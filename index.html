@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baka | 次世代二次元番剧播放器</title>
+    <meta name="description" content="Based on Flutter. Next-Gen Anime Streaming Client.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;900&family=Noto+Sans+SC:wght@300;400;500;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #050507;
+            /* 更通透的玻璃 */
+            --surface-glass: rgba(20, 20, 25, 0.45);
+            --surface-glass-hover: rgba(30, 30, 40, 0.6);
+            --border-glass: rgba(255, 255, 255, 0.15);
+            --accent: #ff7eb3;
+            /* 偏粉色的动漫风格强调色 */
+            --accent-secondary: #7afcff;
+            /* 赛博蓝 */
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.75);
+            --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            background-color: var(--bg-deep);
+            color: var(--text-primary);
+            font-family: 'Outfit', 'Noto Sans SC', sans-serif;
+            /* Outfit 更具现代感 */
+            overflow-x: hidden;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        /* 沉浸式背景图 */
+        .bg-image {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -2;
+            /* 用户指定的背景图 */
+            background-image: url('https://free.picui.cn/free/2026/01/29/697b48a5b3c28.png');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            /* 稍微放大做一点视差效果的基础 */
+            transform: scale(1.05);
+        }
+
+        /* 渐变遮罩：保证文字可读性，同时营造氛围 */
+        .bg-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            background: linear-gradient(to bottom,
+                    rgba(5, 5, 10, 0.6) 0%,
+                    rgba(5, 5, 10, 0.4) 40%,
+                    rgba(5, 5, 10, 0.8) 80%,
+                    #050507 100%);
+            backdrop-filter: blur(8px);
+            /* 稍微模糊背景，突出前景 */
+        }
+
+        /* 装饰性暗角 */
+        .vignette {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: -1;
+            background: radial-gradient(circle, transparent 20%, #000 130%);
+            pointer-events: none;
+        }
+
+        /* Typography */
+        h1,
+        h2,
+        h3,
+        h4 {
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            line-height: 1.1;
+        }
+
+        h1 {
+            font-size: clamp(3.5rem, 9vw, 7rem);
+            /* 动漫风格标题：更强烈的发光效果 */
+            text-shadow: 0 0 40px rgba(255, 255, 255, 0.3);
+            margin-bottom: 24px;
+        }
+
+        h2 {
+            font-size: clamp(2rem, 4vw, 3rem);
+            margin-bottom: 3rem;
+            text-align: center;
+            position: relative;
+            display: inline-block;
+        }
+
+        /* 标题下划线装饰 */
+        h2::after {
+            content: '';
+            display: block;
+            width: 60px;
+            height: 4px;
+            background: var(--accent);
+            margin: 16px auto 0;
+            border-radius: 2px;
+            box-shadow: 0 0 15px var(--accent);
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: #fff;
+            border-radius: 8px;
+            /* 方形圆角更像番剧标签 */
+            font-size: 0.9rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .container {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 0 32px;
+        }
+
+        /* Header */
+        header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 40px 0;
+            z-index: 10;
+        }
+
+        .nav-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.8rem;
+            font-weight: 900;
+            letter-spacing: -0.05em;
+            color: #fff;
+            text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+        }
+
+        .gh-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px 20px;
+            border-radius: 99px;
+            color: white;
+            text-decoration: none;
+            backdrop-filter: blur(10px);
+            font-weight: 600;
+            transition: 0.3s;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .gh-btn:hover {
+            background: white;
+            color: black;
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            /* 全屏 Hero */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 120px 0;
+            position: relative;
+        }
+
+        .hero-content {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .hero p {
+            font-size: clamp(1.2rem, 2vw, 1.5rem);
+            color: var(--text-secondary);
+            max-width: 700px;
+            margin: 24px auto 56px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 18px 48px;
+            border-radius: 16px;
+            /* 方形圆角 */
+            font-weight: 700;
+            font-size: 1.1rem;
+            text-decoration: none;
+            transition: all 0.4s var(--ease-out-expo);
+            position: relative;
+            overflow: hidden;
+            border: 1px solid transparent;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #000;
+            border: none;
+            box-shadow: 0 10px 40px rgba(255, 126, 179, 0.4);
+            /* 粉色光晕 */
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-4px) scale(1.02);
+            box-shadow: 0 20px 60px rgba(255, 126, 179, 0.6);
+            background: #ff9dc6;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.05);
+            /* 极透 */
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: #fff;
+            backdrop-filter: blur(12px);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: #fff;
+            transform: translateY(-4px);
+        }
+
+        /* Features Section (Expanded) */
+        .section {
+            padding: 140px 0;
+        }
+
+        /* 
+           Refined Grid: 
+           More comprehensive list of features as requested 
+        */
+        .feature-showcase {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 32px;
+            margin-top: 80px;
+        }
+
+        .feature-card {
+            background: var(--surface-glass);
+            border-top: 1px solid var(--border-glass);
+            border-left: 1px solid var(--border-glass);
+            border-right: 1px solid rgba(0, 0, 0, 0.1);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+            padding: 40px 32px;
+            border-radius: 20px;
+            backdrop-filter: blur(24px);
+            transition: all 0.4s var(--ease-out-expo);
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Hover effect that adds a subtle glow */
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(800px circle at var(--mouse-x) var(--mouse-y), rgba(255, 255, 255, 0.06), transparent 40%);
+            opacity: 0;
+            transition: opacity 0.4s;
+            pointer-events: none;
+        }
+
+        .feature-card:hover::before {
+            opacity: 1;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-10px);
+            background: var(--surface-glass-hover);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .f-icon {
+            font-size: 2.5rem;
+            margin-bottom: 24px;
+            background: linear-gradient(135deg, #fff 0%, rgba(255, 255, 255, 0.5) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: inline-block;
+        }
+
+        .feature-card h3 {
+            font-size: 1.4rem;
+            margin-bottom: 12px;
+            color: #fff;
+        }
+
+        .feature-card p {
+            font-size: 1rem;
+            color: rgba(255, 255, 255, 0.7);
+            line-height: 1.7;
+        }
+
+        /* Tag List styling inside cards */
+        .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 20px;
+        }
+
+        .tag {
+            font-size: 0.75rem;
+            padding: 4px 10px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.9);
+            font-weight: 600;
+        }
+
+        /* Bento Grid Layout for Showcase */
+        .bento-grid {
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
+            gap: 24px;
+            margin-top: 64px;
+        }
+
+        /* Items styling adapted for glassmorphism on image bg */
+        .bento-item {
+            position: relative;
+            border-radius: 24px;
+            overflow: hidden;
+            /* No background, let the image standout */
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-glass);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+            transition: transform 0.6s var(--ease-out-expo), z-index 0s;
+        }
+
+        .bento-item:hover {
+            z-index: 2;
+            transform: scale(1.05);
+            box-shadow: 0 20px 80px rgba(0, 0, 0, 0.5);
+            border-color: #fff;
+        }
+
+        /* Desktop Items */
+        .bento-item.desktop-main {
+            grid-column: span 12;
+            aspect-ratio: 16/9;
+        }
+
+        @media (min-width: 768px) {
+            .bento-item.desktop-main {
+                grid-column: span 8;
+                aspect-ratio: auto;
+                min-height: 400px;
+            }
+        }
+
+        .bento-item.desktop-sub {
+            grid-column: span 6;
+            aspect-ratio: 16/9;
+        }
+
+        @media (min-width: 768px) {
+            .bento-item.desktop-sub {
+                grid-column: span 4;
+            }
+        }
+
+        /* Mobile Items */
+        .bento-item.mobile {
+            grid-column: span 4;
+            aspect-ratio: 9/19;
+        }
+
+        @media (max-width: 768px) {
+            .bento-item.mobile {
+                grid-column: span 6;
+            }
+        }
+
+        .bento-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            /* Subtle dim to make them blend, brighten on hover */
+            filter: brightness(0.9);
+            transition: filter 0.6s;
+        }
+
+        .bento-item:hover img {
+            filter: brightness(1.1);
+        }
+
+        /* Stats Section */
+        .stats-row {
+            display: flex;
+            justify-content: space-around;
+            padding: 60px 0;
+            border-top: 1px solid var(--border-glass);
+            border-bottom: 1px solid var(--border-glass);
+            background: rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(10px);
+            margin: 80px 0;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-num {
+            font-size: 3.5rem;
+            font-weight: 800;
+            color: var(--accent);
+            line-height: 1;
+            margin-bottom: 10px;
+            font-family: 'Outfit';
+        }
+
+        .stat-label {
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        /* Download Section */
+        .download-row {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            margin-top: 64px;
+            align-items: center;
+        }
+
+        @media (min-width: 768px) {
+            .download-row {
+                flex-direction: row;
+                justify-content: center;
+            }
+        }
+
+        .download-card {
+            background: rgba(20, 20, 25, 0.6);
+            backdrop-filter: blur(16px);
+            padding: 32px;
+            border-radius: 20px;
+            width: 100%;
+            max-width: 340px;
+            text-align: left;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: 0.3s;
+            text-decoration: none;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .download-card::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.05), transparent);
+            transform: translateX(-100%);
+            transition: 0.5s;
+        }
+
+        .download-card:hover::after {
+            transform: translateX(100%);
+        }
+
+        .download-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .os-icon {
+            width: 40px;
+            height: 40px;
+            opacity: 1;
+        }
+
+        .meta h4 {
+            font-size: 1.2rem;
+            margin-bottom: 4px;
+            font-weight: 700;
+        }
+
+        .meta span {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        /* Footer */
+        footer {
+            padding: 80px 0 40px;
+            text-align: center;
+            /* 底部黑色渐变，确保footer文字清晰 */
+            background: linear-gradient(to top, #000 0%, transparent 100%);
+        }
+
+        footer p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        /* Utilities */
+        .gradient-text {
+            background: linear-gradient(to right, #ff7eb3, #7afcff);
+            /* Pink to Cyan */
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .fade-in {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: opacity 1s var(--ease-out-expo), transform 1s var(--ease-out-expo);
+        }
+
+        .fade-in.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- 背景层 -->
+    <div class="bg-image"></div>
+    <div class="bg-overlay"></div>
+    <div class="vignette"></div>
+
+    <header>
+        <div class="container nav-content">
+            <div class="logo">Baka.</div>
+            <a href="https://github.com/AniBakaBaka/AniBaka" class="gh-btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path
+                        d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+                </svg>
+                GitHub
+            </a>
+        </div>
+    </header>
+
+    <!-- HERO SECTION -->
+    <section class="hero">
+        <div class="container hero-content">
+            <div class="badge fade-in">Project Baka / Public Beta</div>
+            <h1 class="fade-in">二次元<br>原生追番体验</h1>
+            <p class="fade-in">不仅是播放器，更是你的二次元中心。Glassmorphism 极致设计，MPV 硬核解码，弹幕、下载、投屏一应俱全。</p>
+
+            <div class="btn-group fade-in">
+                <a href="#download" class="btn btn-primary">
+                    <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                    </svg>
+                    立即下载
+                </a>
+                <a href="#features" class="btn btn-secondary">探索功能</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- FULL FEATURES LIST -->
+    <!-- 展开显示所有功能，解决“功能显示不全”的问题 -->
+    <section id="features" class="section">
+        <div class="container">
+            <h2 class="fade-in">超越极致的 <span class="gradient-text">功能矩阵</span></h2>
+
+            <div class="feature-showcase">
+                <!-- UI -->
+                <div class="feature-card fade-in">
+                    <div class="f-icon">🎨</div>
+                    <h3>视觉盛宴</h3>
+                    <p>拒绝千篇一律的 Material Design。我们采用深度定制的 Glassmorphism 风格，配合丝滑的 60fps 动效，让每一次点击都愉悦。</p>
+                    <div class="tags">
+                        <span class="tag">毛玻璃</span>
+                        <span class="tag">深色模式</span>
+                        <span class="tag">流畅动画</span>
+                        <span class="tag">桌面适配</span>
+                    </div>
+                </div>
+
+                <!-- Sources -->
+                <div class="feature-card fade-in">
+                    <div class="f-icon">🔌</div>
+                    <h3>无限片源</h3>
+                    <p>内置多个主流动漫源，更支持 JavaScript 插件扩展。无论冷门番还是当季新番，一键聚合搜索，全网直达。</p>
+                    <div class="tags">
+                        <span class="tag">聚合搜索</span>
+                        <span class="tag">插件系统</span>
+                        <span class="tag">JS引擎</span>
+                        <span class="tag">自动去重</span>
+                    </div>
+                </div>
+
+                <!-- Player -->
+                <div class="feature-card fade-in">
+                    <div class="f-icon">📺</div>
+                    <h3>硬核播放</h3>
+                    <p>基于 libmpv 的工业级内核。支持 HEVC/H.265 硬解、Anime4K 实时超分算法（让 720P 变 4K）、HDR 视频渲染。</p>
+                    <div class="tags">
+                        <span class="tag">MPV内核</span>
+                        <span class="tag">Anime4K</span>
+                        <span class="tag">4K硬解</span>
+                        <span class="tag">倍速播放</span>
+                    </div>
+                </div>
+
+                <!-- Danmaku -->
+                <div class="feature-card fade-in">
+                    <div class="f-icon">💬</div>
+                    <h3>沉浸弹幕</h3>
+                    <p>自动关联弹幕库，支持智能防挡弹幕、关键词屏蔽、高级弹幕渲染。看番没有弹幕，就像吃泡面没有调料包。</p>
+                    <div class="tags">
+                        <span class="tag">智能匹配</span>
+                        <span class="tag">关键词屏蔽</span>
+                        <span class="tag">弹幕发射</span>
+                    </div>
+                </div>
+
+                <!-- Tools -->
+                <div class="feature-card fade-in">
+                    <div class="f-icon">🛠️</div>
+                    <h3>极客工具箱</h3>
+                    <p>不仅仅是看番。多线程断点续传下载、DLNA 投屏到电视、js源创建）。</p>
+                    <div class="tags">
+                        <span class="tag">高速下载</span>
+                        <span class="tag">DLNA投屏</span>
+                        <span class="tag">隐私保护</span>
+                        <span class="tag">云同步</span>
+                    </div>
+                </div>
+
+                <!-- Shortcuts -->
+                <div class="feature-card fade-in">
+                    <div class="f-icon">⌨️</div>
+                    <h3>效率至上</h3>
+                    <p>专为 PC 用户设计的快捷键体系。空格暂停、方向键快进、F 键全屏... 符合直觉的操作逻辑，让追番快人一步。</p>
+                    <div class="tags">
+                        <span class="tag">全键盘操作</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- UI SHOWCASE (BENTO GRID) -->
+    <section class="section">
+        <div class="container">
+            <h2 class="fade-in">多端视觉预览</h2>
+            <div class="bento-grid">
+                <!-- Desktop Major -->
+                <div class="bento-item desktop-main fade-in">
+                    <img src="https://free.picui.cn/free/2026/01/29/697b48ab40135.png" alt="Desktop Player">
+                </div>
+                <div class="bento-item desktop-sub fade-in">
+                    <img src="https://free.picui.cn/free/2026/01/29/697b48aa35444.png" alt="Desktop Library">
+                </div>
+                <!-- Desktop Minor -->
+
+                <!-- Mobile Row 1 -->
+                <div class="bento-item mobile fade-in">
+                    <img src="https://free.picui.cn/free/2026/01/29/697b423584ece.jpg" alt="Mobile Home">
+                </div>
+                <div class="bento-item mobile fade-in">
+                    <img src="https://free.picui.cn/free/2026/01/29/697b4235784a9.jpg" alt="Mobile Detail">
+                </div>
+                <div class="bento-item mobile fade-in">
+                    <img src="https://free.picui.cn/free/2026/01/29/697b423542ae8.jpg" alt="Mobile Player">
+                </div>
+
+                <!-- Mobile Row 2 -->
+                <div class="bento-item mobile fade-in">
+                    <img src="https://free.picui.cn/free/2026/01/29/697b42350ef2c.jpg" alt="Mobile Episodes">
+                </div>
+                <div class="bento-item mobile fade-in">
+                    <img src="https://free.picui.cn/free/2026/01/29/697b4239beeac.jpg" alt="Mobile Mine">
+                </div>
+                <div class="bento-item mobile fade-in">
+                    <img src="https://free.picui.cn/free/2026/01/29/697b42352cfd7.jpg" alt="Mobile Settings">
+                </div>
+
+                <!-- Desktop Bottom -->
+                <div class="bento-item desktop-main fade-in" style="grid-column: span 12;">
+                    <img src="https://free.picui.cn/free/2026/01/29/697b48a4b2bc2.png" alt="Desktop Immersive"
+                        style="object-position: top;">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- DOWNLOAD -->
+    <section id="download" class="section">
+        <div class="container" style="text-align: center;">
+            <h2 class="fade-in">准备好开始了吗？</h2>
+            <p class="fade-in" style="color: var(--text-secondary); margin-bottom: 40px; font-size: 1.1rem;">
+                完全免费，只为热爱。</p>
+
+            <div class="download-row fade-in">
+                <a href="https://github.com/AniBakaBaka/AniBaka/releases" class="download-card">
+                    <svg class="os-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M0 3.449L9.75 2.1v9.451H0v-8.1zm10.949-1.551L24 0v11.023h-13.051V1.898zm-10.949 9.95L9.75 12.45v9.451H0v-10.053zm10.949 0.601L24 24v-11.55H10.949v10.051z" />
+                    </svg>
+                    <div class="meta">
+                        <h4>Windows</h4>
+                        <span>Setup.exe / Portable</span>
+                    </div>
+                </a>
+
+                <a href="https://github.com/AniBakaBaka/AniBaka/releases" class="download-card">
+                    <svg class="os-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M17.523 15.3414C17.523 15.3414 17.5606 15.3414 17.5606 15.3038C16.9234 14.5919 16.6239 13.5434 16.6613 12.4574C16.6987 11.2217 17.6355 10.3229 17.6355 10.3229C17.598 10.2855 16.1741 9.76123 14.7135 9.79868C13.7773 9.79868 12.9159 10.3603 12.4291 10.3603C11.9048 10.3603 11.1933 9.83613 10.407 9.83613C8.647 9.87358 6.96191 11.1468 6.96191 13.9179C6.96191 15.9031 8.68445 19.3483 10.5942 19.3483C11.2309 19.3109 11.5304 18.9364 12.4665 18.9364C13.4027 18.9364 13.6648 19.3109 14.339 19.3109C16.2114 19.3109 17.935 15.9405 17.935 15.9405C17.8976 15.9405 17.523 15.7907 17.523 15.3414ZM12.3541 7.21484C13.1405 6.20381 13.0656 4.96809 13.0656 4.93064C11.9796 5.00554 10.8938 5.60469 10.1449 6.50346C9.47081 7.28972 9.47081 8.60037 9.58315 9.46166C10.7065 9.53655 11.7549 8.07613 12.3541 7.21484Z" />
+                    </svg>
+                    <div class="meta">
+                        <h4>macOS / iOS</h4>
+                        <span>Alpha / TestFlight</span>
+                    </div>
+                </a>
+
+                <a href="https://github.com/AniBakaBaka/AniBaka/releases" class="download-card">
+                    <svg class="os-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M17.523 16.79C16.326 18.47 14.28 19.38 12 19.38C9.72 19.38 7.674 18.47 6.477 16.79L2.83 20.437C5.071 22.686 8.356 24.06 12 24.06C15.644 24.06 18.929 22.686 21.17 20.437L17.523 16.79Z"
+                            fill="#3DDC84" />
+                        <path
+                            d="M11.999 0.0599976C8.35499 0.0599976 5.06999 1.434 2.82999 3.684L6.47699 7.33C7.67499 5.651 9.71999 4.74 11.999 4.74C14.279 4.74 16.324 5.651 17.522 7.33L21.169 3.684C18.929 1.434 15.644 0.0599976 11.999 0.0599976Z"
+                            fill="#3DDC84" />
+                        <path
+                            d="M2.203 5.43201L6.151 9.38001C5.641 10.155 5.34 11.066 5.34 12.06C5.34 13.054 5.641 13.965 6.151 14.74L2.203 18.688C0.778 16.837 -0.0600004 14.549 -0.0600004 12.06C-0.0600004 9.57101 0.778 7.28301 2.203 5.43201Z"
+                            fill="#3DDC84" />
+                        <path
+                            d="M17.848 14.74C18.358 13.965 18.659 13.054 18.659 12.06C18.659 11.066 18.358 10.155 17.848 9.38001L21.796 5.43201C23.222 7.28301 24.06 9.57101 24.06 12.06C24.06 14.549 23.222 16.837 21.796 18.688L17.848 14.74Z"
+                            fill="#3DDC84" />
+                    </svg>
+                    <div class="meta">
+                        <h4>Android</h4>
+                        <span>Apk Release</span>
+                    </div>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer>
+        <div class="container">
+            <p>&copy; 2026 Baka Team. Made for anime lovers.</p>
+        </div>
+    </footer>
+
+    <script>
+        // Track mouse for card glow effect
+        document.querySelectorAll('.feature-card').forEach(card => {
+            card.addEventListener('mousemove', e => {
+                const rect = card.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                card.style.setProperty('--mouse-x', `${x}px`);
+                card.style.setProperty('--mouse-y', `${y}px`);
+            });
+        });
+
+        // Intersection Observer for scroll animations
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, { threshold: 0.1 });
+
+        document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+    </script>
+</body>
+
+</html>
