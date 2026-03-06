@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自定义源构建指南 | Baka Guide</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=ZCOOL+KuaiLe&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #fb7299;
+            /* Bilibili Pink */
+            --primary-hover: #ff85a7;
+            --secondary: #23ade5;
+            /* Blue */
+            --accent: #ffb84d;
+            /* Warm Yellow */
+            --bg-color: #f6f8fa;
+            --surface: #ffffff;
+            --text-main: #2c3e50;
+            --text-sub: #7f8c8d;
+            --border: #eaecf0;
+            --shadow-sm: 0 4px 12px rgba(251, 114, 153, 0.1);
+            --shadow-md: 0 10px 30px rgba(251, 114, 153, 0.15);
+            --radius-box: 24px;
+            --radius-sm: 16px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Nunito', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background-color: var(--bg-color);
+            background-image:
+                radial-gradient(var(--secondary) 1.5px, transparent 1.5px),
+                radial-gradient(var(--primary) 1.5px, transparent 1.5px);
+            background-size: 30px 30px;
+            background-position: 0 0, 15px 15px;
+            background-attachment: fixed;
+            color: var(--text-main);
+            line-height: 1.7;
+            position: relative;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 4rem 2rem;
+            display: grid;
+            grid-template-columns: 260px 1fr;
+            gap: 3rem;
+        }
+
+        /* Sidebar & Logo */
+        .sidebar {
+            position: sticky;
+            top: 2rem;
+            height: fit-content;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            padding: 1.5rem;
+            border-radius: var(--radius-box);
+            box-shadow: var(--shadow-sm);
+            border: 2px solid #fff;
+        }
+
+        .logo {
+            font-family: 'ZCOOL KuaiLe', cursive;
+            font-size: 2.2rem;
+            color: var(--primary);
+            text-align: center;
+            margin-bottom: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            text-shadow: 2px 2px 0px rgba(251, 114, 153, 0.1);
+        }
+
+        .logo span {
+            font-size: 1.1rem;
+            margin-top: 5px;
+            color: var(--secondary);
+            letter-spacing: 4px;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            padding: 0.8rem 1.2rem;
+            color: var(--text-sub);
+            text-decoration: none;
+            border-radius: var(--radius-sm);
+            margin-bottom: 0.5rem;
+            font-weight: 700;
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            position: relative;
+        }
+
+        .nav-link i {
+            margin-right: 0.8rem;
+            font-size: 1.2rem;
+            color: inherit;
+        }
+
+        .nav-link:hover {
+            color: var(--primary);
+            background: rgba(251, 114, 153, 0.08);
+            transform: translateX(5px);
+        }
+
+        .nav-link.active {
+            color: #fff;
+            background: var(--primary);
+            box-shadow: 0 6px 16px rgba(251, 114, 153, 0.35);
+            transform: scale(1.05);
+        }
+
+        .nav-link.active i {
+            color: #fff;
+        }
+
+        /* Main Content */
+        main {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(20px);
+            border-radius: var(--radius-box);
+            padding: 3rem;
+            box-shadow: var(--shadow-sm);
+            border: 2px solid #fff;
+            position: relative;
+            overflow: hidden;
+        }
+
+        main::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 6px;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+        }
+
+        header {
+            margin-bottom: 4rem;
+            text-align: center;
+        }
+
+        h1 {
+            font-family: 'ZCOOL KuaiLe', cursive;
+            font-size: 2.8rem;
+            color: var(--text-main);
+            margin-bottom: 1rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.8rem;
+        }
+
+        h1 i {
+            color: var(--primary);
+            animation: bounce 2s infinite;
+        }
+
+        @keyframes bounce {
+
+            0%,
+            20%,
+            50%,
+            80%,
+            100% {
+                transform: translateY(0);
+            }
+
+            40% {
+                transform: translateY(-10px);
+            }
+
+            60% {
+                transform: translateY(-5px);
+            }
+        }
+
+        .subtitle {
+            color: var(--text-sub);
+            font-size: 1.1rem;
+            max-width: 600px;
+            margin: 0 auto;
+            position: relative;
+            display: inline-block;
+        }
+
+        .subtitle::after {
+            content: '(｡･∀･)ﾉﾞ';
+            font-size: 0.9rem;
+            color: var(--primary);
+            margin-left: 8px;
+            font-weight: bold;
+        }
+
+        section {
+            margin-bottom: 5rem;
+            scroll-margin-top: 6rem;
+        }
+
+        h2 {
+            font-family: 'ZCOOL KuaiLe', cursive;
+            font-size: 2rem;
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+            color: var(--text-main);
+        }
+
+        h2 i {
+            color: var(--secondary);
+            margin-right: 0.8rem;
+            font-size: 1.8rem;
+        }
+
+        p {
+            margin-bottom: 1.2rem;
+            color: #505c68;
+        }
+
+        /* Cards */
+        .card {
+            background: #fff;
+            border-radius: var(--radius-sm);
+            padding: 1.8rem;
+            margin: 1.5rem 0;
+            border: 2px solid #f0f4f8;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            position: relative;
+            overflow: hidden;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .card:hover {
+            transform: translateY(-8px) rotate(0.5deg);
+            border-color: var(--primary);
+            box-shadow: var(--shadow-md);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .card-icon {
+            width: 44px;
+            height: 44px;
+            background: rgba(251, 114, 153, 0.1);
+            color: var(--primary);
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+            margin-right: 1rem;
+            transition: transform 0.3s;
+        }
+
+        .card:hover .card-icon {
+            transform: scale(1.1) rotate(10deg);
+        }
+
+        .card h3 {
+            font-family: 'ZCOOL KuaiLe', cursive;
+            color: var(--text-main);
+            font-size: 1.4rem;
+            margin: 0;
+        }
+
+        .card ul {
+            padding-left: 1.2rem;
+            margin-bottom: 1rem;
+            color: #505c68;
+        }
+
+        .card li {
+            margin-bottom: 0.5rem;
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 800;
+            margin-left: 0.8rem;
+            gap: 4px;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+
+        .badge.hot {
+            background: #ffebeb;
+            color: var(--primary);
+            border: 1px solid rgba(251, 114, 153, 0.2);
+        }
+
+        .badge.pro {
+            background: #e3f2fd;
+            color: var(--secondary);
+            border: 1px solid rgba(35, 173, 229, 0.2);
+        }
+
+        .badge.warn {
+            background: #fff7e6;
+            color: var(--accent);
+            border: 1px solid rgba(255, 184, 77, 0.2);
+        }
+
+        /* Code Blocks */
+        pre {
+            background: #282c34;
+            border-radius: 20px;
+            padding: 1.5rem;
+            color: #abb2bf;
+            font-family: 'JetBrains Mono', monospace;
+            overflow-x: auto;
+            position: relative;
+            margin: 1.5rem 0;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            border: 4px solid #fff;
+        }
+
+        pre::before {
+            content: '● ● ●';
+            color: #ff5f56;
+            font-size: 10px;
+            word-spacing: 12px;
+            opacity: 0.8;
+            margin-bottom: 1rem;
+            display: block;
+            text-shadow: 18px 0 0 #ffbd2e, 36px 0 0 #27c93f;
+            width: 60px;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+
+        code {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        p code,
+        li code {
+            background: #fff0f6;
+            color: var(--primary);
+            padding: 0.2rem 0.6rem;
+            border-radius: 8px;
+            font-size: 0.9em;
+            font-weight: 600;
+            border: 1px dashed rgba(251, 114, 153, 0.4);
+        }
+
+        /* Tables */
+        .table-container {
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            border: 2px solid #f0f4f8;
+            margin: 2rem 0;
+            background: #fff;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: #f8fbff;
+            color: var(--secondary);
+            font-weight: 800;
+            padding: 1.2rem 1.5rem;
+            text-align: left;
+            border-bottom: 2px solid #f0f4f8;
+            font-family: 'Nunito', sans-serif;
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 1.2rem 1.5rem;
+            border-bottom: 1px solid #f0f4f8;
+            color: var(--text-main);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background: #fafbfc;
+        }
+
+        /* Info Boxes */
+        .info-box {
+            background: #f0f9ff;
+            border: 2px dashed #bae6fd;
+            padding: 1.5rem;
+            border-radius: var(--radius-sm);
+            margin: 2rem 0;
+            display: flex;
+            gap: 1rem;
+            color: #0c4a6e;
+            animation: pulse-border 2s infinite;
+        }
+
+        @keyframes pulse-border {
+            0% {
+                border-color: #bae6fd;
+            }
+
+            50% {
+                border-color: #7dd3fc;
+            }
+
+            100% {
+                border-color: #bae6fd;
+            }
+        }
+
+        .info-box i {
+            font-size: 1.6rem;
+            color: var(--secondary);
+            flex-shrink: 0;
+        }
+
+        /* Copy Button */
+        .copy-btn {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: rgba(255, 255, 255, 0.15);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: #fff;
+            padding: 0.5rem 1rem;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: bold;
+            transition: 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .copy-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: scale(1.05);
+        }
+
+        /* Back to Top */
+        .back-to-top {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            width: 50px;
+            height: 50px;
+            background: var(--primary);
+            color: #fff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            box-shadow: 0 4px 12px rgba(251, 114, 153, 0.4);
+            cursor: pointer;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s;
+            z-index: 100;
+        }
+
+        .back-to-top.show {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
+        .back-to-top:hover {
+            transform: translateY(-5px);
+            background: var(--primary-hover);
+        }
+
+        /* Mobile */
+        @media (max-width: 900px) {
+            .container {
+                grid-template-columns: 1fr;
+                padding: 1rem;
+            }
+
+            .sidebar {
+                display: none;
+            }
+
+            main {
+                padding: 1.5rem;
+            }
+
+            h1 {
+                font-size: 2rem;
+            }
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 5rem;
+            padding-top: 2rem;
+            border-top: 2px dashed #f0f4f8;
+            color: var(--text-sub);
+            font-size: 0.95rem;
+        }
+
+        .footer-mascot {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            display: inline-block;
+            animation: shake 3s infinite;
+        }
+
+        @keyframes shake {
+
+            0%,
+            100% {
+                transform: rotate(0deg);
+            }
+
+            25% {
+                transform: rotate(-5deg);
+            }
+
+            75% {
+                transform: rotate(5deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                BAKA
+                <span>アニメ</span>
+            </div>
+            <nav id="nav">
+                <a href="#intro" class="nav-link"><i class="ri-layout-masonry-line"></i>系统架构</a>
+                <a href="#config" class="nav-link"><i class="ri-settings-4-line"></i>基础配置</a>
+                <a href="#selectors" class="nav-link"><i class="ri-code-s-slash-line"></i>CSS 选择器</a>
+                <a href="#xpath" class="nav-link"><i class="ri-node-tree"></i>XPath 模式</a>
+                <a href="#player" class="nav-link"><i class="ri-movie-2-line"></i>播放解析</a>
+                <a href="#advanced" class="nav-link"><i class="ri-tools-line"></i>高级玩法</a>
+                <a href="#anticrawl" class="nav-link"><i class="ri-shield-check-line"></i>反爬对抗</a>
+                <a href="#faq" class="nav-link"><i class="ri-question-answer-line"></i>常见问题</a>
+                <a href="#example" class="nav-link"><i class="ri-file-code-line"></i>完整范例</a>
+                <a href="#import" class="nav-link"><i class="ri-share-forward-line"></i>导入导出</a>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main>
+            <header>
+                <h1><i class="ri-magic-line"></i> 自定义源构建指南</h1>
+                <p class="subtitle">嘿！不管是 CMS 还是直链站点，简单配置一下就能用啦！</p>
+            </header>
+
+            <section id="intro">
+                <h2><i class="ri-layout-masonry-line"></i>01. 系统架构</h2>
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon"><i class="ri-rocket-line"></i></div>
+                        <h3>( •̀ ω •́ )✧ 混合动力引擎</h3>
+                    </div>
+                    <p>Baka 的解析引擎可是很聪明的哦！它知道怎么在速度和通过率之间找到平衡点。</p>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;">
+                        <div style="background:#f9fafb; padding:1.2rem; border-radius:16px; border: 1px solid #eee;">
+                            <h4
+                                style="color:var(--secondary); margin-bottom:0.5rem; font-family:'ZCOOL KuaiLe'; font-size:1.1rem;">
+                                <i class="ri-flashlight-fill"></i> Dio 极速模式</h4>
+                            <p style="font-size:0.9rem; margin:0;">咻——！默认用 HTTP 请求直接拿源码，速度超级快，也不怎么费流量。</p>
+                        </div>
+                        <div style="background:#fff5f7; padding:1.2rem; border-radius:16px; border: 1px solid #ffeef1;">
+                            <h4
+                                style="color:var(--primary); margin-bottom:0.5rem; font-family:'ZCOOL KuaiLe'; font-size:1.1rem;">
+                                <i class="ri-spy-fill"></i> WebView 隐身模式</h4>
+                            <p style="font-size:0.9rem; margin:0;">遇到 Cloudflare 或者 5秒盾这种“门卫”时，自动变身成浏览器混进去！</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="config">
+                <h2><i class="ri-settings-4-line"></i>02. 基础配置</h2>
+                <p>填好这些信息，App 就能找到你的网站啦！</p>
+
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th width="30%">字段</th>
+                                <th>说明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>name</code></td>
+                                <td>源名称 <span class="badge pro">唯一哦</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>baseUrl</code></td>
+                                <td>站点主页，用来给相对路径补全</td>
+                            </tr>
+                            <tr>
+                                <td><code>searchUrl</code></td>
+                                <td>搜索页面的链接模板</td>
+                            </tr>
+                            <tr>
+                                <td><code>searchMethod</code></td>
+                                <td>请求方式：<code>GET</code> (默认) 或 <code>POST</code></td>
+                            </tr>
+                            <tr>
+                                <td><code>searchParamName</code></td>
+                                <td>可选。如果无法使用模板，指定参数名来追加关键词 (如 <code>wd</code>)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="info-box">
+                    <i class="ri-lightbulb-flash-line"></i>
+                    <div>
+                        <strong>Search URL 小贴士 (oﾟvﾟ)ノ</strong><br />
+                        推荐使用 <code>{keyword}</code> 当作占位符，比如：<code>https://aa.com/search?wd={keyword}</code>。<br>
+                        如果是 <strong>POST</strong> 模式，<code>searchUrl</code> 填接口地址，关键词会自动放入 Body 里 (默认参数名为 `keyword`，或者通过
+                        `searchParamName` 指定)。
+                    </div>
+                </div>
+            </section>
+
+            <section id="selectors">
+                <h2><i class="ri-code-s-slash-line"></i>03. CSS 选择器</h2>
+                <p>就像写 CSS 一样简单！告诉我们标题、封面都在哪里。</p>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon"><i class="ri-search-eye-line"></i></div>
+                        <h3>搜索列表解析</h3>
+                    </div>
+                    <ul>
+                        <li><code>searchResultSelector</code>: 每一个结果的小方块 <span class="badge pro">.vod-list li</span>
+                        </li>
+                        <li><code>searchItemTitleSelector</code>: 标题 <span class="badge pro">a[title]</span></li>
+                        <li><code>searchItemLinkSelector</code>: 详情页链接 <span class="badge pro">a.poster</span></li>
+                        <li><code>searchItemImageSelector</code>: 封面图 <span class="badge pro">img.lazy</span></li>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon"><i class="ri-list-check-2"></i></div>
+                        <h3>剧集列表解析</h3>
+                    </div>
+                    <ul>
+                        <li><code>episodeListSelector</code>: 选集列表的大容器 <span class="badge pro">ul.play-list</span></li>
+                        <li><code>episodeItemSelector</code>: (可选) 每一集的小方块 <span class="badge pro">li</span></li>
+                        <li><code>episodeLinkSelector</code>: (可选) 播放页链接 <span class="badge pro">a</span></li>
+                    </ul>
+                </div>
+            </section>
+
+            <section id="xpath">
+                <h2><i class="ri-node-tree"></i>04. XPath 模式</h2>
+                <p>如果你习惯用 Kazumi 的规则，我们也完全支持哦！</p>
+                <div class="card" style="border-left: 5px solid var(--accent);">
+                    <div class="card-header">
+                        <div class="card-icon" style="background:rgba(255, 184, 77, 0.1); color:var(--accent);"><i
+                                class="ri-arrow-left-right-line"></i></div>
+                        <h3>模式切换</h3>
+                    </div>
+                    <p>只要把 <code>useXPath</code> 设置为 <code>true</code> 就行啦！开启后上面的 CSS 选择器就没有用了哦。<br>
+                        支持字段：<code>xpathSearchList</code>, <code>xpathSearchName</code>, <code>xpathSearchResult</code>
+                        等等。</p>
+                </div>
+            </section>
+
+            <section id="player">
+                <h2><i class="ri-movie-2-line"></i>05. 播放解析 <span class="badge hot">Core</span></h2>
+                <p>怎么拿到视频地址呢？这里有三种办法！( •̀ .̫ •́ )✧</p>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon"><i class="ri-file-code-line"></i></div>
+                        <h3>策略 A: Script 变量提取 <span class="badge hot">推荐</span></h3>
+                    </div>
+                    <p>CMS 站点最喜欢把数据藏在 <code>&lt;script&gt;</code> 里了。</p>
+                    <div class="table-container">
+                        <table>
+                            <tr>
+                                <td width="30%"><code>playUrlPattern</code></td>
+                                <td>正则表达式，用来抓那个 JSON 或者 URL。</td>
+                            </tr>
+                            <tr>
+                                <td><code>playerJsVar</code></td>
+                                <td>(可选) 变量名，比如 <code>player_aaaa</code>。如果是 MacCMS，系统会自动帮你解密（Base64/URLDecode）哦！✨</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon"><i class="ri-video-line"></i></div>
+                        <h3>策略 B: Video 标签直链</h3>
+                    </div>
+                    <p>直链站点专用。直接找到 <code>&lt;video&gt;</code> 或者 <code>&lt;source&gt;</code> 标签就好啦。</p>
+                    <p>字段：<code>videoSelector</code> <span class="badge pro">例: #player video</span></p>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon"><i class="ri-window-line"></i></div>
+                        <h3>策略 C: Iframe 嵌入</h3>
+                    </div>
+                    <p>如果是云解析，就找 <code>&lt;iframe&gt;</code> 的 src 属性吧。</p>
+                    <p>字段：<code>iframeSelector</code> <span class="badge pro">例: .player-box iframe</span></p>
+                </div>
+            </section>
+
+            <section id="advanced">
+                <h2><i class="ri-tools-line"></i>06. 高级玩法 <span class="badge warn">Pro</span></h2>
+                <p>遇到难搞的网站？这时候就需要拿出杀手锏了！(▀TB▀)ゞ</p>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon"><i class="ri-links-line"></i></div>
+                        <h3>二次解析 (Second Parse)</h3>
+                    </div>
+                    <p>有时候从详情页拿到的只是一个中间页地址，还需要再进去“剥一层皮”才能看到视频。</p>
+                    <ul>
+                        <li><code>needSecondParse</code>: 设置为 <code>true</code> 开启。</li>
+                        <li><code>secondParsePattern</code>: 在中间页里找视频地址的正则。</li>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon"><i class="ri-server-line"></i></div>
+                        <h3>解析 API (Parse API)</h3>
+                    </div>
+                    <p>如果网站用了第三方解析接口，我们可以把视频地址传给 API。</p>
+                    <ul>
+                        <li><code>parseApiUrl</code>: API 地址，比如 <code>https://api.jiexi.com/?url=</code>。会自动把视频链接拼在后面。
+                        </li>
+                    </ul>
+                </div>
+            </section>
+
+            <section id="anticrawl">
+                <h2><i class="ri-shield-check-line"></i>07. 反爬对抗</h2>
+                <p>自动防御系统，启动！🛡️ 哪怕网站有验证也不怕。</p>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon"><i class="ri-radar-line"></i></div>
+                        <h3>自动触发条件</h3>
+                    </div>
+                    <ul style="list-style: none; padding-left: 0;">
+                        <li style="margin-bottom:0.8rem;"><i class="ri-error-warning-line"
+                                style="color:var(--accent); margin-right:8px; vertical-align:middle;"></i> HTTP 状态码是
+                            <strong>403</strong> 或者 <strong>503</strong></li>
+                        <li style="margin-bottom:0.8rem;"><i class="ri-text"
+                                style="color:var(--secondary); margin-right:8px; vertical-align:middle;"></i> 页面里有
+                            <strong>"Just a moment"</strong> 或者 <strong>"Security check"</strong></li>
+                        <li style="margin-bottom:0.8rem;"><i class="ri-code-s-slash-line"
+                                style="color:var(--primary); margin-right:8px; vertical-align:middle;"></i>
+                            页面内容极短且包含重定向脚本</li>
+                    </ul>
+                </div>
+            </section>
+
+            <section id="faq">
+                <h2><i class="ri-question-answer-line"></i>08. 常见问题 (FAQ)</h2>
+                <div class="info-box" style="background:#fffbf0; border-color:#ffe58f; color:#d48806;">
+                    <i class="ri-question-mark" style="color:#faad14;"></i>
+                    <div>
+                        <strong>Q: 搜索不到结果怎么办？</strong><br>
+                        A: 先用浏览器 F12 看看网页结构变没变。有时候网站改版了，选择器也要跟着改哦！
+                        <br>另外，注意检查 <code>searchMethod</code> 是否需要改为 POST。
+                    </div>
+                </div>
+                <div class="info-box" style="background:#f6ffed; border-color:#b7eb8f; color:#389e0d;">
+                    <i class="ri-question-mark" style="color:#52c41a;"></i>
+                    <div>
+                        <strong>Q: 视频有声音没画面/无法播放？</strong><br>
+                        A: 很多时候是防盗链在作怪！试着在 <code>headers</code> 里加上 <code>Referer</code>，把源站地址填进去试试看。
+                    </div>
+                </div>
+            </section>
+
+            <section id="example">
+                <h2><i class="ri-file-code-line"></i>09. 完整范例</h2>
+                <p>复制下面的 JSON，改改就能用啦！ヽ(✿ﾟ▽ﾟ)ノ</p>
+
+                <pre><code class="language-json">{
+  "id": "anime_demo_01",
+  "name": "示例动漫",
+  "baseUrl": "https://www.example.com",
+  "searchUrl": "https://www.example.com/search/wd/{keyword}.html",
+  "searchMethod": "GET",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)...",
+    "Referer": "https://www.example.com/"
+  },
+  
+  "searchResultSelector": ".module-item",
+  "searchItemTitleSelector": ".module-card-item-title a",
+  "searchItemLinkSelector": "a.module-card-item-poster",
+  "searchItemImageSelector": "img.lazy",
+  "searchImageAttribute": "data-original",
+  
+  "episodeListSelector": ".module-play-list",
+  
+  "playUrlType": "script",
+  "playerJsVar": "player_aaaa",
+  "enableAntiBotBypass": true
+}</code></pre>
+                <button class="copy-btn" onclick="copyExample()"><i class="ri-file-copy-line"></i> 点击复制</button>
+            </section>
+
+            <section id="import">
+                <h2><i class="ri-share-forward-line"></i>10. 导入与导出</h2>
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon"><i class="ri-survey-line"></i></div>
+                        <h3>分享你的配置</h3>
+                    </div>
+                    <p>做好的源怎么分享给朋友呢？我们支持好几种格式：</p>
+                    <ul>
+                        <li>📄 <strong>JSON 原文</strong>: 直接复制那一串 JSON 代码。</li>
+                        <li>🔗 <strong>baka://协议</strong>: App 生成的专用加密链接，看起来像乱码一样。</li>
+                        <li>🌸 <strong>kazumi://协议</strong>: 如果你有 Kazumi 的源，也可以直接导入！</li>
+                    </ul>
+                </div>
+            </section>
+
+            <footer>
+                <div class="footer-mascot">( ゜- ゜)つロ</div>
+                <p>Designed with <i class="ri-heart-fill" style="color:var(--primary)"></i> by Baka Project</p>
+                <p style="opacity: 0.6; font-size: 0.8rem; margin-top: 0.5rem;">Version 2.0 • ACG Edition</p>
+            </footer>
+        </main>
+    </div>
+
+    <div class="back-to-top" onclick="window.scrollTo({top: 0, behavior: 'smooth'})">
+        <i class="ri-arrow-up-line"></i>
+    </div>
+
+    <script>
+        // Scroll spy
+        const sections = document.querySelectorAll('section');
+        const navLinks = document.querySelectorAll('.nav-link');
+        const backToTopBtn = document.querySelector('.back-to-top');
+
+        window.addEventListener('scroll', () => {
+            let current = '';
+
+            // Back to top visibility
+            if (window.scrollY > 500) {
+                backToTopBtn.classList.add('show');
+            } else {
+                backToTopBtn.classList.remove('show');
+            }
+
+            sections.forEach(section => {
+                const sectionTop = section.offsetTop;
+                if (scrollY >= (sectionTop - 150)) {
+                    current = section.getAttribute('id');
+                }
+            });
+
+            navLinks.forEach(link => {
+                link.classList.remove('active');
+                if (link.getAttribute('href').includes(current)) {
+                    link.classList.add('active');
+                }
+            });
+        });
+
+        // Click to copy
+        function copyExample() {
+            const code = document.querySelector('code.language-json').innerText;
+            navigator.clipboard.writeText(code).then(() => {
+                const btn = document.querySelector('.copy-btn');
+                const originalText = btn.innerHTML; // Store HTML (icon + text)
+                btn.innerHTML = '<i class="ri-check-line"></i> 已复制 (≧∇≦)ﾉ';
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+
+</html>
