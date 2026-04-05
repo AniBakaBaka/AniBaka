@@ -568,6 +568,7 @@
                 <a href="#player" class="nav-link"><i class="ri-movie-2-line"></i>播放解析</a>
                 <a href="#advanced" class="nav-link"><i class="ri-tools-line"></i>高级玩法</a>
                 <a href="#anticrawl" class="nav-link"><i class="ri-shield-check-line"></i>反爬对抗</a>
+                <a href="#kazumi" class="nav-link"><i class="ri-exchange-line"></i>Kazumi 无缝兼容</a>
                 <a href="#faq" class="nav-link"><i class="ri-question-answer-line"></i>常见问题</a>
                 <a href="#example" class="nav-link"><i class="ri-file-code-line"></i>完整范例</a>
                 <a href="#import" class="nav-link"><i class="ri-share-forward-line"></i>导入导出</a>
@@ -774,7 +775,26 @@
 
             <section id="anticrawl">
                 <h2><i class="ri-shield-check-line"></i>07. 反爬对抗</h2>
-                <p>自动防御系统，启动！🛡️ 哪怕网站有验证也不怕。</p>
+                <p>自动防御系统，启动！🛡️ 哪怕网站有验证也不怕。Baka 采用混合动力引擎架构，智能切换策略。</p>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon"><i class="ri-rocket-line"></i></div>
+                        <h3>混合动力引擎 <span class="badge hot">Core</span></h3>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;">
+                        <div style="background:#f9fafb; padding:1.2rem; border-radius:16px; border: 1px solid #eee;">
+                            <h4 style="color:var(--secondary); margin-bottom:0.5rem; font-family:'ZCOOL KuaiLe'; font-size:1.1rem;">
+                                <i class="ri-flashlight-fill"></i> Dio 极速模式</h4>
+                            <p style="font-size:0.9rem; margin:0;">默认使用 HTTP (Dio) 直接请求，速度最快，资源消耗最低。</p>
+                        </div>
+                        <div style="background:#fff5f7; padding:1.2rem; border-radius:16px; border: 1px solid #ffeef1;">
+                            <h4 style="color:var(--primary); margin-bottom:0.5rem; font-family:'ZCOOL KuaiLe'; font-size:1.1rem;">
+                                <i class="ri-spy-fill"></i> WebView 隐身降级</h4>
+                            <p style="font-size:0.9rem; margin:0;">检测到反爬时，自动切换为 WebView 渲染引擎，模拟真实浏览器绕过限制。</p>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="card">
                     <div class="card-header">
@@ -786,17 +806,72 @@
                                 style="color:var(--accent); margin-right:8px; vertical-align:middle;"></i> HTTP 状态码是
                             <strong>403</strong> 或者 <strong>503</strong></li>
                         <li style="margin-bottom:0.8rem;"><i class="ri-text"
-                                style="color:var(--secondary); margin-right:8px; vertical-align:middle;"></i> 页面里有
-                            <strong>"Just a moment"</strong> 或者 <strong>"Security check"</strong></li>
+                                style="color:var(--secondary); margin-right:8px; vertical-align:middle;"></i> 页面包含反爬关键词：
+                            <code>"正在跳转"</code>、<code>"安全验证"</code>、<code>"cloudflare"</code>、<code>"5秒后自动跳转"</code>、<code>"人机验证"</code>、<code>"fl_ua_p"</code></li>
                         <li style="margin-bottom:0.8rem;"><i class="ri-code-s-slash-line"
                                 style="color:var(--primary); margin-right:8px; vertical-align:middle;"></i>
-                            页面内容极短且包含重定向脚本</li>
+                            页面内容极短（&lt;500字符）且不包含预期内容选择器</li>
+                        <li style="margin-bottom:0.8rem;"><i class="ri-shield-check-line"
+                                style="color:#52c41a; margin-right:8px; vertical-align:middle;"></i>
+                            播放页检测：页面过短或包含 <code>loadFunc</code>/<code>fl_ua_p</code> 但无 video/iframe/player_aaaa</li>
                     </ul>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon"><i class="ri-key-2-line"></i></div>
+                        <h3>验证码处理 (CaptchaMixin) <span class="badge warn">Pro</span></h3>
+                    </div>
+                    <p>针对使用<strong>雷池 WAF</strong>等验证码系统的站点，Baka 内置了完整的验证码处理流程：</p>
+                    <ul>
+                        <li><strong>自动识别</strong>: 检测页面中的验证码关键词（<code>ds-verify</code>、<code>雷池WAF</code>、<code>安全检测能力由</code> 等）</li>
+                        <li><strong>图片提取</strong>: 自动提取验证码图片 URL 或字节流</li>
+                        <li><strong>Cookie 持久化</strong>: 验证通过后的 Cookie 自动持久化存储，避免重复验证</li>
+                        <li><strong>支持站点</strong>: LMM/路漫漫 等已内置全自动验证码流程</li>
+                    </ul>
+                </div>
+
+                <div class="info-box">
+                    <i class="ri-lightbulb-flash-line"></i>
+                    <div>
+                        <strong>开发者提示 (oﾟvﾟ)ノ</strong><br />
+                        反爬逻辑通过 <code>AntiCrawlMixin</code> 和 <code>CaptchaMixin</code> 两个 Mixin 实现，适配器只需 <code>with AntiCrawlMixin</code> 即可自动获得完整的反爬绕过能力！
+                    </div>
+                </div>
+            </section>
+
+            <section id="kazumi">
+                <h2><i class="ri-exchange-line"></i>08. Kazumi 无缝兼容 <span class="badge hot">New</span></h2>
+                <p>我们全面支持 Kazumi 规则的原生无脑导入，从复杂的 XPath 到反爬、验证码的抓取，全部包办！</p>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon"><i class="ri-cloud-line"></i></div>
+                        <h3>远程规则订阅 <span class="badge pro">推荐</span></h3>
+                    </div>
+                    <p>无需手动下载规则文件！Baka 支持直接从 GitHub 远程仓库拉取 Kazumi 规则列表：</p>
+                    <ul>
+                        <li><strong>官方源</strong>: <code>https://github.com/Predidit/KazumiRules</code> — 自动获取最新 index.json 规则列表</li>
+                        <li><strong>大陆加速</strong>: 内置 ghfast.top 镜像，中国大陆用户也能快速访问</li>
+                        <li><strong>一键导入</strong>: 浏览规则列表 → 点击订阅 → 自动转换为内部格式 → 立即可用</li>
+                        <li><strong>自动更新</strong>: 支持检查远程规则更新，保持本地规则最新</li>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon"><i class="ri-code-s-slash-line"></i></div>
+                        <h3>直接识别，原生解析</h3>
+                    </div>
+                    <p>只需导入 Kazumi 规则 JSON，Baka 就会自动转换为内部的高效 XPath 引擎格式：<br>
+                    - <code>searchList</code>, <code>chapterRoads</code> 等全部自动映射<br>
+                    - 完美兼容 <code>antiCrawlerConfig</code> 验证码模式捕获<br>
+                    - 支持原生导出分享你编辑后的 Kazumi 规则！</p>
                 </div>
             </section>
 
             <section id="faq">
-                <h2><i class="ri-question-answer-line"></i>08. 常见问题 (FAQ)</h2>
+                <h2><i class="ri-question-answer-line"></i>09. 常见问题 (FAQ)</h2>
                 <div class="info-box" style="background:#fffbf0; border-color:#ffe58f; color:#d48806;">
                     <i class="ri-question-mark" style="color:#faad14;"></i>
                     <div>
@@ -863,7 +938,7 @@
             <footer>
                 <div class="footer-mascot">( ゜- ゜)つロ</div>
                 <p>Designed with <i class="ri-heart-fill" style="color:var(--primary)"></i> by Baka Project</p>
-                <p style="opacity: 0.6; font-size: 0.8rem; margin-top: 0.5rem;">Version 2.0 • ACG Edition</p>
+                <p style="opacity: 0.6; font-size: 0.8rem; margin-top: 0.5rem;">Version 4.5.2 • ACG Edition</p>
             </footer>
         </main>
     </div>

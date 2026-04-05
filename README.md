@@ -4,9 +4,10 @@
 
 **Next-Gen Anime Streaming Client | 次世代二次元番剧播放器**
 
-![Flutter](https://img.shields.io/badge/Flutter-3.22%2B-blue?style=for-the-badge&logo=flutter)
+![Flutter](https://img.shields.io/badge/Flutter-3.38%2B-blue?style=for-the-badge&logo=flutter)
 [![Dart Version](https://img.shields.io/badge/Dart-%3E%3D3.0-blue?style=for-the-badge&logo=dart)](https://dart.dev)
 [![FVM](https://img.shields.io/badge/FVM-Supported-cyan?style=for-the-badge&logo=flutter)](https://fvm.app)
+[![Version](https://img.shields.io/badge/version-4.5.2-important?style=for-the-badge)](https://github.com/AniBakaBaka/AniBaka/releases)
 </div>
 
 <div align="center">
@@ -14,6 +15,7 @@
   <img src="https://img.shields.io/badge/Android-3DDC84?style=flat&logo=android&logoColor=white" />
   <img src="https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white" />
   <img src="https://img.shields.io/badge/iOS-000000?style=flat&logo=apple&logoColor=white" />
+  <img src="https://img.shields.io/badge/Android_TV-3DDC84?style=flat&logo=android&logoColor=white" />
 
 
 [特性](#-✨特性) • [预览](#-预览) • [下载](#-下载与安装) • [反馈](#-反馈与支持) • [常见问题](#-常见问题)
@@ -35,25 +37,52 @@
 
 ### 🎨 极致 UI/UX
 - **Glassmorphism 设计**: 全局采用现代化毛玻璃风格，适配深色/浅色模式，视觉通透，质感细腻。
-- **流畅动效**: 这里的每一个跳转、点击、滑动都经过精心调校，拥有符合物理直觉的丝滑动画。
 - **桌面端优化**: 针对大屏深度适配。
 - **平板优化**: 支持大屏幕UI变化。
+- **主题切换**: 支持深色模式、浅色模式和跟随系统三种模式。
+- **字体自定义**: 内置 Google Fonts 字体库，支持字体切换、字体缩放和字重调节
+- **Android TV 适配**: 自动检测 TV 设备，强制横屏沉浸模式，遥控器友好操作。
 
 
 ### 🔌 开放生态
 - **多源聚合**: 内置 Cycani, Gugu, Anime1, XiFanACG 等主流源，开箱即用。
 - **自定义源**: 支持加载自定义 css/xpath 适配器，也就是kazumi编写好后的规则可以直接导入到 Baka 中，由于与kazumi实现方式不同，有些kazumi可以播放，但baka不能播放，需要进行微调。
 - **聚合搜索**: 一搜索，全网有。不再需要在不同网站间反复横跳。
-
+- **Kazumi 远程规则**: 支持从 GitHub 远程仓库拉取 Kazumi 规则列表，内置中国大陆镜像加速，一键导入即可使用。
+- **智能反爬引擎**: 混合动力架构 —— Dio 极速模式 + WebView 隐身自动降级，自动绕过 Cloudflare、5秒盾等反爬机制。
+- **验证码自动处理**: 内置雷池 WAF 验证码识别与 Cookie 持久化，部分源支持全自动验证码通过。
+- **自定义源管理**: 提供完整的源管理界面，支持新建、编辑、启用/禁用、导出和导入源配置。支持 `baka://` 链接、`kazumi://` 链接和原始 JSON 格式导入
 ### 📺 播放器
 - **mpv 内核**: 基于 `media_kit` (libmpv)，天然支持硬解，播放流畅。
 - **Anime4K 实时增强**: 全端内置 Anime4K 算法，一键将 720p/1080p 提升至 4K 画质，老番画质拯救者。
 - **智能弹幕**: 自动关联 BGM 弹幕库，支持弹幕渲染、发射、屏蔽与过滤。
+- **系统媒体控制**: Android 通知栏 / iOS 锁屏 / macOS 控制中心原生媒体控制集成。
+- **弹幕精细控制**: 支持调节弹幕字体大小、显示区域、滚动速度、透明度、描边宽度，支持按类型（顶部/底部/滚动）过滤，支持关键词屏蔽和重复弹幕过滤。
+- **多线路切换**: 同一剧集支持多条播放线路，可自由切换。
+- **倍速播放**: 支持调节播放速度，长按屏幕可临时倍速。
+- **片头片尾跳过**: 可设置片头片尾的跳过时长和等待时间，自动跳过并支持撤销。
+- **播放进度记忆**: 自动记录每集播放进度，再次打开时提示跳转到上次位置。
+- **画面比例调整**: 支持多种画面填充模式切换。
+- **手势控制**: 支持滑动手势调节亮度和音量。
+### 📖 番剧资料
+- **Bangumi 集成**: 自动关联 Bangumi（BGM）数据库，获取番剧评分、简介、标签、制作信息和收藏统计。
+- **番剧详情页**: 查看番剧的完整信息，包括 Infobox（制作人员/声优）、用户标签云、收藏状态分布（想看/在看/看过/搁置/抛弃）。
+- **新番更新表**: 按星期查看当季番剧的更新时间表。
+- **排行榜**: 查看热门番剧排行，支持多种排行类型切换。
+
+### 追番与历史
+- **追番收藏**: 支持将番剧添加到个人收藏，按状态（想看/在看/看过等）分类管理。
+- **观看历史**: 自动记录观看历史，支持从历史记录中快速续播。
+- **数据同步**: 本地历史记录与远端双向同步，支持强制上传和合并策略，多端进度衔接。
 
 ### 🛠 极客功能
 - **数据同步**: 本地历史记录与远端自动同步，多端进度无缝衔接。
 - **下载管理**: 多线程并发下载引擎，断点续传。
-- **DLNA 投屏**: 一键投射到电视，大屏畅享。
+- **媒体库**: 本地存储 + WebDAV 远程存储统一管理，支持浏览已下载的离线视频资源。
+- **下载管理**: 支持视频缓存下载，断点续传，下载完成后自动保存弹幕文件，已下载视频支持离线播放（含弹幕）。
+- **DLNA 投屏**: 自动搜索局域网中的 DLNA 设备，一键投射到电视。
+- **缓存管理**: 支持查看和清理应用缓存。
+- **社区讨论**: 内置讨论区，支持浏览和发表评论。
 
 ---
 
@@ -137,7 +166,7 @@ A: 是的，Baka 目前完全免费供个人使用。
 A: 还没想好是否开源，主要是代码库太乱了，还有一些历史原因，所以闭源比开源的风险小一些。后续star高些后可能会考虑开源。
 
 **Q: 如何安装自定义源？**
-A: 在设置页面的「扩展中心」或「源管理」中，点击「导入」，选择本地的 `.js` 或 `.json` 适配器文件即可。
+A: 在设置页面的「自定义源管理」中，点击「导入」按钮，粘贴 JSON 配置文本即可。支持 `baka://` 链接、`kazumi://` 链接或原始 JSON 格式导入。也可以点击「新建源」手动填写 CSS/XPath 选择器来创建自定义源。
 
 
 ## 📜 致谢 | Credits
