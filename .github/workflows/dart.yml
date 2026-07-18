@@ -331,6 +331,39 @@ jobs:
           }
           dart pub global activate fastforge "$env:FASTFORGE_VERSION"
 
+      - name: Sync MSIX version from pubspec
+        shell: pwsh
+        run: |
+          $versionLine = Select-String -Path pubspec.yaml -Pattern '^\s*version:\s*(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?\s*$' |
+            Select-Object -First 1
+          if ($null -eq $versionLine) {
+            throw 'pubspec.yaml version must use major.minor.patch+build format'
+          }
+
+          $parts = @(
+            [int]$versionLine.Matches[0].Groups[1].Value
+            [int]$versionLine.Matches[0].Groups[2].Value
+            [int]$versionLine.Matches[0].Groups[3].Value
+            if ($versionLine.Matches[0].Groups[4].Success) {
+              [int]$versionLine.Matches[0].Groups[4].Value
+            } else {
+              [int]$env:GITHUB_RUN_NUMBER
+            }
+          )
+          if ($parts.Where({ $_ -lt 0 -or $_ -gt 65535 }).Count -ne 0) {
+            throw "MSIX version components must be between 0 and 65535: $($parts -join '.')"
+          }
+
+          $msixVersion = $parts -join '.'
+          $configPath = 'windows/packaging/msix/make_config.yaml'
+          $config = Get-Content -Raw -Encoding utf8 -LiteralPath $configPath
+          if ($config -notmatch '(?m)^msix_version:\s*\S+\s*$') {
+            throw "$configPath does not contain msix_version"
+          }
+          $config = $config -replace '(?m)^msix_version:\s*\S+\s*$', "msix_version: $msixVersion"
+          Set-Content -Encoding utf8 -NoNewline -LiteralPath $configPath -Value $config
+          Write-Host "MSIX version: $msixVersion"
+
       - name: Package EXE
         id: windows_exe
         continue-on-error: true
@@ -489,13 +522,8 @@ jobs:
           restore-keys: |
             pub-linux-arm64-
 
-      - name: Prepare project
-        run: |
-          flutter config --enable-linux-desktop
-          if [ ! -f linux/CMakeLists.txt ]; then
-            flutter create --platforms=linux .
-          fi
-          flutter pub get
+      - name: Install dependencies
+        run: flutter pub get
 
       - name: Install Fastforge
         run: dart pub global activate fastforge "$FASTFORGE_VERSION"

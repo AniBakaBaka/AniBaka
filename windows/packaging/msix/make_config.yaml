@@ -8,7 +8,7 @@
 display_name: Baka动漫
 
 # 应用版本 (格式: x.x.x.x)
-msix_version: 5.0.0.624
+msix_version: 5.0.1.718
 
 # 发布者显示名称
 publisher_display_name: Baka动漫
@@ -18,6 +18,9 @@ identity_name: ani.baka
 
 # 发布者 (需要与证书匹配)
 publisher: CN=Baka动漫
+
+# CI 使用测试证书签名，但不向临时构建机的证书库发起交互式安装。
+install_certificate: "false"
 
 # 应用 Logo 路径 (支持 PNG 格式)
 # 图标会自动生成不同尺寸用于开始菜单、任务栏等
