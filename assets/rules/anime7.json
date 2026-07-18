@@ -1,0 +1,81 @@
+{
+  "format": "anx-rule/2",
+  "id": "anime7",
+  "name": "Anime7 动画线上看",
+  "baseUrl": "https://anime7.top",
+  "iconUrl": "https://ani7.b-cdn.net/upload/logo/web-icon.png",
+  "description": "Anime7 动画线上看，提供日韩动漫、剧场版、国产动漫等高清在线观看。",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Referer": "https://anime7.top/"
+  },
+  "search": [
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "maccmsSuggest",
+            "detailUrlTemplate": "/vod-detail/{id}/",
+            "verify": true
+          }
+        ],
+        [
+          {
+            "op": "fetch",
+            "url": "/vod-search/wd/{keyword}/"
+          },
+          {
+            "op": "searchList",
+            "selectors": [
+              ".hl-list-item, a[href*=\"/vod-detail/\"]"
+            ]
+          }
+        ]
+      ]
+    }
+  ],
+  "detail": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "episodes",
+      "listSelectors": [
+        "ul.hl-plays-list"
+      ],
+      "tabSelectors": [
+        ".hl-plays-from a"
+      ]
+    }
+  ],
+  "play": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "playerAaaa",
+            "var": "player_aaaa",
+            "key": "url"
+          }
+        ],
+        [
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "sniff",
+            "goal": "video",
+            "url": "{episodeId:raw}"
+          }
+        ]
+      ]
+    }
+  ]
+}

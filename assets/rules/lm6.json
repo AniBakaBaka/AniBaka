@@ -1,0 +1,54 @@
+{
+  "format": "anx-rule/2",
+  "id": "lm6",
+  "name": "路漫漫动漫",
+  "baseUrl": "https://m.lm6.net",
+  "iconUrl": "https://m.lm6.net/template/jable/statics/icon/favicon-32x32.png",
+  "description": "路漫漫在线动漫提供日本动漫、国产动漫、动画电影等免费在线观看。",
+  "useWebview": true,
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Accept": "*/*",
+    "Referer": "https://m.lm6.net/"
+  },
+  "search": [
+    {
+      "op": "sniff",
+      "goal": "html",
+      "url": "/index.php/vod/search/wd/{keyword}.html",
+      "readyContains": ["video-img-box"],
+      "rejectContains": ["身份验证", "安全验证"],
+      "timeoutMs": 30000,
+      "settleMs": 2000
+    },
+    {
+      "op": "searchList",
+      "selectors": [".video-img-box .detail"],
+      "detailPattern": "/detail/"
+    }
+  ],
+  "detail": [
+    {
+      "op": "sniff",
+      "goal": "html",
+      "url": "{seriesId:raw}",
+      "readyContains": ["module-player-list"],
+      "rejectContains": ["身份验证", "安全验证"],
+      "timeoutMs": 30000,
+      "settleMs": 2000
+    },
+    {
+      "op": "episodes",
+      "listSelectors": [
+        ".module-player-list"
+      ]
+    }
+  ],
+  "play": [
+    {
+      "op": "sniff",
+      "goal": "video",
+      "url": "{episodeId:raw}"
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+# This file configures the analyzer, which statically analyzes Dart code to
+# check for errors, warnings, and lints.
+#
+# The issues identified by the analyzer are surfaced in the UI of Dart-enabled
+# IDEs (https://dart.dev/tools#ides-and-editors). The analyzer can also be
+# invoked from the command line by running `flutter analyze`.
+
+# The following line activates a set of recommended lints for Flutter apps,
+# packages, and plugins designed to encourage good coding practices.
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    # 代码风格统一
+    prefer_single_quotes: true
+    always_declare_return_types: true
+    always_put_control_body_on_new_line: false
+    always_put_required_named_parameters_first: true
+    avoid_print: false
+    avoid_unnecessary_containers: true
+    avoid_empty_else: true
+    prefer_const_constructors: true
+    prefer_const_constructors_in_immutables: true
+    prefer_const_declarations: true
+    prefer_const_literals_to_create_immutables: true
+    prefer_final_fields: true
+    prefer_final_locals: true
+    prefer_if_null_operators: true
+    prefer_is_empty: true
+    prefer_is_not_empty: true
+    prefer_relative_imports: false
+    sort_child_properties_last: true
+    use_key_in_widget_constructors: false
+    
+    # 命名规范
+    camel_case_types: true
+    library_names: true
+    file_names: true
+    non_constant_identifier_names: true
+    constant_identifier_names: true
+    
+    # 避免常见错误
+    unnecessary_null_aware_assignments: true
+    unnecessary_null_in_if_null_operators: true
+    unnecessary_nullable_for_final_variable_declarations: true
+    unnecessary_string_interpolations: true
+    avoid_init_to_null: true
+    avoid_null_checks_in_equality_operators: true
+    avoid_return_types_on_setters: true
+    avoid_shadowing_type_parameters: true
+    avoid_types_as_parameter_names: true
+    empty_catches: true
+    no_duplicate_case_values: true
+    valid_regexps: true
+
+# Additional information about this file can be found at
+# https://dart.dev/guides/language/analysis-options

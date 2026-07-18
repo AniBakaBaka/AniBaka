@@ -1,0 +1,154 @@
+{
+  "format": "anx-rule/2",
+  "id": "cycani",
+  "name": "Cycani 次元城",
+  "baseUrl": "https://www.cycani.org",
+  "iconUrl": "https://www.cycani.org/favicon.ico",
+  "description": "Cycani 次元城动画视频源",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "Accept": "*/*"
+  },
+  "search": [
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "maccmsSuggest",
+            "verify": true,
+            "headers": {
+              "Accept": "application/json, text/javascript, */*; q=0.01",
+              "Referer": "https://www.cycani.org/"
+            },
+            "detailUrlTemplate": "/bangumi/{id}.html"
+          }
+        ],
+        [
+          {
+            "op": "fetch",
+            "url": "/search.html?wd={keyword}",
+            "headers": {
+              "Referer": "https://www.cycani.org/"
+            }
+          },
+          {
+            "op": "searchList",
+            "selectors": [
+              ".vod-detail.search-list",
+              ".public-list-box",
+              ".module-search-item",
+              "a[href*='/bangumi/']"
+            ],
+            "detailPattern": "/bangumi/"
+          }
+        ],
+        [
+          {
+            "op": "sniff",
+            "goal": "html",
+            "url": "/search.html?wd={keyword}",
+            "readyContains": [
+              "bangumi"
+            ],
+            "rejectContains": [
+              "verify",
+              "验证"
+            ],
+            "timeoutMs": 15000
+          },
+          {
+            "op": "searchList",
+            "selectors": [
+              ".vod-detail.search-list",
+              ".public-list-box",
+              ".module-search-item",
+              "a[href*='/bangumi/']"
+            ],
+            "detailPattern": "/bangumi/"
+          }
+        ]
+      ]
+    }
+  ],
+  "detail": [
+    {
+      "op": "follow",
+      "headers": {
+        "Referer": "https://www.cycani.org/"
+      }
+    },
+    {
+      "op": "episodes",
+      "listSelectors": [
+        ".anthology-list-box",
+        ".anthology-list-play"
+      ],
+      "tabSelectors": [
+        ".anthology-tab .swiper-slide",
+        ".anthology-tab a",
+        ".module-tab-item",
+        ".tab-item"
+      ]
+    }
+  ],
+  "useWebview": true,
+  "play": [
+    {
+      "op": "follow",
+      "headers": {
+        "Referer": "https://www.cycani.org/"
+      }
+    },
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "playerAaaa"
+          },
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "playerAaaa"
+          },
+          {
+            "op": "template",
+            "value": "https://player.cycanime.com/?url={url:raw}"
+          },
+          {
+            "op": "follow",
+            "headers": {
+              "Referer": "https://www.cycani.org/"
+            }
+          },
+          {
+            "op": "playerDecrypt",
+            "salt": "YLwJVbXw77pk2eOrAnFdBo2c3mWkLtodMni2wk81GCnP94ZltW"
+          }
+        ],
+        [
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "playerAaaa"
+          },
+          {
+            "op": "template",
+            "value": "https://player.cycanime.com/?url={url:raw}"
+          },
+          {
+            "op": "sniff",
+            "goal": "video"
+          }
+        ]
+      ]
+    }
+  ]
+}

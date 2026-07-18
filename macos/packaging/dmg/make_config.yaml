@@ -1,0 +1,53 @@
+# macOS DMG 安装镜像配置
+# 应用名称: Baka动漫
+# 包名: ani.baka
+# 文档: https://fastforge.dev/zh/makers/dmg
+# 依赖: npm install -g appdmg
+
+# DMG 窗口标题
+title: Baka动漫
+
+# DMG 窗口背景 (可选)
+# 可以使用图片作为背景
+# 注意: 路径相对于本配置文件所在目录
+background: background.jpg
+
+# DMG 窗口大小
+window:
+  size:
+    width: 660
+    height: 400
+
+# DMG 窗口位置 (可选)
+# position:
+#   x: 100
+#   y: 100
+
+# 图标大小
+icon-size: 80
+
+# 图标位置设置
+contents:
+  # Applications 文件夹链接
+  - x: 448
+    y: 200
+    type: link
+    path: '/Applications'
+  
+  # 应用程序图标
+  - x: 192
+    y: 200
+    type: file
+    path: Baka.app
+
+# 文件格式
+format: UDBZ
+
+# 代码签名 (可选, macOS 发布时需要)
+# code-sign:
+#   signing-identity: "Developer ID Application: Your Name (XXXXXXXXXX)"
+#   identifier: ani.baka
+
+# 其他选项
+# filesystem: HFS+
+# license: LICENSE

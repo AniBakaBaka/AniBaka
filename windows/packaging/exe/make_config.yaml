@@ -1,0 +1,58 @@
+# Windows EXE 安装程序配置 (Inno Setup)
+# 应用名称: Baka动漫
+# 包名: ani.baka
+# 文档: https://fastforge.dev/zh/makers/exe
+
+# AppId 的值唯一标识此应用
+# 不要在其他应用的安装程序中使用相同的 AppId 值
+# 生成方式: 可使用 UUID 生成器或在线工具生成唯一 ID
+app_id: A9C3F8E2-6B4D-4A1E-B8C7-3D5F2E9A1B7C
+
+# 发布者信息
+publisher: Baka动漫
+publisher_url: https://github.com/AniBakaBaka/AniBaka
+
+# 应用显示名称 (将显示在开始菜单、控制面板等位置)
+display_name: Baka动漫
+
+# 安装程序可执行文件名称
+executable_name: baka
+
+# 是否创建桌面快捷方式
+create_desktop_icon: true
+
+# 是否创建开始菜单快捷方式
+create_start_menu_icon: true
+
+# 安装程序图标 (相对于项目根目录的路径)
+# 图标格式必须是 .ico 格式
+setup_icon_file: windows\runner\resources\appicon.ico
+
+# 默认安装目录名称
+# 如需自定义安装路径，取消下行注释并修改
+# install_dir_name: "D:\\Baka动漫"
+
+# 安装程序语言设置
+# 支持的语言: en (英语), zh (中文), ja (日语) 等
+locales:
+  - zh
+  - en
+
+# 许可协议文件 (可选)
+# license_file: LICENSE
+
+# 安装完成后运行的命令 (可选)
+run_after_install: true
+
+# 最低操作系统版本要求
+# min_windows_version: "10.0"
+
+# 架构设置
+# architectures: x64
+
+# 权限设置 - 是否需要管理员权限
+privileges_required: admin
+
+# 安装模式
+# install_mode_flags:
+#   - installAllUsers

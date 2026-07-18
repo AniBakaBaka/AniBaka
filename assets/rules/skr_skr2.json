@@ -1,0 +1,67 @@
+{
+  "format": "anx-rule/2",
+  "id": "skr_skr2",
+  "name": "樱之空动漫",
+  "baseUrl": "https://skr.skr2.cc:666",
+  "iconUrl": "https://skr.skr2.cc:666/favicon.ico",
+  "description": "樱之空动漫是一个极具个人色彩、神秘又温馨的二次元圣地，提供好看的动漫、日剧及歌曲。",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "https://skr.skr2.cc:666/"
+  },
+  "search": [
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "maccmsSuggest",
+            "urlKey": "url",
+            "detailUrlTemplate": "/voddetail/{id}/"
+          }
+        ],
+        [
+          {
+            "op": "searchList",
+            "selectors": [
+              ""
+            ]
+          }
+        ]
+      ]
+    }
+  ],
+  "detail": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "episodes",
+      "listSelectors": [
+        ".play_list_box, .content_playlist, .stui-content__playlist, .myui-content__list"
+      ]
+    }
+  ],
+  "play": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "playerAaaa",
+            "var": "player_aaaa",
+            "key": "url"
+          }
+        ],
+        [
+          {
+            "op": "videoUrl"
+          }
+        ]
+      ]
+    }
+  ]
+}

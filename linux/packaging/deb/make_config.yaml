@@ -1,0 +1,18 @@
+display_name: Baka动漫
+package_name: baka
+maintainer:
+  name: Baka contributors
+priority: optional
+section: video
+installed_size: 200000
+essential: false
+icon: assets/ic_launcher.png
+generic_name: Anime aggregation and media player
+keywords:
+  - Anime
+  - Video
+  - Player
+categories:
+  - AudioVideo
+  - Video
+startup_notify: true

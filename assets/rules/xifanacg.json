@@ -1,0 +1,130 @@
+{
+  "format": "anx-rule/2",
+  "id": "xifanacg",
+  "name": "Xifanacg",
+  "baseUrl": "https://anime.xifanacg.com",
+  "iconUrl": "https://anime.xifanacg.com/template/dsn2/static/img/fav.png",
+  "description": "Xifanacg动漫视频源，源网址https://anime.xifanacg.com",
+  "headers": {
+    "Referer": "https://anime.xifanacg.com/"
+  },
+  "search": [
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "maccmsSuggest",
+            "headers": {
+              "Accept": "application/json, text/javascript, */*; q=0.01"
+            },
+            "detailUrlTemplate": "/bangumi/{id}.html"
+          }
+        ],
+        [
+          {
+            "op": "fetch",
+            "url": "/search/wd/{keyword}.html"
+          },
+          {
+            "op": "searchList",
+            "selectors": [
+              ".vod-detail.search-list",
+              ".public-list-box"
+            ],
+            "detailPattern": "/bangumi/"
+          }
+        ]
+      ]
+    }
+  ],
+  "detail": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "episodes",
+      "listSelectors": [
+        ".anthology-list-box",
+        ".anthology-list-play",
+        ".module-play-list"
+      ]
+    }
+  ],
+  "play": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "playerAaaa",
+            "var": "player_aaaa",
+            "key": "url"
+          },
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "playerAaaa",
+            "var": "player_aaaa",
+            "key": "url"
+          },
+          {
+            "op": "regex",
+            "pattern": "^(https?://\\S+)",
+            "group": 1
+          },
+          {
+            "op": "follow"
+          },
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "select",
+            "css": "iframe[data-src]",
+            "attr": "data-src"
+          },
+          {
+            "op": "follow"
+          },
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "select",
+            "css": "iframe[src]",
+            "attr": "src"
+          },
+          {
+            "op": "follow"
+          },
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "regex",
+            "pattern": "\"url\"\\s*:\\s*\"(https?://[^\"]+)\"",
+            "group": 1
+          }
+        ],
+        [
+          {
+            "op": "videoUrl"
+          }
+        ]
+      ]
+    }
+  ]
+}

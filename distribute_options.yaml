@@ -1,0 +1,82 @@
+# Fastforge 只负责生成各平台安装包，GitHub Release 由工作流统一发布。
+# CI 会按单个 job 调用并使用 --skip-clean，让同一平台/架构复用 Flutter
+# 的增量构建结果；每次调用前都会清空 dist，避免不同包型互相污染。
+# 桌面架构由对应的原生 runner 决定，不向 Flutter 传入跨平台参数。
+output: dist/
+
+releases:
+  - name: windows
+    jobs:
+      - name: windows-exe
+        package:
+          platform: windows
+          target: exe
+
+      - name: windows-msix
+        package:
+          platform: windows
+          target: msix
+
+      - name: windows-zip
+        package:
+          platform: windows
+          target: zip
+
+  - name: macos
+    jobs:
+      - name: macos-dmg
+        package:
+          platform: macos
+          target: dmg
+
+      - name: macos-zip
+        package:
+          platform: macos
+          target: zip
+
+  - name: android
+    jobs:
+      - name: android-apk-arm64
+        package:
+          platform: android
+          target: apk
+          build_args:
+            target-platform: android-arm64
+
+      - name: android-apk-arm
+        package:
+          platform: android
+          target: apk
+          build_args:
+            target-platform: android-arm
+
+      - name: android-apk-x64
+        package:
+          platform: android
+          target: apk
+          build_args:
+            target-platform: android-x64
+
+      - name: android-aab
+        package:
+          platform: android
+          target: aab
+          build_args:
+            target-platform: android-arm,android-arm64,android-x64
+
+  - name: linux
+    jobs:
+      - name: linux-appimage
+        package:
+          platform: linux
+          target: appimage
+
+      - name: linux-deb
+        package:
+          platform: linux
+          target: deb
+
+      - name: linux-zip
+        package:
+          platform: linux
+          target: zip

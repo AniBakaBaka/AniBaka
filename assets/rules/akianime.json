@@ -1,0 +1,91 @@
+{
+  "format": "anx-rule/2",
+  "id": "akianime",
+  "name": "AkiAnime",
+  "baseUrl": "https://www.akianime.com",
+  "iconUrl": "https://www.akianime.com/template/dsn2/static/img/ico.png",
+  "description": "AkiAnime-最新动漫尽在Aki",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "Referer": "https://www.akianime.com/"
+  },
+  "useWebview": true,
+  "search": [
+    {
+      "op": "fetch",
+      "url": "https://www.akianime.com/bgmsearch/-------------.html?wd={keyword}"
+    },
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "jsonSeries",
+            "listPath": "list",
+            "idKey": "id",
+            "nameKey": "name",
+            "imageKey": "pic",
+            "urlKey": "url"
+          }
+        ],
+        [
+          {
+            "op": "searchList",
+            "selectors": [
+              "a[href*=\"/bgmdetail/\"], .vod-detail.search-list, .search-list, .module-card-item, .stui-vodlist__box"
+            ]
+          }
+        ]
+      ]
+    }
+  ],
+  "detail": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "episodes",
+      "listSelectors": [
+        "a[href*=\"/bgmplay/\"], .anthology-list-play, .module-player-list, .play-list, .playlist"
+      ]
+    }
+  ],
+  "play": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "playerAaaa",
+            "var": "player_aaaa",
+            "key": "url"
+          }
+        ],
+        [
+          {
+            "op": "videoUrl"
+          }
+        ]
+      ]
+    },
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "sniff",
+            "goal": "video"
+          }
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,114 @@
+{
+  "format": "anx-rule/2",
+  "id": "girigirilove",
+  "name": "GirigiriLove",
+  "baseUrl": "https://ani.girigirilove.com",
+  "iconUrl": "https://ani.girigirilove.com/upload/anime.girigirilove.com_.png",
+  "description": "GirigiriLove动漫视频源，源网址ani.girigirilove.com",
+  "headers": {
+    "Referer": "https://ani.girigirilove.com/"
+  },
+  "search": [
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "maccmsSuggest",
+            "headers": {
+              "Accept": "application/json, text/javascript, */*; q=0.01"
+            },
+            "detailUrlTemplate": "/GV{id}/"
+          }
+        ],
+        [
+          {
+            "op": "fetch",
+            "url": "/search/{keyword}-------------/"
+          },
+          {
+            "op": "searchList",
+            "selectors": [
+              ".vod-detail.search-list",
+              ".public-list-box"
+            ],
+            "detailPattern": "/GV"
+          }
+        ]
+      ]
+    }
+  ],
+  "detail": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "episodes",
+      "listSelectors": [
+        ".anthology-list-box",
+        ".anthology-list-play",
+        ".module-play-list"
+      ]
+    }
+  ],
+  "useWebview": true,
+  "play": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "playerAaaa",
+            "var": "player_aaaa",
+            "key": "url"
+          },
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "playerAaaa",
+            "var": "player_aaaa",
+            "key": "url"
+          },
+          {
+            "op": "regex",
+            "pattern": "^(https?://\\S+)",
+            "group": 1
+          },
+          {
+            "op": "follow"
+          },
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "playerAaaa",
+            "var": "player_aaaa",
+            "key": "url"
+          },
+          {
+            "op": "regex",
+            "pattern": "^(https?://\\S+)",
+            "group": 1
+          },
+          {
+            "op": "sniff",
+            "goal": "video"
+          }
+        ]
+      ]
+    }
+  ]
+}

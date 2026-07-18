@@ -1,0 +1,12 @@
+display_name: Baka动漫
+icon: assets/ic_launcher.png
+generic_name: Anime aggregation and media player
+keywords:
+  - Anime
+  - Video
+  - Player
+categories:
+  - AudioVideo
+  - Video
+startup_notify: true
+include: []

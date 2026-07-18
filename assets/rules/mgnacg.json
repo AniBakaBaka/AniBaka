@@ -1,0 +1,140 @@
+{
+  "format": "anx-rule/2",
+  "id": "mgnacg",
+  "name": "Mgnacg 橘子动漫",
+  "baseUrl": "https://www.mgnacg.com",
+  "iconUrl": "https://r2img.nanoacg.com/favicon.png",
+  "description": "Mgnacg 橘子动漫视频源",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "Accept": "*/*"
+  },
+  "search": [
+    {
+      "op": "maccmsSuggest",
+      "headers": {
+        "Referer": "https://www.mgnacg.com/",
+        "Origin": "https://www.mgnacg.com"
+      },
+      "detailUrlTemplate": "/media/{id}/"
+    }
+  ],
+  "detail": [
+    {
+      "op": "follow",
+      "headers": {
+        "Referer": "https://www.mgnacg.com/"
+      }
+    },
+    {
+      "op": "episodes",
+      "listSelectors": [
+        ".anthology-list-box"
+      ],
+      "tabSelectors": [
+        ".anthology-tab .swiper-slide",
+        ".anthology-tab a",
+        ".module-tab-item",
+        ".tab-item"
+      ]
+    }
+  ],
+  "useWebview": true,
+  "play": [
+    {
+      "op": "follow",
+      "headers": {
+        "Referer": "https://www.mgnacg.com/"
+      }
+    },
+    {
+      "op": "setVar",
+      "name": "watchHtml",
+      "value": "{url:raw}"
+    },
+    {
+      "op": "regex",
+      "pattern": "\"from\"\\s*:\\s*\"([^\"]+)\"",
+      "group": 1
+    },
+    {
+      "op": "setVar",
+      "name": "from",
+      "value": "{url:raw}"
+    },
+    {
+      "op": "template",
+      "value": "{watchHtml:raw}"
+    },
+    {
+      "op": "regex",
+      "pattern": "player_aaaa\\s*=\\s*\\{[\\s\\S]*?\"url\"\\s*:\\s*\"([^\"]+)\"",
+      "group": 1
+    },
+    {
+      "op": "setVar",
+      "name": "encoded",
+      "value": "{url:raw}"
+    },
+    {
+      "op": "fetch",
+      "url": "/static/js/playerconfig.js",
+      "headers": {
+        "Referer": "https://www.mgnacg.com/"
+      }
+    },
+    {
+      "op": "regex",
+      "pattern": "\"{from:raw}\"\\s*:\\s*\\{[\\s\\S]*?\"parse\"\\s*:\\s*\"([^\"]*)\"",
+      "group": 1
+    },
+    {
+      "op": "replace",
+      "pattern": "\\/",
+      "replacement": "/"
+    },
+    {
+      "op": "setVar",
+      "name": "parser",
+      "value": "{url:raw}"
+    },
+    {
+      "op": "template",
+      "value": "{parser:raw}{encoded:raw}"
+    },
+    {
+      "op": "setVar",
+      "name": "parserUrl",
+      "value": "{url:raw}"
+    },
+    {
+      "op": "follow",
+      "headers": {
+        "Referer": "https://www.mgnacg.com/"
+      }
+    },
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "playerDecrypt",
+            "salt": "Mknacg123321"
+          }
+        ],
+        [
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "sniff",
+            "goal": "video",
+            "url": "{parserUrl:raw}"
+          }
+        ]
+      ]
+    }
+  ]
+}

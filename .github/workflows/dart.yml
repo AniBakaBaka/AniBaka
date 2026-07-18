@@ -1,0 +1,665 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "创建预发布或正式 GitHub Release"
+        required: true
+        type: choice
+        default: prerelease
+        options:
+          - prerelease
+          - release
+      release_name:
+        description: "可选的 GitHub Release 标题；留空时使用标签名"
+        required: false
+        type: string
+      release_notes:
+        description: "可选的 GitHub Release 正文；留空时自动生成更新记录"
+        required: false
+        type: string
+      draft_release:
+        description: "先创建草稿，以便在 GitHub 中继续编辑后再发布"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FASTFORGE_VERSION: 0.6.9
+
+jobs:
+  build-android:
+    name: Android packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h /
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platforms;android-36" "build-tools;34.0.0"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: .fvmrc
+          cache: true
+          pub-cache: true
+
+      - name: Prepare project
+        run: |
+          sed -i 's/abiFilters "armeabi-v7a", "arm64-v8a"/abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"/g' android/app/build.gradle
+          sed -i "s|excludes += \['lib/x86/\*\*', 'lib/x86_64/\*\*'\]|excludes += ['lib/x86/**']|g" android/app/build.gradle
+          flutter pub get
+
+      - name: Install Fastforge
+        run: dart pub global activate fastforge "$FASTFORGE_VERSION"
+
+      - name: Package APK (arm64)
+        id: apk_arm64
+        continue-on-error: true
+        run: |
+          rm -rf dist
+          dart pub global run fastforge:main release --name android --jobs android-apk-arm64 --skip-clean
+
+      - name: Upload APK (arm64)
+        if: steps.apk_arm64.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android-arm64-apk
+          path: dist/**/*
+          if-no-files-found: error
+
+      - name: Package APK (armv7)
+        id: apk_armv7
+        continue-on-error: true
+        run: |
+          rm -rf dist
+          dart pub global run fastforge:main release --name android --jobs android-apk-arm --skip-clean
+
+      - name: Upload APK (armv7)
+        if: steps.apk_armv7.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android-armv7-apk
+          path: dist/**/*
+          if-no-files-found: error
+
+      - name: Package APK (x64)
+        id: apk_x64
+        continue-on-error: true
+        run: |
+          rm -rf dist
+          dart pub global run fastforge:main release --name android --jobs android-apk-x64 --skip-clean
+
+      - name: Upload APK (x64)
+        if: steps.apk_x64.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android-x64-apk
+          path: dist/**/*
+          if-no-files-found: error
+
+      - name: Package Android App Bundle
+        id: android_aab
+        continue-on-error: true
+        run: |
+          rm -rf dist
+          dart pub global run fastforge:main release --name android --jobs android-aab --skip-clean
+
+      - name: Upload Android App Bundle
+        if: steps.android_aab.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android-universal-aab
+          path: dist/**/*
+          if-no-files-found: error
+
+      - name: Write Android package summary
+        if: always()
+        env:
+          APK_ARM64: ${{ steps.apk_arm64.outcome }}
+          APK_ARMV7: ${{ steps.apk_armv7.outcome }}
+          APK_X64: ${{ steps.apk_x64.outcome }}
+          AAB: ${{ steps.android_aab.outcome }}
+        run: |
+          {
+            echo "### Android packages"
+            echo "| Package | Result |"
+            echo "| --- | --- |"
+            echo "| APK arm64 | $APK_ARM64 |"
+            echo "| APK armv7 | $APK_ARMV7 |"
+            echo "| APK x64 | $APK_X64 |"
+            echo "| AAB | $AAB |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build-ios:
+    name: iOS unsigned IPA
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read app version
+        id: version
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | tr '+' '-')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: .fvmrc
+          cache: true
+          pub-cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build iOS without code signing
+        run: flutter build ios --release --no-codesign
+
+      - name: Create unsigned IPA
+        run: |
+          APP_PATH=$(find build/ios/iphoneos -maxdepth 1 -name "*.app" -print -quit)
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app bundle found in build/ios/iphoneos"
+            exit 1
+          fi
+
+          mkdir -p dist/ios/Payload
+          cp -R "$APP_PATH" dist/ios/Payload/
+          (cd dist/ios && zip -qry "../baka-${{ steps.version.outputs.version }}-ios-arm64-unsigned.ipa" Payload)
+          rm -rf dist/ios
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-ios-arm64-unsigned-ipa
+          path: dist/*.ipa
+          if-no-files-found: error
+
+  build-macos:
+    name: macOS ${{ matrix.arch }} packages
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: macos-15-intel
+          - arch: arm64
+            runner: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: .fvmrc
+          cache: true
+          pub-cache: true
+
+      - name: Prepare project
+        run: |
+          flutter config --enable-macos-desktop
+          flutter pub get
+
+      - name: Install packaging tools
+        run: |
+          npm install -g appdmg
+          brew install p7zip
+          dart pub global activate fastforge "$FASTFORGE_VERSION"
+
+      - name: Package DMG
+        id: macos_dmg
+        continue-on-error: true
+        run: |
+          rm -rf dist
+          dart pub global run fastforge:main release --name macos --jobs macos-dmg --skip-clean
+
+      - name: Upload DMG
+        if: steps.macos_dmg.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-${{ matrix.arch }}-dmg
+          path: dist/**/*
+          if-no-files-found: error
+
+      - name: Package ZIP
+        id: macos_zip
+        continue-on-error: true
+        run: |
+          rm -rf dist
+          dart pub global run fastforge:main release --name macos --jobs macos-zip --skip-clean
+
+      - name: Upload ZIP
+        if: steps.macos_zip.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-${{ matrix.arch }}-zip
+          path: dist/**/*
+          if-no-files-found: error
+
+      - name: Write macOS package summary
+        if: always()
+        env:
+          DMG: ${{ steps.macos_dmg.outcome }}
+          ZIP: ${{ steps.macos_zip.outcome }}
+        run: |
+          {
+            echo "### macOS ${{ matrix.arch }} packages"
+            echo "| Package | Result |"
+            echo "| --- | --- |"
+            echo "| DMG | $DMG |"
+            echo "| ZIP | $ZIP |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build-windows:
+    name: Windows ${{ matrix.arch }} packages
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: .fvmrc
+          cache: true
+          pub-cache: true
+
+      - name: Prepare project
+        shell: pwsh
+        run: |
+          flutter config --enable-windows-desktop
+          flutter pub get
+
+      - name: Install packaging tools
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+          dart pub global activate fastforge "$env:FASTFORGE_VERSION"
+
+      - name: Package EXE
+        id: windows_exe
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          if (Test-Path dist) {
+            Remove-Item -Recurse -Force -LiteralPath dist
+          }
+          dart pub global run fastforge:main release --name windows --jobs windows-exe --skip-clean
+
+      - name: Upload EXE
+        if: steps.windows_exe.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-${{ matrix.arch }}-exe
+          path: dist/**/*
+          if-no-files-found: error
+
+      - name: Package MSIX
+        id: windows_msix
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          if (Test-Path dist) {
+            Remove-Item -Recurse -Force -LiteralPath dist
+          }
+          dart pub global run fastforge:main release --name windows --jobs windows-msix --skip-clean
+
+      - name: Upload MSIX
+        if: steps.windows_msix.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-${{ matrix.arch }}-msix
+          path: dist/**/*
+          if-no-files-found: error
+
+      - name: Package ZIP
+        id: windows_zip
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          if (Test-Path dist) {
+            Remove-Item -Recurse -Force -LiteralPath dist
+          }
+          dart pub global run fastforge:main release --name windows --jobs windows-zip --skip-clean
+
+      - name: Upload ZIP
+        if: steps.windows_zip.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-${{ matrix.arch }}-zip
+          path: dist/**/*
+          if-no-files-found: error
+
+      - name: Write Windows package summary
+        if: always()
+        shell: pwsh
+        env:
+          EXE: ${{ steps.windows_exe.outcome }}
+          MSIX: ${{ steps.windows_msix.outcome }}
+          ZIP: ${{ steps.windows_zip.outcome }}
+        run: |
+          @"
+          ### Windows ${{ matrix.arch }} packages
+          | Package | Result |
+          | --- | --- |
+          | EXE | $env:EXE |
+          | MSIX | $env:MSIX |
+          | ZIP | $env:ZIP |
+          "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+  build-linux:
+    name: Linux ${{ matrix.arch }} packages
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-latest
+            appimagetool_arch: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            appimagetool_arch: aarch64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux build and packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev plocate p7zip-full
+          sudo updatedb
+
+      - name: Install appimagetool
+        env:
+          APPIMAGETOOL_ARCH: ${{ matrix.appimagetool_arch }}
+        run: |
+          curl -fL "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${APPIMAGETOOL_ARCH}.AppImage" -o appimagetool-bin
+          chmod +x appimagetool-bin
+          sudo mv appimagetool-bin /usr/local/bin/appimagetool-bin
+          sudo tee /usr/local/bin/appimagetool >/dev/null <<'EOF'
+          #!/usr/bin/env bash
+          export ARCH="$(uname -m)"
+          exec /usr/local/bin/appimagetool-bin --appimage-extract-and-run "$@"
+          EOF
+          sudo chmod +x /usr/local/bin/appimagetool
+
+      - name: Set up Flutter (x64)
+        if: matrix.arch == 'x64'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: .fvmrc
+          cache: true
+          pub-cache: true
+
+      - name: Cache Flutter SDK (ARM64)
+        if: matrix.arch == 'arm64'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/flutter-arm64
+          key: flutter-linux-arm64-${{ hashFiles('.fvmrc') }}
+
+      - name: Set up Flutter (ARM64)
+        if: matrix.arch == 'arm64'
+        env:
+          FLUTTER_HOME: ${{ runner.temp }}/flutter-arm64
+        run: |
+          if [ ! -x "$FLUTTER_HOME/bin/flutter" ]; then
+            FLUTTER_VERSION=$(jq -r '.flutter' .fvmrc)
+            git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$FLUTTER_HOME"
+          fi
+          echo "$FLUTTER_HOME/bin" >> "$GITHUB_PATH"
+          "$FLUTTER_HOME/bin/flutter" config --no-analytics
+          "$FLUTTER_HOME/bin/flutter" precache --linux
+
+      - name: Cache Pub packages (ARM64)
+        if: matrix.arch == 'arm64'
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-linux-arm64-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            pub-linux-arm64-
+
+      - name: Prepare project
+        run: |
+          flutter config --enable-linux-desktop
+          if [ ! -f linux/CMakeLists.txt ]; then
+            flutter create --platforms=linux .
+          fi
+          flutter pub get
+
+      - name: Install Fastforge
+        run: dart pub global activate fastforge "$FASTFORGE_VERSION"
+
+      - name: Package AppImage
+        id: linux_appimage
+        continue-on-error: true
+        run: |
+          rm -rf dist
+          dart pub global run fastforge:main release --name linux --jobs linux-appimage --skip-clean
+
+      - name: Upload AppImage
+        if: steps.linux_appimage.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}-appimage
+          path: dist/**/*
+          if-no-files-found: error
+
+      - name: Package DEB
+        id: linux_deb
+        continue-on-error: true
+        run: |
+          rm -rf dist
+          dart pub global run fastforge:main release --name linux --jobs linux-deb --skip-clean
+
+      - name: Upload DEB
+        if: steps.linux_deb.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}-deb
+          path: dist/**/*
+          if-no-files-found: error
+
+      - name: Package ZIP
+        id: linux_zip
+        continue-on-error: true
+        run: |
+          rm -rf dist
+          dart pub global run fastforge:main release --name linux --jobs linux-zip --skip-clean
+
+      - name: Upload ZIP
+        if: steps.linux_zip.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}-zip
+          path: dist/**/*
+          if-no-files-found: error
+
+      - name: Write Linux package summary
+        if: always()
+        env:
+          APPIMAGE: ${{ steps.linux_appimage.outcome }}
+          DEB: ${{ steps.linux_deb.outcome }}
+          ZIP: ${{ steps.linux_zip.outcome }}
+        run: |
+          {
+            echo "### Linux ${{ matrix.arch }} packages"
+            echo "| Package | Result |"
+            echo "| --- | --- |"
+            echo "| AppImage | $APPIMAGE |"
+            echo "| DEB | $DEB |"
+            echo "| ZIP | $ZIP |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - build-android
+      - build-ios
+      - build-macos
+      - build-windows
+      - build-linux
+    if: >-
+      ${{
+        always() &&
+        !cancelled() &&
+        (
+          startsWith(github.ref, 'refs/tags/v') ||
+          github.event_name == 'workflow_dispatch'
+        )
+      }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release version from pubspec
+        id: release_meta
+        env:
+          RELEASE_TYPE: ${{ inputs.release_type }}
+        run: |
+          APP_VERSION=$(awk '$1 == "version:" { print $2; exit }' pubspec.yaml)
+          if [ -z "$APP_VERSION" ]; then
+            echo "No version was found in pubspec.yaml."
+            exit 1
+          fi
+
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            RELEASE_TAG="$GITHUB_REF_NAME"
+            if [[ "$RELEASE_TAG" == *-* ]]; then
+              IS_PRERELEASE=true
+            else
+              IS_PRERELEASE=false
+            fi
+          elif [ "$RELEASE_TYPE" = "prerelease" ]; then
+            VERSION_BASE=${APP_VERSION%%+*}
+            if [[ "$APP_VERSION" == *+* ]]; then
+              VERSION_BUILD="+${APP_VERSION#*+}"
+            else
+              VERSION_BUILD=""
+            fi
+            if [[ "$VERSION_BASE" == *-* ]]; then
+              VERSION_BASE="${VERSION_BASE}.pre.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+            else
+              VERSION_BASE="${VERSION_BASE}-pre.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+            fi
+            RELEASE_TAG="v${VERSION_BASE}${VERSION_BUILD}"
+            IS_PRERELEASE=true
+          else
+            RELEASE_TAG="v${APP_VERSION}"
+            IS_PRERELEASE=false
+          fi
+
+          echo "version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+          {
+            echo "### GitHub Release"
+            echo "- pubspec version: \`$APP_VERSION\`"
+            echo "- release tag: \`$RELEASE_TAG\`"
+            echo "- prerelease: \`$IS_PRERELEASE\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Download successful package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: downloaded-artifacts
+
+      - name: Prepare unique release asset names
+        run: |
+          mkdir -p release-assets
+          count=0
+          for artifact_dir in downloaded-artifacts/release-*; do
+            [ -d "$artifact_dir" ] || continue
+            artifact_name=$(basename "$artifact_dir")
+            artifact_name=${artifact_name#release-}
+            while IFS= read -r -d '' file; do
+              cp "$file" "release-assets/${artifact_name}-$(basename "$file")"
+              count=$((count + 1))
+            done < <(find "$artifact_dir" -type f -print0)
+          done
+          if [ "$count" -eq 0 ]; then
+            echo "No package was built successfully; GitHub Release was not created."
+            exit 1
+          fi
+          echo "Prepared $count release asset(s)."
+          ls -lah release-assets
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_meta.outputs.tag }}
+          name: ${{ inputs.release_name || steps.release_meta.outputs.tag }}
+          body: ${{ inputs.release_notes }}
+          generate_release_notes: ${{ inputs.release_notes == '' }}
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft_release }}
+          prerelease: ${{ steps.release_meta.outputs.prerelease }}
+          fail_on_unmatched_files: true
+          files: release-assets/*

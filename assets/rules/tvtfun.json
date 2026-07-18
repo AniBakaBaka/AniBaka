@@ -1,0 +1,111 @@
+{
+  "format": "anx-rule/2",
+  "id": "tvtfun",
+  "name": "TvTFun",
+  "baseUrl": "https://www.tvtfun.net",
+  "iconUrl": "https://www.tvtfun.net/favicon-32x32.png",
+  "description": "TvTFun，番剧自由，从这里开始！",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "*/*",
+    "Referer": "https://www.tvtfun.net/"
+  },
+  "search": [
+    {
+      "op": "fetch",
+      "url": "https://www.tvtfun.net/api/videos/search?q={keyword}&pageSize=20"
+    },
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "jsonSeries",
+            "listPath": "data.videos",
+            "idKey": "id",
+            "nameKey": "name",
+            "imageKey": "pic",
+            "descKey": "remarks",
+            "detailUrlTemplate": "https://www.tvtfun.net/api/videos/{id}"
+          }
+        ],
+        [
+          {
+            "op": "jsonSeries",
+            "listPath": "data.videos",
+            "idKey": "slug",
+            "nameKey": "name",
+            "imageKey": "pic",
+            "descKey": "remarks",
+            "detailUrlTemplate": "/video/{id}"
+          }
+        ]
+      ]
+    }
+  ],
+  "detail": [
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "follow"
+          },
+          {
+            "op": "jsonEpisodes",
+            "sourcesPath": "data.playSources",
+            "episodesKey": "episodes",
+            "episodeNameKey": "name",
+            "sourceNameKey": "name",
+            "episodeIdTemplate": "{id}"
+          }
+        ],
+        [
+          {
+            "op": "follow"
+          },
+          {
+            "op": "episodes",
+            "listSelectors": [
+              "a[href*=\"/play?source=\"]"
+            ]
+          }
+        ]
+      ]
+    }
+  ],
+  "play": [
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "fetch",
+            "url": "https://www.tvtfun.net/api/videos/resolve-play-url?episodeId={episodeId:raw}",
+            "headers": {
+              "Accept": "application/json, text/plain, */*",
+              "Referer": "https://www.tvtfun.net/"
+            }
+          },
+          {
+            "op": "setMediaHeaders",
+            "jsonPath": "data.headers"
+          },
+          {
+            "op": "json",
+            "path": "data.url"
+          }
+        ],
+        [
+          {
+            "op": "follow",
+            "url": "{episodeId:raw}"
+          },
+          {
+            "op": "videoUrl"
+          }
+        ]
+      ]
+    }
+  ]
+}

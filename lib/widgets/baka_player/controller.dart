@@ -1,0 +1,705 @@
+import 'dart:async';
+
+import 'package:baka/models/playback_state.dart';
+import 'package:baka/models/subtitle_config.dart';
+import 'package:baka/services/playback_settings_service.dart';
+import 'package:baka/utils/date_util.dart';
+import 'package:baka/widgets/baka_player/anime4k.dart';
+import 'package:baka/widgets/baka_player/mpv_config.dart';
+import 'package:baka/widgets/baka_player/playback_backend.dart';
+import 'package:baka/widgets/baka_player/utils.dart';
+import 'package:baka/widgets/danmaku/controller.dart';
+import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
+
+class PlaybackController {
+  PlaybackController({PlaybackBackend? backend})
+    : _backend = backend ?? MediaKitPlaybackBackend();
+
+  static const videoFitTypes = <({BoxFit fit, String description})>[
+    (fit: BoxFit.contain, description: '\u753b\u9762'),
+    (fit: BoxFit.cover, description: '\u8986\u76d6'),
+    (fit: BoxFit.fill, description: '\u586b\u5145'),
+    (fit: BoxFit.fitHeight, description: '\u9ad8\u5ea6\u9002\u5e94'),
+    (fit: BoxFit.fitWidth, description: '\u5bbd\u5ea6\u9002\u5e94'),
+  ];
+
+  static const _timelineIntervalMs = 250;
+  static const _skipCancelVisibleDuration = Duration(seconds: 5);
+
+  final PlaybackBackend _backend;
+  final core = ValueNotifier<PlaybackCoreState>(const PlaybackCoreState());
+  final timeline = ValueNotifier<PlaybackTimelineState>(
+    const PlaybackTimelineState(),
+  );
+  final overlay = ValueNotifier<PlayerOverlayState>(const PlayerOverlayState());
+  final preferences = ValueNotifier<PlaybackPreferences>(
+    const PlaybackPreferences(),
+  );
+  final mediaInfo = ValueNotifier<PlaybackMediaInfo>(const PlaybackMediaInfo());
+
+  final List<StreamSubscription<dynamic>> _subscriptions = [];
+  final StreamController<void> _completed = StreamController<void>.broadcast();
+  final StreamController<Duration> _seekEvents =
+      StreamController<Duration>.broadcast();
+
+  Timer? _hideControlsTimer;
+  Timer? _skipCancelHideTimer;
+  Timer? _jumpPromptTimer;
+  Timer? _errorDebounceTimer;
+  Timer? _bufferingDebounceTimer;
+
+  Future<void>? _initializeFuture;
+  Future<void> _settingsWrites = Future<void>.value();
+  PlaybackPreferences _persistedPreferences = const PlaybackPreferences();
+  DanmakuController? _danmakuController;
+  double _lastPlaybackRate = 1.0;
+  int _lastTimelineBucket = -1;
+  bool _listenersBound = false;
+  bool _disposed = false;
+
+  VideoController? get videoController => _backend.videoController;
+  String? get currentMediaUri => _backend.currentMediaUri;
+  List<SubtitleTrack> get subtitleTracks => _backend.subtitleTracks;
+  SubtitleTrack get currentSubtitleTrack => _backend.currentSubtitleTrack;
+  DanmakuController get danmakuController =>
+      _danmakuController ??
+      (throw StateError('Danmaku controller is not attached'));
+  Stream<void> get completed => _completed.stream;
+  Stream<Duration> get seekEvents => _seekEvents.stream;
+
+  Future<void> initialize() {
+    return _initializeFuture ??= _initialize();
+  }
+
+  Future<void> _initialize() async {
+    final loaded = await PlaybackSettingsService.loadAll();
+    if (_disposed) return;
+    _persistedPreferences = loaded;
+    preferences.value = loaded;
+    overlay.value = overlay.value.copyWith(
+      showDanmaku: !loaded.defaultDanmakuOff,
+    );
+    await _backend.initialize();
+    if (_disposed) return;
+    _bindBackend();
+  }
+
+  Future<void> open(
+    String uri, {
+    bool autoplay = true,
+    Map<String, String>? httpHeaders,
+  }) async {
+    _resetPlaybackState();
+    try {
+      await initialize();
+      if (_backend.currentMediaUri != null) await _backend.stop();
+      await _backend.open(uri, autoplay: autoplay, httpHeaders: httpHeaders);
+      await _configurePlayer(preferences.value.defaultPlaybackSpeed);
+      if (_disposed) return;
+      core.value = core.value.copyWith(loading: false);
+    } catch (error) {
+      final safeError = sanitizePlaybackError(error);
+      if (!_disposed) {
+        core.value = core.value.copyWith(
+          loading: false,
+          buffering: false,
+          failed: true,
+          errorMessage: safeError,
+        );
+      }
+      throw Exception(safeError);
+    }
+  }
+
+  Future<void> applyPlaybackConfiguration() async {
+    await initialize();
+    await _configurePlayer(preferences.value.defaultPlaybackSpeed);
+  }
+
+  void attachDanmaku(DanmakuController controller) {
+    _danmakuController = controller;
+    controller.playbackRate = core.value.playbackRate;
+    controller.syncTime(timeline.value.position);
+    if (core.value.playing && !core.value.buffering) {
+      controller.resume();
+    } else {
+      controller.pause();
+    }
+  }
+
+  void detachDanmaku() {
+    _danmakuController?.pause();
+    _danmakuController = null;
+  }
+
+  void addDanmakuItems(List<DanmakuItem> items) {
+    _danmakuController?.addItems(items);
+  }
+
+  void _bindBackend() {
+    if (_listenersBound || _disposed) return;
+    _listenersBound = true;
+    _subscriptions.addAll([
+      _backend.playing.listen(_onPlayingChanged),
+      _backend.position.listen(_onPositionChanged),
+      _backend.duration.listen(_onDurationChanged),
+      _backend.buffered.listen(_onBufferedChanged),
+      _backend.buffering.listen(_onBufferingChanged),
+      _backend.errors.listen(_onError),
+      _backend.completed.listen((completed) {
+        if (!_disposed && completed) _completed.add(null);
+      }),
+      _backend.tracks.listen(_onTracksChanged),
+    ]);
+  }
+
+  void _onPlayingChanged(bool playing) {
+    if (_disposed) return;
+    final current = core.value;
+    final loading = playing ? false : current.loading;
+    final buffering = playing ? false : current.buffering;
+    final failed = playing ? false : current.failed;
+    final errorMessage = playing ? '' : current.errorMessage;
+    if (current.playing != playing ||
+        current.loading != loading ||
+        current.buffering != buffering ||
+        current.failed != failed ||
+        current.errorMessage != errorMessage) {
+      core.value = current.copyWith(
+        playing: playing,
+        loading: loading,
+        buffering: buffering,
+        failed: failed,
+        errorMessage: errorMessage,
+      );
+    }
+    if (playing && !buffering) {
+      _danmakuController?.resume();
+    } else {
+      _danmakuController?.pause();
+    }
+  }
+
+  void _onPositionChanged(Duration position) {
+    if (_disposed) return;
+    if (position > Duration.zero) {
+      final current = core.value;
+      if (current.loading ||
+          current.buffering ||
+          current.failed ||
+          current.errorMessage.isNotEmpty) {
+        core.value = current.copyWith(
+          loading: false,
+          buffering: false,
+          failed: false,
+          errorMessage: '',
+        );
+        if (current.playing) _danmakuController?.resume();
+      }
+    }
+    _danmakuController?.syncTime(position);
+    _updateSkipState(position);
+
+    final milliseconds = position.inMilliseconds;
+    final bucket = milliseconds ~/ _timelineIntervalMs;
+    if (_lastTimelineBucket == bucket &&
+        milliseconds >= timeline.value.position.inMilliseconds) {
+      return;
+    }
+    _lastTimelineBucket = bucket;
+    final current = timeline.value;
+    timeline.value = current.copyWith(
+      position: position,
+      previewPosition: current.seeking ? current.previewPosition : position,
+    );
+  }
+
+  void _onDurationChanged(Duration duration) {
+    if (_disposed ||
+        duration == Duration.zero ||
+        duration == timeline.value.duration) {
+      return;
+    }
+    timeline.value = timeline.value.copyWith(duration: duration);
+  }
+
+  void _onBufferedChanged(Duration buffered) {
+    if (_disposed || buffered == timeline.value.buffered) return;
+    timeline.value = timeline.value.copyWith(buffered: buffered);
+  }
+
+  void _onTracksChanged(Tracks tracks) {
+    if (_disposed) return;
+    final hasTracks = tracks.subtitle.any(
+      (track) => track.id != 'auto' && track.id != 'no',
+    );
+    if (hasTracks == core.value.hasSubtitleTracks) return;
+    core.value = core.value.copyWith(hasSubtitleTracks: hasTracks);
+  }
+
+  void _onBufferingChanged(bool buffering) {
+    if (_disposed) return;
+    _bufferingDebounceTimer?.cancel();
+    _bufferingDebounceTimer = null;
+
+    if (!buffering) {
+      if (core.value.buffering) {
+        core.value = core.value.copyWith(buffering: false);
+      }
+      if (core.value.playing) _danmakuController?.resume();
+      return;
+    }
+    if (!core.value.playing) {
+      if (!core.value.buffering) {
+        core.value = core.value.copyWith(buffering: true);
+      }
+      _danmakuController?.pause();
+      return;
+    }
+
+    _danmakuController?.pause();
+    final position = _backend.currentPosition;
+    _bufferingDebounceTimer = Timer(const Duration(milliseconds: 600), () {
+      if (_disposed) return;
+      final stalled = _backend.currentPosition <= position;
+      if (core.value.buffering != stalled) {
+        core.value = core.value.copyWith(buffering: stalled);
+      }
+      if (!stalled && core.value.playing) _danmakuController?.resume();
+    });
+  }
+
+  void _onError(String error) {
+    if (_disposed) return;
+    final safeError = sanitizePlaybackError(error);
+    _errorDebounceTimer?.cancel();
+    _errorDebounceTimer = Timer(const Duration(milliseconds: 300), () {
+      if (_disposed) return;
+      if (_backend.isPlaying || timeline.value.duration > Duration.zero) {
+        debugPrint('播放中忽略非致命错误: $safeError');
+        return;
+      }
+      core.value = core.value.copyWith(
+        loading: false,
+        buffering: false,
+        failed: true,
+        errorMessage: safeError,
+      );
+      unawaited(_backend.pause());
+      _danmakuController?.pause();
+    });
+  }
+
+  Future<void> play({bool repeat = false, bool hideControls = true}) async {
+    if (_disposed) return;
+    if (!hideControls) setControlsVisible(true);
+    if (repeat) await seek(Duration.zero);
+    await _backend.play();
+  }
+
+  Future<void> pause() async {
+    if (_disposed) return;
+    await _backend.pause();
+    _danmakuController?.pause();
+  }
+
+  Future<void> stop() async {
+    if (_disposed) return;
+    await _backend.stop();
+    _danmakuController?.pause();
+  }
+
+  void togglePlayback() {
+    if (core.value.playing) {
+      unawaited(pause());
+    } else {
+      unawaited(play());
+    }
+  }
+
+  Future<void> seek(Duration target, {bool fromSlider = false}) async {
+    if (_disposed) return;
+    if (overlay.value.skipState == SkipState.waiting) {
+      _setSkipState(SkipState.idle);
+    }
+    await _performSeek(target, updatePreview: !fromSlider);
+    if (!_seekEvents.isClosed) _seekEvents.add(target);
+  }
+
+  Future<void> _performSeek(
+    Duration target, {
+    bool updatePreview = true,
+  }) async {
+    final clamped = target.clamp(Duration.zero, timeline.value.duration);
+    final current = timeline.value;
+    timeline.value = current.copyWith(
+      position: clamped,
+      previewPosition: updatePreview ? clamped : current.previewPosition,
+    );
+    _lastTimelineBucket = clamped.inMilliseconds ~/ _timelineIntervalMs;
+    try {
+      await _backend.seek(clamped);
+      _danmakuController?.syncTime(clamped);
+    } catch (error) {
+      debugPrint('播放跳转失败: $error');
+    }
+  }
+
+  Future<void> setRate(double rate) async {
+    if (_disposed) return;
+    final normalized = rate > 0 ? rate : 1.0;
+    core.value = core.value.copyWith(playbackRate: normalized);
+    _danmakuController?.playbackRate = normalized;
+    await _backend.setRate(normalized);
+  }
+
+  void setDoubleSpeed(bool enabled) {
+    if (_disposed ||
+        overlay.value.controlsLocked ||
+        overlay.value.doubleSpeed == enabled) {
+      return;
+    }
+    if (enabled) _lastPlaybackRate = core.value.playbackRate;
+    overlay.value = overlay.value.copyWith(doubleSpeed: enabled);
+    unawaited(
+      setRate(enabled ? preferences.value.longPressSpeed : _lastPlaybackRate),
+    );
+  }
+
+  void beginSeekPreview() {
+    if (timeline.value.seeking) return;
+    timeline.value = timeline.value.copyWith(seeking: true);
+  }
+
+  void updateSeekPreview(Duration value) {
+    if (timeline.value.previewPosition == value) return;
+    timeline.value = timeline.value.copyWith(previewPosition: value);
+  }
+
+  void endSeekPreview() {
+    if (!timeline.value.seeking) return;
+    timeline.value = timeline.value.copyWith(seeking: false);
+    setControlsVisible(true);
+  }
+
+  void setControlsVisible(bool visible) {
+    if (_disposed) return;
+    if (overlay.value.controlsVisible != visible) {
+      overlay.value = overlay.value.copyWith(controlsVisible: visible);
+    }
+    _hideControlsTimer?.cancel();
+    if (visible) {
+      _hideControlsTimer = Timer(const Duration(seconds: 3), () {
+        if (_disposed || timeline.value.seeking) return;
+        overlay.value = overlay.value.copyWith(controlsVisible: false);
+      });
+    }
+  }
+
+  void toggleControls() => setControlsVisible(!overlay.value.controlsVisible);
+
+  void setControlsLocked(bool locked) {
+    if (_disposed || overlay.value.controlsLocked == locked) return;
+    overlay.value = overlay.value.copyWith(
+      controlsLocked: locked,
+      controlsVisible: locked ? false : true,
+    );
+    if (locked) {
+      _hideControlsTimer?.cancel();
+    } else {
+      setControlsVisible(true);
+    }
+  }
+
+  void setVolume(double value) {
+    final next = value.clamp(0.0, 1.0);
+    if (overlay.value.volume == next) return;
+    overlay.value = overlay.value.copyWith(volume: next);
+  }
+
+  void setBrightness(double value) {
+    final next = value.clamp(0.0, 1.0);
+    if (overlay.value.brightness == next) return;
+    overlay.value = overlay.value.copyWith(brightness: next);
+  }
+
+  void setDanmakuVisible(bool visible) {
+    if (overlay.value.showDanmaku == visible) return;
+    overlay.value = overlay.value.copyWith(showDanmaku: visible);
+  }
+
+  void setDanmakuInputVisible(bool visible) {
+    if (overlay.value.showDanmakuInput == visible) return;
+    overlay.value = overlay.value.copyWith(showDanmakuInput: visible);
+    if (visible) setControlsVisible(false);
+  }
+
+  void showJumpToPositionPrompt(Duration position) {
+    if (!preferences.value.rememberLastPosition || position.inSeconds <= 0) {
+      return;
+    }
+    overlay.value = overlay.value.copyWith(
+      showJumpPrompt: true,
+      jumpPosition: position,
+      jumpPromptText: '继续播放${formatDuration(position)}？',
+    );
+    _jumpPromptTimer?.cancel();
+    _jumpPromptTimer = Timer(const Duration(seconds: 15), hideJumpPrompt);
+  }
+
+  void hideJumpPrompt() {
+    if (!overlay.value.showJumpPrompt) return;
+    overlay.value = overlay.value.copyWith(
+      showJumpPrompt: false,
+      jumpPosition: Duration.zero,
+      jumpPromptText: '',
+    );
+    _jumpPromptTimer?.cancel();
+  }
+
+  void performJumpToPosition() {
+    final target = overlay.value.jumpPosition;
+    if (target > Duration.zero) unawaited(seek(target));
+    hideJumpPrompt();
+  }
+
+  void _updateSkipState(Duration position) {
+    final settings = preferences.value;
+    final current = overlay.value;
+    if (!settings.enableSkipOpEd) {
+      if (current.skipState == SkipState.waiting) {
+        _setSkipState(SkipState.idle);
+      }
+      return;
+    }
+    final seconds = position.inSeconds;
+    final canSkip =
+        seconds > 0 &&
+        timeline.value.duration.inSeconds >
+            settings.skipOpWaitTime + settings.skipOpDuration;
+    if (!canSkip || current.showJumpPrompt) return;
+
+    if (current.skipState == SkipState.idle &&
+        seconds < settings.skipOpWaitTime) {
+      _setSkipState(SkipState.waiting);
+      return;
+    }
+    if (current.skipState != SkipState.waiting) return;
+    if (seconds < settings.skipOpWaitTime) return;
+
+    _showSkipCancelPrompt();
+    unawaited(
+      _performSeek(position + Duration(seconds: settings.skipOpDuration)),
+    );
+  }
+
+  void _setSkipState(SkipState state) {
+    if (overlay.value.skipState == state) return;
+    overlay.value = overlay.value.copyWith(skipState: state);
+  }
+
+  void userActionSkip() {
+    _showSkipCancelPrompt();
+    unawaited(
+      _performSeek(
+        timeline.value.position +
+            Duration(seconds: preferences.value.skipOpDuration),
+      ),
+    );
+  }
+
+  void userActionCancelSkip() {
+    _skipCancelHideTimer?.cancel();
+    _setSkipState(SkipState.idle);
+  }
+
+  void cancelSkipOpEd() {
+    final wasShowing = overlay.value.skipState == SkipState.showingCancel;
+    _skipCancelHideTimer?.cancel();
+    _setSkipState(SkipState.idle);
+    if (!wasShowing) return;
+    final position = timeline.value.position;
+    final target =
+        (position - Duration(seconds: preferences.value.skipOpDuration)).clamp(
+          Duration.zero,
+          position,
+        );
+    unawaited(_performSeek(target));
+  }
+
+  void _showSkipCancelPrompt() {
+    _setSkipState(SkipState.showingCancel);
+    _skipCancelHideTimer?.cancel();
+    _skipCancelHideTimer = Timer(_skipCancelVisibleDuration, () {
+      if (_disposed || overlay.value.skipState != SkipState.showingCancel) {
+        return;
+      }
+      _setSkipState(SkipState.idle);
+    });
+  }
+
+  void setMediaInfo(PlaybackMediaInfo info) {
+    mediaInfo.value = info;
+  }
+
+  Future<void> updatePreferences(
+    PlaybackPreferences next, {
+    bool persist = true,
+  }) async {
+    if (_disposed) return;
+    final previous = preferences.value;
+    if (previous == next) return;
+    preferences.value = next;
+
+    if (previous.enableAnime4K != next.enableAnime4K ||
+        previous.anime4KLevel != next.anime4KLevel) {
+      await _syncAnime4KShaders();
+    }
+    if (previous.subtitleConfig != next.subtitleConfig) {
+      await _syncSubtitleConfig();
+    }
+    if (previous.showSubtitle != next.showSubtitle) {
+      await _backend.setNativeProperty(
+        'sub-visibility',
+        next.showSubtitle ? 'yes' : 'no',
+      );
+    }
+
+    if (persist) {
+      _settingsWrites = _settingsWrites.then((_) async {
+        final persisted = _persistedPreferences;
+        await PlaybackSettingsService.saveChanges(persisted, next);
+        _persistedPreferences = next;
+      });
+      await _settingsWrites;
+    }
+  }
+
+  Future<void> setVideoFit(BoxFit fit, String description) {
+    return updatePreferences(
+      preferences.value.copyWith(
+        videoFit: fit,
+        videoFitDescription: description,
+      ),
+      persist: false,
+    );
+  }
+
+  Future<bool> toggleAnime4K() async {
+    final enabled = !preferences.value.enableAnime4K;
+    await updatePreferences(preferences.value.copyWith(enableAnime4K: enabled));
+    return enabled;
+  }
+
+  Future<void> switchAnime4KLevel(String level) async {
+    if (preferences.value.anime4KLevel == level) return;
+    await updatePreferences(preferences.value.copyWith(anime4KLevel: level));
+  }
+
+  Future<void> updateSubtitleConfig(
+    SubtitleConfig config, {
+    bool persist = true,
+  }) {
+    return updatePreferences(
+      preferences.value.copyWith(subtitleConfig: config),
+      persist: persist,
+    );
+  }
+
+  Future<void> toggleSubtitle() {
+    return updatePreferences(
+      preferences.value.copyWith(showSubtitle: !preferences.value.showSubtitle),
+    );
+  }
+
+  Future<void> setSubtitleTrack(SubtitleTrack track) =>
+      _backend.setSubtitleTrack(track);
+
+  Future<void> resetPreferences() {
+    const defaults = PlaybackPreferences();
+    overlay.value = overlay.value.copyWith(showDanmaku: true);
+    return updatePreferences(defaults);
+  }
+
+  Future<void> _configurePlayer(double rate) async {
+    await syncMpvProperties(
+      _backend.setNativeProperty,
+      playerProperties,
+      debugLabel: 'player',
+    );
+    await _syncAnime4KShaders();
+    await _syncSubtitleConfig();
+    await _backend.setNativeProperty(
+      'sub-visibility',
+      preferences.value.showSubtitle ? 'yes' : 'no',
+    );
+    await setRate(rate);
+  }
+
+  Future<void> _syncAnime4KShaders() async {
+    final settings = preferences.value;
+    final path = settings.enableAnime4K
+        ? await Anime4K.shaderPath(settings.anime4KLevel)
+        : '';
+    await _backend.setNativeProperty('glsl-shaders', path);
+  }
+
+  Future<void> _syncSubtitleConfig() {
+    return syncMpvProperties(
+      _backend.setNativeProperty,
+      buildSubtitleProperties(preferences.value.subtitleConfig),
+      debugLabel: 'subtitle',
+    );
+  }
+
+  void _resetPlaybackState() {
+    _skipCancelHideTimer?.cancel();
+    _jumpPromptTimer?.cancel();
+    _errorDebounceTimer?.cancel();
+    _bufferingDebounceTimer?.cancel();
+    core.value = core.value.copyWith(
+      loading: true,
+      buffering: true,
+      failed: false,
+      errorMessage: '',
+    );
+    timeline.value = const PlaybackTimelineState();
+    overlay.value = overlay.value.copyWith(
+      skipState: SkipState.idle,
+      showJumpPrompt: false,
+      jumpPosition: Duration.zero,
+      jumpPromptText: '',
+    );
+    _lastTimelineBucket = -1;
+  }
+
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    _hideControlsTimer?.cancel();
+    _skipCancelHideTimer?.cancel();
+    _jumpPromptTimer?.cancel();
+    _errorDebounceTimer?.cancel();
+    _bufferingDebounceTimer?.cancel();
+    for (final subscription in _subscriptions) {
+      await subscription.cancel();
+    }
+    _subscriptions.clear();
+    _danmakuController?.pause();
+    _danmakuController = null;
+    await _settingsWrites;
+    try {
+      await _backend.pause();
+    } catch (_) {}
+    await _backend.dispose();
+    await _completed.close();
+    await _seekEvents.close();
+    core.dispose();
+    timeline.dispose();
+    overlay.dispose();
+    preferences.dispose();
+    mediaInfo.dispose();
+  }
+}

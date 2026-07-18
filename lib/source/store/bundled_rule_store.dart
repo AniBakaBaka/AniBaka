@@ -1,0 +1,84 @@
+import 'dart:convert';
+
+import 'package:flutter/services.dart';
+
+import 'package:baka/source/engine/rule_validator.dart';
+import 'package:baka/source/model/source_rule.dart';
+
+/// Loads the former built-in sources from bundled `anx-rule/2` assets.
+///
+/// Built-in rules live under `assets/rules/`. Community rules are maintained
+/// by AniBakaRule and are fetched by Rule Hub instead of being duplicated in
+/// the application repository.
+class BundledRuleStore {
+  BundledRuleStore._();
+
+  static const Map<String, String> builtinAssets = <String, String>{
+    'akianime': 'assets/rules/akianime.json',
+    'cycani': 'assets/rules/cycani.json',
+    'anime7': 'assets/rules/anime7.json',
+    'dm84': 'assets/rules/dm84.json',
+    'enlienli': 'assets/rules/enlienli.json',
+    'girigirilove': 'assets/rules/girigirilove.json',
+    'lm6': 'assets/rules/lm6.json',
+    'mgnacg': 'assets/rules/mgnacg.json',
+    'skr_skr2': 'assets/rules/skr_skr2.json',
+    'tvtfun': 'assets/rules/tvtfun.json',
+    'xifanacg': 'assets/rules/xifanacg.json',
+  };
+
+  /// Rule Hub revisions represented by the bundled copies.
+  ///
+  /// A zero revision means the rule is bundled only and has no matching
+  /// official Rule Hub entry yet.
+  static const Map<String, int> builtinVersions = <String, int>{
+    'akianime': 4,
+    'cycani': 0,
+    'anime7': 2,
+    'dm84': 0,
+    'enlienli': 4,
+    'girigirilove': 2,
+    'lm6': 4,
+    'mgnacg': 0,
+    'skr_skr2': 4,
+    'tvtfun': 5,
+    'xifanacg': 2,
+  };
+
+  static Map<String, SourceRule> _rules = const <String, SourceRule>{};
+  static Future<void>? _loading;
+
+  static Iterable<String> get keys => builtinAssets.keys;
+
+  static Future<void> load() => _loading ??= _load();
+
+  static SourceRule? ruleFor(String key) => _rules[key];
+
+  static int versionFor(String key) => builtinVersions[key] ?? 0;
+
+  static Future<void> _load() async {
+    final loaded = <String, SourceRule>{};
+    for (final entry in builtinAssets.entries) {
+      final raw = await rootBundle.loadString(entry.value);
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) {
+        throw FormatException('${entry.value}: rule root must be an object');
+      }
+      final rule = SourceRule.fromJson(Map<String, dynamic>.from(decoded));
+      final validation = RuleValidator.validate(rule);
+      if (!validation.isValid) {
+        throw FormatException(
+          '${entry.value}: ${validation.errors.join('; ')}',
+        );
+      }
+      if (rule.id != entry.key) {
+        throw FormatException(
+          '${entry.value}: asset id ${rule.id} does not match '
+          'registry key ${entry.key}',
+        );
+      }
+      loaded[entry.key] = rule;
+    }
+    _rules = Map<String, SourceRule>.unmodifiable(loaded);
+  }
+}

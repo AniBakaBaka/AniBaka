@@ -1,0 +1,423 @@
+import 'package:baka/widgets/platform/tv/tv_theme_util.dart';
+import 'package:baka/models/playback_state.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import 'package:baka/widgets/baka_player/controller.dart';
+import 'package:baka/widgets/danmaku/controller.dart';
+import 'package:baka/services/danmaku_service.dart';
+import 'package:baka/widgets/platform/tv/tv_focusable.dart';
+
+class TvSettingsPanel extends StatefulWidget {
+  final PlaybackController controller;
+  final DanmakuController danmakuController;
+  final VoidCallback onClose;
+
+  const TvSettingsPanel({
+    required this.controller,
+    required this.danmakuController,
+    required this.onClose,
+    super.key,
+  });
+
+  @override
+  State<TvSettingsPanel> createState() => _TvSettingsPanelState();
+}
+
+class _TvSettingsPanelState extends State<TvSettingsPanel> {
+  PlaybackController get _ctrl => widget.controller;
+  DanmakuController get _danmaku => widget.danmakuController;
+
+  late DanmakuOption _option;
+  late double _speed;
+  bool _optionChanged = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _option = _danmaku.option;
+    _speed = _ctrl.core.value.playbackRate;
+  }
+
+  @override
+  void dispose() {
+    if (_optionChanged) DanmakuService.saveSettings(_option);
+    super.dispose();
+  }
+
+  void _setDanmakuOption(DanmakuOption option) {
+    setState(() => _option = option);
+    _danmaku.updateOption(option);
+    _optionChanged = true;
+  }
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.goBack ||
+        key == LogicalKeyboardKey.arrowRight) {
+      widget.onClose();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FocusScope(
+      autofocus: true,
+      child: Focus(
+        canRequestFocus: false,
+        onKeyEvent: _handleKeyEvent,
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Container(
+            width: 380,
+            height: double.infinity,
+            decoration: BoxDecoration(
+              color: context.tvShadowColor(0.88),
+              border: Border(
+                right: BorderSide(color: context.tvHighlightColor(0.08)),
+              ),
+            ),
+            child: FocusTraversalGroup(
+              policy: OrderedTraversalPolicy(),
+              child: ListView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 28,
+                  vertical: 32,
+                ),
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.settings,
+                        color: context.tvTextSecondaryColor,
+                        size: 22,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        '播放设置',
+                        style: TextStyle(
+                          color: context.tvTextColor,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 28),
+
+                  _buildSectionTitle('弹幕'),
+                  const SizedBox(height: 12),
+
+                  ValueListenableBuilder<PlayerOverlayState>(
+                    valueListenable: _ctrl.overlay,
+                    builder: (context, overlay, _) => _buildToggleItem(
+                      icon: Icons.subtitles,
+                      title: '显示弹幕',
+                      value: overlay.showDanmaku,
+                      autofocus: true,
+                      onToggle: () {
+                        _ctrl.setDanmakuVisible(!overlay.showDanmaku);
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  _TvSliderItem(
+                    icon: Icons.format_size,
+                    title: '弹幕字号',
+                    value: _option.fontSize,
+                    min: 10,
+                    max: 36,
+                    step: 2,
+                    displayValue: '${_option.fontSize.toInt()}',
+                    onChanged: (value) =>
+                        _setDanmakuOption(_option.copyWith(fontSize: value)),
+                  ),
+                  const SizedBox(height: 8),
+
+                  _TvSliderItem(
+                    icon: Icons.opacity,
+                    title: '弹幕透明度',
+                    value: _option.opacity,
+                    min: 0.1,
+                    max: 1.0,
+                    step: 0.1,
+                    displayValue: '${(_option.opacity * 100).toInt()}%',
+                    onChanged: (value) => _setDanmakuOption(
+                      _option.copyWith(
+                        opacity: double.parse(value.toStringAsFixed(1)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  _TvSliderItem(
+                    icon: Icons.crop_free,
+                    title: '弹幕区域',
+                    value: _option.area,
+                    min: 0.25,
+                    max: 1.0,
+                    step: 0.25,
+                    displayValue: '${(_option.area * 100).toInt()}%',
+                    onChanged: (value) => _setDanmakuOption(
+                      _option.copyWith(
+                        area: double.parse(value.toStringAsFixed(2)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  _buildToggleItem(
+                    icon: Icons.vertical_align_top,
+                    title: '隐藏顶部弹幕',
+                    value: _option.hideTop,
+                    onToggle: () => _setDanmakuOption(
+                      _option.copyWith(hideTop: !_option.hideTop),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  _buildToggleItem(
+                    icon: Icons.vertical_align_bottom,
+                    title: '隐藏底部弹幕',
+                    value: _option.hideBottom,
+                    onToggle: () => _setDanmakuOption(
+                      _option.copyWith(hideBottom: !_option.hideBottom),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  _buildToggleItem(
+                    icon: Icons.swap_horiz,
+                    title: '隐藏滚动弹幕',
+                    value: _option.hideScroll,
+                    onToggle: () => _setDanmakuOption(
+                      _option.copyWith(hideScroll: !_option.hideScroll),
+                    ),
+                  ),
+
+                  const SizedBox(height: 28),
+
+                  _buildSectionTitle('播放'),
+                  const SizedBox(height: 12),
+
+                  _TvSliderItem(
+                    icon: Icons.speed,
+                    title: '播放速度',
+                    value: _speed,
+                    min: 0.5,
+                    max: 3.0,
+                    step: 0.25,
+                    displayValue: '${_speed}x',
+                    onChanged: (v) {
+                      final speed = double.parse(v.toStringAsFixed(2));
+                      setState(() => _speed = speed);
+                      _ctrl.setRate(speed);
+                    },
+                  ),
+                  const SizedBox(height: 8),
+
+                  ValueListenableBuilder<PlaybackPreferences>(
+                    valueListenable: _ctrl.preferences,
+                    builder: (context, preferences, _) => _buildToggleItem(
+                      icon: Icons.skip_next,
+                      title: '智能跳过片头片尾',
+                      value: preferences.enableSkipOpEd,
+                      onToggle: () {
+                        _ctrl.updatePreferences(
+                          preferences.copyWith(
+                            enableSkipOpEd: !preferences.enableSkipOpEd,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+
+                  const SizedBox(height: 32),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Text(
+      title,
+      style: TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.w700,
+        color: context.tvHighlightColor(0.4),
+        letterSpacing: 1.5,
+      ),
+    );
+  }
+
+  Widget _buildToggleItem({
+    required IconData icon,
+    required String title,
+    required bool value,
+    required VoidCallback onToggle,
+    bool autofocus = false,
+  }) {
+    return TvFocusable(
+      autofocus: autofocus,
+      onPressed: onToggle,
+      borderRadius: BorderRadius.circular(12),
+      enableScale: false,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: context.tvHighlightColor(0.06),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: context.tvTextSecondaryColor, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: context.tvTextColor,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            Container(
+              width: 44,
+              height: 26,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(13),
+                color: value
+                    ? Theme.of(context).colorScheme.primary
+                    : context.tvHighlightColor(0.15),
+              ),
+              child: AnimatedAlign(
+                duration: const Duration(milliseconds: 200),
+                alignment: value ? Alignment.centerRight : Alignment.centerLeft,
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: context.tvTextColor,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TvSliderItem extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final double value;
+  final double min;
+  final double max;
+  final double step;
+  final String displayValue;
+  final ValueChanged<double> onChanged;
+
+  const _TvSliderItem({
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.step,
+    required this.displayValue,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocusable(
+      onPressed: () {
+        final next = value + step;
+        onChanged(next > max ? min : next);
+      },
+      borderRadius: BorderRadius.circular(12),
+      enableScale: false,
+      customKeyHandler: (event) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+        final key = event.logicalKey;
+        if (key == LogicalKeyboardKey.arrowLeft) {
+          final next = value - step;
+          if (next >= min) onChanged(next);
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowRight) {
+          final next = value + step;
+          if (next <= max + 0.001) onChanged(next.clamp(min, max));
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: context.tvHighlightColor(0.06),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: context.tvTextSecondaryColor, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: context.tvTextColor,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            Icon(
+              Icons.chevron_left,
+              color: value > min
+                  ? context.tvTextSecondaryColor
+                  : context.tvHighlightColor(0.15),
+              size: 20,
+            ),
+            const SizedBox(width: 4),
+            SizedBox(
+              width: 60,
+              child: Text(
+                displayValue,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.chevron_right,
+              color: value < max
+                  ? context.tvTextSecondaryColor
+                  : context.tvHighlightColor(0.15),
+              size: 20,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

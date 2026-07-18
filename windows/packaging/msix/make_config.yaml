@@ -1,0 +1,38 @@
+# Windows MSIX 打包配置
+# 应用名称: Baka动漫
+# 包名: ani.baka
+# 文档: https://fastforge.dev/zh/makers/msix
+# 完整配置参考: https://github.com/YehudaKremer/msix
+
+# 应用显示名称
+display_name: Baka动漫
+
+# 应用版本 (格式: x.x.x.x)
+msix_version: 5.0.0.624
+
+# 发布者显示名称
+publisher_display_name: Baka动漫
+
+# 发布者标识
+identity_name: ani.baka
+
+# 发布者 (需要与证书匹配)
+publisher: CN=Baka动漫
+
+# 应用 Logo 路径 (支持 PNG 格式)
+# 图标会自动生成不同尺寸用于开始菜单、任务栏等
+logo_path: assets\ic_launcher.png
+
+# 语言设置 (逗号分隔)
+languages: zh-CN, en-US
+
+# 应用功能声明 (逗号分隔)
+# internetClient: 访问互联网
+# privateNetworkClientServer: 访问本地网络
+capabilities: internetClient, privateNetworkClientServer
+
+# 架构设置
+# Fastforge 0.6.9 会根据 Flutter 构建输出目录自动识别 x64/ARM64。
+
+# 输出文件名
+output_name: BakaAnime
