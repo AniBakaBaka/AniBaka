@@ -34,6 +34,7 @@ class PlaybackController {
     const PlaybackTimelineState(),
   );
   final overlay = ValueNotifier<PlayerOverlayState>(const PlayerOverlayState());
+  final toastRevision = ValueNotifier<int>(0);
   final preferences = ValueNotifier<PlaybackPreferences>(
     const PlaybackPreferences(),
   );
@@ -426,6 +427,7 @@ class PlaybackController {
     }
     if (enabled) _lastPlaybackRate = core.value.playbackRate;
     overlay.value = overlay.value.copyWith(doubleSpeed: enabled);
+    _notifyToastChanged();
     unawaited(
       setRate(enabled ? preferences.value.longPressSpeed : _lastPlaybackRate),
     );
@@ -434,17 +436,24 @@ class PlaybackController {
   void beginSeekPreview() {
     if (timeline.value.seeking) return;
     timeline.value = timeline.value.copyWith(seeking: true);
+    _notifyToastChanged();
   }
 
   void updateSeekPreview(Duration value) {
     if (timeline.value.previewPosition == value) return;
     timeline.value = timeline.value.copyWith(previewPosition: value);
+    _notifyToastChanged();
   }
 
   void endSeekPreview() {
     if (!timeline.value.seeking) return;
     timeline.value = timeline.value.copyWith(seeking: false);
+    _notifyToastChanged();
     setControlsVisible(true);
+  }
+
+  void _notifyToastChanged() {
+    toastRevision.value = toastRevision.value + 1;
   }
 
   void setControlsVisible(bool visible) {
@@ -615,6 +624,9 @@ class PlaybackController {
     final previous = preferences.value;
     if (previous == next) return;
     preferences.value = next;
+    if (previous.longPressSpeed != next.longPressSpeed) {
+      _notifyToastChanged();
+    }
 
     if (previous.enableAnime4K != next.enableAnime4K ||
         previous.anime4KLevel != next.anime4KLevel) {
@@ -735,6 +747,7 @@ class PlaybackController {
       jumpPosition: Duration.zero,
       jumpPromptText: '',
     );
+    _notifyToastChanged();
     _lastTimelineBucket = -1;
   }
 
@@ -762,6 +775,7 @@ class PlaybackController {
     core.dispose();
     timeline.dispose();
     overlay.dispose();
+    toastRevision.dispose();
     preferences.dispose();
     mediaInfo.dispose();
   }

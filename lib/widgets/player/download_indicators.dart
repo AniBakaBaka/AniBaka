@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import 'package:baka/models/download_task.dart';
@@ -195,39 +193,28 @@ class _ActiveDownloadIndicatorState extends State<ActiveDownloadIndicator> {
   }
 }
 
-class MobileBtProgressIndicator extends StatefulWidget {
+class MobileBtProgressIndicator extends StatelessWidget {
   const MobileBtProgressIndicator({super.key});
-
-  @override
-  State<MobileBtProgressIndicator> createState() =>
-      _MobileBtProgressIndicatorState();
-}
-
-class _MobileBtProgressIndicatorState extends State<MobileBtProgressIndicator> {
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     final torrent = TorrentService.instance;
-    if (torrent.state == TorrentState.idle) return const SizedBox.shrink();
+    return ValueListenableBuilder<TorrentStats?>(
+      valueListenable: torrent.statsNotifier,
+      builder: (context, stats, _) {
+        if (stats == null || stats.state == TorrentState.idle) {
+          return const SizedBox.shrink();
+        }
+        return _buildIndicator(context, torrent, stats);
+      },
+    );
+  }
 
-    final stats = torrent.getStats();
-    if (stats == null) return const SizedBox.shrink();
-
+  Widget _buildIndicator(
+    BuildContext context,
+    TorrentService torrent,
+    TorrentStats stats,
+  ) {
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
     final bodyColor = theme.textTheme.bodyMedium?.color;

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 class AppShimmer extends StatefulWidget {
@@ -32,54 +34,80 @@ class AppShimmer extends StatefulWidget {
   State<AppShimmer> createState() => _AppShimmerState();
 }
 
-class _AppShimmerState extends State<AppShimmer>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: widget.duration,
-  );
+class _AppShimmerState extends State<AppShimmer> with WidgetsBindingObserver {
+  static const _frameInterval = Duration(milliseconds: 33);
+
+  final Stopwatch _clock = Stopwatch();
+  Timer? _timer;
+  double _progress = 0;
+  bool _isAnimating = false;
 
   @override
   void initState() {
     super.initState();
-    if (widget.enabled) _controller.repeat();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncAnimation();
   }
 
   @override
   void didUpdateWidget(covariant AppShimmer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.duration != widget.duration) {
-      _controller.duration = widget.duration;
-      if (_controller.isAnimating) {
-        _controller.repeat();
-      }
-    }
-    if (oldWidget.enabled != widget.enabled) {
-      if (widget.enabled) {
-        _controller.repeat();
-      } else {
-        _controller.stop();
-      }
-    }
+    _syncAnimation();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _syncAnimation();
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
     super.dispose();
+  }
+
+  void _syncAnimation() {
+    final mediaQuery = MediaQuery.maybeOf(context);
+    final animationsDisabled = mediaQuery?.disableAnimations ?? false;
+    final lifecycleState = WidgetsBinding.instance.lifecycleState;
+    final shouldAnimate =
+        widget.enabled &&
+        !animationsDisabled &&
+        TickerMode.of(context) &&
+        (lifecycleState == null || lifecycleState == AppLifecycleState.resumed);
+
+    if (_isAnimating == shouldAnimate) return;
+    _isAnimating = shouldAnimate;
+    _timer?.cancel();
+    _timer = null;
+
+    if (!shouldAnimate) {
+      _clock.stop();
+      return;
+    }
+
+    _clock.start();
+    _timer = Timer.periodic(_frameInterval, (_) {
+      if (!mounted) return;
+      final durationMicros = widget.duration.inMicroseconds;
+      final progress = durationMicros <= 0
+          ? 1.0
+          : (_clock.elapsedMicroseconds % durationMicros) / durationMicros;
+      setState(() => _progress = progress);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.maybeOf(context);
-    final animationsDisabled = mediaQuery?.disableAnimations ?? false;
-    if (!widget.enabled || animationsDisabled) {
-      // 动画被禁用时不应运转 AnimationController，避免后台空转与不必要重建
-      if (_controller.isAnimating) _controller.stop();
+    if (!_isAnimating) {
       return widget.child;
     }
-
-    if (!_controller.isAnimating) _controller.repeat();
 
     final theme = Theme.of(context);
     final baseColor = widget.baseColor ?? AppShimmer.defaultBaseColor(theme);
@@ -89,24 +117,18 @@ class _AppShimmerState extends State<AppShimmer>
     // RepaintBoundary 将 ShaderMask 的逐帧重绘隔离在内部，
     // 避免连带父级（如列表项、骨架网格）一起重绘。
     return RepaintBoundary(
-      child: AnimatedBuilder(
-        animation: _controller,
-        child: widget.child,
-        builder: (context, child) {
-          return ShaderMask(
-            blendMode: BlendMode.srcATop,
-            shaderCallback: (bounds) {
-              return LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                colors: [baseColor, highlightColor, baseColor],
-                stops: const [0.1, 0.5, 0.9],
-                transform: _ShimmerGradientTransform(_controller.value),
-              ).createShader(bounds);
-            },
-            child: child,
-          );
+      child: ShaderMask(
+        blendMode: BlendMode.srcATop,
+        shaderCallback: (bounds) {
+          return LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [baseColor, highlightColor, baseColor],
+            stops: const [0.1, 0.5, 0.9],
+            transform: _ShimmerGradientTransform(_progress),
+          ).createShader(bounds);
         },
+        child: widget.child,
       ),
     );
   }

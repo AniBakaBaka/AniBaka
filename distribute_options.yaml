@@ -43,26 +43,19 @@ releases:
           build_args:
             target-platform: android-arm64
 
-      - name: android-apk-arm
+      - name: android-apk-armv7
         package:
           platform: android
           target: apk
           build_args:
             target-platform: android-arm
 
-      - name: android-apk-x64
+      - name: android-apk-universal
         package:
           platform: android
           target: apk
           build_args:
-            target-platform: android-x64
-
-      - name: android-aab
-        package:
-          platform: android
-          target: aab
-          build_args:
-            target-platform: android-arm,android-arm64,android-x64
+            target-platform: android-arm,android-arm64
 
   - name: linux
     jobs:

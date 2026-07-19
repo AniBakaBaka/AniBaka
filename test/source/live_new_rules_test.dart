@@ -33,8 +33,11 @@ Future<SourceRule> _loadRule(String file) async {
       throw StateError('Remote rule tests require --dart-define=LIVE=true');
     }
     final uri = Uri.parse(
-      RuleRepositoryService.remoteSubscription,
-    ).resolve(file);
+      RuleRepositoryService.resolveRuleUrl(
+        RuleRepositoryService.remoteSubscription,
+        file,
+      ),
+    );
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 20);
     try {

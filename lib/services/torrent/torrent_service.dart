@@ -1,4 +1,6 @@
-﻿import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart';
+import 'dart:async';
+
 import 'package:baka/services/torrent/torrent_engine.dart';
 import 'package:baka/services/torrent/torrent_model.dart';
 
@@ -9,12 +11,17 @@ class TorrentService {
 
   static const Duration defaultBufferTimeout = Duration(seconds: 30);
   static const Duration _bufferPollInterval = Duration(milliseconds: 200);
+  static const Duration _statsPublishInterval = Duration(milliseconds: 500);
   static final RegExp _torrentUrlPattern = RegExp(
     r'\.torrent(?:[?#&]|$)',
     caseSensitive: false,
   );
 
   TorrentEngine? _engine;
+  Timer? _statsTimer;
+  DateTime? _lastStatsPublishedAt;
+
+  final ValueNotifier<TorrentStats?> statsNotifier = ValueNotifier(null);
 
   /// Current torrent engine.
   TorrentEngine? get engine => _engine;
@@ -35,8 +42,7 @@ class TorrentService {
   /// Whether the URL or episode id points to a BT source.
   static bool isBtLink(String value) {
     final lower = value.toLowerCase().trim();
-    return lower.startsWith('magnet:') ||
-        _torrentUrlPattern.hasMatch(lower);
+    return lower.startsWith('magnet:') || _torrentUrlPattern.hasMatch(lower);
   }
 
   static bool isMagnetLink(String value) =>
@@ -112,6 +118,10 @@ class TorrentService {
     if (engine == null) return;
 
     _engine = null;
+    _statsTimer?.cancel();
+    _statsTimer = null;
+    _lastStatsPublishedAt = null;
+    statsNotifier.value = null;
     await engine.stop();
   }
 
@@ -157,14 +167,47 @@ class TorrentService {
 
   void _bindCallbacks(TorrentEngine engine) {
     engine.onProgress = (progress, downloaded, total) {
-      if (_engine == engine) onProgress?.call(progress, downloaded, total);
+      if (_engine != engine) return;
+      onProgress?.call(progress, downloaded, total);
+      _scheduleStatsPublish(engine);
     };
     engine.onStateChanged = (state) {
-      if (_engine == engine) onStateChanged?.call(state);
+      if (_engine != engine) return;
+      onStateChanged?.call(state);
+      _publishStats(engine);
     };
     engine.onReadyToPlay = (streamUrl) {
-      if (_engine == engine) onReadyToPlay?.call(streamUrl);
+      if (_engine != engine) return;
+      onReadyToPlay?.call(streamUrl);
+      _publishStats(engine);
     };
+    _publishStats(engine);
+  }
+
+  void _scheduleStatsPublish(TorrentEngine engine) {
+    if (_statsTimer != null) return;
+
+    final now = DateTime.now();
+    final elapsed = _lastStatsPublishedAt == null
+        ? _statsPublishInterval
+        : now.difference(_lastStatsPublishedAt!);
+    if (elapsed >= _statsPublishInterval) {
+      _publishStats(engine);
+      return;
+    }
+
+    _statsTimer = Timer(_statsPublishInterval - elapsed, () {
+      _statsTimer = null;
+      _publishStats(engine);
+    });
+  }
+
+  void _publishStats(TorrentEngine engine) {
+    if (!identical(_engine, engine)) return;
+    _statsTimer?.cancel();
+    _statsTimer = null;
+    _lastStatsPublishedAt = DateTime.now();
+    statsNotifier.value = engine.getStats();
   }
 
   String? _finalizeStart(TorrentEngine engine, String? streamUrl) {

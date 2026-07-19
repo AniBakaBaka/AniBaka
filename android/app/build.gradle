@@ -23,6 +23,23 @@ if (flutterVersionName == null) {
     flutterVersionName = '1.0'
 }
 
+// Keep packaged native libraries aligned with Flutter's --target-platform.
+// CI builds one v7 APK, one v8 APK, and one APK containing both ARM ABIs.
+def flutterAbiByTargetPlatform = [
+    'android-arm'  : 'armeabi-v7a',
+    'android-arm64': 'arm64-v8a',
+]
+def requestedFlutterPlatforms = (
+    project.findProperty('target-platform') ?: 'android-arm,android-arm64'
+).toString().split(',')
+def requestedFlutterAbis = requestedFlutterPlatforms
+    .collect { flutterAbiByTargetPlatform[it.trim()] }
+    .findAll { it != null }
+    .unique()
+if (requestedFlutterAbis.isEmpty()) {
+    requestedFlutterAbis = ['armeabi-v7a', 'arm64-v8a']
+}
+
 android {
     namespace "ani.baka"
     compileSdkVersion 36
@@ -57,15 +74,16 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             ndk {
-                abiFilters "armeabi-v7a", "arm64-v8a"
-                // 'armeabi', 'armeabi-v7a', 'x86'//, 'x86_64', 'mips', 'mips64', 'arm64-v8a',
+                abiFilters.clear()
+                abiFilters.addAll(requestedFlutterAbis)
             }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             signingConfig signingConfigs.debug
         }
         debug {
             ndk {
-                abiFilters "armeabi-v7a", "arm64-v8a"
+                abiFilters.clear()
+                abiFilters.addAll(requestedFlutterAbis)
             }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             signingConfig signingConfigs.debug

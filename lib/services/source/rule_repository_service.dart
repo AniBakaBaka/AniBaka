@@ -24,8 +24,14 @@ class RuleRepositoryService extends ChangeNotifier {
 
   static final RuleRepositoryService instance = RuleRepositoryService._();
 
-  static const String remoteSubscription =
+  static const String directSubscription =
       'https://raw.githubusercontent.com/AniBakaBaka/AniBakaRule/main/index.json';
+  static const String jsDelivrSubscription =
+      'https://cdn.jsdelivr.net/gh/AniBakaBaka/AniBakaRule@main/index.json';
+  static const String githubAcceleratorPrefix = 'https://gh.dpik.top/';
+  static const String acceleratedSubscription =
+      '${githubAcceleratorPrefix}https://raw.githubusercontent.com/AniBakaBaka/AniBakaRule/main/index.json';
+  static const String remoteSubscription = acceleratedSubscription;
   static const String assetScheme = 'asset://';
   static const String defaultSubscription = remoteSubscription;
 
@@ -155,7 +161,7 @@ class RuleRepositoryService extends ChangeNotifier {
     }
 
     final body = await _getString(
-      _resolveRelative(indexUrl, file),
+      resolveRuleUrl(indexUrl, file),
       forceRefresh: forceRefresh,
     );
     return _decodeConfig(SourceCodec.decode(body.trim()), item);
@@ -407,9 +413,13 @@ class RuleRepositoryService extends ChangeNotifier {
 
   static List<String> _candidateUrls(String url, bool forceRefresh) {
     final primary = _canonicalUrl(url);
-    final github = _toGitHubRepositoryUrl(primary);
+    final direct = _toRawGitHubUrl(primary);
+    final jsDelivr = _toJsDelivrUrl(direct ?? primary);
+    final github = _toGitHubRepositoryUrl(direct ?? primary);
     final candidates = <String>[
       primary,
+      if (jsDelivr != null && jsDelivr != primary) jsDelivr,
+      if (direct != null && direct != primary) direct,
       if (github != null && github != primary) github,
     ];
     return forceRefresh
@@ -429,12 +439,26 @@ class RuleRepositoryService extends ChangeNotifier {
         .toString();
   }
 
-  /// Converts a stored jsDelivr URL before any network request is made.
+  /// Moves the old official Raw subscription to the accelerated default while
+  /// leaving user-added repositories untouched.
   static String? _migrateLegacySubscription(String url) {
-    final uri = Uri.tryParse(url);
-    if (uri == null || !uri.host.toLowerCase().contains('jsdelivr.net')) {
-      return null;
+    if (url == directSubscription || url == jsDelivrSubscription) {
+      return acceleratedSubscription;
     }
+    return null;
+  }
+
+  static String? _toRawGitHubUrl(String url) {
+    if (url.startsWith(githubAcceleratorPrefix)) {
+      return _toRawGitHubUrl(url.substring(githubAcceleratorPrefix.length));
+    }
+
+    final uri = Uri.tryParse(url);
+    if (uri == null) return null;
+    if (uri.host.toLowerCase() == 'raw.githubusercontent.com') {
+      return url;
+    }
+    if (!uri.host.toLowerCase().contains('jsdelivr.net')) return null;
 
     final segments = uri.pathSegments;
     if (segments.length < 4 || segments.first != 'gh') return null;
@@ -457,8 +481,31 @@ class RuleRepositoryService extends ChangeNotifier {
     ).toString();
   }
 
+  static String? _toJsDelivrUrl(String url) {
+    final raw = _toRawGitHubUrl(url);
+    final uri = Uri.tryParse(raw ?? url);
+    if (uri == null || uri.host.toLowerCase() != 'raw.githubusercontent.com') {
+      return null;
+    }
+
+    final segments = uri.pathSegments;
+    if (segments.length < 4) return null;
+    final owner = segments[0];
+    final repository = segments[1];
+    final ref = segments[2];
+    final path = segments.skip(3).join('/');
+    if (owner.isEmpty || repository.isEmpty || ref.isEmpty || path.isEmpty) {
+      return null;
+    }
+    return Uri.https(
+      'cdn.jsdelivr.net',
+      '/gh/$owner/$repository@$ref/$path',
+    ).toString();
+  }
+
   static String? _toGitHubRepositoryUrl(String url) {
-    final uri = Uri.tryParse(url);
+    final raw = _toRawGitHubUrl(url);
+    final uri = Uri.tryParse(raw ?? url);
     if (uri == null || uri.host.toLowerCase() != 'raw.githubusercontent.com') {
       return null;
     }
@@ -478,9 +525,16 @@ class RuleRepositoryService extends ChangeNotifier {
     ).toString();
   }
 
-  static String _resolveRelative(String indexUrl, String relative) {
+  static String resolveRuleUrl(String indexUrl, String relative) {
     if (_isHttpUrl(relative)) return relative;
-    return Uri.parse(_canonicalUrl(indexUrl)).resolve(relative).toString();
+    final canonicalIndex = _canonicalUrl(indexUrl);
+    if (canonicalIndex.startsWith(githubAcceleratorPrefix)) {
+      final directIndex = canonicalIndex.substring(
+        githubAcceleratorPrefix.length,
+      );
+      return '$githubAcceleratorPrefix${Uri.parse(directIndex).resolve(relative)}';
+    }
+    return Uri.parse(canonicalIndex).resolve(relative).toString();
   }
 
   static List<String> _storedSubscriptions() {

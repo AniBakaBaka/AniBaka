@@ -128,7 +128,7 @@ flutter test test/source/live_new_rules_test.dart --dart-define=LIVE=true
 - `www.anibaka.com`：默认社区 API；可在应用的服务器设置中替换。
 - `version.anibaka.com`、`app.anibaka.com`：版本与下载信息。
 - `bgm.anibaka.com`、`p1.anibaka.com`：Bangumi 元数据代理。
-- `raw.githubusercontent.com/AniBakaBaka/AniBakaRule`：默认规则订阅，直接跟随仓库更新。
+- `gh.dpik.top/https://raw.githubusercontent.com/AniBakaBaka/AniBakaRule`：默认使用 GitHub 加速节点，失败时依次回退到 jsDelivr 和 GitHub。
 - 各规则文件声明的第三方站点：仅在搜索、查看详情或播放等对应操作时访问。
 
 使用者可通过源码审查具体请求及数据字段。登录、评论、历史同步等功能会向所选社区服务器发送完成相应操作所需的数据。

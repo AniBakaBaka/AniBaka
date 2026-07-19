@@ -46,19 +46,14 @@ class PlayerToastIndicators extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: Listenable.merge([
-        controller.overlay,
-        controller.timeline,
-        controller.preferences,
-      ]),
-      builder: (context, _) {
+    return ValueListenableBuilder<int>(
+      valueListenable: controller.toastRevision,
+      builder: (context, _, _) {
         final overlay = controller.overlay.value;
         final timeline = controller.timeline.value;
         final showSpeed = overlay.doubleSpeed;
         final showProgress = timeline.seeking;
         final showBoth = showSpeed && showProgress;
-
         return IgnorePointer(
           child: Align(
             alignment: Alignment.topCenter,

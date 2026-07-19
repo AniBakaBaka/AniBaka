@@ -29,6 +29,7 @@ class _SwiperBannerState extends State<SwiperBanner> {
   bool _showSwiper = !SwiperSettingsService.isHidden;
   bool _isInteracting = false;
   bool _reduceVisualEffects = false;
+  bool _tickerEnabled = true;
 
   @override
   void initState() {
@@ -60,8 +61,13 @@ class _SwiperBannerState extends State<SwiperBanner> {
     super.didChangeDependencies();
     final reduceVisualEffects =
         MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    if (_reduceVisualEffects == reduceVisualEffects) return;
+    final tickerEnabled = TickerMode.of(context);
+    if (_reduceVisualEffects == reduceVisualEffects &&
+        _tickerEnabled == tickerEnabled) {
+      return;
+    }
     _reduceVisualEffects = reduceVisualEffects;
+    _tickerEnabled = tickerEnabled;
     _restartAutoPlay();
   }
 
@@ -85,7 +91,12 @@ class _SwiperBannerState extends State<SwiperBanner> {
 
   void _restartAutoPlay() {
     _timer?.cancel();
-    if (_reduceVisualEffects || !_showSwiper || _imageUrls.length < 2) return;
+    if (_reduceVisualEffects ||
+        !_tickerEnabled ||
+        !_showSwiper ||
+        _imageUrls.length < 2) {
+      return;
+    }
 
     _timer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (_isInteracting || !_pageController.hasClients) return;

@@ -706,6 +706,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
                   triggerFullScreen: _triggerFullScreen,
                   isFullScreen: widget.full,
                   isWideLayout: isWide,
+                  updatesEnabled: !isLocked && showControls,
                   danmakuBar: danmakuBar,
                   extraButtons: extraButtons,
                   episodeTitle: episodeTitle,

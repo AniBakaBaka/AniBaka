@@ -99,6 +99,7 @@ abstract class AdapterBase {
   Future<String> resolveDownloadUrl(
     String episodeId, {
     bool forceRefresh = false,
+    bool skipValidation = false,
   }) async {
     final key = '$name|$episodeId';
     if (!forceRefresh) {
@@ -118,7 +119,9 @@ abstract class AdapterBase {
     debugPrint(
       '$name: resolveDownloadUrl 得到URL: $url, isSignedCdn=${VideoUrlExtractor.isSignedCdnUrl(url)}, validatesOwnUrls=$validatesOwnUrls',
     );
-    if (!validatesOwnUrls && await _isDirectUrlBlocked(url)) {
+    if (!skipValidation &&
+        !validatesOwnUrls &&
+        await _isDirectUrlBlocked(url)) {
       debugPrint('$name: 直链校验未通过: $url');
       return '';
     }
@@ -195,9 +198,13 @@ abstract class AdapterBase {
   bool get requiresCustomPlayback => false;
 
   Future<({String url, Map<String, String> httpHeaders})> resolvePlaybackMedia(
-    String episodeId,
-  ) async {
-    final url = await resolveDownloadUrl(episodeId);
+    String episodeId, {
+    bool skipValidation = false,
+  }) async {
+    final url = await resolveDownloadUrl(
+      episodeId,
+      skipValidation: skipValidation,
+    );
     final headers = Map<String, String>.from(mediaValidationHeaders)
       ..removeWhere((_, value) => value.isEmpty);
     if (url.isNotEmpty && VideoUrlExtractor.isSignedCdnUrl(url)) {

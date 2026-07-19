@@ -148,13 +148,16 @@ String? _extractUpdateInfo(Map data) {
 
 class _SearchPolicy {
   static const int searchConcurrency = 4;
+  static const int backgroundSearchConcurrency = 2;
   static const int maxManualAliasKeywords = 3;
   static const int maxActiveAutoAliasKeywords = 3;
   static const int minResultsBeforeAliasFallback = 8;
   static const int perSourceResultLimit = 20;
   static const int globalResultLimit = 100;
-  static const int autoProbeLimit = 6;
+  static const int autoProbeLimit = 16;
+  static const int autoProbePerSourceLimit = 2;
   static const int autoProbeConcurrency = 3;
+  static const int backgroundAutoProbeConcurrency = 1;
   static const int switchAutoProbeLimit = 4;
   static const Duration resolveTimeout = Duration(seconds: 12);
   static const Duration directProbeTimeout = Duration(seconds: 8);
@@ -250,7 +253,8 @@ class _CachedEntry {
 
 class _SearchResultCache {
   static const Duration ttl = Duration(minutes: 10);
-  static const int maxSize = 120;
+  static const int maxSize = 48;
+  static const int maxItemsPerEntry = 30;
 
   static final LinkedHashMap<String, _CachedEntry> _cache = LinkedHashMap();
   static final Map<String, Future<List<Map<String, dynamic>>>> _inflight = {};
@@ -278,9 +282,12 @@ class _SearchResultCache {
     if (running != null) return await running;
 
     final future = loader().then((items) {
+      final cachedItems = items.length <= maxItemsPerEntry
+          ? items
+          : items.sublist(0, maxItemsPerEntry);
       if (_cache.length >= maxSize) _cache.remove(_cache.keys.first);
-      _cache[key] = _CachedEntry(items, DateTime.now());
-      return items;
+      _cache[key] = _CachedEntry(cachedItems, DateTime.now());
+      return cachedItems;
     });
     _inflight[key] = future;
     try {
@@ -622,7 +629,12 @@ class VideoSourceSearchController {
         ),
     ];
 
-    final searchFuture = _runBounded(searches, _SearchPolicy.searchConcurrency);
+    final searchFuture = _runBounded(
+      searches,
+      _SearchPolicy.searchConcurrency,
+      backgroundConcurrency: _SearchPolicy.backgroundSearchConcurrency,
+      isBackground: () => session.autoMatched,
+    );
 
     // A remembered route opens immediately while the rest of the sources keep
     // filling the route list in the background.
@@ -657,19 +669,25 @@ class VideoSourceSearchController {
 
   Future<void> _runBounded(
     List<Future<void> Function()> tasks,
-    int concurrency,
-  ) async {
+    int concurrency, {
+    int? backgroundConcurrency,
+    bool Function()? isBackground,
+  }) async {
     var next = 0;
 
-    Future<void> worker() async {
+    Future<void> worker(int workerIndex) async {
       while (next < tasks.length) {
+        if ((isBackground?.call() ?? false) &&
+            workerIndex >= (backgroundConcurrency ?? concurrency)) {
+          return;
+        }
         final task = tasks[next++];
         await task();
       }
     }
 
     final workerCount = tasks.length < concurrency ? tasks.length : concurrency;
-    await Future.wait(List.generate(workerCount, (_) => worker()));
+    await Future.wait(List.generate(workerCount, worker));
   }
 
   bool _isSessionStopped(_SearchSession session) {
@@ -863,7 +881,7 @@ class VideoSourceSearchController {
     _SearchSession session, {
     bool finalPass = false,
   }) {
-    if (_isSessionStopped(session) || session.autoMatched || _userSelected) {
+    if (_isSessionStopped(session) || _userSelected) {
       return Future.value();
     }
 
@@ -886,7 +904,6 @@ class VideoSourceSearchController {
   Future<void> _drainAutoMatchQueue(_SearchSession session) async {
     while (session.autoMatchRerunRequested &&
         !_isSessionStopped(session) &&
-        !session.autoMatched &&
         !_userSelected) {
       session.autoMatchRerunRequested = false;
       final finalPass = session.autoMatchFinalPassRequested;
@@ -899,9 +916,8 @@ class VideoSourceSearchController {
     _SearchSession session, {
     required bool finalPass,
   }) async {
-    if (session.autoMatched) return;
     final context = await _getMatchContext();
-    if (_isSessionStopped(session) || session.autoMatched || _userSelected) {
+    if (_isSessionStopped(session) || _userSelected) {
       return;
     }
 
@@ -910,7 +926,7 @@ class VideoSourceSearchController {
         if (item.sourceType != 'internal') item.matchCandidate,
     ], context);
 
-    final candidates = <SearchResultItem>[];
+    final candidatesBySource = <String, List<SearchResultItem>>{};
     for (final score in ranked) {
       if (finalPass) {
         if (score.confidence < 0.45) break;
@@ -922,14 +938,42 @@ class VideoSourceSearchController {
           !_autoTriedProbeKeys.contains(
             _probeKey(item, _targetEpisodeIndex, 1),
           )) {
-        candidates.add(item);
+        final sourceCandidates = candidatesBySource.putIfAbsent(
+          item.sourceType,
+          () => <SearchResultItem>[],
+        );
+        if (sourceCandidates.length < _SearchPolicy.autoProbePerSourceLimit) {
+          sourceCandidates.add(item);
+        }
+      }
+    }
+
+    // Probe one candidate from every source before trying fallbacks from the
+    // same source. This fills the source-switch list without letting one noisy
+    // site consume the entire background budget.
+    final candidates = <SearchResultItem>[];
+    for (
+      var round = 0;
+      round < _SearchPolicy.autoProbePerSourceLimit;
+      round++
+    ) {
+      for (final sourceCandidates in candidatesBySource.values) {
+        if (round < sourceCandidates.length) {
+          candidates.add(sourceCandidates[round]);
+          if (candidates.length >= _SearchPolicy.autoProbeLimit) break;
+        }
       }
       if (candidates.length >= _SearchPolicy.autoProbeLimit) break;
     }
 
     var next = 0;
-    Future<void> worker() async {
+    int? backgroundWorkerIndex;
+    Future<void> worker(int workerIndex) async {
       while (next < candidates.length && !_isSessionStopped(session)) {
+        if (session.autoMatched) {
+          backgroundWorkerIndex ??= workerIndex;
+          if (backgroundWorkerIndex != workerIndex) return;
+        }
         final item = candidates[next++];
         final key = _probeKey(item, _targetEpisodeIndex, 1);
         _autoTriedProbeKeys.add(key);
@@ -940,42 +984,33 @@ class VideoSourceSearchController {
         );
         if (_isSessionStopped(session) || _userSelected) return;
 
-        if (probe.status != SourceProbeStatus.direct) {
+        if (probe.status == SourceProbeStatus.direct && probe.data != null) {
+          if (_claimAutoMatch(session)) {
+            _finishAutoMatch(session, probe.data!);
+            unawaited(_recordMatchSuccess(item, probe.data!));
+          }
+        } else {
           unawaited(_recordSourceFailure(item.sourceType));
         }
       }
     }
 
-    final workerCount = candidates.length < _SearchPolicy.autoProbeConcurrency
-        ? candidates.length
+    final concurrency = session.autoMatched
+        ? _SearchPolicy.backgroundAutoProbeConcurrency
         : _SearchPolicy.autoProbeConcurrency;
-    await Future.wait(List.generate(workerCount, (_) => worker()));
-    if (!finalPass ||
-        _isSessionStopped(session) ||
-        session.autoMatched ||
-        _userSelected) {
-      return;
-    }
+    final workerCount = candidates.length < concurrency
+        ? candidates.length
+        : concurrency;
+    await Future.wait(List.generate(workerCount, worker));
 
-    // Auto-match and the player's source switch now consume the same probe
-    // states and the same ordering. Do not let network completion order choose
-    // the source: wait for the bounded final probe pass, then take the
-    // highest-ranked verified route.
-    SourceCandidateState? best;
-    for (final candidate in getSwitchCandidates(
-      episodeIndex: _targetEpisodeIndex,
-      preferredLine: 1,
-    )) {
-      if (candidate.status == SourceProbeStatus.direct &&
-          candidate.data != null) {
-        best = candidate;
-        break;
-      }
+    if (finalPass &&
+        candidates.length >= _SearchPolicy.autoProbeLimit &&
+        !_isSessionStopped(session) &&
+        !_userSelected) {
+      session
+        ..autoMatchRerunRequested = true
+        ..autoMatchFinalPassRequested = true;
     }
-    if (best == null || !_claimAutoMatch(session)) return;
-
-    _finishAutoMatch(session, best.data!);
-    unawaited(_recordMatchSuccess(best.item, best.data!));
   }
 
   bool _claimAutoMatch(_SearchSession session) {
@@ -1441,7 +1476,7 @@ class VideoSourceSearchController {
   ) async {
     try {
       final media = await adapter
-          .resolvePlaybackMedia(episodeId)
+          .resolvePlaybackMedia(episodeId, skipValidation: true)
           .timeout(
             _SearchPolicy.directProbeTimeout,
             onTimeout: () => (url: '', httpHeaders: const <String, String>{}),

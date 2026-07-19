@@ -144,10 +144,14 @@ class PipelineSourceAdapter extends AdapterBase
 
   @override
   Future<({String url, Map<String, String> httpHeaders})> resolvePlaybackMedia(
-    String episodeId,
-  ) async {
+    String episodeId, {
+    bool skipValidation = false,
+  }) async {
     if (!_usesDynamicPlayMetadata) {
-      return super.resolvePlaybackMedia(episodeId);
+      return super.resolvePlaybackMedia(
+        episodeId,
+        skipValidation: skipValidation,
+      );
     }
     return _withPlayCookieSnapshot(() async {
       final media = await _interpreter.runPlayMedia(rule, this, episodeId);

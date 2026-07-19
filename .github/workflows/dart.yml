@@ -1,12 +1,6 @@
 name: Build and Release
 
 on:
-  push:
-    branches: [main]
-    tags:
-      - "v*"
-  pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       release_type:
@@ -79,75 +73,56 @@ jobs:
           pub-cache: true
 
       - name: Prepare project
-        run: |
-          sed -i 's/abiFilters "armeabi-v7a", "arm64-v8a"/abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"/g' android/app/build.gradle
-          sed -i "s|excludes += \['lib/x86/\*\*', 'lib/x86_64/\*\*'\]|excludes += ['lib/x86/**']|g" android/app/build.gradle
-          flutter pub get
+        run: flutter pub get
 
       - name: Install Fastforge
         run: dart pub global activate fastforge "$FASTFORGE_VERSION"
 
-      - name: Package APK (arm64)
+      - name: Package APK (arm64-v8a)
         id: apk_arm64
         continue-on-error: true
         run: |
           rm -rf dist
           dart pub global run fastforge:main release --name android --jobs android-apk-arm64 --skip-clean
 
-      - name: Upload APK (arm64)
+      - name: Upload APK (arm64-v8a)
         if: steps.apk_arm64.outcome == 'success'
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: release-android-arm64-apk
+          name: release-android-arm64-v8a-apk
           path: dist/**/*
           if-no-files-found: error
 
-      - name: Package APK (armv7)
+      - name: Package APK (armeabi-v7a)
         id: apk_armv7
         continue-on-error: true
         run: |
           rm -rf dist
-          dart pub global run fastforge:main release --name android --jobs android-apk-arm --skip-clean
+          dart pub global run fastforge:main release --name android --jobs android-apk-armv7 --skip-clean
 
-      - name: Upload APK (armv7)
+      - name: Upload APK (armeabi-v7a)
         if: steps.apk_armv7.outcome == 'success'
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: release-android-armv7-apk
+          name: release-android-armeabi-v7a-apk
           path: dist/**/*
           if-no-files-found: error
 
-      - name: Package APK (x64)
-        id: apk_x64
+      - name: Package APK (armeabi-v7a + arm64-v8a)
+        id: apk_universal
         continue-on-error: true
         run: |
           rm -rf dist
-          dart pub global run fastforge:main release --name android --jobs android-apk-x64 --skip-clean
+          dart pub global run fastforge:main release --name android --jobs android-apk-universal --skip-clean
 
-      - name: Upload APK (x64)
-        if: steps.apk_x64.outcome == 'success'
+      - name: Upload APK (armeabi-v7a + arm64-v8a)
+        if: steps.apk_universal.outcome == 'success'
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: release-android-x64-apk
-          path: dist/**/*
-          if-no-files-found: error
-
-      - name: Package Android App Bundle
-        id: android_aab
-        continue-on-error: true
-        run: |
-          rm -rf dist
-          dart pub global run fastforge:main release --name android --jobs android-aab --skip-clean
-
-      - name: Upload Android App Bundle
-        if: steps.android_aab.outcome == 'success'
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-android-universal-aab
+          name: release-android-armeabi-v7a-arm64-v8a-apk
           path: dist/**/*
           if-no-files-found: error
 
@@ -156,17 +131,15 @@ jobs:
         env:
           APK_ARM64: ${{ steps.apk_arm64.outcome }}
           APK_ARMV7: ${{ steps.apk_armv7.outcome }}
-          APK_X64: ${{ steps.apk_x64.outcome }}
-          AAB: ${{ steps.android_aab.outcome }}
+          APK_UNIVERSAL: ${{ steps.apk_universal.outcome }}
         run: |
           {
             echo "### Android packages"
             echo "| Package | Result |"
             echo "| --- | --- |"
-            echo "| APK arm64 | $APK_ARM64 |"
-            echo "| APK armv7 | $APK_ARMV7 |"
-            echo "| APK x64 | $APK_X64 |"
-            echo "| AAB | $AAB |"
+            echo "| APK arm64-v8a | $APK_ARM64 |"
+            echo "| APK armeabi-v7a | $APK_ARMV7 |"
+            echo "| APK armeabi-v7a + arm64-v8a | $APK_UNIVERSAL |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   build-ios:
@@ -601,15 +574,7 @@ jobs:
       - build-macos
       - build-windows
       - build-linux
-    if: >-
-      ${{
-        always() &&
-        !cancelled() &&
-        (
-          startsWith(github.ref, 'refs/tags/v') ||
-          github.event_name == 'workflow_dispatch'
-        )
-      }}
+    if: ${{ always() && !cancelled() }}
     permissions:
       contents: write
     steps:
@@ -627,14 +592,7 @@ jobs:
             exit 1
           fi
 
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            RELEASE_TAG="$GITHUB_REF_NAME"
-            if [[ "$RELEASE_TAG" == *-* ]]; then
-              IS_PRERELEASE=true
-            else
-              IS_PRERELEASE=false
-            fi
-          elif [ "$RELEASE_TYPE" = "prerelease" ]; then
+          if [ "$RELEASE_TYPE" = "prerelease" ]; then
             VERSION_BASE=${APP_VERSION%%+*}
             if [[ "$APP_VERSION" == *+* ]]; then
               VERSION_BUILD="+${APP_VERSION#*+}"
@@ -696,7 +654,7 @@ jobs:
           name: ${{ inputs.release_name || steps.release_meta.outputs.tag }}
           body: ${{ inputs.release_notes }}
           generate_release_notes: ${{ inputs.release_notes == '' }}
-          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft_release }}
+          draft: ${{ inputs.draft_release }}
           prerelease: ${{ steps.release_meta.outputs.prerelease }}
           fail_on_unmatched_files: true
           files: release-assets/*

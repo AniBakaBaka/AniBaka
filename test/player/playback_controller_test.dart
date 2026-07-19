@@ -33,6 +33,23 @@ void main() {
     await controller.dispose();
   });
 
+  test('keeps hidden toast indicators idle during playback progress', () async {
+    final backend = FakePlaybackBackend();
+    final controller = PlaybackController(backend: backend);
+    await controller.open('https://example.test/video.mp4');
+
+    final initialRevision = controller.toastRevision.value;
+    backend.emitPosition(const Duration(seconds: 1));
+    expect(controller.toastRevision.value, initialRevision);
+
+    controller.beginSeekPreview();
+    controller.updateSeekPreview(const Duration(seconds: 2));
+    controller.endSeekPreview();
+    expect(controller.toastRevision.value, initialRevision + 3);
+
+    await controller.dispose();
+  });
+
   test('opening a paused replacement stops the previous media first', () async {
     final backend = FakePlaybackBackend();
     final controller = PlaybackController(backend: backend);

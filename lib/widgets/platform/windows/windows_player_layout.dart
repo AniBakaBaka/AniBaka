@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:baka/models/playback_state.dart';
@@ -560,40 +559,28 @@ class _DesktopPlayerTitleBar extends StatelessWidget {
 }
 
 /// 桌面端 BT 下载进度指示器
-class _DesktopBtProgressIndicator extends StatefulWidget {
+class _DesktopBtProgressIndicator extends StatelessWidget {
   const _DesktopBtProgressIndicator();
-
-  @override
-  State<_DesktopBtProgressIndicator> createState() =>
-      _DesktopBtProgressIndicatorState();
-}
-
-class _DesktopBtProgressIndicatorState
-    extends State<_DesktopBtProgressIndicator> {
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (mounted) setState(() {});
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     final torrent = TorrentService.instance;
-    if (torrent.state == TorrentState.idle) return const SizedBox.shrink();
+    return ValueListenableBuilder<TorrentStats?>(
+      valueListenable: torrent.statsNotifier,
+      builder: (context, stats, _) {
+        if (stats == null || stats.state == TorrentState.idle) {
+          return const SizedBox.shrink();
+        }
+        return _buildIndicator(context, torrent, stats);
+      },
+    );
+  }
 
-    final stats = torrent.getStats();
-    if (stats == null) return const SizedBox.shrink();
-
+  Widget _buildIndicator(
+    BuildContext context,
+    TorrentService torrent,
+    TorrentStats stats,
+  ) {
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
     final bodyColor = theme.textTheme.bodyMedium?.color;

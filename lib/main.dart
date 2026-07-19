@@ -300,12 +300,23 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                           ),
                         ),
                       Expanded(
-                        child: Obx(
-                          () => IndexedStack(
-                            index: _appState.currentPageIndex.value,
-                            children: _pages,
-                          ),
-                        ),
+                        child: Obx(() {
+                          final currentIndex = _appState.currentPageIndex.value;
+                          return IndexedStack(
+                            index: currentIndex,
+                            children: [
+                              for (
+                                var index = 0;
+                                index < _pages.length;
+                                index++
+                              )
+                                TickerMode(
+                                  enabled: index == currentIndex,
+                                  child: _pages[index],
+                                ),
+                            ],
+                          );
+                        }),
                       ),
                     ],
                   ),

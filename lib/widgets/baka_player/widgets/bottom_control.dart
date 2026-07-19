@@ -9,6 +9,7 @@ class BottomControl extends StatelessWidget {
     required this.controller,
     required this.triggerFullScreen,
     required this.isWideLayout,
+    required this.updatesEnabled,
     this.isFullScreen = false,
     this.danmakuBar,
     this.extraButtons,
@@ -19,6 +20,7 @@ class BottomControl extends StatelessWidget {
   final PlaybackController controller;
   final VoidCallback triggerFullScreen;
   final bool isWideLayout;
+  final bool updatesEnabled;
   final bool isFullScreen;
   final Widget? danmakuBar;
   final Widget? extraButtons;
@@ -78,32 +80,11 @@ class BottomControl extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    ValueListenableBuilder<PlaybackCoreState>(
-                      valueListenable: controller.core,
-                      builder: (context, core, _) =>
-                          _buildPlayPauseBtn(core.playing, isWideScreen),
-                    ),
+                    _buildPlaybackButton(isWideScreen),
                     SizedBox(width: isWideScreen ? 12 : 8),
-                    Expanded(
-                      child: ValueListenableBuilder<PlaybackTimelineState>(
-                        valueListenable: controller.timeline,
-                        builder: (context, timeline, _) => _TimelineControl(
-                          controller: controller,
-                          timeline: timeline,
-                          colorTheme: colorTheme,
-                          isWideScreen: isWideScreen,
-                        ),
-                      ),
-                    ),
+                    Expanded(child: _buildTimeline(colorTheme, isWideScreen)),
                     SizedBox(width: isWideScreen ? 12 : 8),
-                    if (danmakuBar != null)
-                      ValueListenableBuilder<PlayerOverlayState>(
-                        valueListenable: controller.overlay,
-                        builder: (context, overlay, _) => _buildDanmakuToggle(
-                          overlay.showDanmaku,
-                          isWideScreen,
-                        ),
-                      ),
+                    if (danmakuBar != null) _buildDanmakuButton(isWideScreen),
                     if (!isFullScreen)
                       _buildIconBtn(
                         Icons.fullscreen_rounded,
@@ -118,6 +99,45 @@ class BottomControl extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildPlaybackButton(bool isWideScreen) {
+    if (!updatesEnabled) {
+      return _buildPlayPauseBtn(controller.core.value.playing, isWideScreen);
+    }
+    return ValueListenableBuilder<PlaybackCoreState>(
+      valueListenable: controller.core,
+      builder: (context, core, _) =>
+          _buildPlayPauseBtn(core.playing, isWideScreen),
+    );
+  }
+
+  Widget _buildTimeline(Color colorTheme, bool isWideScreen) {
+    Widget buildTimeline(PlaybackTimelineState timeline) => _TimelineControl(
+      controller: controller,
+      timeline: timeline,
+      colorTheme: colorTheme,
+      isWideScreen: isWideScreen,
+    );
+    if (!updatesEnabled) return buildTimeline(controller.timeline.value);
+    return ValueListenableBuilder<PlaybackTimelineState>(
+      valueListenable: controller.timeline,
+      builder: (context, timeline, _) => buildTimeline(timeline),
+    );
+  }
+
+  Widget _buildDanmakuButton(bool isWideScreen) {
+    if (!updatesEnabled) {
+      return _buildDanmakuToggle(
+        controller.overlay.value.showDanmaku,
+        isWideScreen,
+      );
+    }
+    return ValueListenableBuilder<PlayerOverlayState>(
+      valueListenable: controller.overlay,
+      builder: (context, overlay, _) =>
+          _buildDanmakuToggle(overlay.showDanmaku, isWideScreen),
     );
   }
 
@@ -191,10 +211,11 @@ class _TimelineControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final total = timeline.duration;
-    final progress = (timeline.seeking
-            ? timeline.previewPosition
-            : timeline.position)
-        .clamp(Duration.zero, total);
+    final progress =
+        (timeline.seeking ? timeline.previewPosition : timeline.position).clamp(
+          Duration.zero,
+          total,
+        );
     final buffered = timeline.buffered.clamp(Duration.zero, total);
 
     return Row(
