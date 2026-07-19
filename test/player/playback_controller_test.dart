@@ -136,6 +136,61 @@ void main() {
     await controller.dispose();
   });
 
+  test(
+    'retries an autoplay open error before any media progress, then fails',
+    () async {
+      final backend = FakePlaybackBackend();
+      final controller = PlaybackController(backend: backend);
+      await controller.open('https://example.test/video.mp4');
+
+      backend.emitError('Failed to open https://example.test/video.mp4.');
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+
+      expect(backend.openCount, 2);
+      expect(controller.core.value.failed, isFalse);
+
+      backend.emitError('Failed to open https://example.test/video.mp4.');
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+
+      expect(controller.core.value.failed, isTrue);
+      expect(controller.core.value.errorMessage, contains('Failed to open'));
+      await controller.dispose();
+    },
+  );
+
+  test(
+    'keeps transient backend errors non-fatal after playback advances',
+    () async {
+      final backend = FakePlaybackBackend();
+      final controller = PlaybackController(backend: backend);
+      await controller.open('https://example.test/video.mp4');
+      backend.emitPosition(const Duration(seconds: 2));
+
+      backend.emitError('temporary network read error');
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+
+      expect(backend.openCount, 1);
+      expect(controller.core.value.failed, isFalse);
+      await controller.dispose();
+    },
+  );
+
+  test('does not retry a stale error after media is replaced', () async {
+    final backend = FakePlaybackBackend();
+    final controller = PlaybackController(backend: backend);
+    await controller.open('https://example.test/first.mp4');
+
+    backend.emitError('Failed to open first.mp4');
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    await controller.open('https://example.test/second.mp4');
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+
+    expect(backend.openCount, 2);
+    expect(backend.currentMediaUri, 'https://example.test/second.mp4');
+    expect(controller.core.value.failed, isFalse);
+    await controller.dispose();
+  });
+
   test('dispose cancels backend subscriptions and backend lifetime', () async {
     final backend = FakePlaybackBackend();
     final controller = PlaybackController(backend: backend);

@@ -102,52 +102,55 @@ class _HomePageState extends State<HomePage>
 
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final reduceVisualEffects =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       extendBodyBehindAppBar: true,
       body: Stack(
         children: [
-          Positioned.fill(
-            child: Stack(
-              children: [
-                Positioned(
-                  top: -100,
-                  right: -50,
-                  child: Container(
-                    width: 300,
-                    height: 300,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: theme.colorScheme.primary.withValues(
-                        alpha: isDark ? 0.15 : 0.08,
+          if (!reduceVisualEffects)
+            Positioned.fill(
+              child: Stack(
+                children: [
+                  Positioned(
+                    top: -100,
+                    right: -50,
+                    child: Container(
+                      width: 300,
+                      height: 300,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: theme.colorScheme.primary.withValues(
+                          alpha: isDark ? 0.15 : 0.08,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                Positioned(
-                  bottom: 200,
-                  left: -100,
-                  child: Container(
-                    width: 400,
-                    height: 400,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: theme.colorScheme.secondary.withValues(
-                        alpha: isDark ? 0.1 : 0.05,
+                  Positioned(
+                    bottom: 200,
+                    left: -100,
+                    child: Container(
+                      width: 400,
+                      height: 400,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: theme.colorScheme.secondary.withValues(
+                          alpha: isDark ? 0.1 : 0.05,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                Positioned.fill(
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 80, sigmaY: 80),
-                    child: const SizedBox(),
+                  Positioned.fill(
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 80, sigmaY: 80),
+                      child: const SizedBox(),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
           RefreshWrapper(
             onLoadMore: _svc.loadMore,
             onRefresh: _refresh,
@@ -174,6 +177,54 @@ class _HomePageState extends State<HomePage>
   Widget _buildAppBar() {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final reduceVisualEffects =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final content = Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.black.withValues(alpha: reduceVisualEffects ? 0.9 : 0.4)
+            : Colors.white.withValues(alpha: reduceVisualEffects ? 0.95 : 0.5),
+        borderRadius: BorderRadius.circular(100),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.12)
+              : Colors.black.withValues(alpha: 0.05),
+          width: 1.2,
+        ),
+        boxShadow: reduceVisualEffects
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildNavTabBar(),
+          const SizedBox(width: 12),
+          _buildIconButton(
+            'assets/li-font.svg',
+            () => _push(
+              const WebViewPage(url: 'https://www.bgm.tv', title: '里世界'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          _buildIconButton(
+            'assets/Search.svg',
+            () => _push(const SearchPage()),
+            iconSize: 22,
+          ),
+          const SizedBox(width: 12),
+          _buildUserAvatar(),
+        ],
+      ),
+    );
 
     return SliverAppBar(
       pinned: true,
@@ -185,53 +236,12 @@ class _HomePageState extends State<HomePage>
       centerTitle: true,
       title: ClipRRect(
         borderRadius: BorderRadius.circular(100),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-          child: Container(
-            height: 52,
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.black.withValues(alpha: 0.4)
-                  : Colors.white.withValues(alpha: 0.5),
-              borderRadius: BorderRadius.circular(100),
-              border: Border.all(
-                color: isDark
-                    ? Colors.white.withValues(alpha: 0.12)
-                    : Colors.black.withValues(alpha: 0.05),
-                width: 1.2,
+        child: reduceVisualEffects
+            ? content
+            : BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                child: content,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 16,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _buildNavTabBar(),
-                const SizedBox(width: 12),
-                _buildIconButton(
-                  'assets/li-font.svg',
-                  () => _push(
-                    const WebViewPage(url: 'https://www.bgm.tv', title: '里世界'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _buildIconButton(
-                  'assets/Search.svg',
-                  () => _push(const SearchPage()),
-                  iconSize: 22,
-                ),
-                const SizedBox(width: 12),
-                _buildUserAvatar(),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -239,6 +249,8 @@ class _HomePageState extends State<HomePage>
   Widget _buildNavTabBar() {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final reduceVisualEffects =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
 
     return Container(
       width: ScreenUtils(context).isTablet ? 240.0 : 160.0,
@@ -284,13 +296,15 @@ class _HomePageState extends State<HomePage>
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(100),
-          boxShadow: [
-            BoxShadow(
-              color: theme.colorScheme.primary.withValues(alpha: 0.4),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          boxShadow: reduceVisualEffects
+              ? null
+              : [
+                  BoxShadow(
+                    color: theme.colorScheme.primary.withValues(alpha: 0.4),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
         ),
         onTap: (index) {
           HapticFeedback.lightImpact();
@@ -301,7 +315,9 @@ class _HomePageState extends State<HomePage>
           if (target != null) {
             Scrollable.ensureVisible(
               target,
-              duration: const Duration(milliseconds: 600),
+              duration: reduceVisualEffects
+                  ? Duration.zero
+                  : const Duration(milliseconds: 600),
               curve: Curves.easeOutQuart,
             );
           }
@@ -355,6 +371,8 @@ class _HomePageState extends State<HomePage>
       final avatar = _appState.userInfo.value['qq']?.toString() ?? '';
       final isLoggedIn = _appState.isLoggedIn;
       final theme = Theme.of(context);
+      final reduceVisualEffects =
+          MediaQuery.maybeOf(context)?.disableAnimations ?? false;
 
       return InkWell(
         onLongPress: isLoggedIn ? _confirmLogout : null,
@@ -371,13 +389,15 @@ class _HomePageState extends State<HomePage>
               color: theme.colorScheme.primary.withValues(alpha: 0.5),
               width: 1.5,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: theme.colorScheme.primary.withValues(alpha: 0.2),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
+            boxShadow: reduceVisualEffects
+                ? null
+                : [
+                    BoxShadow(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.2),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
           ),
           child: ClipOval(
             child: CachedNetworkImage(
@@ -433,6 +453,8 @@ class _HomePageState extends State<HomePage>
             ? MediaQuery.sizeOf(context).width * 0.15
             : 20.0;
         final radius = BorderRadius.circular(isTablet ? 24 : 28);
+        final reduceVisualEffects =
+            MediaQuery.maybeOf(context)?.disableAnimations ?? false;
 
         return SliverToBoxAdapter(
           child: Padding(
@@ -443,16 +465,18 @@ class _HomePageState extends State<HomePage>
             child: DecoratedBox(
               decoration: BoxDecoration(
                 borderRadius: radius,
-                boxShadow: [
-                  BoxShadow(
-                    color: Theme.of(
-                      context,
-                    ).shadowColor.withValues(alpha: 0.15),
-                    blurRadius: 30,
-                    offset: const Offset(0, 16),
-                    spreadRadius: -8,
-                  ),
-                ],
+                boxShadow: reduceVisualEffects
+                    ? null
+                    : [
+                        BoxShadow(
+                          color: Theme.of(
+                            context,
+                          ).shadowColor.withValues(alpha: 0.15),
+                          blurRadius: 30,
+                          offset: const Offset(0, 16),
+                          spreadRadius: -8,
+                        ),
+                      ],
               ),
               child: ClipRRect(
                 borderRadius: radius,

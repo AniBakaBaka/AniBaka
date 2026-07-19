@@ -57,6 +57,7 @@
     },
     {
       "op": "first",
+      "resolveMediaRedirects": true,
       "branches": [
         [
           {

@@ -104,6 +104,8 @@ class NetUtils {
     String url, {
     data,
     bool isRetry = false,
+    Duration? timeout,
+    bool notifyOnError = true,
   }) async {
     if (kDebugMode) debugPrint('http $method $url');
     final isAuthRequest =
@@ -123,7 +125,10 @@ class NetUtils {
       final uri = Uri.parse(url);
       switch (method) {
         case 'GET':
-          httpResponse = await httpClient.get(uri, headers: headers);
+          final request = httpClient.get(uri, headers: headers);
+          httpResponse = timeout == null
+              ? await request
+              : await request.timeout(timeout);
         case 'PUT':
           httpResponse = await httpClient.put(
             uri,
@@ -145,7 +150,9 @@ class NetUtils {
       }
     } catch (e) {
       debugPrint('http error $e');
-      showSnackBar('网络连接失败，请检查网络和线路＞︿＜', isError: true);
+      if (notifyOnError) {
+        showSnackBar('网络连接失败，请检查网络和线路＞︿＜', isError: true);
+      }
       return Response('');
     }
 
@@ -153,7 +160,14 @@ class NetUtils {
       if (!isRetry) {
         debugPrint('[NetUtils] 收到401，尝试刷新Token...');
         if (await _tryRefreshToken()) {
-          return _send(method, url, data: data, isRetry: true);
+          return _send(
+            method,
+            url,
+            data: data,
+            isRetry: true,
+            timeout: timeout,
+            notifyOnError: notifyOnError,
+          );
         }
       }
       debugPrint('[NetUtils] Token无效，需要重新登录');
@@ -164,8 +178,12 @@ class NetUtils {
     return Response(httpResponse.body);
   }
 
-  static Future get(String url) {
-    return _send('GET', url);
+  static Future get(
+    String url, {
+    Duration? timeout,
+    bool notifyOnError = true,
+  }) {
+    return _send('GET', url, timeout: timeout, notifyOnError: notifyOnError);
   }
 
   static Future post(String url, data) {

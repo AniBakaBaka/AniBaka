@@ -28,6 +28,7 @@ class _SwiperBannerState extends State<SwiperBanner> {
   Timer? _timer;
   bool _showSwiper = !SwiperSettingsService.isHidden;
   bool _isInteracting = false;
+  bool _reduceVisualEffects = false;
 
   @override
   void initState() {
@@ -54,6 +55,16 @@ class _SwiperBannerState extends State<SwiperBanner> {
     _restartAutoPlay();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduceVisualEffects =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    if (_reduceVisualEffects == reduceVisualEffects) return;
+    _reduceVisualEffects = reduceVisualEffects;
+    _restartAutoPlay();
+  }
+
   static List<String> _resolveImageUrls(List items) {
     return List<String>.generate(items.length, (index) {
       final item = items[index];
@@ -74,7 +85,7 @@ class _SwiperBannerState extends State<SwiperBanner> {
 
   void _restartAutoPlay() {
     _timer?.cancel();
-    if (!_showSwiper || _imageUrls.length < 2) return;
+    if (_reduceVisualEffects || !_showSwiper || _imageUrls.length < 2) return;
 
     _timer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (_isInteracting || !_pageController.hasClients) return;
@@ -133,15 +144,28 @@ class _SwiperBannerState extends State<SwiperBanner> {
         borderRadius: BorderRadius.circular(12),
         child: Container(
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+            color: Theme.of(
+              context,
+            ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Center(
             child: Chip(
               backgroundColor: Colors.transparent,
-              side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-              avatar: Icon(Icons.visibility_off_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              label: Text('横幅已隐藏', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              side: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant,
+              ),
+              avatar: Icon(
+                Icons.visibility_off_outlined,
+                size: 18,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              label: Text(
+                '横幅已隐藏',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
             ),
           ),
         ),
@@ -151,6 +175,9 @@ class _SwiperBannerState extends State<SwiperBanner> {
 
     final theme = Theme.of(context);
     final primaryColor = theme.colorScheme.primary;
+    final animationDuration = _reduceVisualEffects
+        ? Duration.zero
+        : const Duration(milliseconds: 400);
 
     return GestureDetector(
       onLongPress: _showSettingsDialog,
@@ -194,7 +221,7 @@ class _SwiperBannerState extends State<SwiperBanner> {
               ),
             ),
           ),
-          
+
           Positioned(
             left: 0,
             right: 0,
@@ -208,14 +235,14 @@ class _SwiperBannerState extends State<SwiperBanner> {
                     end: Alignment.bottomCenter,
                     colors: [
                       Colors.transparent,
-                      Colors.black.withOpacity(0.85),
+                      Colors.black.withValues(alpha: 0.85),
                     ],
                   ),
                 ),
               ),
             ),
           ),
-          
+
           Positioned(
             left: 16,
             right: 16,
@@ -229,7 +256,7 @@ class _SwiperBannerState extends State<SwiperBanner> {
                     children: [
                       Expanded(
                         child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 400),
+                          duration: animationDuration,
                           switchInCurve: Curves.easeOutCubic,
                           switchOutCurve: Curves.easeInCubic,
                           transitionBuilder: (child, animation) {
@@ -254,7 +281,8 @@ class _SwiperBannerState extends State<SwiperBanner> {
                               fontSize: 22, // 增大字号，更具视觉冲击力
                               height: 1.2,
                               fontWeight: FontWeight.w900,
-                              fontStyle: FontStyle.italic, // 倾斜字体带来强烈的动感（符合动漫应用调性）
+                              fontStyle:
+                                  FontStyle.italic, // 倾斜字体带来强烈的动感（符合动漫应用调性）
                               letterSpacing: 0.5,
                               shadows: [
                                 Shadow(
@@ -270,32 +298,35 @@ class _SwiperBannerState extends State<SwiperBanner> {
                       const SizedBox(width: 24),
                       Row(
                         mainAxisSize: MainAxisSize.min,
-                        children: List.generate(
-                          _imageUrls.length,
-                          (idx) {
-                            final isActive = idx == currentIndex;
-                            return AnimatedContainer(
-                              duration: const Duration(milliseconds: 300),
-                              curve: Curves.easeOutQuart,
-                              margin: const EdgeInsets.only(left: 4, bottom: 6),
-                              height: 4,
-                              width: isActive ? 18 : 6,
-                              decoration: BoxDecoration(
-                                color: isActive ? primaryColor : Colors.white.withOpacity(0.4),
-                                borderRadius: BorderRadius.circular(2),
-                                boxShadow: isActive
-                                    ? [
-                                        BoxShadow(
-                                          color: primaryColor.withOpacity(0.5),
-                                          blurRadius: 8,
-                                          spreadRadius: 1,
+                        children: List.generate(_imageUrls.length, (idx) {
+                          final isActive = idx == currentIndex;
+                          return AnimatedContainer(
+                            duration: _reduceVisualEffects
+                                ? Duration.zero
+                                : const Duration(milliseconds: 300),
+                            curve: Curves.easeOutQuart,
+                            margin: const EdgeInsets.only(left: 4, bottom: 6),
+                            height: 4,
+                            width: isActive ? 18 : 6,
+                            decoration: BoxDecoration(
+                              color: isActive
+                                  ? primaryColor
+                                  : Colors.white.withValues(alpha: 0.4),
+                              borderRadius: BorderRadius.circular(2),
+                              boxShadow: isActive && !_reduceVisualEffects
+                                  ? [
+                                      BoxShadow(
+                                        color: primaryColor.withValues(
+                                          alpha: 0.5,
                                         ),
-                                      ]
-                                    : null,
-                              ),
-                            );
-                          },
-                        ),
+                                        blurRadius: 8,
+                                        spreadRadius: 1,
+                                      ),
+                                    ]
+                                  : null,
+                            ),
+                          );
+                        }),
                       ),
                     ],
                   );

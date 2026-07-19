@@ -158,10 +158,13 @@ class BakaApp extends StatelessWidget {
         fontFamily: appState.fontFamily,
         fontWeight: appState.fontWeight,
       );
+      final mediaQuery = MediaQuery.of(context);
       return MediaQuery(
-        data: MediaQuery.of(
-          context,
-        ).copyWith(textScaler: TextScaler.linear(appState.fontScale)),
+        data: mediaQuery.copyWith(
+          textScaler: TextScaler.linear(appState.fontScale),
+          disableAnimations:
+              mediaQuery.disableAnimations || appState.reduceVisualEffects,
+        ),
         child: MaterialApp(
           debugShowCheckedModeBanner: false,
           scrollBehavior: const AppScrollBehavior(),
@@ -268,6 +271,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     }
 
     final theme = Theme.of(context);
+    final reduceVisualEffects =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final navigationDuration = reduceVisualEffects
+        ? Duration.zero
+        : const Duration(milliseconds: 300);
 
     return PopScope(
       canPop: false,
@@ -313,7 +321,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   right: 24,
                   bottom: 96,
                   child: AnimatedSlide(
-                    duration: const Duration(milliseconds: 300),
+                    duration: navigationDuration,
                     curve: Curves.easeOutCubic,
                     offset: _appState.isBottomNavVisible.value
                         ? Offset.zero
@@ -327,7 +335,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         bottomNavigationBar: !Instances.isDesktopPlatform
             ? Obx(
                 () => AnimatedSlide(
-                  duration: const Duration(milliseconds: 300),
+                  duration: navigationDuration,
                   curve: Curves.easeOutCubic,
                   offset: _appState.isBottomNavVisible.value
                       ? Offset.zero
@@ -346,6 +354,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
   Widget _buildPostButton(ThemeData theme) {
     const radius = BorderRadius.all(Radius.circular(28));
+    final reduceVisualEffects =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -360,13 +370,15 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           decoration: BoxDecoration(
             color: theme.colorScheme.primary,
             borderRadius: radius,
-            boxShadow: [
-              BoxShadow(
-                color: theme.colorScheme.primary.withValues(alpha: 0.4),
-                blurRadius: 16,
-                offset: const Offset(0, 8),
-              ),
-            ],
+            boxShadow: reduceVisualEffects
+                ? null
+                : [
+                    BoxShadow(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.4),
+                      blurRadius: 16,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
           ),
           child: const Icon(Icons.edit_rounded, color: Colors.white, size: 24),
         ),

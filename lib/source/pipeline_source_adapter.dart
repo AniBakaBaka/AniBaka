@@ -21,6 +21,7 @@ import 'package:baka/source/engine/recipes.dart';
 import 'package:baka/source/model/source_rule.dart';
 import 'package:baka/source/runtime/request_scheduler.dart';
 import 'package:baka/source/runtime/scheduler_interceptor.dart';
+import 'package:baka/services/remote_media_redirect_resolver.dart';
 
 /// Pipeline-based adapter: implements [AdapterBase] for the upper layer
 /// and [PipelineHost] for the pipeline interpreter. No mixins — all
@@ -38,6 +39,8 @@ class PipelineSourceAdapter extends AdapterBase
   final SourceRule rule;
   static const PipelineInterpreter _interpreter = PipelineInterpreter();
   final CookieJar _cookieJar = CookieJar();
+  final WebViewTaskScope _webViewTaskScope = WebViewTaskScope();
+  RemoteMediaRedirectResolver? _mediaRedirectResolver;
   Future<void> _playCookieBarrier = Future<void>.value();
   Timer? _playbackKeepAliveTimer;
   int _playbackKeepAliveGeneration = 0;
@@ -59,6 +62,10 @@ class PipelineSourceAdapter extends AdapterBase
   late final bool _materializesHlsManifest =
       rule.id == 'ani_pekolove' ||
       _containsPlayFlag(rule.play, 'materializeHls');
+  late final bool _resolvesMediaRedirects = _containsPlayFlag(
+    rule.play,
+    'resolveMediaRedirects',
+  );
 
   @override
   String get baseUrl => rule.baseUrl;
@@ -91,6 +98,14 @@ class PipelineSourceAdapter extends AdapterBase
   @override
   bool get validatesOwnUrls =>
       rule.play.any((step) => step.flag('validateWithCookies'));
+
+  @override
+  void dispose() {
+    _webViewTaskScope.cancel();
+    _mediaRedirectResolver?.close();
+    stopPlaybackKeepAlive();
+    super.dispose();
+  }
 
   @override
   Map<String, String> get mediaValidationHeaders {
@@ -212,18 +227,31 @@ class PipelineSourceAdapter extends AdapterBase
   Future<({String url, Map<String, String> httpHeaders})> preparePlaybackMedia(
     ({String url, Map<String, String> httpHeaders}) media,
   ) async {
-    if (!_materializesHlsManifest ||
-        !media.url.toLowerCase().contains('.m3u8')) {
-      return media;
+    var prepared = media;
+    if (_resolvesMediaRedirects) {
+      final resolvedUrl =
+          await (_mediaRedirectResolver ??= RemoteMediaRedirectResolver())
+              .resolve(media.url, headers: media.httpHeaders);
+      if (resolvedUrl != media.url) {
+        prepared = (
+          url: resolvedUrl,
+          httpHeaders: _headersForRedirectTarget(media.httpHeaders),
+        );
+      }
     }
-    final manifestUri = Uri.tryParse(media.url);
-    if (manifestUri == null || !manifestUri.hasScheme) return media;
+
+    if (!_materializesHlsManifest ||
+        !prepared.url.toLowerCase().contains('.m3u8')) {
+      return prepared;
+    }
+    final manifestUri = Uri.tryParse(prepared.url);
+    if (manifestUri == null || !manifestUri.hasScheme) return prepared;
 
     try {
       final response = await dio.getUri<String>(
         manifestUri,
         options: Options(
-          headers: media.httpHeaders,
+          headers: prepared.httpHeaders,
           responseType: ResponseType.plain,
           validateStatus: (_) => true,
         ),
@@ -238,19 +266,36 @@ class PipelineSourceAdapter extends AdapterBase
           '${rule.id}: unable to materialize complete HLS manifest '
           '(HTTP $status, ${body.length} chars)',
         );
-        return media;
+        return prepared;
       }
 
       final proxyUrl = await _startHlsProxy(
         body,
         manifestUri,
-        media.httpHeaders,
+        prepared.httpHeaders,
       );
       return (url: proxyUrl, httpHeaders: const <String, String>{});
     } catch (error) {
       debugPrint('${rule.id}: HLS manifest materialization failed: $error');
-      return media;
+      return prepared;
     }
+  }
+
+  static Map<String, String> _headersForRedirectTarget(
+    Map<String, String> headers,
+  ) {
+    return Map<String, String>.from(headers)..removeWhere((name, _) {
+      switch (name.toLowerCase()) {
+        case 'authorization':
+        case 'cookie':
+        case 'host':
+        case 'origin':
+        case 'referer':
+          return true;
+        default:
+          return false;
+      }
+    });
   }
 
   @override
@@ -779,6 +824,7 @@ class PipelineSourceAdapter extends AdapterBase
         timeout: timeout,
         settleDelay: settleDelay,
         userAgent: requestUserAgent,
+        taskScope: _webViewTaskScope,
       );
       if (cookies.isNotEmpty) await storeWebViewCookies(url, cookies);
       return html;
@@ -815,6 +861,7 @@ class PipelineSourceAdapter extends AdapterBase
       return await WebViewAdapter.extractVideoUrl(
             url,
             userAgent: requestUserAgent,
+            taskScope: _webViewTaskScope,
           ) ??
           '';
     } catch (e) {

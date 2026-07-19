@@ -89,17 +89,21 @@ class SettingsGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final reduceVisualEffects =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     return Container(
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        boxShadow: reduceVisualEffects
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.02),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
       ),
       child: Column(children: children),
     );
@@ -203,6 +207,7 @@ class SettingsTile extends StatelessWidget {
 
 class SettingsSwitchTile extends StatelessWidget {
   final String title;
+  final String? subtitle;
   final bool value;
   final IconData icon;
   final ValueChanged<bool> onChanged;
@@ -213,6 +218,7 @@ class SettingsSwitchTile extends StatelessWidget {
     required this.value,
     required this.icon,
     required this.onChanged,
+    this.subtitle,
     super.key,
     this.showDivider = true,
   });
@@ -253,13 +259,29 @@ class SettingsSwitchTile extends StatelessWidget {
                 ),
                 const SizedBox(width: 16),
                 Expanded(
-                  child: Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                      color: textColor,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                          color: textColor,
+                        ),
+                      ),
+                      if (subtitle != null) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          subtitle!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.35,
+                            color: isDark ? Colors.white54 : Colors.black54,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 Switch.adaptive(

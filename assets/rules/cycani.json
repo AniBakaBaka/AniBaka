@@ -26,46 +26,28 @@
         ],
         [
           {
-            "op": "fetch",
-            "url": "/search.html?wd={keyword}",
-            "headers": {
-              "Referer": "https://www.cycani.org/"
-            }
-          },
-          {
-            "op": "searchList",
-            "selectors": [
-              ".vod-detail.search-list",
-              ".public-list-box",
-              ".module-search-item",
-              "a[href*='/bangumi/']"
-            ],
-            "detailPattern": "/bangumi/"
-          }
-        ],
-        [
-          {
             "op": "sniff",
             "goal": "html",
-            "url": "/search.html?wd={keyword}",
+            "url": "/index.php/ajax/suggest?mid=1&wd={keyword}&limit=20",
             "readyContains": [
-              "bangumi"
+              "<pre>"
             ],
             "rejectContains": [
-              "verify",
-              "验证"
+              "altcha-widget",
+              "aegis_altcha"
             ],
-            "timeoutMs": 15000
+            "timeoutMs": 60000,
+            "settleMs": 0
           },
           {
-            "op": "searchList",
-            "selectors": [
-              ".vod-detail.search-list",
-              ".public-list-box",
-              ".module-search-item",
-              "a[href*='/bangumi/']"
-            ],
-            "detailPattern": "/bangumi/"
+            "op": "select",
+            "css": "pre",
+            "attr": "text"
+          },
+          {
+            "op": "jsonSeries",
+            "listPath": "list",
+            "detailUrlTemplate": "/bangumi/{id}.html"
           }
         ]
       ]
@@ -73,10 +55,35 @@
   ],
   "detail": [
     {
-      "op": "follow",
-      "headers": {
-        "Referer": "https://www.cycani.org/"
-      }
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "follow",
+            "headers": {
+              "Referer": "https://www.cycani.org/"
+            }
+          },
+          {
+            "op": "maccmsVerify"
+          }
+        ],
+        [
+          {
+            "op": "sniff",
+            "goal": "html",
+            "readyContains": [
+              "anthology-list"
+            ],
+            "rejectContains": [
+              "altcha-widget",
+              "aegis_altcha"
+            ],
+            "timeoutMs": 60000,
+            "settleMs": 0
+          }
+        ]
+      ]
     },
     {
       "op": "episodes",
@@ -95,10 +102,35 @@
   "useWebview": true,
   "play": [
     {
-      "op": "follow",
-      "headers": {
-        "Referer": "https://www.cycani.org/"
-      }
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "follow",
+            "headers": {
+              "Referer": "https://www.cycani.org/"
+            }
+          },
+          {
+            "op": "maccmsVerify"
+          }
+        ],
+        [
+          {
+            "op": "sniff",
+            "goal": "html",
+            "readyContains": [
+              "player_aaaa"
+            ],
+            "rejectContains": [
+              "altcha-widget",
+              "aegis_altcha"
+            ],
+            "timeoutMs": 60000,
+            "settleMs": 0
+          }
+        ]
+      ]
     },
     {
       "op": "first",

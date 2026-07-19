@@ -27,6 +27,7 @@ class AppState extends GetxService {
   final _fontFamily = ''.obs;
   final _fontScale = 1.0.obs;
   final _fontWeightIndex = 3.obs;
+  final _reduceVisualEffects = false.obs;
 
   bool get isLoggedIn {
     final id = userInfo.value['id'];
@@ -37,6 +38,8 @@ class AppState extends GetxService {
   double get fontScale => _fontScale.value;
   int get fontWeightIndex => _fontWeightIndex.value;
   FontWeight get fontWeight => AppFonts.availableWeights[fontWeightIndex];
+  int get themeMode => _themeMode.value;
+  bool get reduceVisualEffects => _reduceVisualEffects.value;
 
   ThemeMode get currentThemeMode {
     switch (_themeMode.value) {
@@ -59,6 +62,7 @@ class AppState extends GetxService {
     _fontFamily.value = ThemeService.getFontFamily();
     _fontScale.value = ThemeService.getFontScale();
     _fontWeightIndex.value = ThemeService.getFontWeightIndex();
+    _reduceVisualEffects.value = ThemeService.getReduceVisualEffects();
     WidgetsBinding.instance.platformDispatcher.onPlatformBrightnessChanged =
         () {
           if (_themeMode.value == 0) {
@@ -157,6 +161,11 @@ class AppState extends GetxService {
       AppFonts.availableWeights.length - 1,
     );
     ThemeService.setFontWeightIndex(_fontWeightIndex.value);
+  }
+
+  void setReduceVisualEffects(bool value) {
+    _reduceVisualEffects.value = value;
+    ThemeService.setReduceVisualEffects(value);
   }
 
   @override

@@ -18,6 +18,8 @@ class AppBottomNavigation extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final reduceVisualEffects =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
 
     return SafeArea(
       top: false,
@@ -34,13 +36,15 @@ class AppBottomNavigation extends StatelessWidget {
               border: Border.all(
                 color: colors.onSurface.withValues(alpha: 0.07),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: theme.shadowColor.withValues(alpha: 0.12),
-                  blurRadius: 20,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+              boxShadow: reduceVisualEffects
+                  ? null
+                  : [
+                      BoxShadow(
+                        color: theme.shadowColor.withValues(alpha: 0.12),
+                        blurRadius: 20,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
             ),
             child: Material(
               color: Colors.transparent,

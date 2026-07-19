@@ -116,6 +116,8 @@ Future<Map<String, dynamic>?> _loadAnimeDetail(int bgmId) async {
   try {
     final response = await NetUtils.get(
       '$host/api/v1/anime/detail?bgm_id=$bgmId',
+      timeout: const Duration(seconds: 8),
+      notifyOnError: false,
     );
     final json = BgmUtils.parseJsonMap(response.data);
     if (json == null) return null;

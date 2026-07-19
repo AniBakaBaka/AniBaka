@@ -56,6 +56,14 @@ class _MinePageState extends State<MinePage>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) {
+      _controller.value = 1;
+    }
+  }
+
+  @override
   void dispose() {
     _controller.dispose();
     _loginWorker.dispose();
@@ -183,6 +191,8 @@ class _MinePageState extends State<MinePage>
     final avatarUrl = getAvatar(avatar: _svc.avatarQq);
     final String name = _svc.displayName;
     final String subtitle = _svc.displaySubtitle;
+    final reduceVisualEffects =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
 
     return SliverAppBar(
       expandedHeight: 180.0,
@@ -317,13 +327,17 @@ class _MinePageState extends State<MinePage>
                                       : Colors.black12,
                                   width: 1,
                                 ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.1),
-                                    blurRadius: 20,
-                                    offset: const Offset(0, 10),
-                                  ),
-                                ],
+                                boxShadow: reduceVisualEffects
+                                    ? null
+                                    : [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.1,
+                                          ),
+                                          blurRadius: 20,
+                                          offset: const Offset(0, 10),
+                                        ),
+                                      ],
                               ),
                               child: ClipOval(
                                 child: isLogin
@@ -511,17 +525,21 @@ class _MinePageState extends State<MinePage>
     bool isDark,
     List<_MenuItem> items,
   ) {
+    final reduceVisualEffects =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     return Container(
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        boxShadow: reduceVisualEffects
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.02),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
       ),
       child: Column(
         children: items.asMap().entries.map((entry) {

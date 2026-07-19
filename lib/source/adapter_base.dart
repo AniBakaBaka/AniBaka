@@ -61,6 +61,12 @@ abstract class AdapterBase {
 
   Future<void> storeWebViewCookies(String url, String cookieString) async {}
 
+  /// Releases source-scoped background work when its owning service closes.
+  void dispose() {
+    _dio?.close(force: true);
+    _dio = null;
+  }
+
   // ── Abstract contract ───────────────────────────────────────────────
 
   Future<List<Series>> search(
@@ -160,7 +166,12 @@ abstract class AdapterBase {
           .timeout(const Duration(seconds: 7));
 
       final status = resp.statusCode ?? 0;
-      if (status == 405 || status == 501) {
+      if (status == 401 ||
+          status == 403 ||
+          status == 404 ||
+          status == 405 ||
+          status == 501 ||
+          status == 503) {
         resp = await _validationDio
             .get(
               url,

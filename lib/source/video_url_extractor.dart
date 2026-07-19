@@ -44,6 +44,8 @@ class VideoUrlExtractor {
     caseSensitive: false,
   );
 
+  static final _expiringSignRegex = RegExp(r'^.+:\d{9,}$');
+
   static const _queryParamKeys = [
     'url', 'u', 'src', 'file', 'video', 'videoUrl', 'play_url', 'path',
   ];
@@ -61,8 +63,19 @@ class VideoUrlExtractor {
         _cdnSignedRegex.hasMatch(lower);
   }
 
-  static bool isSignedCdnUrl(String url) =>
-      _cdnSignedRegex.hasMatch(url.toLowerCase());
+  static bool isSignedCdnUrl(String url) {
+    if (_cdnSignedRegex.hasMatch(url.toLowerCase())) return true;
+    try {
+      final uri = Uri.parse(url);
+      for (final entry in uri.queryParameters.entries) {
+        if (entry.key.toLowerCase() == 'sign' &&
+            _expiringSignRegex.hasMatch(entry.value)) {
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
 
   static bool isPlayable(String url) {
     if (url.isEmpty) return false;

@@ -130,7 +130,7 @@ class PipelineInterpreter {
     caseSensitive: false,
   );
   static final RegExp _macCmsChallengePattern = RegExp(
-    r'身份验证|安全验证|点击访问|smart_verify|请输入验证码|verify_check|/verify/index\.html|雷池 WAF',
+    r'身份验证|安全验证|点击访问|smart_verify|请输入验证码|verify_check|/verify/index\.html|雷池 WAF|altcha-widget|aegis_altcha',
     caseSensitive: false,
   );
   static final RegExp _smartVerifyButtonPattern = RegExp(

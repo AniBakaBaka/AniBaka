@@ -188,11 +188,11 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
 
   void _navigateToPlayer(Map<String, dynamic> videoData) {
     if (!mounted) return;
+    VideoSourceSearchController.cacheGlobal(widget.title, _controller);
     if (widget.headlessMode) {
       widget.onMatchFound?.call(videoData);
       return;
     }
-    VideoSourceSearchController.cacheGlobal(widget.title, _controller);
     NavigationService.toPlayer(context, videoData, popFirst: true);
   }
 

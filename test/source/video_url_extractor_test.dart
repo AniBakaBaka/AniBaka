@@ -17,4 +17,19 @@ void main() {
       url,
     );
   });
+
+  test('expiring sign parameter is treated as a signed CDN URL', () {
+    const url =
+        'https://al.huazidm02.top/d/tycc/tv/2022/10/孤独摇滚/01.mp4'
+        '?sign=xhbzK4c0ulTC0VIrc70DFxB5AghRrwM6Hdp7XI8lEKA=:1784510743';
+
+    expect(VideoUrlExtractor.isSignedCdnUrl(url), isTrue);
+    expect(
+      VideoUrlExtractor.normalizeResolvedUrl(
+        url,
+        'https://www.huazidm.com/play/1-1.html',
+      ),
+      url,
+    );
+  });
 }

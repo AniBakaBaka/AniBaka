@@ -315,6 +315,9 @@ class VideoSourceSearchController {
     String title,
     VideoSourceSearchController controller,
   ) {
+    if (!identical(globalCached, controller)) {
+      globalCached?.dispose();
+    }
     globalCached = controller;
     globalCachedTitle = title;
   }
@@ -403,7 +406,10 @@ class VideoSourceSearchController {
   bool get isDisposed => _isDisposed;
 
   void dispose() {
+    if (_isDisposed) return;
     _isDisposed = true;
+    _searchRunId++;
+    _activeSession = null;
     _sourceAdapterService.dispose();
     isSearchingNotifier.dispose();
     resultsNotifier.dispose();
@@ -934,13 +940,9 @@ class VideoSourceSearchController {
         );
         if (_isSessionStopped(session) || _userSelected) return;
 
-        if (probe.status == SourceProbeStatus.direct && probe.data != null) {
-          if (!_claimAutoMatch(session)) return;
-          _finishAutoMatch(session, probe.data!);
-          unawaited(_recordMatchSuccess(item, probe.data!));
-          return;
+        if (probe.status != SourceProbeStatus.direct) {
+          unawaited(_recordSourceFailure(item.sourceType));
         }
-        unawaited(_recordSourceFailure(item.sourceType));
       }
     }
 
@@ -948,6 +950,32 @@ class VideoSourceSearchController {
         ? candidates.length
         : _SearchPolicy.autoProbeConcurrency;
     await Future.wait(List.generate(workerCount, (_) => worker()));
+    if (!finalPass ||
+        _isSessionStopped(session) ||
+        session.autoMatched ||
+        _userSelected) {
+      return;
+    }
+
+    // Auto-match and the player's source switch now consume the same probe
+    // states and the same ordering. Do not let network completion order choose
+    // the source: wait for the bounded final probe pass, then take the
+    // highest-ranked verified route.
+    SourceCandidateState? best;
+    for (final candidate in getSwitchCandidates(
+      episodeIndex: _targetEpisodeIndex,
+      preferredLine: 1,
+    )) {
+      if (candidate.status == SourceProbeStatus.direct &&
+          candidate.data != null) {
+        best = candidate;
+        break;
+      }
+    }
+    if (best == null || !_claimAutoMatch(session)) return;
+
+    _finishAutoMatch(session, best.data!);
+    unawaited(_recordMatchSuccess(best.item, best.data!));
   }
 
   bool _claimAutoMatch(_SearchSession session) {

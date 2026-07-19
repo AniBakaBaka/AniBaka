@@ -32,6 +32,9 @@ class SourceAdapterService {
   }
 
   void dispose() {
+    for (final entry in _adapterCache.values) {
+      entry.adapter.dispose();
+    }
     _adapterCache.clear();
   }
 
@@ -64,7 +67,7 @@ class SourceAdapterService {
 
   Future<bool> deleteCustomSource(String id) async {
     final ok = await _catalog.deleteCustomSource(id);
-    if (ok) _adapterCache.remove(AdapterRegistry.customSourceKey(id));
+    if (ok) _removeAdapter(AdapterRegistry.customSourceKey(id));
     return ok;
   }
 
@@ -77,9 +80,7 @@ class SourceAdapterService {
   Future<int> importCustomSource(String input) async {
     final count = await _catalog.importCustomSource(input);
     if (count > 0) {
-      _adapterCache.removeWhere(
-        (key, _) => AdapterRegistry.isBuiltinSource(key),
-      );
+      _removeAdaptersWhere(AdapterRegistry.isBuiltinSource);
     }
     return count;
   }
@@ -93,7 +94,7 @@ class SourceAdapterService {
 
   Future<void> clearAllCustomSources() async {
     await _catalog.clearCustomSources();
-    _adapterCache.removeWhere((key, _) => AdapterRegistry.isCustomSource(key));
+    _removeAdaptersWhere(AdapterRegistry.isCustomSource);
   }
 
   List<AdapterDescriptor> get allBuiltinSources => _catalog.builtinSources;
@@ -127,13 +128,13 @@ class SourceAdapterService {
     CustomSourceConfig source,
   ) async {
     final updated = await _catalog.updateBuiltinSource(key, source);
-    if (updated) _adapterCache.remove(key);
+    if (updated) _removeAdapter(key);
     return updated;
   }
 
   Future<bool> resetBuiltinSource(String key) async {
     final reset = await _catalog.resetBuiltinSource(key);
-    if (reset) _adapterCache.remove(key);
+    if (reset) _removeAdapter(key);
     return reset;
   }
 
@@ -277,15 +278,27 @@ class SourceAdapterService {
       _adapterCache[sourceKey] = cached;
       return cached.adapter;
     }
+    cached?.adapter.dispose();
 
     final adapter = create();
     if (adapter != null) {
       if (_adapterCache.length >= _maxCachedAdapters) {
-        _adapterCache.remove(_adapterCache.keys.first);
+        _removeAdapter(_adapterCache.keys.first);
       }
       _adapterCache[sourceKey] = (adapter: adapter, revision: revision);
     }
     return adapter;
+  }
+
+  void _removeAdapter(String key) {
+    _adapterCache.remove(key)?.adapter.dispose();
+  }
+
+  void _removeAdaptersWhere(bool Function(String key) test) {
+    final keys = _adapterCache.keys.where(test).toList(growable: false);
+    for (final key in keys) {
+      _removeAdapter(key);
+    }
   }
 }
 

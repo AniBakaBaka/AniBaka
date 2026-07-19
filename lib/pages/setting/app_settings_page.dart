@@ -195,6 +195,37 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
     Navigator.pop(context);
   }
 
+  Future<void> _showThemeModeDialog() async {
+    HapticFeedback.selectionClick();
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: const Text('选择主题模式'),
+        children: [
+          for (final option in const [(0, '跟随系统'), (1, '浅色模式'), (2, '深色模式')])
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialogContext, option.$1),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(option.$2),
+                  if (_appState.themeMode == option.$1)
+                    Icon(
+                      Icons.check_rounded,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+    if (selected != null) _appState.setThemeMode(selected);
+  }
+
+  String get _themeModeLabel =>
+      const ['跟随系统', '浅色模式', '深色模式'][_appState.themeMode];
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -213,7 +244,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
               delegate: SliverChildListDelegate([
                 const SizedBox(height: 20),
                 if (isLoggedIn) ...[
-                  const SettingsSectionHeader('个人信息'),
+                  const SettingsSectionHeader('账户与安全'),
                   SettingsGroup(
                     children: [
                       SettingsTile(
@@ -233,15 +264,9 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                         value: _userInfo?['sign'] ?? '未设置',
                         icon: Icons.edit_note_rounded,
                         onTap: () => _showUpdateDialog('修改签名', 'sign'),
-                        showDivider: false,
+                        showDivider: _userInfo?['pwd'] != null,
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  if (_userInfo?['pwd'] != null) ...[
-                    const SettingsSectionHeader('安全'),
-                    SettingsGroup(
-                      children: [
+                      if (_userInfo?['pwd'] != null)
                         SettingsTile(
                           title: '修改密码',
                           value: '******',
@@ -249,10 +274,9 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                           onTap: () => _showUpdateDialog('修改密码', 'pwd'),
                           showDivider: false,
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                  ],
+                    ],
+                  ),
+                  const SizedBox(height: 24),
                 ],
                 const SettingsSectionHeader('播放'),
                 SettingsGroup(
@@ -274,7 +298,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                   ],
                 ),
                 const SizedBox(height: 24),
-                const SettingsSectionHeader('源管理'),
+                const SettingsSectionHeader('内容来源'),
                 SettingsGroup(
                   children: [
                     SettingsTile(
@@ -294,23 +318,21 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                   ],
                 ),
                 const SizedBox(height: 24),
-                const SettingsSectionHeader('外观'),
+                const SettingsSectionHeader('外观与显示'),
                 SettingsGroup(
                   children: [
                     Obx(
-                      () => SettingsSwitchTile(
-                        title: '滑动时隐藏底栏',
-                        value: _appState.isHideBottomNavOnScroll.value,
-                        icon: Icons.swipe_down_rounded,
-                        onChanged: _appState.toggleHideBottomNavOnScroll,
+                      () => SettingsTile(
+                        title: '主题模式',
+                        value: _themeModeLabel,
+                        icon: Icons.brightness_6_outlined,
+                        onTap: _showThemeModeDialog,
                       ),
                     ),
                     Obx(
                       () => SettingsTile(
                         title: '字体',
-                        value: AppFonts.getLabelForFont(
-                          _appState.fontFamily,
-                        ),
+                        value: AppFonts.getLabelForFont(_appState.fontFamily),
                         icon: Icons.font_download_rounded,
                         onTap: () async {
                           await Navigator.push(
@@ -320,13 +342,38 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                             ),
                           );
                         },
+                      ),
+                    ),
+                    Obx(
+                      () => SettingsSwitchTile(
+                        title: '减少视觉效果',
+                        subtitle: '关闭动效、毛玻璃与自动轮播，并减少装饰阴影',
+                        value: _appState.reduceVisualEffects,
+                        icon: Icons.motion_photos_off_outlined,
+                        onChanged: _appState.setReduceVisualEffects,
                         showDivider: false,
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 24),
-                const SettingsSectionHeader('关于'),
+                const SettingsSectionHeader('交互'),
+                SettingsGroup(
+                  children: [
+                    Obx(
+                      () => SettingsSwitchTile(
+                        title: '滑动时隐藏底栏',
+                        subtitle: '向下浏览内容时收起底部导航',
+                        value: _appState.isHideBottomNavOnScroll.value,
+                        icon: Icons.swipe_down_rounded,
+                        onChanged: _appState.toggleHideBottomNavOnScroll,
+                        showDivider: false,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                const SettingsSectionHeader('存储'),
                 SettingsGroup(
                   children: [
                     SettingsTile(
@@ -334,7 +381,14 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                       value: _isClearing ? '清理中...' : _cacheSize,
                       icon: Icons.cleaning_services_rounded,
                       onTap: _isClearing ? null : _clearCache,
+                      showDivider: false,
                     ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                const SettingsSectionHeader('诊断'),
+                SettingsGroup(
+                  children: [
                     SettingsTile(
                       title: '导出日志',
                       value: _isExportingLogs ? '导出中...' : 'ZIP',
@@ -346,7 +400,14 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                       value: _isSharingLogs ? '准备中...' : '系统分享',
                       icon: Icons.ios_share_rounded,
                       onTap: _isSharingLogs ? null : _shareLogs,
+                      showDivider: false,
                     ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                const SettingsSectionHeader('关于'),
+                SettingsGroup(
+                  children: [
                     SettingsTile(
                       title: '版本更新',
                       value: 'v${Instances.appVersion}',
@@ -357,7 +418,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                       ),
                     ),
                     SettingsTile(
-                      title: 'Github地址',
+                      title: 'GitHub 地址',
                       value: 'AniBaka',
                       icon: Icons.code_rounded,
                       onTap: () => launchUrlString(

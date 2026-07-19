@@ -23,6 +23,7 @@ class FakePlaybackBackend implements PlaybackBackend {
   double? lastRate;
   SubtitleTrack? lastSubtitleTrack;
   int playCount = 0;
+  int openCount = 0;
   int pauseCount = 0;
   int stopCount = 0;
   final nativeProperties = <String, String>{};
@@ -39,6 +40,7 @@ class FakePlaybackBackend implements PlaybackBackend {
   Stream<Duration> get buffered => _buffer.stream;
   @override
   Stream<bool> get buffering => _buffering.stream;
+  @override
   Stream<String> get errors => _errors.stream;
   @override
   Stream<bool> get completed => _completed.stream;
@@ -48,6 +50,7 @@ class FakePlaybackBackend implements PlaybackBackend {
   bool get isPlaying => _isPlaying;
   @override
   Duration get currentPosition => _currentPosition;
+  @override
   List<SubtitleTrack> get subtitleTracks => const [];
   @override
   SubtitleTrack get currentSubtitleTrack => SubtitleTrack.no();
@@ -63,6 +66,7 @@ class FakePlaybackBackend implements PlaybackBackend {
     required bool autoplay,
     Map<String, String>? httpHeaders,
   }) async {
+    openCount++;
     _currentMediaUri = uri;
     _isPlaying = autoplay;
     _playing.add(autoplay);

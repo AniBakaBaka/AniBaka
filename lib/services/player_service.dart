@@ -183,7 +183,6 @@ class PlayerService {
   String? _adapterSource;
   AdapterBase? _playbackKeepAliveAdapter;
   int _playbackKeepAliveGeneration = 0;
-
   PlaybackEpisode? get currentVideoItem =>
       currPlayIndex >= 0 && currPlayIndex < videoList.length
       ? videoList[currPlayIndex]

@@ -12,6 +12,40 @@ void main() {
     Instances.sp = await SharedPreferences.getInstance();
   });
 
+  tearDown(() {
+    final cached = VideoSourceSearchController.globalCached;
+    VideoSourceSearchController.globalCached = null;
+    VideoSourceSearchController.globalCachedTitle = null;
+    cached?.dispose();
+  });
+
+  test('shares the latest detail search controller with source switching', () {
+    final detailController = VideoSourceSearchController(
+      title: 'Example',
+      cover: '',
+    );
+    final replacement = VideoSourceSearchController(
+      title: 'Other',
+      cover: '',
+    );
+
+    VideoSourceSearchController.cacheGlobal('Example', detailController);
+
+    expect(
+      identical(VideoSourceSearchController.globalCached, detailController),
+      isTrue,
+    );
+    expect(detailController.isDisposed, isFalse);
+
+    VideoSourceSearchController.cacheGlobal('Other', replacement);
+
+    expect(detailController.isDisposed, isTrue);
+    expect(
+      identical(VideoSourceSearchController.globalCached, replacement),
+      isTrue,
+    );
+  });
+
   test('reuses an already verified switch candidate', () async {
     final controller = VideoSourceSearchController(title: 'Example', cover: '');
     addTearDown(controller.dispose);

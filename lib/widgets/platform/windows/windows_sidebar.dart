@@ -39,6 +39,8 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final reduceVisualEffects =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
 
     final width = _isSidebarCollapsed ? 72.0 : 240.0;
 
@@ -59,7 +61,7 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
           ),
         ),
         boxShadow: [
-          if (!_isSidebarCollapsed)
+          if (!_isSidebarCollapsed && !reduceVisualEffects)
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.03),
               blurRadius: 20,

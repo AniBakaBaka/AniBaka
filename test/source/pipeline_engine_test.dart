@@ -153,6 +153,45 @@ class VerifyCheckHost extends FakeHost {
   }
 }
 
+class AltchaWebviewHost extends FakeHost implements PipelineWebviewReadyHost {
+  AltchaWebviewHost()
+    : super(const {
+        'https://example.com/blocked':
+            '<html><altcha-widget></altcha-widget><script src="/aegis_altcha_object/altcha.min.js"></script></html>',
+      });
+
+  final rendered = <String>[];
+  var rejectedChallenge = false;
+  var acceptedResult = false;
+
+  @override
+  bool get allowWebview => true;
+
+  @override
+  Future<String> renderWithWebviewReady(
+    String url, {
+    bool Function(String html)? isReady,
+    Duration timeout = const Duration(seconds: 30),
+    Duration settleDelay = const Duration(seconds: 1),
+  }) async {
+    rendered.add(url);
+    rejectedChallenge =
+        isReady?.call('<html><altcha-widget></altcha-widget></html>') == false;
+    const html =
+        '<html><body><pre>{"list":[{"id":30,"name":"鬼灭之刃"}]}</pre></body></html>';
+    acceptedResult = isReady?.call(html) == true;
+    return html;
+  }
+
+  @override
+  String? selectAttr(String html, String selector, String attr) {
+    if (selector == 'pre' && attr == 'text') {
+      return '{"list":[{"id":30,"name":"鬼灭之刃"}]}';
+    }
+    return null;
+  }
+}
+
 void main() {
   const interp = PipelineInterpreter();
 
@@ -594,6 +633,56 @@ void main() {
       (DateTime.now().millisecondsSinceEpoch - millis).abs(),
       lessThan(10000),
     );
+  });
+
+  test('ALTCHA challenge falls back to ready WebView JSON', () async {
+    final host = AltchaWebviewHost();
+    final rule = SourceRule.fromJson({
+      'format': kSourceRuleFormatV2,
+      'id': 'altcha',
+      'name': 'ALTCHA',
+      'baseUrl': 'https://example.com',
+      'search': [
+        {
+          'op': 'first',
+          'branches': [
+            [
+              {'op': 'fetch', 'url': '/blocked'},
+              {'op': 'maccmsVerify'},
+            ],
+            [
+              {
+                'op': 'sniff',
+                'goal': 'html',
+                'url': '/suggest',
+                'readyContains': ['<pre>'],
+                'rejectContains': ['altcha-widget', 'aegis_altcha'],
+                'timeoutMs': 60000,
+                'settleMs': 0,
+              },
+              {'op': 'select', 'css': 'pre', 'attr': 'text'},
+              {
+                'op': 'jsonSeries',
+                'listPath': 'list',
+                'detailUrlTemplate': '/bangumi/{id}.html',
+              },
+            ],
+          ],
+        },
+      ],
+      'detail': const [],
+      'play': const [],
+      'useWebview': true,
+    });
+
+    final results = await interp.runSearch(rule, host, '鬼灭');
+
+    expect(host.rendered, ['https://example.com/suggest']);
+    expect(host.rejectedChallenge, isTrue);
+    expect(host.acceptedResult, isTrue);
+    expect(results, hasLength(1));
+    expect(results.single.name, '鬼灭之刃');
+    expect(results.single.seriesId, 'https://example.com/bangumi/30.html');
   });
 
   test('anime1Play 只解析 URL，媒体头与 Cookie 规则交给宿主', () async {

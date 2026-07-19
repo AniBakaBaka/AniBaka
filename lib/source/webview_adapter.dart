@@ -3,6 +3,17 @@ import 'dart:io';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_windows/webview_windows.dart' as webview_windows;
 
+/// Cancellation scope for queued background WebView work.
+///
+/// A source adapter owns one scope. Disposing that adapter invalidates work
+/// already running or waiting in the shared WebView queue without affecting
+/// tasks submitted later by another adapter.
+class WebViewTaskScope {
+  int _generation = 0;
+
+  void cancel() => _generation++;
+}
+
 /// 后台 WebView 适配器：加载页面、嗅探视频直链、抓取渲染后的 HTML 与 cookie。
 ///
 /// 设计要点：
@@ -21,7 +32,6 @@ class WebViewAdapter {
   static const String mobileUserAgent =
       'Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36';
-
 
   /// 视频嗅探脚本，幂等安装。
   ///
@@ -321,7 +331,6 @@ class WebViewAdapter {
       '<!DOCTYPE html><html><head><meta charset="utf-8" /><title>baka-webview-reset</title></head>'
       '<body style="margin:0;background:#000;"></body></html>';
 
-
   static bool get _isDesktop => Platform.isWindows || Platform.isMacOS;
 
   static webview_windows.WebviewController? _desktopController;
@@ -379,16 +388,28 @@ class WebViewAdapter {
     )
     poll,
     required T Function() onTimeout,
+    required T Function() onCancelled,
+    WebViewTaskScope? taskScope,
   }) {
+    // Capture before enqueueing. If the owning adapter is disposed while this
+    // task is waiting behind another page, it must not start later.
+    final taskGeneration = taskScope?._generation;
     return _enqueue(() async {
       var cancelled = false;
+      bool taskCancelled() =>
+          cancelled ||
+          (taskScope != null && taskScope._generation != taskGeneration);
+
+      if (taskCancelled()) return onCancelled();
 
       if (_isDesktop) {
         final controller = await _getDesktopController();
+        if (taskCancelled()) return onCancelled();
         try {
           await controller.setUserAgent(userAgent).catchError((_) {});
           await controller.loadUrl(url);
-          final result = poll(controller.executeScript, () => cancelled);
+          if (taskCancelled()) return onCancelled();
+          final result = poll(controller.executeScript, taskCancelled);
           return await result.timeout(timeout, onTimeout: onTimeout);
         } finally {
           cancelled = true;
@@ -414,13 +435,14 @@ class WebViewAdapter {
           );
         }
         await controller.loadRequest(Uri.parse(url));
+        if (taskCancelled()) return onCancelled();
         final result = poll(
           controller.runJavaScriptReturningResult,
-          () => cancelled,
+          taskCancelled,
         );
         return await result.timeout(timeout, onTimeout: onTimeout);
       } catch (_) {
-        return onTimeout();
+        return taskCancelled() ? onCancelled() : onTimeout();
       } finally {
         cancelled = true;
         final controller = _mobileController;
@@ -431,7 +453,6 @@ class WebViewAdapter {
       }
     });
   }
-
 
   static String _cleanJsResult(dynamic result) {
     if (result == null) return '';
@@ -486,7 +507,7 @@ class WebViewAdapter {
     r'please enable javascript and (?:cookies|refresh)|'
     r'checking your browser before accessing|window\._cf_chl_opt|'
     r'__cf_chl_|cf-browser-verification|ddos-guard|'
-    r'smart-verify-btn|smart_verify',
+    r'smart-verify-btn|smart_verify|altcha-widget|aegis_altcha',
     caseSensitive: false,
   );
 
@@ -563,19 +584,21 @@ class WebViewAdapter {
     return (html, cookies);
   }
 
-
   /// 加载播放器页面并嗅探视频直链，未嗅到返回 null。
   static Future<String?> extractVideoUrl(
     String playerUrl, {
     String? userAgent,
+    WebViewTaskScope? taskScope,
   }) => _run(
     url: playerUrl,
     userAgent: userAgent ?? desktopUserAgent,
     timeout: const Duration(seconds: 60),
     sniff: true,
+    taskScope: taskScope,
     poll: (exec, cancelled) =>
         _pollSniffedUrl(exec, cancelled, const Duration(seconds: 58)),
     onTimeout: () => null,
+    onCancelled: () => null,
   );
 
   /// 短超时嗅探：适合直链就写在页面状态（全局变量 / DOM）里的站点。
@@ -583,13 +606,16 @@ class WebViewAdapter {
     String playerUrl, {
     String? userAgent,
     Duration timeout = const Duration(seconds: 8),
+    WebViewTaskScope? taskScope,
   }) => _run(
     url: playerUrl,
     userAgent: userAgent ?? desktopUserAgent,
     timeout: timeout + const Duration(seconds: 5),
     sniff: true,
+    taskScope: taskScope,
     poll: (exec, cancelled) => _pollSniffedUrl(exec, cancelled, timeout),
     onTimeout: () => null,
+    onCancelled: () => null,
   );
 
   /// 加载页面并返回 (HTML, JS 可见 cookie)。
@@ -600,11 +626,13 @@ class WebViewAdapter {
     Duration timeout = const Duration(seconds: 30),
     Duration settleDelay = const Duration(seconds: 1),
     String? userAgent,
+    WebViewTaskScope? taskScope,
   }) => _run(
     url: url,
     userAgent: userAgent ?? desktopUserAgent,
     timeout: timeout + settleDelay + const Duration(seconds: 5),
     sniff: false,
+    taskScope: taskScope,
     poll: (exec, cancelled) => _pollPageContent(
       exec,
       cancelled,
@@ -613,6 +641,7 @@ class WebViewAdapter {
       isReady: isReady,
     ),
     onTimeout: () => throw Exception('获取页面内容超时'),
+    onCancelled: () => ('', ''),
   );
 
   static Future<String> getPageContent(
@@ -621,11 +650,13 @@ class WebViewAdapter {
     Duration timeout = const Duration(seconds: 30),
     Duration settleDelay = const Duration(seconds: 1),
     String? userAgent,
+    WebViewTaskScope? taskScope,
   }) async => (await getPageContentWithCookies(
     url,
     isReady: isReady,
     timeout: timeout,
     settleDelay: settleDelay,
     userAgent: userAgent,
+    taskScope: taskScope,
   )).$1;
 }

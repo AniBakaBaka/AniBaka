@@ -58,6 +58,12 @@ class PlaybackController {
   int _lastTimelineBucket = -1;
   bool _listenersBound = false;
   bool _disposed = false;
+  bool _hasPlaybackProgress = false;
+  int _openRetryCount = 0;
+  int _openGeneration = 0;
+  String? _lastOpenUri;
+  Map<String, String>? _lastOpenHeaders;
+  bool _lastOpenAutoplay = true;
 
   VideoController? get videoController => _backend.videoController;
   String? get currentMediaUri => _backend.currentMediaUri;
@@ -91,6 +97,14 @@ class PlaybackController {
     bool autoplay = true,
     Map<String, String>? httpHeaders,
   }) async {
+    _openGeneration++;
+    _lastOpenUri = uri;
+    _lastOpenHeaders = httpHeaders == null
+        ? null
+        : Map<String, String>.from(httpHeaders);
+    _lastOpenAutoplay = autoplay;
+    _hasPlaybackProgress = false;
+    _openRetryCount = 0;
     _resetPlaybackState();
     try {
       await initialize();
@@ -185,6 +199,7 @@ class PlaybackController {
   void _onPositionChanged(Duration position) {
     if (_disposed) return;
     if (position > Duration.zero) {
+      _hasPlaybackProgress = true;
       final current = core.value;
       if (current.loading ||
           current.buffering ||
@@ -274,22 +289,70 @@ class PlaybackController {
   void _onError(String error) {
     if (_disposed) return;
     final safeError = sanitizePlaybackError(error);
+    final openGeneration = _openGeneration;
     _errorDebounceTimer?.cancel();
     _errorDebounceTimer = Timer(const Duration(milliseconds: 300), () {
-      if (_disposed) return;
-      if (_backend.isPlaying || timeline.value.duration > Duration.zero) {
+      if (_disposed || openGeneration != _openGeneration) return;
+      final hasPlaybackProgress =
+          _hasPlaybackProgress ||
+          _backend.currentPosition > Duration.zero ||
+          timeline.value.position > Duration.zero;
+      if (hasPlaybackProgress && _backend.isPlaying) {
         debugPrint('播放中忽略非致命错误: $safeError');
         return;
       }
-      core.value = core.value.copyWith(
-        loading: false,
-        buffering: false,
-        failed: true,
-        errorMessage: safeError,
-      );
-      unawaited(_backend.pause());
-      _danmakuController?.pause();
+      if (!hasPlaybackProgress &&
+          _backend.isPlaying &&
+          _openRetryCount == 0 &&
+          _lastOpenUri != null) {
+        _openRetryCount = 1;
+        debugPrint('媒体尚未开始播放，自动重试打开: $safeError');
+        unawaited(_retryLastOpen(openGeneration));
+        return;
+      }
+      _setPlaybackFailed(safeError);
     });
+  }
+
+  Future<void> _retryLastOpen(int openGeneration) async {
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      if (_disposed ||
+          _hasPlaybackProgress ||
+          openGeneration != _openGeneration) {
+        return;
+      }
+      final uri = _lastOpenUri;
+      if (uri == null) return;
+
+      _resetPlaybackState();
+      if (_backend.currentMediaUri != null) await _backend.stop();
+      await _backend.open(
+        uri,
+        autoplay: _lastOpenAutoplay,
+        httpHeaders: _lastOpenHeaders,
+      );
+      await _configurePlayer(preferences.value.defaultPlaybackSpeed);
+      if (!_disposed) {
+        core.value = core.value.copyWith(loading: false);
+      }
+    } catch (error) {
+      if (!_disposed && openGeneration == _openGeneration) {
+        _setPlaybackFailed(sanitizePlaybackError(error));
+      }
+    }
+  }
+
+  void _setPlaybackFailed(String error) {
+    if (_disposed) return;
+    core.value = core.value.copyWith(
+      loading: false,
+      buffering: false,
+      failed: true,
+      errorMessage: error,
+    );
+    unawaited(_backend.pause());
+    _danmakuController?.pause();
   }
 
   Future<void> play({bool repeat = false, bool hideControls = true}) async {
