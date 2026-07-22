@@ -55,6 +55,7 @@ class MediaKitPlaybackBackend implements PlaybackBackend {
   Stream<Duration> get buffered => _requiredPlayer.stream.buffer;
   @override
   Stream<bool> get buffering => _requiredPlayer.stream.buffering;
+  @override
   Stream<String> get errors => _requiredPlayer.stream.error;
   @override
   Stream<bool> get completed => _requiredPlayer.stream.completed;
@@ -65,6 +66,7 @@ class MediaKitPlaybackBackend implements PlaybackBackend {
   bool get isPlaying => _player?.state.playing ?? false;
   @override
   Duration get currentPosition => _player?.state.position ?? Duration.zero;
+  @override
   List<SubtitleTrack> get subtitleTracks =>
       _player?.state.tracks.subtitle ?? const <SubtitleTrack>[];
   @override

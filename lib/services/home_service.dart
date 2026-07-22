@@ -233,7 +233,7 @@ class HomeDataService {
   Future<void> loadSwipers({bool force = false}) async {
     try {
       swipers.value = _listOf(
-        await _cached('home_swiper', _fetchSwipers, force: force),
+        await _cached('home_swiper_backdrop_v1', _fetchSwipers, force: force),
       );
     } catch (error) {
       debugPrint('home swipers: $error');
@@ -245,21 +245,19 @@ class HomeDataService {
 
     await Future.wait(
       items.whereType<Map>().map((item) async {
-        final bgmId = BgmUtils.toInt(item['bgmId']);
+        var bgmId = BgmUtils.toInt(item['bgmId']);
+        if (bgmId == null) {
+          final subject = await BgmService.resolveSubject(
+            title: item['title']?.toString() ?? '',
+          );
+          bgmId = subject?.subjectId;
+          if (bgmId != null) item['bgmId'] = bgmId;
+        }
         if (bgmId == null) return;
 
-        final images = (await getAnimeDetail(bgmId))?['images'];
-        if (images is! Map) return;
-        final posters = images['posters'];
-        if (posters is! List || posters.isEmpty || posters.first is! Map) {
-          return;
-        }
-
-        final poster = posters.first as Map;
-        final url =
-            BgmUtils.trimmed(poster['url']) ??
-            BgmUtils.trimmed(poster['thumbnail']);
-        if (url != null) item['posterUrl'] = url;
+        final detail = await getAnimeDetail(bgmId);
+        final url = BgmUtils.pickAniBakaTmdbBackdrop(detail);
+        if (url != null) item['backdropUrl'] = url;
       }),
     );
     return items;

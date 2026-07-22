@@ -134,6 +134,37 @@ class BgmUtils {
     );
   }
 
+  /// Picks the poster supplied by AniBaka's TMDB image source.
+  ///
+  /// Prefer a Chinese poster when the API provides multiple TMDB variants.
+  static String? pickAniBakaTmdbPoster(Map<String, dynamic>? detail) {
+    return _pickAniBakaTmdbImage(detail, 'posters');
+  }
+
+  /// Picks the backdrop supplied by AniBaka's TMDB image source.
+  static String? pickAniBakaTmdbBackdrop(Map<String, dynamic>? detail) {
+    return _pickAniBakaTmdbImage(detail, 'backdrops');
+  }
+
+  static String? _pickAniBakaTmdbImage(
+    Map<String, dynamic>? detail,
+    String collection,
+  ) {
+    final images = asMap(detail?['images']);
+    final candidates = asMapList(images?[collection]);
+    Map<String, dynamic>? fallback;
+
+    for (final candidate in candidates) {
+      if (trimmed(candidate['source'])?.toLowerCase() != 'tmdb') continue;
+      fallback ??= candidate;
+      if (trimmed(candidate['lang'])?.toLowerCase() == 'zh') {
+        return trimmed(candidate['url']) ?? trimmed(candidate['thumbnail']);
+      }
+    }
+
+    return trimmed(fallback?['url']) ?? trimmed(fallback?['thumbnail']);
+  }
+
   static double? extractScore(dynamic rating) {
     final score = (rating is Map) ? rating['score'] : null;
     return (score is num && score > 0) ? score.toDouble() : null;

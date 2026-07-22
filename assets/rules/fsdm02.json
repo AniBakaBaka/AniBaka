@@ -1,0 +1,44 @@
+{
+  "format": "anx-rule/2",
+  "id": "fsdm02",
+  "name": "番薯动漫",
+  "baseUrl": "https://dm.fsdm02.com",
+  "iconUrl": "https://p0.ssl.qhimg.com/t016852bd7df93fb9de.png",
+  "description": "番薯动漫视频源",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.fsdm02.com/"
+  },
+  "search": [
+    {
+      "op": "fetch",
+      "url": "/api.php/provide/vod/?ac=list&wd={keyword}"
+    },
+    {
+      "op": "jsonSeries",
+      "listPath": "list",
+      "idKey": "vod_id",
+      "nameKey": "vod_name",
+      "imageKey": "vod_pic",
+      "descKey": "vod_remarks"
+    }
+  ],
+  "detail": [
+    {
+      "op": "fetch",
+      "url": "/api.php/provide/vod/?ac=detail&ids={seriesId:raw}"
+    },
+    {
+      "op": "maccmsApiEpisodes",
+      "directOnly": true,
+      "preferHls": true
+    }
+  ],
+  "play": [
+    {
+      "op": "template",
+      "value": "{episodeId:raw}"
+    }
+  ]
+}

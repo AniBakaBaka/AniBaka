@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -40,11 +39,7 @@ class AppFonts {
   static const List<Map<String, String>> displayFonts = [
     {'name': 'ZCOOL KuaiLe', 'label': '站酷快乐体', 'preview': '快乐追番'},
     {'name': 'ZCOOL XiaoWei', 'label': '站酷小薇体', 'preview': '文艺清新'},
-    {
-      'name': 'ZCOOL QingKe HuangYou',
-      'label': '站酷庆科黄油体',
-      'preview': '圆润可爱',
-    },
+    {'name': 'ZCOOL QingKe HuangYou', 'label': '站酷庆科黄油体', 'preview': '圆润可爱'},
   ];
 
   static const List<Map<String, String>> _allFonts = [
@@ -98,8 +93,7 @@ class AppFonts {
 
   static bool isSystemFont(String fontName) => fontName == systemFont;
 
-  static String getSavedFont() =>
-      Instances.sp.getString(spKey) ?? defaultFont;
+  static String getSavedFont() => Instances.sp.getString(spKey) ?? defaultFont;
 
   static double getSavedFontScale() =>
       Instances.sp.getDouble(fontScaleKey) ?? defaultFontScale;
@@ -126,25 +120,39 @@ class AppTheme {
 
   static String? _cachedFontFamily;
   static FontWeight? _cachedFontWeight;
+  static ColorScheme? _cachedLightColorScheme;
+  static ColorScheme? _cachedDarkColorScheme;
   static ({ThemeData light, ThemeData dark})? _cachedThemes;
 
   static ({ThemeData light, ThemeData dark}) resolve({
     required String fontFamily,
     required FontWeight fontWeight,
+    ColorScheme? lightColorScheme,
+    ColorScheme? darkColorScheme,
   }) {
     final cached = _cachedThemes;
     if (cached != null &&
         _cachedFontFamily == fontFamily &&
-        _cachedFontWeight == fontWeight) {
+        _cachedFontWeight == fontWeight &&
+        _cachedLightColorScheme == lightColorScheme &&
+        _cachedDarkColorScheme == darkColorScheme) {
       return cached;
     }
 
+    final lightBase = lightColorScheme == null
+        ? _lightBase
+        : _baseTheme(Brightness.light, dynamicColorScheme: lightColorScheme);
+    final darkBase = darkColorScheme == null
+        ? _darkBase
+        : _baseTheme(Brightness.dark, dynamicColorScheme: darkColorScheme);
     final themes = (
-      light: _withFont(_lightBase, fontFamily, fontWeight),
-      dark: _withFont(_darkBase, fontFamily, fontWeight),
+      light: _withFont(lightBase, fontFamily, fontWeight),
+      dark: _withFont(darkBase, fontFamily, fontWeight),
     );
     _cachedFontFamily = fontFamily;
     _cachedFontWeight = fontWeight;
+    _cachedLightColorScheme = lightColorScheme;
+    _cachedDarkColorScheme = darkColorScheme;
     return _cachedThemes = themes;
   }
 
@@ -184,9 +192,13 @@ class AppTheme {
     );
   }
 
-  static ThemeData _baseTheme(Brightness brightness) {
+  static ThemeData _baseTheme(
+    Brightness brightness, {
+    ColorScheme? dynamicColorScheme,
+  }) {
     final isDark = brightness == Brightness.dark;
     final colorScheme =
+        dynamicColorScheme?.copyWith(brightness: brightness) ??
         ColorScheme.fromSeed(
           seedColor: ThemeColors.primary,
           brightness: brightness,
@@ -201,9 +213,12 @@ class AppTheme {
               ? const Color(0xB3FFFFFF)
               : const Color(0x8A000000),
         );
+    final usesDynamicColor = dynamicColorScheme != null;
 
     return ThemeData(useMaterial3: true, colorScheme: colorScheme).copyWith(
-      scaffoldBackgroundColor: isDark
+      scaffoldBackgroundColor: usesDynamicColor
+          ? colorScheme.surface
+          : isDark
           ? Colors.black
           : const Color(0xFFF2F2F7),
       appBarTheme: AppBarTheme(
@@ -213,22 +228,28 @@ class AppTheme {
         backgroundColor: Colors.transparent,
         systemOverlayStyle: SystemUiOverlayStyle(
           statusBarColor: Colors.transparent,
-          statusBarIconBrightness: isDark
-              ? Brightness.light
-              : Brightness.dark,
+          statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
           statusBarBrightness: brightness,
         ),
       ),
-      iconTheme: IconThemeData(
-        color: isDark ? ThemeColors.contentDark : ThemeColors.contentLight,
-      ),
+      iconTheme: IconThemeData(color: colorScheme.onSurface),
       inputDecorationTheme: InputDecorationTheme(
-        fillColor: isDark ? const Color(0x1AFFFFFF) : const Color(0x0D000000),
+        fillColor: usesDynamicColor
+            ? colorScheme.surfaceContainerHighest
+            : isDark
+            ? const Color(0x1AFFFFFF)
+            : const Color(0x0D000000),
         hintStyle: TextStyle(
-          color: isDark ? const Color(0x61FFFFFF) : const Color(0x61000000),
+          color: usesDynamicColor
+              ? colorScheme.onSurfaceVariant.withValues(alpha: 0.6)
+              : isDark
+              ? const Color(0x61FFFFFF)
+              : const Color(0x61000000),
         ),
       ),
-      shadowColor: isDark
+      shadowColor: usesDynamicColor
+          ? colorScheme.shadow
+          : isDark
           ? const Color.fromRGBO(0, 0, 0, 0.6)
           : const Color.fromRGBO(0, 0, 0, 0.3),
       pageTransitionsTheme: _pageTransitionsTheme,

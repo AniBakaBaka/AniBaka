@@ -3,12 +3,19 @@ import 'package:baka/theme.dart';
 
 class ThemeService {
   static const _themeModeKey = 'theme_mode';
+  static const _dynamicColorKey = 'dynamic_color';
   static const _reduceVisualEffectsKey = 'reduce_visual_effects';
 
   static int getThemeMode() => Instances.sp.getInt(_themeModeKey) ?? 1;
 
   static Future<void> setThemeMode(int mode) =>
       Instances.sp.setInt(_themeModeKey, mode);
+
+  static bool getDynamicColor() =>
+      Instances.sp.getBool(_dynamicColorKey) ?? false;
+
+  static Future<void> setDynamicColor(bool value) =>
+      Instances.sp.setBool(_dynamicColorKey, value);
 
   static bool getReduceVisualEffects() =>
       Instances.sp.getBool(_reduceVisualEffectsKey) ?? false;

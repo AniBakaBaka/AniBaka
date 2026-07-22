@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:baka/services/danmaku_service.dart';
+import 'package:baka/services/playback_settings_service.dart';
 import 'package:baka/widgets/platform/tv/tv_focusable.dart';
 
 class TvSettingsPanel extends StatefulWidget {
@@ -236,6 +237,79 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
                       },
                     ),
                   ),
+                  const SizedBox(height: 8),
+
+                  ValueListenableBuilder<PlaybackPreferences>(
+                    valueListenable: _ctrl.preferences,
+                    builder: (context, preferences, _) => _TvSliderItem(
+                      icon: Icons.memory_rounded,
+                      title: '硬件解码',
+                      value: PlaybackSettingsService.hwdecModeOptions
+                          .indexOf(preferences.hwdecMode)
+                          .toDouble(),
+                      min: 0,
+                      max: (PlaybackSettingsService.hwdecModeOptions.length - 1)
+                          .toDouble(),
+                      step: 1,
+                      displayValue:
+                          PlaybackSettingsService.hwdecModeLabels[preferences
+                              .hwdecMode] ??
+                          preferences.hwdecMode,
+                      onChanged: (v) {
+                        final index = v.toInt();
+                        if (index >= 0 &&
+                            index <
+                                PlaybackSettingsService
+                                    .hwdecModeOptions
+                                    .length) {
+                          _ctrl.updatePreferences(
+                            preferences.copyWith(
+                              hwdecMode: PlaybackSettingsService
+                                  .hwdecModeOptions[index],
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  ValueListenableBuilder<PlaybackPreferences>(
+                    valueListenable: _ctrl.preferences,
+                    builder: (context, preferences, _) => _TvSliderItem(
+                      icon: Icons.monitor_rounded,
+                      title: '视频渲染器',
+                      value: PlaybackSettingsService.videoRendererOptions
+                          .indexOf(preferences.videoRenderer)
+                          .toDouble(),
+                      min: 0,
+                      max:
+                          (PlaybackSettingsService.videoRendererOptions.length -
+                                  1)
+                              .toDouble(),
+                      step: 1,
+                      displayValue:
+                          PlaybackSettingsService
+                              .videoRendererLabels[preferences.videoRenderer] ??
+                          preferences.videoRenderer,
+                      onChanged: (value) {
+                        final index = value.toInt();
+                        if (index >= 0 &&
+                            index <
+                                PlaybackSettingsService
+                                    .videoRendererOptions
+                                    .length) {
+                          _ctrl.updatePreferences(
+                            preferences.copyWith(
+                              videoRenderer: PlaybackSettingsService
+                                  .videoRendererOptions[index],
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
 
                   const SizedBox(height: 32),
                 ],

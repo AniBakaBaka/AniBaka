@@ -2,10 +2,47 @@
 
 #include <flutter_windows.h>
 #include <io.h>
+#include <shlobj.h>
 #include <stdio.h>
 #include <windows.h>
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
+
+namespace {
+
+std::wstring ResolveStartupLogPath() {
+  PWSTR documents_path = nullptr;
+  if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_Documents, KF_FLAG_DEFAULT,
+                                       nullptr, &documents_path))) {
+    std::filesystem::path log_path(documents_path);
+    ::CoTaskMemFree(documents_path);
+    return (log_path / L"baka" / L"logs" / L"startup.log").wstring();
+  }
+
+  wchar_t temp_path[MAX_PATH];
+  if (::GetTempPathW(MAX_PATH, temp_path) != 0) {
+    return (std::filesystem::path(temp_path) / L"baka_startup.log").wstring();
+  }
+  return L"baka_startup.log";
+}
+
+std::string StartupTimestamp() {
+  const auto now = std::chrono::system_clock::now();
+  const std::time_t time = std::chrono::system_clock::to_time_t(now);
+  std::tm local_time = {};
+  localtime_s(&local_time, &time);
+
+  std::ostringstream stream;
+  stream << std::put_time(&local_time, "%Y-%m-%d %H:%M:%S");
+  return stream.str();
+}
+
+}  // namespace
 
 void CreateAndAttachConsole() {
   if (::AllocConsole()) {
@@ -62,4 +99,22 @@ std::string Utf8FromUtf16(const wchar_t* utf16_string) {
     return std::string();
   }
   return utf8_string;
+}
+
+std::wstring GetStartupLogPath() {
+  static const std::wstring path = ResolveStartupLogPath();
+  return path;
+}
+
+void InitializeStartupLog() {
+  const std::filesystem::path path(GetStartupLogPath());
+  std::error_code error;
+  std::filesystem::create_directories(path.parent_path(), error);
+  std::ofstream(path, std::ios::trunc)
+      << StartupTimestamp() << " [INFO] Native startup log initialized\n";
+}
+
+void WriteStartupLog(const std::string& message) {
+  std::ofstream(GetStartupLogPath(), std::ios::app)
+      << StartupTimestamp() << " [INFO] " << message << '\n';
 }

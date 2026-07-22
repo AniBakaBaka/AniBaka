@@ -439,9 +439,22 @@ jobs:
             libgtk-3-dev \
             liblzma-dev \
             libasound2-dev \
+            libmpv-dev \
+            mpv \
             plocate \
             p7zip-full
           sudo updatedb
+
+      - name: Verify Linux native dependencies
+        run: |
+          pkg-config --print-errors --exists gtk+-3.0 alsa mpv
+          echo "mpv $(pkg-config --modversion mpv)"
+          echo "alsa $(pkg-config --modversion alsa)"
+          MPV_LIBDIR=$(pkg-config --variable=libdir mpv)
+          ALSA_LIBDIR=$(pkg-config --variable=libdir alsa)
+          test -f "$MPV_LIBDIR/libmpv.so"
+          test -f "$ALSA_LIBDIR/libasound.so"
+          file "$MPV_LIBDIR/libmpv.so" "$ALSA_LIBDIR/libasound.so"
 
       - name: Install appimagetool
         env:

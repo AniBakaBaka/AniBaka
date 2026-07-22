@@ -30,6 +30,48 @@ class PlaybackSettingsService {
   static const String _enableAnime4KKey = 'player_enableAnime4K';
   static const String _anime4KLevelKey = 'player_anime4KLevel';
   static const String _showSubtitleKey = 'player_showSubtitle';
+  static const String _hwdecModeKey = 'player_hwdecMode';
+  static const String _videoRendererKey = 'player_videoRenderer';
+
+  static const List<String> hwdecModeOptions = <String>[
+    'auto',
+    'auto-safe',
+    'no',
+  ];
+
+  static const Map<String, String> hwdecModeLabels = <String, String>{
+    'auto': '自动',
+    'auto-safe': '安全模式',
+    'no': '软件解码',
+  };
+
+  static String normalizeHwdecMode(String? mode) {
+    if (mode != null && hwdecModeOptions.contains(mode)) return mode;
+    return Instances.isTV ? 'auto-safe' : 'auto';
+  }
+
+  static const List<String> videoRendererOptions = <String>[
+    'auto',
+    'compatibility',
+    'quality',
+  ];
+
+  static const Map<String, String> videoRendererLabels = <String, String>{
+    'auto': '自动',
+    'compatibility': 'GPU 兼容',
+    'quality': 'GPU 高质量',
+  };
+
+  static String normalizeVideoRenderer(String? renderer) {
+    // Migrate the old vo=gpu/gpu-next values. Embedded media_kit playback must
+    // keep vo=libmpv; these modes now select safe libmpv render profiles.
+    if (renderer == 'gpu') return 'compatibility';
+    if (renderer == 'gpu-next') return 'quality';
+    if (renderer != null && videoRendererOptions.contains(renderer)) {
+      return renderer;
+    }
+    return 'auto';
+  }
 
   static const double defaultPlaybackSpeed = 1.0;
   static const List<double> playbackSpeedOptions = <double>[
@@ -115,6 +157,8 @@ class PlaybackSettingsService {
       anime4KLevel: sp.getString(_anime4KLevelKey) ?? 'medium',
       showSubtitle: sp.getBool(_showSubtitleKey) ?? true,
       subtitleConfig: subtitleConfig,
+      hwdecMode: normalizeHwdecMode(sp.getString(_hwdecModeKey)),
+      videoRenderer: normalizeVideoRenderer(sp.getString(_videoRendererKey)),
     );
   }
 
@@ -182,6 +226,12 @@ class PlaybackSettingsService {
     }
     if (previous.subtitleConfig != next.subtitleConfig) {
       writes.add(next.subtitleConfig.save());
+    }
+    if (previous.hwdecMode != next.hwdecMode) {
+      writes.add(sp.setString(_hwdecModeKey, next.hwdecMode));
+    }
+    if (previous.videoRenderer != next.videoRenderer) {
+      writes.add(sp.setString(_videoRendererKey, next.videoRenderer));
     }
     return Future.wait(writes);
   }

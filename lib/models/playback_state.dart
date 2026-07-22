@@ -156,6 +156,8 @@ class PlaybackPreferences {
     this.subtitleConfig = const SubtitleConfig(),
     this.videoFit = BoxFit.contain,
     this.videoFitDescription = '\u753b\u9762',
+    this.hwdecMode = 'auto',
+    this.videoRenderer = 'auto',
   });
 
   final bool rememberLastPosition;
@@ -177,6 +179,8 @@ class PlaybackPreferences {
   final SubtitleConfig subtitleConfig;
   final BoxFit videoFit;
   final String videoFitDescription;
+  final String hwdecMode;
+  final String videoRenderer;
 
   PlaybackPreferences copyWith({
     bool? rememberLastPosition,
@@ -198,6 +202,8 @@ class PlaybackPreferences {
     SubtitleConfig? subtitleConfig,
     BoxFit? videoFit,
     String? videoFitDescription,
+    String? hwdecMode,
+    String? videoRenderer,
   }) {
     return PlaybackPreferences(
       rememberLastPosition: rememberLastPosition ?? this.rememberLastPosition,
@@ -221,6 +227,8 @@ class PlaybackPreferences {
       subtitleConfig: subtitleConfig ?? this.subtitleConfig,
       videoFit: videoFit ?? this.videoFit,
       videoFitDescription: videoFitDescription ?? this.videoFitDescription,
+      hwdecMode: hwdecMode ?? this.hwdecMode,
+      videoRenderer: videoRenderer ?? this.videoRenderer,
     );
   }
 
@@ -246,10 +254,12 @@ class PlaybackPreferences {
           showSubtitle == other.showSubtitle &&
           subtitleConfig == other.subtitleConfig &&
           videoFit == other.videoFit &&
-          videoFitDescription == other.videoFitDescription;
+          videoFitDescription == other.videoFitDescription &&
+          hwdecMode == other.hwdecMode &&
+          videoRenderer == other.videoRenderer;
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     rememberLastPosition,
     autoFullscreen,
     enableSkipOpEd,
@@ -269,7 +279,9 @@ class PlaybackPreferences {
     subtitleConfig,
     videoFit,
     videoFitDescription,
-  );
+    hwdecMode,
+    videoRenderer,
+  ]);
 }
 
 @immutable

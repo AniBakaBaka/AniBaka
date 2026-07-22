@@ -75,7 +75,8 @@ class _SwiperBannerState extends State<SwiperBanner> {
     return List<String>.generate(items.length, (index) {
       final item = items[index];
       if (item is! Map) return getSuo(item?.toString());
-      return BgmUtils.trimmed(item['posterUrl']) ??
+      return BgmUtils.trimmed(item['backdropUrl']) ??
+          BgmUtils.trimmed(item['posterUrl']) ??
           BgmUtils.resolveCoverImage(item) ??
           getSuo(item['content']?.toString() ?? '');
     }, growable: false);

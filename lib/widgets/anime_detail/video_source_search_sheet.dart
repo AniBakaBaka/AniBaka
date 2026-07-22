@@ -90,7 +90,12 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
         if (widget.headlessMode) {
           widget.onMatchFailed?.call();
         } else {
-          Navigator.of(context).pop('failed');
+          if (widget.onMatchFailed != null) {
+            widget.onMatchFailed!.call();
+          } else {
+            // 保留原有默认行为以防破坏其他地方的逻辑
+            Navigator.of(context).pop('failed');
+          }
         }
       },
     );

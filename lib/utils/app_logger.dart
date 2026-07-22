@@ -28,7 +28,7 @@ class AppLogger {
   static const int _maxLogFileBytes = 2 * 1024 * 1024;
   static const int _maxLogFiles = 5;
   static const String _activeLogFileName = 'app.log';
-  static const LogLevel _minimumPersistedLevel = LogLevel.warning;
+  static const LogLevel _minimumPersistedLevel = LogLevel.info;
 
   static final AppLogger instance = AppLogger._();
 
@@ -89,7 +89,7 @@ class AppLogger {
 
     _initialized = true;
     _installGlobalErrorHandlers();
-    debug('Logger initialized (${_logFile?.path})', tag: 'Logger');
+    info('Logger initialized (${_logFile?.path})', tag: 'Logger');
   }
 
   void debug(Object? message, {String? tag, Object? error, StackTrace? stackTrace}) =>

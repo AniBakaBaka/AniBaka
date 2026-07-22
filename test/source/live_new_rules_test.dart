@@ -175,8 +175,8 @@ Future<void> _expectMediaReadable(
   try {
     final isRemote =
         mediaUrl.startsWith('http://') || mediaUrl.startsWith('https://');
-    late final Uri manifestUri;
-    late final String manifest;
+    late Uri manifestUri;
+    late String manifest;
     if (isRemote) {
       manifestUri = Uri.parse(mediaUrl);
       final request = await client.getUrl(manifestUri);
@@ -197,6 +197,26 @@ Future<void> _expectMediaReadable(
       expect(await file.exists(), isTrue, reason: '本地媒体清单不存在: $mediaUrl');
       manifestUri = file.uri;
       manifest = await file.readAsString();
+    }
+    for (var depth = 0; depth < 3; depth++) {
+      if (manifest.contains('#EXT-X-MEDIA-SEQUENCE:')) break;
+      if (!manifest.contains('#EXT-X-STREAM-INF:')) break;
+      final variants = const LineSplitter()
+          .convert(manifest)
+          .map((line) => line.trim())
+          .where((line) => line.isNotEmpty && !line.startsWith('#'))
+          .toList(growable: false);
+      expect(variants, isNotEmpty, reason: 'HLS 主清单没有子清单');
+      manifestUri = manifestUri.resolve(variants.first);
+      final request = await client.getUrl(manifestUri);
+      headers.forEach(request.headers.set);
+      final response = await request.close();
+      expect(
+        response.statusCode,
+        anyOf(HttpStatus.ok, HttpStatus.partialContent),
+        reason: 'HLS 子清单不可访问: $manifestUri',
+      );
+      manifest = await utf8.decoder.bind(response).join();
     }
     expect(manifest, contains('#EXT-X-MEDIA-SEQUENCE:0'));
     expect(manifest, contains('#EXT-X-ENDLIST'));
@@ -305,6 +325,16 @@ void main() {
         'sorani',
         () => _probe('sorani.json', '海贼王', verifyMedia: true),
         timeout: const Timeout(Duration(minutes: 2)),
+      );
+      test(
+        'jcydmz',
+        () => _probe('jcydmz.json', '\u6d77\u8d3c\u738b', verifyMedia: true),
+        timeout: const Timeout(Duration(minutes: 2)),
+      );
+      test(
+        'fsdm02',
+        () => _probe('fsdm02.json', '咔嗒咔嗒', verifyMedia: true),
+        timeout: const Timeout(Duration(minutes: 4)),
       );
       test(
         'mikan',

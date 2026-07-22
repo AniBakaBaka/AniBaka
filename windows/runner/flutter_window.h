@@ -23,9 +23,11 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
-  // Called when the first Flutter frame is rendered OR when the fallback
-  // timer fires — whichever comes first.  Shows the window exactly once.
+  // Called when the first Flutter frame is rendered.
   void OnFirstFrame();
+
+  // Shows the native host window exactly once.
+  void EnsureVisible();
 
   // The project to run.
   flutter::DartProject project_;

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_windows/webview_windows.dart' as webview_windows;
+import 'package:baka/instance.dart';
 
 /// Cancellation scope for queued background WebView work.
 ///
@@ -420,7 +421,9 @@ class WebViewAdapter {
       try {
         final controller = _mobileController ??= WebViewController()
           ..setJavaScriptMode(JavaScriptMode.unrestricted);
-        await controller.setUserAgent(userAgent);
+        // TV 环境下强制使用桌面 UA 伪装，以绕过大部分针对移动端的反爬虫及验证码检测
+        final effectiveUserAgent = Instances.isTV ? desktopUserAgent : userAgent;
+        await controller.setUserAgent(effectiveUserAgent);
         if (sniff) {
           // 移动端没有文档创建期注入，在导航前后各补一次（脚本幂等）。
           controller.setNavigationDelegate(

@@ -1,0 +1,40 @@
+{
+  "format": "anx-rule/2",
+  "id": "jcydmz",
+  "name": "囧次元",
+  "baseUrl": "https://www.jcydmz.com",
+  "iconUrl": "https://www.jcydmz.com/favicon.ico",
+  "description": "囧次元动漫网页版视频源。",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "Referer": "https://www.jcydmz.com/"
+  },
+  "search": [
+    {
+      "op": "maccmsSuggest",
+      "detailUrlTemplate": "/index.php/vod/detail/id/{id}.html"
+    }
+  ],
+  "detail": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "episodes",
+      "tabSelectors": [
+        ".playlist-tab li"
+      ],
+      "listSelectors": [
+        "ul.ewave-playlist-content"
+      ]
+    }
+  ],
+  "play": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "playerAaaa"
+    }
+  ]
+}

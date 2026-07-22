@@ -9,6 +9,7 @@ import 'package:baka/source/video_url_extractor.dart';
 import 'package:baka/source/webview_adapter.dart';
 import 'package:baka/services/bgm_service.dart';
 import 'package:baka/services/system_proxy_service.dart';
+import 'package:baka/instance.dart';
 import 'package:baka/source/runtime/scheduler_interceptor.dart';
 
 /// Base class for all video source adapters.
@@ -162,6 +163,10 @@ abstract class AdapterBase {
       return false;
     }
     if (VideoUrlExtractor.isSignedCdnUrl(url)) return false;
+    
+    // TV 环境下网络通常较差，跳过验证以加速播放并减少误判
+    if (Instances.isTV) return false;
+
     try {
       final headers = mediaValidationHeaders;
       var resp = await _validationDio

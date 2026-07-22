@@ -15,6 +15,17 @@ void main() {
     expect(ThemeService.getReduceVisualEffects(), isFalse);
   });
 
+  test('dynamic color is disabled by default', () {
+    expect(ThemeService.getDynamicColor(), isFalse);
+  });
+
+  test('dynamic color preference persists', () async {
+    await ThemeService.setDynamicColor(true);
+
+    expect(ThemeService.getDynamicColor(), isTrue);
+    expect(Instances.sp.getBool('dynamic_color'), isTrue);
+  });
+
   test('reduced visual effects preference persists', () async {
     await ThemeService.setReduceVisualEffects(true);
 

@@ -303,6 +303,9 @@ class PipelineInterpreter {
       case 'jsonEpisodes':
         _opJsonEpisodes(step, ctx);
         break;
+      case 'maccmsApiEpisodes':
+        _opMaccmsApiEpisodes(step, ctx);
+        break;
       case 'videoUrl':
         _opVideoUrl(step, ctx);
         break;
@@ -1103,6 +1106,83 @@ class PipelineInterpreter {
       }
     }
     ctx.emitSources(result);
+  }
+
+  /// `maccmsApiEpisodes`：解析 MacCMS provide API 的播放线路。
+  /// `vod_play_url` 以 `$$$` 分线路、`#` 分剧集、`$` 分标题与地址。
+  void _opMaccmsApiEpisodes(PipelineStep step, _PipelineContext ctx) {
+    ctx.beginSink();
+    final data = _asJson(ctx.value);
+    final list = _jsonPath(data, step.str('listPath') ?? 'list');
+    if (list is! List || list.isEmpty) return;
+
+    final requestedIndex = step.intValue('index') ?? 0;
+    final index = requestedIndex.clamp(0, list.length - 1).toInt();
+    final item = list[index];
+    if (item is! Map) return;
+
+    final sourceNames =
+        item[step.str('fromKey') ?? 'vod_play_from']?.toString().split(
+          r'$$$',
+        ) ??
+        const <String>[];
+    final rawGroups = item[step.str('urlKey') ?? 'vod_play_url']
+        ?.toString()
+        .split(r'$$$');
+    if (rawGroups == null) return;
+
+    final directOnly = step.flag('directOnly');
+    final sources = <Source>[];
+    for (var sourceIndex = 0; sourceIndex < rawGroups.length; sourceIndex++) {
+      final episodes = <Episode>[];
+      for (final rawEntry in rawGroups[sourceIndex].split('#')) {
+        final separator = rawEntry.indexOf(r'$');
+        if (separator <= 0 || separator >= rawEntry.length - 1) continue;
+        final title = rawEntry.substring(0, separator).trim();
+        final rawId = rawEntry
+            .substring(separator + 1)
+            .trim()
+            .replaceAll(r'\/', '/');
+        if (rawId.isEmpty) continue;
+        final isDirect = RegExp(
+          r'^https?://',
+          caseSensitive: false,
+        ).hasMatch(rawId);
+        if (directOnly && !isDirect) continue;
+        final episodeId = isDirect
+            ? ctx.host.normalizeUrl(rawId, ctx.pageUrl)
+            : rawId;
+        episodes.add(
+          Episode(
+            episodeId,
+            episodes.length,
+            title.isEmpty ? 'Episode ${episodes.length + 1}' : title,
+          ),
+        );
+      }
+      if (episodes.isEmpty) continue;
+      final rawName = sourceIndex < sourceNames.length
+          ? sourceNames[sourceIndex].trim()
+          : '';
+      sources.add(
+        Source(episodes, rawName.isEmpty ? '线路${sourceIndex + 1}' : rawName),
+      );
+    }
+    if (step.flag('preferHls')) {
+      final hlsSources = sources.where(
+        (source) => source.episodes.any(
+          (episode) => episode.episodeId.toLowerCase().contains('.m3u8'),
+        ),
+      );
+      final otherSources = sources.where(
+        (source) => !source.episodes.any(
+          (episode) => episode.episodeId.toLowerCase().contains('.m3u8'),
+        ),
+      );
+      ctx.emitSources([...hlsSources, ...otherSources]);
+      return;
+    }
+    ctx.emitSources(sources);
   }
 
   List<Episode> _buildJsonEpisodes(

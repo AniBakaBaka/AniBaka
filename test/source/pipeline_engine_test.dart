@@ -430,6 +430,42 @@ void main() {
     expect(sources.single.episodes.last.name, '第0002集');
   });
 
+  test('maccmsApiEpisodes：过滤非直连并保留线路与剧集名', () async {
+    final host = FakeHost({
+      'https://example.com/api.php/provide/vod/?ac=detail&ids=1':
+          r'{"list":[{"vod_play_from":"解析线$$$直连线$$$HLS线","vod_play_url":"第1集$opaque-token$$$第1集$https:\/\/cdn.example.com\/1.mp4$$$第2集$https:\/\/cdn.example.com\/2.m3u8"}]}',
+    });
+    final rule = SourceRule.fromJson({
+      'format': kSourceRuleFormatV2,
+      'id': 's',
+      'name': 'S',
+      'baseUrl': 'https://example.com',
+      'search': [],
+      'detail': [
+        {
+          'op': 'fetch',
+          'url': '/api.php/provide/vod/?ac=detail&ids={seriesId:raw}',
+        },
+        {'op': 'maccmsApiEpisodes', 'directOnly': true, 'preferHls': true},
+      ],
+      'play': [
+        {'op': 'template', 'value': '{episodeId:raw}'},
+      ],
+    });
+
+    final sources = await interp.runDetail(rule, host, '1');
+    expect(sources, hasLength(2));
+    expect(sources.first.sourceName, 'HLS线');
+    expect(sources.last.sourceName, '直连线');
+    expect(sources.last.episodes, hasLength(1));
+    expect(sources.last.episodes.first.name, '第1集');
+    expect(
+      sources.last.episodes.first.episodeId,
+      'https://cdn.example.com/1.mp4',
+    );
+    expect(sources.first.episodes.single.name, '第2集');
+  });
+
   test('baseN：编码/解码往返一致（fcwdm 短码字母表）', () async {
     const alphabet =
         'CSqxIWYbLFQjsvy9RZdDu0HPait4MTU7NVenrwABXf2GK8EJOhklmp56cg13oz';

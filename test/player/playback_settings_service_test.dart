@@ -31,6 +31,23 @@ void main() {
     expect(Instances.sp.getKeys(), isEmpty);
   });
 
+  test('persists and migrates the video renderer selection', () async {
+    const previous = PlaybackPreferences();
+    final next = previous.copyWith(videoRenderer: 'quality');
+
+    await PlaybackSettingsService.saveChanges(previous, next);
+
+    expect(Instances.sp.getString('player_videoRenderer'), 'quality');
+    expect(
+      PlaybackSettingsService.normalizeVideoRenderer('gpu'),
+      'compatibility',
+    );
+    expect(
+      PlaybackSettingsService.normalizeVideoRenderer('gpu-next'),
+      'quality',
+    );
+  });
+
   test(
     'persists subtitle configuration with the preference snapshot',
     () async {

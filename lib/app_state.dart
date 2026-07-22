@@ -24,6 +24,7 @@ class AppState extends GetxService {
 
   // 主题
   final _themeMode = 1.obs;
+  final _dynamicColor = false.obs;
   final _fontFamily = ''.obs;
   final _fontScale = 1.0.obs;
   final _fontWeightIndex = 3.obs;
@@ -39,6 +40,7 @@ class AppState extends GetxService {
   int get fontWeightIndex => _fontWeightIndex.value;
   FontWeight get fontWeight => AppFonts.availableWeights[fontWeightIndex];
   int get themeMode => _themeMode.value;
+  bool get dynamicColor => _dynamicColor.value;
   bool get reduceVisualEffects => _reduceVisualEffects.value;
 
   ThemeMode get currentThemeMode {
@@ -59,6 +61,7 @@ class AppState extends GetxService {
     isHideBottomNavOnScroll.value =
         Instances.sp.getBool('hide_bottom_nav_on_scroll') ?? true;
     _themeMode.value = ThemeService.getThemeMode();
+    _dynamicColor.value = ThemeService.getDynamicColor();
     _fontFamily.value = ThemeService.getFontFamily();
     _fontScale.value = ThemeService.getFontScale();
     _fontWeightIndex.value = ThemeService.getFontWeightIndex();
@@ -143,6 +146,11 @@ class AppState extends GetxService {
     if (mode < 0 || mode > 2) return;
     _themeMode.value = mode;
     ThemeService.setThemeMode(mode);
+  }
+
+  void setDynamicColor(bool value) {
+    _dynamicColor.value = value;
+    ThemeService.setDynamicColor(value);
   }
 
   void setFontFamily(String fontFamily) {

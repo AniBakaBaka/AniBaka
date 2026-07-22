@@ -39,6 +39,7 @@ class RuleValidator {
     'jsonSeries',
     'episodes',
     'jsonEpisodes',
+    'maccmsApiEpisodes',
     'videoUrl',
     'setMediaHeaders',
     'playerAaaa',

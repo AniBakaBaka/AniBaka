@@ -121,6 +121,15 @@ class AdapterRegistry {
       factory: () => _createBundledRuleAdapter('dm84'),
     ),
     AdapterDescriptor(
+      key: 'fsdm02',
+      displayName: '番薯动漫',
+      playerContent: '来源: 番薯动漫。',
+      icon: Icons.play_circle_fill_rounded,
+      color: const Color(0xFFFF8A65),
+      statusLabel: '第三方源',
+      factory: () => _createBundledRuleAdapter('fsdm02'),
+    ),
+    AdapterDescriptor(
       key: 'enlienli',
       displayName: 'OmoFun',
       playerContent: '来源: OmoFun Enlienli。',
@@ -147,6 +156,16 @@ class AdapterRegistry {
       color: const Color(0xFF66BB6A),
       statusLabel: '第三方源',
       factory: () => _createBundledRuleAdapter('lm6'),
+    ),
+    AdapterDescriptor(
+      key: 'jcydmz',
+      displayName: '囧次元',
+      playerContent: '来源: 囧次元。',
+      idPattern: r'/vod/detail/id/(\d+)',
+      icon: Icons.smart_display_rounded,
+      color: const Color(0xFFEF5350),
+      statusLabel: '第三方源',
+      factory: () => _createBundledRuleAdapter('jcydmz'),
     ),
     AdapterDescriptor(
       key: 'mgnacg',

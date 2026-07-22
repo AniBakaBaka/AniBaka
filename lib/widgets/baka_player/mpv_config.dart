@@ -17,9 +17,52 @@ const playerProperties = <String, String>{
   'demuxer-max-back-bytes': '4194304',
   'demuxer-hysteresis-secs': '3',
   'network-timeout': '30',
+  'tls-verify': 'no',
+  'user-agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
   'demuxer-lavf-o':
-      'reconnect=1,multiple_requests=1,retry_open=3,hls_wrap=0,hls_allow_cache=1,fflags=+igndts+ignidx',
+      'reconnect=1,multiple_requests=1,retry_open=3,hls_wrap=0,hls_allow_cache=1,fflags=+igndts+ignidx,tls_verify=0',
 };
+
+/// Build player properties with configurable decode and render profiles.
+///
+/// [hwdecMode] accepts 'auto', 'auto-safe', or 'no'.
+/// [videoRenderer] deliberately changes libmpv's scaling profile instead of
+/// `vo`: media_kit's external texture requires `vo=libmpv` on Windows.
+Map<String, String> buildPlayerProperties({
+  String hwdecMode = 'auto',
+  String videoRenderer = 'auto',
+}) {
+  return <String, String>{
+    ...playerProperties,
+    'hwdec': hwdecMode,
+    ...buildVideoRendererProperties(videoRenderer),
+  };
+}
+
+Map<String, String> buildVideoRendererProperties(String renderer) {
+  if (renderer == 'quality') {
+    return const <String, String>{
+      'scale': 'ewa_lanczossharp',
+      'cscale': 'ewa_lanczossharp',
+      'dscale': 'mitchell',
+      'correct-downscaling': 'yes',
+      'linear-downscaling': 'yes',
+      'sigmoid-upscaling': 'yes',
+    };
+  }
+
+  // Keep auto and compatibility conservative. These values also reset every
+  // quality override when the selection is changed while playback is active.
+  return const <String, String>{
+    'scale': 'bilinear',
+    'cscale': 'bilinear',
+    'dscale': 'bilinear',
+    'correct-downscaling': 'no',
+    'linear-downscaling': 'no',
+    'sigmoid-upscaling': 'no',
+  };
+}
 
 String sanitizePlaybackError(Object error) {
   var message = error.toString();

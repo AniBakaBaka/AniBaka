@@ -8,6 +8,7 @@ import 'package:baka/api/post.dart';
 import 'package:baka/services/bgm_service.dart';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/services/source_adapter_service.dart';
+import 'package:baka/utils/bgm_utils.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SearchService {
@@ -156,7 +157,8 @@ class SearchService {
   Future<List<dynamic>> _searchSelectedSource(String searchKey) async {
     try {
       if (selectedSourceIndex == 0) {
-        return BgmService.searchSubjects(searchKey);
+        final subjects = await BgmService.searchSubjects(searchKey);
+        return Future.wait(subjects.map(_withAniBakaPoster));
       }
 
       final builtinSource = _selectedBuiltinSource();
@@ -182,6 +184,22 @@ class SearchService {
       debugPrint('Search failed for $selectedSourceLabel: $error');
       return const [];
     }
+  }
+
+  Future<BgmSubjectInfo> _withAniBakaPoster(BgmSubjectInfo subject) async {
+    final detail = await getAnimeDetail(subject.subjectId);
+    final tmdbPoster = BgmUtils.pickAniBakaTmdbPoster(detail);
+
+    return BgmSubjectInfo(
+      subjectId: subject.subjectId,
+      name: subject.name,
+      nameCn: subject.nameCn,
+      summary: subject.summary,
+      imageUrl: tmdbPoster ?? subject.imageUrl,
+      score: subject.score,
+      aliases: subject.aliases,
+      hasDetail: subject.hasDetail,
+    );
   }
 
   Future<Map<String, dynamic>?> buildPlayerData(

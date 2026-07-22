@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   bitsdojo_window_linux
+  dynamic_color
   flutter_volume_controller
   fullscreen_window
   media_kit_libs_linux

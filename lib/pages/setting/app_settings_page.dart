@@ -330,6 +330,15 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                       ),
                     ),
                     Obx(
+                      () => SettingsSwitchTile(
+                        title: '动态取色',
+                        subtitle: '使用系统壁纸或强调色生成 Material 3 配色',
+                        value: _appState.dynamicColor,
+                        icon: Icons.palette_outlined,
+                        onChanged: _appState.setDynamicColor,
+                      ),
+                    ),
+                    Obx(
                       () => SettingsTile(
                         title: '字体',
                         value: AppFonts.getLabelForFont(_appState.fontFamily),

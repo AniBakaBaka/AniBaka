@@ -16,4 +16,14 @@ std::string Utf8FromUtf16(const wchar_t* utf16_string);
 // encoded in UTF-8. Returns an empty std::vector<std::string> on failure.
 std::vector<std::string> GetCommandLineArguments();
 
+// Initializes the native startup log. This log is available even when the
+// Flutter engine cannot render a window.
+void InitializeStartupLog();
+
+// Appends a line to the native startup log.
+void WriteStartupLog(const std::string& message);
+
+// Returns the native startup log path shown in recovery dialogs.
+std::wstring GetStartupLogPath();
+
 #endif  // RUNNER_UTILS_H_

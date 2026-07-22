@@ -1,4 +1,5 @@
 import 'package:baka/models/playback_state.dart';
+import 'package:baka/services/playback_settings_service.dart';
 import 'package:flutter/material.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:baka/utils/toast_utils.dart';
@@ -96,6 +97,9 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                               current.copyWith(showNextEpisodeButton: value),
                         ),
                       ),
+                      _buildHwdecSelectTile(preferences.hwdecMode),
+                      const PanelDivider(),
+                      _buildVideoRendererSelectTile(preferences.videoRenderer),
                     ],
                   ),
 
@@ -289,6 +293,118 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                 onChanged: (v) {
                   if (v != null) {
                     onChanged(v);
+                  }
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHwdecSelectTile(String currentMode) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text(
+            '硬件解码',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          Container(
+            height: 28,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: currentMode,
+                dropdownColor: const Color(0xFF2C2C2E),
+                icon: const Icon(
+                  Icons.unfold_more,
+                  color: Colors.white60,
+                  size: 16,
+                ),
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                isDense: true,
+                items: [
+                  for (final mode in PlaybackSettingsService.hwdecModeOptions)
+                    DropdownMenuItem(
+                      value: mode,
+                      child: Text(
+                        PlaybackSettingsService.hwdecModeLabels[mode] ?? mode,
+                      ),
+                    ),
+                ],
+                onChanged: (v) {
+                  if (v != null) {
+                    _update((current) => current.copyWith(hwdecMode: v));
+                  }
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVideoRendererSelectTile(String currentRenderer) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text(
+            '视频渲染器',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          Container(
+            height: 28,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: currentRenderer,
+                dropdownColor: const Color(0xFF2C2C2E),
+                icon: const Icon(
+                  Icons.unfold_more,
+                  color: Colors.white60,
+                  size: 16,
+                ),
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                isDense: true,
+                items: [
+                  for (final renderer
+                      in PlaybackSettingsService.videoRendererOptions)
+                    DropdownMenuItem(
+                      value: renderer,
+                      child: Text(
+                        PlaybackSettingsService.videoRendererLabels[renderer] ??
+                            renderer,
+                      ),
+                    ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    _update(
+                      (current) => current.copyWith(videoRenderer: value),
+                    );
                   }
                 },
               ),

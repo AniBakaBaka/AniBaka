@@ -11,6 +11,7 @@ import 'package:baka/services/bgm_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/reg_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
+import 'package:baka/services/playback_settings_service.dart';
 import 'package:baka/widgets/anime_detail/video_source_search_sheet.dart';
 import 'package:baka/widgets/anime/post_card.dart';
 import 'package:baka/widgets/common/shimmer.dart';
@@ -195,6 +196,11 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
           if (_bgmCoverUrl != null && _bgmCoverUrl!.isNotEmpty)
             'bgmImageUrl': _bgmCoverUrl,
           if (_detailData != null) 'bgmDetailData': _detailData,
+        },
+        autoMatchMode: PlaybackSettingsService.getAutoMatchSource(),
+        headlessMode: false,
+        onMatchFailed: () {
+          showSnackBar('自动匹配失败，已切换至手动搜索');
         },
         heroTag: coverHeroTag(widget.data),
       ),

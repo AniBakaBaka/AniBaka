@@ -110,8 +110,8 @@ class PlaybackController {
     try {
       await initialize();
       if (_backend.currentMediaUri != null) await _backend.stop();
-      await _backend.open(uri, autoplay: autoplay, httpHeaders: httpHeaders);
       await _configurePlayer(preferences.value.defaultPlaybackSpeed);
+      await _backend.open(uri, autoplay: autoplay, httpHeaders: httpHeaders);
       if (_disposed) return;
       core.value = core.value.copyWith(loading: false);
     } catch (error) {
@@ -328,12 +328,12 @@ class PlaybackController {
 
       _resetPlaybackState();
       if (_backend.currentMediaUri != null) await _backend.stop();
+      await _configurePlayer(preferences.value.defaultPlaybackSpeed);
       await _backend.open(
         uri,
         autoplay: _lastOpenAutoplay,
         httpHeaders: _lastOpenHeaders,
       );
-      await _configurePlayer(preferences.value.defaultPlaybackSpeed);
       if (!_disposed) {
         core.value = core.value.copyWith(loading: false);
       }
@@ -641,7 +641,16 @@ class PlaybackController {
         next.showSubtitle ? 'yes' : 'no',
       );
     }
-
+    if (previous.hwdecMode != next.hwdecMode) {
+      await _backend.setNativeProperty('hwdec', next.hwdecMode);
+    }
+    if (previous.videoRenderer != next.videoRenderer) {
+      await syncMpvProperties(
+        _backend.setNativeProperty,
+        buildVideoRendererProperties(next.videoRenderer),
+        debugLabel: 'video renderer',
+      );
+    }
     if (persist) {
       _settingsWrites = _settingsWrites.then((_) async {
         final persisted = _persistedPreferences;
@@ -701,7 +710,10 @@ class PlaybackController {
   Future<void> _configurePlayer(double rate) async {
     await syncMpvProperties(
       _backend.setNativeProperty,
-      playerProperties,
+      buildPlayerProperties(
+        hwdecMode: preferences.value.hwdecMode,
+        videoRenderer: preferences.value.videoRenderer,
+      ),
       debugLabel: 'player',
     );
     await _syncAnime4KShaders();

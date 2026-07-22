@@ -23,6 +23,7 @@ import 'package:baka/widgets/navigation/bottom_navigation.dart';
 import 'package:baka/widgets/platform/macos/macos_title_bar.dart';
 import 'package:baka/widgets/platform/windows/windows_sidebar.dart';
 import 'package:baka/widgets/platform/windows/windows_title_bar.dart';
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -42,7 +43,7 @@ Future<void> _bootstrap() async {
   SystemProxyService.initialize();
   await Instances.init();
   await AppLogger.instance.init();
-  AppLogger.instance.debug('Application bootstrap started', tag: 'Bootstrap');
+  AppLogger.instance.info('Application bootstrap started', tag: 'Bootstrap');
 
   if (Instances.isDesktopPlatform) {
     await Instances.prepareDesktopWorkspace(
@@ -153,34 +154,39 @@ class BakaApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final appState = Get.find<AppState>();
-    return Obx(() {
-      final themes = AppTheme.resolve(
-        fontFamily: appState.fontFamily,
-        fontWeight: appState.fontWeight,
-      );
-      final mediaQuery = MediaQuery.of(context);
-      return MediaQuery(
-        data: mediaQuery.copyWith(
-          textScaler: TextScaler.linear(appState.fontScale),
-          disableAnimations:
-              mediaQuery.disableAnimations || appState.reduceVisualEffects,
-        ),
-        child: MaterialApp(
-          debugShowCheckedModeBanner: false,
-          scrollBehavior: const AppScrollBehavior(),
-          navigatorKey: Instances.navigatorKey,
-          scaffoldMessengerKey: scaffoldMessengerKey,
-          themeMode: Instances.isTV
-              ? ThemeMode.dark
-              : appState.currentThemeMode,
-          theme: themes.light,
-          darkTheme: themes.dark,
-          home: const MyHomePage(),
-          title: 'Baka',
-          onGenerateRoute: _onGenerateRoute,
-        ),
-      );
-    });
+    return DynamicColorBuilder(
+      builder: (lightDynamic, darkDynamic) => Obx(() {
+        final useDynamicColor = appState.dynamicColor && !Instances.isTV;
+        final themes = AppTheme.resolve(
+          fontFamily: appState.fontFamily,
+          fontWeight: appState.fontWeight,
+          lightColorScheme: useDynamicColor ? lightDynamic : null,
+          darkColorScheme: useDynamicColor ? darkDynamic : null,
+        );
+        final mediaQuery = MediaQuery.of(context);
+        return MediaQuery(
+          data: mediaQuery.copyWith(
+            textScaler: TextScaler.linear(appState.fontScale),
+            disableAnimations:
+                mediaQuery.disableAnimations || appState.reduceVisualEffects,
+          ),
+          child: MaterialApp(
+            debugShowCheckedModeBanner: false,
+            scrollBehavior: const AppScrollBehavior(),
+            navigatorKey: Instances.navigatorKey,
+            scaffoldMessengerKey: scaffoldMessengerKey,
+            themeMode: Instances.isTV
+                ? ThemeMode.dark
+                : appState.currentThemeMode,
+            theme: themes.light,
+            darkTheme: themes.dark,
+            home: const MyHomePage(),
+            title: 'Baka',
+            onGenerateRoute: _onGenerateRoute,
+          ),
+        );
+      }),
+    );
   }
 }
 
