@@ -3,7 +3,7 @@
   "id": "cycani",
   "name": "Cycani 次元城",
   "baseUrl": "https://www.cycani.org",
-  "iconUrl": "https://www.cycani.org/favicon.ico",
+  "iconUrl": "https://www.cycity.pro/site.webp",
   "description": "Cycani 次元城动画视频源",
   "headers": {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
@@ -15,38 +15,38 @@
       "branches": [
         [
           {
+            "op": "sniff",
+            "goal": "html",
+            "url": "/index.php/ajax/suggest?mid=1&wd={keyword}&limit=20",
+            "readyContains": [
+              "\"list\""
+            ],
+            "rejectContains": [
+              "altcha-widget",
+              "aegis_altcha"
+            ],
+            "timeoutMs": 30000,
+            "settleMs": 0
+          },
+          {
+            "op": "select",
+            "css": "body",
+            "attr": "text"
+          },
+          {
+            "op": "jsonSeries",
+            "listPath": "list",
+            "detailUrlTemplate": "/bangumi/{id}.html"
+          }
+        ],
+        [
+          {
             "op": "maccmsSuggest",
             "verify": true,
             "headers": {
               "Accept": "application/json, text/javascript, */*; q=0.01",
               "Referer": "https://www.cycani.org/"
             },
-            "detailUrlTemplate": "/bangumi/{id}.html"
-          }
-        ],
-        [
-          {
-            "op": "sniff",
-            "goal": "html",
-            "url": "/index.php/ajax/suggest?mid=1&wd={keyword}&limit=20",
-            "readyContains": [
-              "<pre>"
-            ],
-            "rejectContains": [
-              "altcha-widget",
-              "aegis_altcha"
-            ],
-            "timeoutMs": 60000,
-            "settleMs": 0
-          },
-          {
-            "op": "select",
-            "css": "pre",
-            "attr": "text"
-          },
-          {
-            "op": "jsonSeries",
-            "listPath": "list",
             "detailUrlTemplate": "/bangumi/{id}.html"
           }
         ]

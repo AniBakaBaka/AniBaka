@@ -51,6 +51,7 @@ class PlayerToastIndicators extends StatelessWidget {
       builder: (context, _, _) {
         final overlay = controller.overlay.value;
         final timeline = controller.timeline.value;
+        final longPressRate = overlay.longPressRate;
         final showSpeed = overlay.doubleSpeed;
         final showProgress = timeline.seeking;
         final showBoth = showSpeed && showProgress;
@@ -71,14 +72,18 @@ class PlayerToastIndicators extends StatelessWidget {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(
-                              Icons.fast_forward_rounded,
+                            Icon(
+                              longPressRate < 0
+                                  ? Icons.fast_rewind_rounded
+                                  : longPressRate == 0
+                                  ? Icons.pause_rounded
+                                  : Icons.fast_forward_rounded,
                               color: Colors.white,
                               size: 16,
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              '${controller.preferences.value.longPressSpeed}\u500d\u901f',
+                              _formatLongPressRate(longPressRate),
                               style: _whiteTextStyle.copyWith(
                                 fontWeight: FontWeight.bold,
                               ),
@@ -103,6 +108,13 @@ class PlayerToastIndicators extends StatelessWidget {
       },
     );
   }
+}
+
+String _formatLongPressRate(double rate) {
+  final value = rate.abs().toStringAsFixed(1).replaceFirst(RegExp(r'\.0$'), '');
+  if (rate < 0) return '\u5feb\u9000 ${value}x';
+  if (rate == 0) return '\u6682\u505c 0x';
+  return '\u5feb\u8fdb ${value}x';
 }
 
 class PlayerVolumeBrightnessIndicators extends StatelessWidget {

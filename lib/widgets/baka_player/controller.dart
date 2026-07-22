@@ -27,6 +27,9 @@ class PlaybackController {
 
   static const _timelineIntervalMs = 250;
   static const _skipCancelVisibleDuration = Duration(seconds: 5);
+  static const _reverseTickInterval = Duration(milliseconds: 100);
+  static const _longPressPixelsPerRate = 32.0;
+  static const _maxLongPressRate = 5.0;
 
   final PlaybackBackend _backend;
   final core = ValueNotifier<PlaybackCoreState>(const PlaybackCoreState());
@@ -50,12 +53,17 @@ class PlaybackController {
   Timer? _jumpPromptTimer;
   Timer? _errorDebounceTimer;
   Timer? _bufferingDebounceTimer;
+  Timer? _reversePlaybackTimer;
 
   Future<void>? _initializeFuture;
   Future<void> _settingsWrites = Future<void>.value();
   PlaybackPreferences _persistedPreferences = const PlaybackPreferences();
   DanmakuController? _danmakuController;
   double _lastPlaybackRate = 1.0;
+  double _longPressStartRate = 1.0;
+  double _reversePlaybackRate = 0.0;
+  bool _playingBeforeLongPress = false;
+  bool _reverseSeekInFlight = false;
   int _lastTimelineBucket = -1;
   bool _listenersBound = false;
   bool _disposed = false;
@@ -425,12 +433,102 @@ class PlaybackController {
         overlay.value.doubleSpeed == enabled) {
       return;
     }
-    if (enabled) _lastPlaybackRate = core.value.playbackRate;
-    overlay.value = overlay.value.copyWith(doubleSpeed: enabled);
+    if (enabled) {
+      _lastPlaybackRate = core.value.playbackRate;
+      _longPressStartRate = preferences.value.longPressSpeed.clamp(
+        0.0,
+        _maxLongPressRate,
+      );
+      _playingBeforeLongPress = core.value.playing;
+      overlay.value = overlay.value.copyWith(
+        doubleSpeed: true,
+        longPressRate: _longPressStartRate,
+      );
+      _notifyToastChanged();
+      unawaited(_applyLongPressRate(_longPressStartRate));
+      return;
+    }
+
+    _stopReversePlayback();
+    overlay.value = overlay.value.copyWith(doubleSpeed: false);
     _notifyToastChanged();
-    unawaited(
-      setRate(enabled ? preferences.value.longPressSpeed : _lastPlaybackRate),
-    );
+    unawaited(_restorePlaybackAfterLongPress());
+  }
+
+  void updateDoubleSpeedOffset(double horizontalOffset) {
+    if (_disposed || !overlay.value.doubleSpeed) return;
+    final rate =
+        (_longPressStartRate + horizontalOffset / _longPressPixelsPerRate)
+            .clamp(-_maxLongPressRate, _maxLongPressRate)
+            .toDouble();
+    final steppedRate = (rate * 10).round() / 10;
+    if (overlay.value.longPressRate == steppedRate) return;
+    overlay.value = overlay.value.copyWith(longPressRate: steppedRate);
+    _notifyToastChanged();
+    unawaited(_applyLongPressRate(steppedRate));
+  }
+
+  Future<void> _applyLongPressRate(double rate) async {
+    if (_disposed || !overlay.value.doubleSpeed) return;
+    if (rate > 0) {
+      _stopReversePlayback();
+      await setRate(rate);
+      if (_playingBeforeLongPress &&
+          overlay.value.doubleSpeed &&
+          overlay.value.longPressRate > 0 &&
+          !core.value.playing) {
+        await play();
+      }
+      return;
+    }
+
+    _stopReversePlayback();
+    if (core.value.playing) await pause();
+    if (rate < 0 &&
+        !_disposed &&
+        overlay.value.doubleSpeed &&
+        overlay.value.longPressRate == rate) {
+      _reversePlaybackRate = rate.abs();
+      _reversePlaybackTimer = Timer.periodic(
+        _reverseTickInterval,
+        (_) => unawaited(_reversePlaybackTick()),
+      );
+    }
+  }
+
+  Future<void> _reversePlaybackTick() async {
+    if (_reverseSeekInFlight ||
+        _disposed ||
+        !overlay.value.doubleSpeed ||
+        overlay.value.longPressRate >= 0) {
+      return;
+    }
+    _reverseSeekInFlight = true;
+    try {
+      final rewind = Duration(
+        milliseconds:
+            (_reverseTickInterval.inMilliseconds * _reversePlaybackRate)
+                .round(),
+      );
+      await _performSeek(timeline.value.position - rewind);
+    } finally {
+      _reverseSeekInFlight = false;
+    }
+  }
+
+  void _stopReversePlayback() {
+    _reversePlaybackTimer?.cancel();
+    _reversePlaybackTimer = null;
+    _reversePlaybackRate = 0.0;
+  }
+
+  Future<void> _restorePlaybackAfterLongPress() async {
+    await setRate(_lastPlaybackRate);
+    if (_playingBeforeLongPress) {
+      if (!core.value.playing) await play();
+    } else if (core.value.playing) {
+      await pause();
+    }
   }
 
   void beginSeekPreview() {
@@ -742,6 +840,7 @@ class PlaybackController {
   }
 
   void _resetPlaybackState() {
+    _stopReversePlayback();
     _skipCancelHideTimer?.cancel();
     _jumpPromptTimer?.cancel();
     _errorDebounceTimer?.cancel();
@@ -754,6 +853,7 @@ class PlaybackController {
     );
     timeline.value = const PlaybackTimelineState();
     overlay.value = overlay.value.copyWith(
+      doubleSpeed: false,
       skipState: SkipState.idle,
       showJumpPrompt: false,
       jumpPosition: Duration.zero,
@@ -771,6 +871,7 @@ class PlaybackController {
     _jumpPromptTimer?.cancel();
     _errorDebounceTimer?.cancel();
     _bufferingDebounceTimer?.cancel();
+    _reversePlaybackTimer?.cancel();
     for (final subscription in _subscriptions) {
       await subscription.cancel();
     }

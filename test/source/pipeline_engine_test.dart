@@ -177,15 +177,14 @@ class AltchaWebviewHost extends FakeHost implements PipelineWebviewReadyHost {
     rendered.add(url);
     rejectedChallenge =
         isReady?.call('<html><altcha-widget></altcha-widget></html>') == false;
-    const html =
-        '<html><body><pre>{"list":[{"id":30,"name":"鬼灭之刃"}]}</pre></body></html>';
+    const html = '<html><body>{"list":[{"id":30,"name":"鬼灭之刃"}]}</body></html>';
     acceptedResult = isReady?.call(html) == true;
     return html;
   }
 
   @override
   String? selectAttr(String html, String selector, String attr) {
-    if (selector == 'pre' && attr == 'text') {
+    if (selector == 'body' && attr == 'text') {
       return '{"list":[{"id":30,"name":"鬼灭之刃"}]}';
     }
     return null;
@@ -691,12 +690,12 @@ void main() {
                 'op': 'sniff',
                 'goal': 'html',
                 'url': '/suggest',
-                'readyContains': ['<pre>'],
+                'readyContains': ['"list"'],
                 'rejectContains': ['altcha-widget', 'aegis_altcha'],
-                'timeoutMs': 60000,
+                'timeoutMs': 30000,
                 'settleMs': 0,
               },
-              {'op': 'select', 'css': 'pre', 'attr': 'text'},
+              {'op': 'select', 'css': 'body', 'attr': 'text'},
               {
                 'op': 'jsonSeries',
                 'listPath': 'list',

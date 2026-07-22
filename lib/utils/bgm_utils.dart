@@ -134,6 +134,22 @@ class BgmUtils {
     );
   }
 
+  /// Returns a cached cover URL that does not redirect the client to
+  /// Bangumi's blocked image host.
+  static String bgmCoverProxyUrl(int subjectId) {
+    final source = Uri.https(
+      'api.bgm.tv',
+      '/v0/subjects/$subjectId/image',
+      const {'type': 'large'},
+    );
+    return Uri.https('wsrv.nl', '/', {
+      'url': source.toString(),
+      'w': '360',
+      'output': 'webp',
+      'q': '85',
+    }).toString();
+  }
+
   /// Picks the poster supplied by AniBaka's TMDB image source.
   ///
   /// Prefer a Chinese poster when the API provides multiple TMDB variants.

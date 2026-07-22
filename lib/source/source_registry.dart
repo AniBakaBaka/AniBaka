@@ -130,15 +130,6 @@ class AdapterRegistry {
       factory: () => _createBundledRuleAdapter('fsdm02'),
     ),
     AdapterDescriptor(
-      key: 'enlienli',
-      displayName: 'OmoFun',
-      playerContent: '来源: OmoFun Enlienli。',
-      icon: Icons.play_circle_outline,
-      color: const Color(0xFF42A5F5),
-      statusLabel: '第三方源',
-      factory: () => _createBundledRuleAdapter('enlienli'),
-    ),
-    AdapterDescriptor(
       key: 'girigirilove',
       displayName: 'GirigiriLove',
       playerContent: '来源: GirigiriLove。',

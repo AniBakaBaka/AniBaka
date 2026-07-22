@@ -468,7 +468,10 @@ class _BakaPlayerState extends State<BakaPlayer> {
             );
           },
           onLongPressStart: (_) => controller.setDoubleSpeed(true),
+          onLongPressMoveUpdate: (details) =>
+              controller.updateDoubleSpeedOffset(details.offsetFromOrigin.dx),
           onLongPressEnd: (_) => controller.setDoubleSpeed(false),
+          onLongPressCancel: () => controller.setDoubleSpeed(false),
           onHorizontalDragStart: _handleHorizontalDragStart,
           onHorizontalDragUpdate: _handleHorizontalDragUpdate,
           onHorizontalDragEnd: (_) {

@@ -146,6 +146,7 @@ flutter test test/source/live_new_rules_test.dart --dart-define=LIVE=true
 - [GetX](https://github.com/jonataslaw/getx) — 状态与依赖管理
 - [Hive](https://github.com/isar/hive) — 本地数据存储
 - [Anime4K](https://github.com/bloc97/Anime4K) — 动漫画质增强着色器
+- [弹弹Play](https://www.dandanplay.com/) — 弹幕 API 服务
 
 ## 许可证
 

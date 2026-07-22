@@ -12,16 +12,54 @@
   },
   "search": [
     {
-      "op": "fetch",
-      "url": "/api.php/provide/vod/?ac=list&wd={keyword}"
-    },
-    {
-      "op": "jsonSeries",
-      "listPath": "list",
-      "idKey": "vod_id",
-      "nameKey": "vod_name",
-      "imageKey": "vod_pic",
-      "descKey": "vod_remarks"
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "fetch",
+            "url": "/api.php/provide/vod/?ac=list&wd={keyword}"
+          },
+          {
+            "op": "jsonSeries",
+            "listPath": "list",
+            "idKey": "vod_id",
+            "nameKey": "vod_name",
+            "imageKey": "vod_pic",
+            "descKey": "vod_remarks"
+          }
+        ],
+        [
+          {
+            "op": "sniff",
+            "goal": "html",
+            "url": "/api.php/provide/vod/?ac=list&wd={keyword}",
+            "readyContains": [
+              "\"list\""
+            ],
+            "rejectContains": [
+              "DokiDoki CDN",
+              "dooki.cloud",
+              "X-GE-UA-Step",
+              "__cf_chl_"
+            ],
+            "timeoutMs": 60000,
+            "settleMs": 0
+          },
+          {
+            "op": "select",
+            "css": "body",
+            "attr": "text"
+          },
+          {
+            "op": "jsonSeries",
+            "listPath": "list",
+            "idKey": "vod_id",
+            "nameKey": "vod_name",
+            "imageKey": "vod_pic",
+            "descKey": "vod_remarks"
+          }
+        ]
+      ]
     }
   ],
   "detail": [
@@ -40,5 +78,6 @@
       "op": "template",
       "value": "{episodeId:raw}"
     }
-  ]
+  ],
+  "useWebview": true
 }

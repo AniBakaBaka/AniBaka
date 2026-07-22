@@ -50,6 +50,45 @@ void main() {
     await controller.dispose();
   });
 
+  test(
+    'long press drag crosses zero into bounded 5x rewind and restores playback',
+    () async {
+      final backend = FakePlaybackBackend();
+      final controller = PlaybackController(backend: backend);
+      await controller.open('https://example.test/video.mp4');
+      backend.emitDuration(const Duration(minutes: 2));
+      backend.emitPosition(const Duration(minutes: 1));
+      await controller.updatePreferences(
+        controller.preferences.value.copyWith(longPressSpeed: 2.0),
+        persist: false,
+      );
+
+      controller.setDoubleSpeed(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.overlay.value.longPressRate, 2.0);
+      expect(backend.lastRate, 2.0);
+
+      controller.updateDoubleSpeedOffset(-64);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.overlay.value.longPressRate, 0.0);
+      expect(backend.isPlaying, isFalse);
+
+      controller.updateDoubleSpeedOffset(-1000);
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      expect(controller.overlay.value.longPressRate, -5.0);
+      expect(backend.lastSeek, isNotNull);
+      expect(backend.lastSeek!.inMilliseconds, lessThan(60000));
+      expect(backend.lastSeek!.inMilliseconds, greaterThanOrEqualTo(59000));
+
+      controller.setDoubleSpeed(false);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.overlay.value.doubleSpeed, isFalse);
+      expect(backend.lastRate, 1.0);
+      expect(backend.isPlaying, isTrue);
+      await controller.dispose();
+    },
+  );
+
   test('opening a paused replacement stops the previous media first', () async {
     final backend = FakePlaybackBackend();
     final controller = PlaybackController(backend: backend);

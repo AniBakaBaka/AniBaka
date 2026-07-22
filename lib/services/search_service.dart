@@ -158,7 +158,7 @@ class SearchService {
     try {
       if (selectedSourceIndex == 0) {
         final subjects = await BgmService.searchSubjects(searchKey);
-        return Future.wait(subjects.map(_withAniBakaPoster));
+        return subjects.map(_withReliablePoster).toList(growable: false);
       }
 
       final builtinSource = _selectedBuiltinSource();
@@ -186,16 +186,13 @@ class SearchService {
     }
   }
 
-  Future<BgmSubjectInfo> _withAniBakaPoster(BgmSubjectInfo subject) async {
-    final detail = await getAnimeDetail(subject.subjectId);
-    final tmdbPoster = BgmUtils.pickAniBakaTmdbPoster(detail);
-
+  BgmSubjectInfo _withReliablePoster(BgmSubjectInfo subject) {
     return BgmSubjectInfo(
       subjectId: subject.subjectId,
       name: subject.name,
       nameCn: subject.nameCn,
       summary: subject.summary,
-      imageUrl: tmdbPoster ?? subject.imageUrl,
+      imageUrl: BgmUtils.bgmCoverProxyUrl(subject.subjectId),
       score: subject.score,
       aliases: subject.aliases,
       hasDetail: subject.hasDetail,

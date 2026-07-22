@@ -83,6 +83,7 @@ class PlayerOverlayState {
     this.controlsVisible = false,
     this.controlsLocked = false,
     this.doubleSpeed = false,
+    this.longPressRate = 1.0,
     this.volume = 1.0,
     this.brightness = 0.0,
     this.showDanmaku = true,
@@ -96,6 +97,7 @@ class PlayerOverlayState {
   final bool controlsVisible;
   final bool controlsLocked;
   final bool doubleSpeed;
+  final double longPressRate;
   final double volume;
   final double brightness;
   final bool showDanmaku;
@@ -109,6 +111,7 @@ class PlayerOverlayState {
     bool? controlsVisible,
     bool? controlsLocked,
     bool? doubleSpeed,
+    double? longPressRate,
     double? volume,
     double? brightness,
     bool? showDanmaku,
@@ -122,6 +125,7 @@ class PlayerOverlayState {
       controlsVisible: controlsVisible ?? this.controlsVisible,
       controlsLocked: controlsLocked ?? this.controlsLocked,
       doubleSpeed: doubleSpeed ?? this.doubleSpeed,
+      longPressRate: longPressRate ?? this.longPressRate,
       volume: volume ?? this.volume,
       brightness: brightness ?? this.brightness,
       showDanmaku: showDanmaku ?? this.showDanmaku,
