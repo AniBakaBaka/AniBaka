@@ -74,7 +74,9 @@ jobs:
 
       - name: Decode Android Keystore
         id: decode_keystore
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         uses: timheuer/base64-to-file@v2
         with:
           fileName: 'upload-keystore.jks'
@@ -82,7 +84,9 @@ jobs:
           encodedString: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
 
       - name: Create key.properties
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         run: |
           cat <<EOF > android/key.properties
           storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}
