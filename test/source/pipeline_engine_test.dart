@@ -1029,6 +1029,27 @@ void main() {
     expect(PipelineSourceAdapter(rule).useSystemProxy, isFalse);
   });
 
+  test('Cycani validates direct media during auto-match', () {
+    SourceRule rule(String id) => SourceRule.fromJson({
+      'format': kSourceRuleFormatV2,
+      'id': id,
+      'name': id,
+      'baseUrl': 'https://example.com',
+      'search': const [],
+      'detail': const [],
+      'play': const [],
+    });
+
+    expect(
+      PipelineSourceAdapter(rule('cycani')).validateAutoMatchedUrls,
+      isTrue,
+    );
+    expect(
+      PipelineSourceAdapter(rule('other')).validateAutoMatchedUrls,
+      isFalse,
+    );
+  });
+
   test('custom source persistence keeps directConnection', () {
     final config = CustomSourceConfig.fromJson({
       'format': kSourceRuleFormatV2,

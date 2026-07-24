@@ -435,9 +435,25 @@ class PlayerService {
     String episodeId, {
     Duration torrentBufferTimeout = TorrentService.defaultBufferTimeout,
   }) async {
-    final media =
+    var media =
         _readPrefetchedPlaybackMedia(episodeId) ??
         await adapter.resolvePlaybackMedia(episodeId);
+    if (media.url.isEmpty && adapter.validateAutoMatchedUrls) {
+      final episode = currentVideoItem;
+      if (episode != null) {
+        for (var line = 1; line <= episode.lines.length; line++) {
+          if (line == currUrl) continue;
+          final alternateId = episode.lineAt(line);
+          if (alternateId == null || alternateId.isEmpty) continue;
+          final alternate = await adapter.resolvePlaybackMedia(alternateId);
+          if (alternate.url.isEmpty) continue;
+          currUrl = line;
+          data['currUrl'] = line;
+          media = alternate;
+          break;
+        }
+      }
+    }
     if (media.url.isEmpty || !TorrentService.isBtLink(media.url)) return media;
 
     final streamUrl = await TorrentService.instance.resolvePlaybackUrl(

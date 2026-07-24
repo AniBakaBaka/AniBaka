@@ -100,6 +100,9 @@ class PipelineSourceAdapter extends AdapterBase
       rule.play.any((step) => step.flag('validateWithCookies'));
 
   @override
+  bool get validateAutoMatchedUrls => rule.id == 'cycani';
+
+  @override
   void dispose() {
     _webViewTaskScope.cancel();
     _mediaRedirectResolver?.close();

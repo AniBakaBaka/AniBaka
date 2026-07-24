@@ -45,6 +45,7 @@ Future<void> _bootstrap() async {
   await AppLogger.instance.init();
   AppLogger.instance.info('Application bootstrap started', tag: 'Bootstrap');
 
+  Directory? desktopHiveDirectory;
   if (Instances.isDesktopPlatform) {
     await Instances.prepareDesktopWorkspace(
       legacyHiveBoxes: const [
@@ -58,11 +59,22 @@ Future<void> _bootstrap() async {
         'storage_configs',
       ],
     );
-    Hive.init((await Instances.desktopDataDirectory('hive')).path);
+    desktopHiveDirectory = await Instances.desktopDataDirectory('hive');
+    Hive.init(desktopHiveDirectory.path);
   } else {
     await Hive.initFlutter();
   }
-  await AppStorage.init();
+  final storageRecoveries = await AppStorage.init(
+    hiveDirectory: desktopHiveDirectory,
+  );
+  for (final recovery in storageRecoveries) {
+    AppLogger.instance.warning(
+      'Recovered unreadable Hive box "${recovery.boxName}"'
+      '${recovery.backupPath == null ? '' : ' (backup: ${recovery.backupPath})'}',
+      tag: 'Storage',
+      error: recovery.reason,
+    );
+  }
   await SourceAdapterService.instance.init();
   MediaKit.ensureInitialized();
   await MediaSessionService.init();

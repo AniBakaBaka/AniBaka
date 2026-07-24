@@ -20,6 +20,12 @@ if (keystorePropertiesFile.exists()) {
         keystoreProperties.load(reader)
     }
 }
+def releaseSigningConfigured = [
+    'keyAlias',
+    'keyPassword',
+    'storeFile',
+    'storePassword',
+].every { key -> keystoreProperties[key]?.trim() }
 
 def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
 if (flutterVersionCode == null) {
@@ -67,11 +73,13 @@ android {
     }
 
     signingConfigs {
-        release {
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-            storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
-            storePassword keystoreProperties['storePassword']
+        if (releaseSigningConfigured) {
+            release {
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+            }
         }
     }
 
@@ -91,7 +99,9 @@ android {
                 abiFilters.addAll(requestedFlutterAbis)
             }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
+            // Keep CI buildable without secrets, but use the same release key
+            // whenever android/key.properties has been restored.
+            signingConfig releaseSigningConfigured ? signingConfigs.release : signingConfigs.debug
         }
         debug {
             ndk {

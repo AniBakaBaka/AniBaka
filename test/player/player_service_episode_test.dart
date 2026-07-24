@@ -19,6 +19,18 @@ class _KeepAliveAdapter extends AdapterBase {
   Future<String> getDownloadUrl(String episodeId) async => '';
 
   @override
+  bool get validateAutoMatchedUrls => true;
+
+  @override
+  Future<({String url, Map<String, String> httpHeaders})> resolvePlaybackMedia(
+    String episodeId, {
+    bool skipValidation = false,
+  }) async => (
+    url: episodeId == 'good' ? 'https://example.com/good.mp4' : '',
+    httpHeaders: const <String, String>{},
+  );
+
+  @override
   Future<List<Source>> getSources(String seriesId) async => const [];
 
   @override
@@ -114,6 +126,22 @@ void main() {
 
     service.stopAdapterPlaybackKeepAlive(second);
     expect(adapter.stops, 2);
+    service.dispose();
+  });
+
+  test('validated source falls back to another playback line', () async {
+    final service = PlayerService(data: <String, Object>{'source': 'internal'});
+    service.syncVideoData(const [
+      PlaybackEpisode(title: 'Episode', lines: ['blocked', 'good']),
+    ]);
+
+    final media = await service.resolveAdapterPlaybackMedia(
+      _KeepAliveAdapter(),
+      'blocked',
+    );
+
+    expect(media.url, 'https://example.com/good.mp4');
+    expect(service.currUrl, 2);
     service.dispose();
   });
 }

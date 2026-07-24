@@ -34,14 +34,18 @@ concurrency:
 
 env:
   FASTFORGE_VERSION: 0.6.9
+  ANDROID_SIGNING_CERT_SHA256: FF6D2DCA832EA3D9B20C20F21B33D124D8C239B2EDFAC382DB77740D23935B11
 
 jobs:
+  # ==========================================
+  # Android Platform Build
+  # ==========================================
   build-android:
     name: Android packages
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Set up Flutter Environment
+        uses: ./.github/actions/setup-flutter-env
 
       - name: Free disk space
         run: |
@@ -64,254 +68,176 @@ jobs:
           yes | sdkmanager --licenses >/dev/null
           sdkmanager "platforms;android-36" "build-tools;34.0.0"
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version-file: .fvmrc
-          cache: true
-          pub-cache: true
-
-      - name: Decode Android Keystore
-        id: decode_keystore
+      - name: Configure Android signing key
+        id: android_signing
+        shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
-        uses: timheuer/base64-to-file@v2
-        with:
-          fileName: 'upload-keystore.jks'
-          fileDir: './android/app/'
-          encodedString: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-
-      - name: Create key.properties
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
-        run: |
-          cat <<EOF > android/key.properties
-          storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}
-          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
-          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
-          storeFile=../app/upload-keystore.jks
-          EOF
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: bash .github/scripts/setup-android-signing.sh
 
       - name: Prepare project
         run: flutter pub get
 
-      - name: Install Fastforge
-        run: dart pub global activate fastforge "$FASTFORGE_VERSION"
-
-      - name: Package APK (arm64-v8a)
-        id: apk_arm64
-        continue-on-error: true
+      - name: Build Android packages
         run: |
-          rm -rf dist
-          dart pub global run fastforge:main release --name android --jobs android-apk-arm64 --skip-clean
+          flutter build apk --release --target-platform android-arm64 --split-per-abi
+          flutter build apk --release
 
-      - name: Upload APK (arm64-v8a)
-        if: steps.apk_arm64.outcome == 'success'
-        continue-on-error: true
+      - name: Stage Android artifacts
+        run: |
+          version=$(sed -n 's/^\s*version:\s*\([^+]*\)+.*/\1/p' pubspec.yaml)
+          mkdir -p release-stage
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "release-stage/AniBaka-v${version}-android-arm64-v8a.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "release-stage/AniBaka-v${version}-android-universal.apk"
+          echo "sha256=${{ steps.android_signing.outputs.fingerprint }}" > release-stage/signing-metadata.txt
+
+      - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-android-arm64-v8a-apk
-          path: dist/**/*
-          if-no-files-found: error
+          name: release-android
+          path: release-stage/*
+          retention-days: 1
 
-      - name: Package APK (armeabi-v7a)
-        id: apk_armv7
-        continue-on-error: true
-        run: |
-          rm -rf dist
-          dart pub global run fastforge:main release --name android --jobs android-apk-armv7 --skip-clean
-
-      - name: Upload APK (armeabi-v7a)
-        if: steps.apk_armv7.outcome == 'success'
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-android-armeabi-v7a-apk
-          path: dist/**/*
-          if-no-files-found: error
-
-      - name: Package APK (armeabi-v7a + arm64-v8a)
-        id: apk_universal
-        continue-on-error: true
-        run: |
-          rm -rf dist
-          dart pub global run fastforge:main release --name android --jobs android-apk-universal --skip-clean
-
-      - name: Upload APK (armeabi-v7a + arm64-v8a)
-        if: steps.apk_universal.outcome == 'success'
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-android-armeabi-v7a-arm64-v8a-apk
-          path: dist/**/*
-          if-no-files-found: error
-
-      - name: Write Android package summary
-        if: always()
-        env:
-          APK_ARM64: ${{ steps.apk_arm64.outcome }}
-          APK_ARMV7: ${{ steps.apk_armv7.outcome }}
-          APK_UNIVERSAL: ${{ steps.apk_universal.outcome }}
-        run: |
-          {
-            echo "### Android packages"
-            echo "| Package | Result |"
-            echo "| --- | --- |"
-            echo "| APK arm64-v8a | $APK_ARM64 |"
-            echo "| APK armeabi-v7a | $APK_ARMV7 |"
-            echo "| APK armeabi-v7a + arm64-v8a | $APK_UNIVERSAL |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
+  # ==========================================
+  # iOS Platform Build
+  # ==========================================
   build-ios:
-    name: iOS unsigned IPA
-    runs-on: macos-15
+    name: iOS packages
+    runs-on: macos-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Set up Flutter Environment
+        uses: ./.github/actions/setup-flutter-env
 
-      - name: Read app version
-        id: version
+      - name: Prepare project
         run: |
-          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | tr '+' '-')
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version-file: .fvmrc
-          cache: true
-          pub-cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build iOS without code signing
-        run: flutter build ios --release --no-codesign
-
-      - name: Create unsigned IPA
-        run: |
-          APP_PATH=$(find build/ios/iphoneos -maxdepth 1 -name "*.app" -print -quit)
-          if [ -z "$APP_PATH" ]; then
-            echo "No .app bundle found in build/ios/iphoneos"
-            exit 1
+          flutter pub get
+          if [ -f ios/Podfile ]; then
+            cd ios && pod install --repo-update && cd ..
           fi
 
-          mkdir -p dist/ios/Payload
-          cp -R "$APP_PATH" dist/ios/Payload/
-          (cd dist/ios && zip -qry "../baka-${{ steps.version.outputs.version }}-ios-arm64-unsigned.ipa" Payload)
-          rm -rf dist/ios
+      - name: Build iOS unsigned bundle
+        run: flutter build ios --release --no-codesign
 
-      - name: Upload unsigned IPA
+      - name: Stage iOS artifacts
+        run: |
+          version=$(sed -n 's/^\s*version:\s*\([^+]*\)+.*/\1/p' pubspec.yaml)
+          mkdir -p release-stage
+          tar -czf "release-stage/AniBaka-v${version}-ios-unsigned.tar.gz" -C build/ios/iphoneos Runner.app
+
+      - name: Upload iOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-ios-arm64-unsigned-ipa
-          path: dist/*.ipa
-          if-no-files-found: error
+          name: release-ios
+          path: release-stage/*
+          retention-days: 1
 
+  # ==========================================
+  # macOS Platform Build
+  # ==========================================
   build-macos:
-    name: macOS ${{ matrix.arch }} packages
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x64
-            runner: macos-15-intel
-          - arch: arm64
-            runner: macos-15
+    name: macOS packages
+    runs-on: macos-14
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version-file: .fvmrc
-          cache: true
-          pub-cache: true
+      - name: Set up Flutter Environment
+        uses: ./.github/actions/setup-flutter-env
 
       - name: Prepare project
         run: |
           flutter config --enable-macos-desktop
           flutter pub get
 
-      - name: Install packaging tools
-        run: |
-          npm install -g appdmg
-          brew install p7zip
-          dart pub global activate fastforge "$FASTFORGE_VERSION"
-
-      - name: Package DMG
-        id: macos_dmg
-        continue-on-error: true
-        run: |
-          rm -rf dist
-          dart pub global run fastforge:main release --name macos --jobs macos-dmg --skip-clean
-
-      - name: Upload DMG
-        if: steps.macos_dmg.outcome == 'success'
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-macos-${{ matrix.arch }}-dmg
-          path: dist/**/*
-          if-no-files-found: error
-
-      - name: Package ZIP
-        id: macos_zip
-        continue-on-error: true
-        run: |
-          rm -rf dist
-          dart pub global run fastforge:main release --name macos --jobs macos-zip --skip-clean
-
-      - name: Upload ZIP
-        if: steps.macos_zip.outcome == 'success'
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-macos-${{ matrix.arch }}-zip
-          path: dist/**/*
-          if-no-files-found: error
-
-      - name: Write macOS package summary
-        if: always()
+      - name: Setup macOS signing identity
+        id: macos_signing
+        shell: bash
         env:
-          DMG: ${{ steps.macos_dmg.outcome }}
-          ZIP: ${{ steps.macos_zip.outcome }}
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: bash .github/scripts/setup-macos-signing.sh
+
+      - name: Build and sign macOS app
+        shell: bash
+        env:
+          SIGNING_IDENTITY: ${{ steps.macos_signing.outputs.identity }}
+          SIGNING_KEYCHAIN: ${{ steps.macos_signing.outputs.keychain }}
         run: |
-          {
-            echo "### macOS ${{ matrix.arch }} packages"
-            echo "| Package | Result |"
-            echo "| --- | --- |"
-            echo "| DMG | $DMG |"
-            echo "| ZIP | $ZIP |"
-          } >> "$GITHUB_STEP_SUMMARY"
+          dart pub global activate fastforge "$FASTFORGE_VERSION"
+          options=("-p" "macos" "-t" "app" "-i" "$SIGNING_IDENTITY")
+          if [ "${{ steps.macos_signing.outputs.timestamp }}" = "true" ]; then
+            options+=("--timestamp")
+          fi
+          dart pub global run fastforge build "${options[@]}"
 
-  build-windows:
-    name: Windows ${{ matrix.arch }} packages
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x64
-            runner: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+          app_path="build/macos/Build/Products/Release/AniBaka.app"
+          find "$app_path/Contents/Frameworks" "$app_path/Contents/PlugIns" -mindepth 1 -maxdepth 1 2>/dev/null | while read -r item; do
+            codesign --force --verbose --deep --options runtime --timestamp --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$item"
+          done
+          codesign --force --verbose --deep --options runtime --timestamp --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$app_path"
+          codesign --verify --verbose --deep --strict "$app_path"
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - name: Build macOS packages (DMG, ZIP)
+        shell: bash
+        run: |
+          dart pub global activate fastforge "$FASTFORGE_VERSION"
+          export FASTFORGE_MACOS_SKIP_BUILD=true
+          dart pub global run fastforge build -p macos -t dmg,zip
+
+      - name: Sign macOS DMG
+        shell: bash
+        env:
+          SIGNING_IDENTITY: ${{ steps.macos_signing.outputs.identity }}
+          SIGNING_KEYCHAIN: ${{ steps.macos_signing.outputs.keychain }}
+        run: |
+          for dmg_file in build/fastforge/macos/*.dmg; do
+            [ -f "$dmg_file" ] || continue
+            codesign --force --verbose --options runtime --timestamp --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$dmg_file"
+            codesign --verify --verbose "$dmg_file"
+          done
+
+      - name: Clean up disposable keychain
+        if: always()
+        shell: bash
+        run: |
+          keychain_path="${{ steps.macos_signing.outputs.keychain }}"
+          if [ -n "$keychain_path" ] && [ -f "$keychain_path" ]; then
+            security delete-keychain "$keychain_path" || true
+          fi
+
+      - name: Stage macOS artifacts
+        shell: bash
+        run: |
+          version=$(sed -n 's/^\s*version:\s*\([^+]*\)+.*/\1/p' pubspec.yaml)
+          mkdir -p release-stage
+          for artifact in build/fastforge/macos/*; do
+            [ -f "$artifact" ] || continue
+            ext="${artifact##*.}"
+            cp "$artifact" "release-stage/AniBaka-v${version}-macos-universal.${ext}"
+          done
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
         with:
-          channel: stable
-          flutter-version-file: .fvmrc
-          cache: true
-          pub-cache: true
+          name: release-macos
+          path: release-stage/*
+          retention-days: 1
+
+  # ==========================================
+  # Windows Platform Build
+  # ==========================================
+  build-windows:
+    name: Windows packages
+    runs-on: windows-latest
+    steps:
+      - name: Set up Flutter Environment
+        uses: ./.github/actions/setup-flutter-env
+
+      - name: Free disk space
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force 'C:\Program Files\dotnet' -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force 'C:\hostedtoolcache\windows\CodeQL' -ErrorAction SilentlyContinue
 
       - name: Prepare project
         shell: pwsh
@@ -319,290 +245,121 @@ jobs:
           flutter config --enable-windows-desktop
           flutter pub get
 
-      - name: Install packaging tools
+      - name: Configure Windows signing certificate
+        id: windows_signing
         shell: pwsh
-        run: |
-          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
-            choco install innosetup --no-progress -y
-          }
-          dart pub global activate fastforge "$env:FASTFORGE_VERSION"
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: pwsh .github/scripts/setup-windows-signing.ps1
 
       - name: Sync MSIX version from pubspec
         shell: pwsh
         run: |
-          $versionLine = Select-String -Path pubspec.yaml -Pattern '^\s*version:\s*(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?\s*$' |
-            Select-Object -First 1
-          if ($null -eq $versionLine) {
-            throw 'pubspec.yaml version must use major.minor.patch+build format'
-          }
-
-          $parts = @(
-            [int]$versionLine.Matches[0].Groups[1].Value
-            [int]$versionLine.Matches[0].Groups[2].Value
-            [int]$versionLine.Matches[0].Groups[3].Value
-            if ($versionLine.Matches[0].Groups[4].Success) {
-              [int]$versionLine.Matches[0].Groups[4].Value
-            } else {
-              [int]$env:GITHUB_RUN_NUMBER
-            }
-          )
-          if ($parts.Where({ $_ -lt 0 -or $_ -gt 65535 }).Count -ne 0) {
-            throw "MSIX version components must be between 0 and 65535: $($parts -join '.')"
-          }
-
+          $versionLine = Select-String -Path pubspec.yaml -Pattern '^\s*version:\s*(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?\s*$' | Select-Object -First 1
+          if ($null -eq $versionLine) { throw 'pubspec.yaml version format error' }
+          $parts = @([int]$versionLine.Matches[0].Groups[1].Value, [int]$versionLine.Matches[0].Groups[2].Value, [int]$versionLine.Matches[0].Groups[3].Value, if ($versionLine.Matches[0].Groups[4].Success) { [int]$versionLine.Matches[0].Groups[4].Value } else { [int]$env:GITHUB_RUN_NUMBER })
           $msixVersion = $parts -join '.'
           $configPath = 'windows/packaging/msix/make_config.yaml'
-          $config = Get-Content -Raw -Encoding utf8 -LiteralPath $configPath
-          if ($config -notmatch '(?m)^msix_version:\s*\S+\s*$') {
-            throw "$configPath does not contain msix_version"
-          }
-          $config = $config -replace '(?m)^msix_version:\s*\S+\s*$', "msix_version: $msixVersion"
+          $config = (Get-Content -Raw -Encoding utf8 -LiteralPath $configPath) -replace '(?m)^msix_version:\s*\S+\s*$', "msix_version: $msixVersion"
           Set-Content -Encoding utf8 -NoNewline -LiteralPath $configPath -Value $config
-          Write-Host "MSIX version: $msixVersion"
 
-      - name: Package EXE
-        id: windows_exe
-        continue-on-error: true
+      - name: Build Windows packages
         shell: pwsh
         run: |
-          if (Test-Path dist) {
-            Remove-Item -Recurse -Force -LiteralPath dist
-          }
-          dart pub global run fastforge:main release --name windows --jobs windows-exe --skip-clean
+          dart pub global activate fastforge "$env:FASTFORGE_VERSION"
+          dart pub global run fastforge build -p windows -t exe,msix,zip --no-sign
 
-      - name: Upload EXE
-        if: steps.windows_exe.outcome == 'success'
-        continue-on-error: true
+      - name: Sign Windows binaries
+        shell: pwsh
+        run: |
+          $certPath = '${{ steps.windows_signing.outputs.certificate_path }}'
+          $certPassword = $env:WINDOWS_CERTIFICATE_PASSWORD
+          $signtool = Get-ChildItem -Path 'C:\Program Files (x86)\Windows Kits\10\bin' -Filter 'signtool.exe' -Recurse | Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1 -ExpandProperty FullName
+          
+          $filesToSign = @(
+            'build/windows/x64/runner/Release/anibaka.exe'
+            'build/windows/x64/runner/Release/*.dll'
+            'build/fastforge/windows/*.exe'
+          ) | ForEach-Object { Get-ChildItem $_ -ErrorAction SilentlyContinue } | Select-Object -ExpandProperty FullName -Unique
+
+          foreach ($file in $filesToSign) {
+            & $signtool sign /f $certPath /p $certPassword /tr http://timestamp.digicert.com /td sha256 /fd sha256 $file
+          }
+
+      - name: Stage Windows artifacts
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path pubspec.yaml -Pattern '^\s*version:\s*([^+]+)').Matches.Groups[1].Value
+          mkdir release-stage -ErrorAction SilentlyContinue
+          Get-ChildItem 'build/fastforge/windows/*' | ForEach-Object {
+            $ext = $_.Extension
+            Copy-Item $_.FullName "release-stage/AniBaka-v${version}-windows-x64${ext}"
+          }
+          $certPath = '${{ steps.windows_signing.outputs.certificate_path }}'
+          $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($certPath, $env:WINDOWS_CERTIFICATE_PASSWORD)
+          [IO.File]::WriteAllBytes("release-stage/AniBaka-v${version}-windows-certificate.cer", $cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-windows-${{ matrix.arch }}-exe
-          path: dist/**/*
-          if-no-files-found: error
+          name: release-windows
+          path: release-stage/*
+          retention-days: 1
 
-      - name: Package MSIX
-        id: windows_msix
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          if (Test-Path dist) {
-            Remove-Item -Recurse -Force -LiteralPath dist
-          }
-          dart pub global run fastforge:main release --name windows --jobs windows-msix --skip-clean
-
-      - name: Upload MSIX
-        if: steps.windows_msix.outcome == 'success'
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-windows-${{ matrix.arch }}-msix
-          path: dist/**/*
-          if-no-files-found: error
-
-      - name: Package ZIP
-        id: windows_zip
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          if (Test-Path dist) {
-            Remove-Item -Recurse -Force -LiteralPath dist
-          }
-          dart pub global run fastforge:main release --name windows --jobs windows-zip --skip-clean
-
-      - name: Upload ZIP
-        if: steps.windows_zip.outcome == 'success'
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-windows-${{ matrix.arch }}-zip
-          path: dist/**/*
-          if-no-files-found: error
-
-      - name: Write Windows package summary
-        if: always()
-        shell: pwsh
-        env:
-          EXE: ${{ steps.windows_exe.outcome }}
-          MSIX: ${{ steps.windows_msix.outcome }}
-          ZIP: ${{ steps.windows_zip.outcome }}
-        run: |
-          @"
-          ### Windows ${{ matrix.arch }} packages
-          | Package | Result |
-          | --- | --- |
-          | EXE | $env:EXE |
-          | MSIX | $env:MSIX |
-          | ZIP | $env:ZIP |
-          "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
-
+  # ==========================================
+  # Linux Platform Build
+  # ==========================================
   build-linux:
-    name: Linux ${{ matrix.arch }} packages
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x64
-            runner: ubuntu-latest
-            appimagetool_arch: x86_64
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-            appimagetool_arch: aarch64
+    name: Linux packages
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Set up Flutter Environment
+        uses: ./.github/actions/setup-flutter-env
 
-      - name: Install Linux build and packaging dependencies
+      - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            clang \
-            cmake \
-            ninja-build \
-            pkg-config \
-            libgtk-3-dev \
-            liblzma-dev \
-            libasound2-dev \
-            libmpv-dev \
-            mpv \
-            plocate \
-            p7zip-full
-          sudo updatedb
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libmpv-dev appstream
 
-      - name: Verify Linux native dependencies
+      - name: Prepare project
         run: |
-          pkg-config --print-errors --exists gtk+-3.0 alsa mpv
-          echo "mpv $(pkg-config --modversion mpv)"
-          echo "alsa $(pkg-config --modversion alsa)"
-          MPV_LIBDIR=$(pkg-config --variable=libdir mpv)
-          ALSA_LIBDIR=$(pkg-config --variable=libdir alsa)
-          test -f "$MPV_LIBDIR/libmpv.so"
-          test -f "$ALSA_LIBDIR/libasound.so"
-          file "$MPV_LIBDIR/libmpv.so" "$ALSA_LIBDIR/libasound.so"
+          flutter config --enable-linux-desktop
+          flutter pub get
 
-      - name: Install appimagetool
-        env:
-          APPIMAGETOOL_ARCH: ${{ matrix.appimagetool_arch }}
+      - name: Build Linux packages
         run: |
-          curl -fL "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${APPIMAGETOOL_ARCH}.AppImage" -o appimagetool-bin
-          chmod +x appimagetool-bin
-          sudo mv appimagetool-bin /usr/local/bin/appimagetool-bin
-          sudo tee /usr/local/bin/appimagetool >/dev/null <<'EOF'
-          #!/usr/bin/env bash
-          export ARCH="$(uname -m)"
-          exec /usr/local/bin/appimagetool-bin --appimage-extract-and-run "$@"
-          EOF
-          sudo chmod +x /usr/local/bin/appimagetool
+          dart pub global activate fastforge "$FASTFORGE_VERSION"
+          dart pub global run fastforge build -p linux -t appimage,deb,zip
 
-      - name: Set up Flutter (x64)
-        if: matrix.arch == 'x64'
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version-file: .fvmrc
-          cache: true
-          pub-cache: true
-
-      - name: Cache Flutter SDK (ARM64)
-        if: matrix.arch == 'arm64'
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/flutter-arm64
-          key: flutter-linux-arm64-${{ hashFiles('.fvmrc') }}
-
-      - name: Set up Flutter (ARM64)
-        if: matrix.arch == 'arm64'
-        env:
-          FLUTTER_HOME: ${{ runner.temp }}/flutter-arm64
+      - name: Stage Linux artifacts
         run: |
-          if [ ! -x "$FLUTTER_HOME/bin/flutter" ]; then
-            FLUTTER_VERSION=$(jq -r '.flutter' .fvmrc)
-            git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$FLUTTER_HOME"
-          fi
-          echo "$FLUTTER_HOME/bin" >> "$GITHUB_PATH"
-          "$FLUTTER_HOME/bin/flutter" config --no-analytics
-          "$FLUTTER_HOME/bin/flutter" precache --linux
+          version=$(sed -n 's/^\s*version:\s*\([^+]*\)+.*/\1/p' pubspec.yaml)
+          mkdir -p release-stage
+          for artifact in build/fastforge/linux/*; do
+            [ -f "$artifact" ] || continue
+            filename=$(basename "$artifact")
+            case "$filename" in
+              *.AppImage) target="release-stage/AniBaka-v${version}-linux-x64.AppImage" ;;
+              *.deb) target="release-stage/AniBaka-v${version}-linux-amd64.deb" ;;
+              *.zip) target="release-stage/AniBaka-v${version}-linux-x64.zip" ;;
+              *) target="release-stage/AniBaka-v${version}-linux-${filename}" ;;
+            esac
+            cp "$artifact" "$target"
+          done
 
-      - name: Cache Pub packages (ARM64)
-        if: matrix.arch == 'arm64'
-        uses: actions/cache@v4
-        with:
-          path: ~/.pub-cache
-          key: pub-linux-arm64-${{ hashFiles('pubspec.lock') }}
-          restore-keys: |
-            pub-linux-arm64-
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Install Fastforge
-        run: dart pub global activate fastforge "$FASTFORGE_VERSION"
-
-      - name: Package AppImage
-        id: linux_appimage
-        continue-on-error: true
-        run: |
-          rm -rf dist
-          dart pub global run fastforge:main release --name linux --jobs linux-appimage --skip-clean
-
-      - name: Upload AppImage
-        if: steps.linux_appimage.outcome == 'success'
-        continue-on-error: true
+      - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-linux-${{ matrix.arch }}-appimage
-          path: dist/**/*
-          if-no-files-found: error
+          name: release-linux
+          path: release-stage/*
+          retention-days: 1
 
-      - name: Package DEB
-        id: linux_deb
-        continue-on-error: true
-        run: |
-          rm -rf dist
-          dart pub global run fastforge:main release --name linux --jobs linux-deb --skip-clean
-
-      - name: Upload DEB
-        if: steps.linux_deb.outcome == 'success'
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-linux-${{ matrix.arch }}-deb
-          path: dist/**/*
-          if-no-files-found: error
-
-      - name: Package ZIP
-        id: linux_zip
-        continue-on-error: true
-        run: |
-          rm -rf dist
-          dart pub global run fastforge:main release --name linux --jobs linux-zip --skip-clean
-
-      - name: Upload ZIP
-        if: steps.linux_zip.outcome == 'success'
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-linux-${{ matrix.arch }}-zip
-          path: dist/**/*
-          if-no-files-found: error
-
-      - name: Write Linux package summary
-        if: always()
-        env:
-          APPIMAGE: ${{ steps.linux_appimage.outcome }}
-          DEB: ${{ steps.linux_deb.outcome }}
-          ZIP: ${{ steps.linux_zip.outcome }}
-        run: |
-          {
-            echo "### Linux ${{ matrix.arch }} packages"
-            echo "| Package | Result |"
-            echo "| --- | --- |"
-            echo "| AppImage | $APPIMAGE |"
-            echo "| DEB | $DEB |"
-            echo "| ZIP | $ZIP |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
+  # ==========================================
+  # GitHub Release & GPG Signing
+  # ==========================================
   release:
-    name: Publish GitHub Release
+    name: Create GitHub Release
     runs-on: ubuntu-latest
     needs:
       - build-android
@@ -610,52 +367,23 @@ jobs:
       - build-macos
       - build-windows
       - build-linux
-    if: ${{ always() && !cancelled() }}
-    permissions:
-      contents: write
+    if: always() && !cancelled()
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Set up Flutter Environment
+        uses: ./.github/actions/setup-flutter-env
 
-      - name: Resolve release version from pubspec
+      - name: Determine release metadata
         id: release_meta
-        env:
-          RELEASE_TYPE: ${{ inputs.release_type }}
         run: |
-          APP_VERSION=$(awk '$1 == "version:" { print $2; exit }' pubspec.yaml)
-          if [ -z "$APP_VERSION" ]; then
-            echo "No version was found in pubspec.yaml."
-            exit 1
+          version=$(sed -n 's/^\s*version:\s*\([^+]*\)+.*/\1/p' pubspec.yaml)
+          tag="v${version}"
+          is_prerelease=false
+          if [ "${{ inputs.release_type }}" = "prerelease" ]; then
+            is_prerelease=true
           fi
-
-          if [ "$RELEASE_TYPE" = "prerelease" ]; then
-            VERSION_BASE=${APP_VERSION%%+*}
-            if [[ "$APP_VERSION" == *+* ]]; then
-              VERSION_BUILD="+${APP_VERSION#*+}"
-            else
-              VERSION_BUILD=""
-            fi
-            if [[ "$VERSION_BASE" == *-* ]]; then
-              VERSION_BASE="${VERSION_BASE}.pre.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-            else
-              VERSION_BASE="${VERSION_BASE}-pre.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-            fi
-            RELEASE_TAG="v${VERSION_BASE}${VERSION_BUILD}"
-            IS_PRERELEASE=true
-          else
-            RELEASE_TAG="v${APP_VERSION}"
-            IS_PRERELEASE=false
-          fi
-
-          echo "version=$APP_VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
-          {
-            echo "### GitHub Release"
-            echo "- pubspec version: \`$APP_VERSION\`"
-            echo "- release tag: \`$RELEASE_TAG\`"
-            echo "- prerelease: \`$IS_PRERELEASE\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$is_prerelease" >> "$GITHUB_OUTPUT"
 
       - name: Download successful package artifacts
         uses: actions/download-artifact@v4
@@ -680,8 +408,15 @@ jobs:
             echo "No package was built successfully; GitHub Release was not created."
             exit 1
           fi
-          echo "Prepared $count release asset(s)."
           ls -lah release-assets
+
+      - name: Sign release artifacts with GPG
+        id: release_signing
+        shell: bash
+        env:
+          RELEASE_GPG_PRIVATE_KEY_BASE64: ${{ secrets.RELEASE_GPG_PRIVATE_KEY_BASE64 }}
+          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: bash .github/scripts/gpg-sign-artifacts.sh
 
       - name: Publish release
         uses: softprops/action-gh-release@v2

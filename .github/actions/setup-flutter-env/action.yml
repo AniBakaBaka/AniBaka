@@ -1,0 +1,16 @@
+name: "Set up Flutter Environment"
+description: "Check out code repository and set up Flutter SDK with caching"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+        flutter-version-file: .fvmrc
+        cache: true
+        pub-cache: true

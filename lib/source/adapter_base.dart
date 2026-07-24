@@ -92,6 +92,10 @@ abstract class AdapterBase {
 
   bool get validatesOwnUrls => false;
 
+  /// Whether auto-match should perform the normal media HTTP probe before
+  /// accepting and prefetching a direct URL.
+  bool get validateAutoMatchedUrls => false;
+
   Map<String, String> get mediaValidationHeaders => const {
     'User-Agent': defaultUserAgent,
     'Accept': '*/*',

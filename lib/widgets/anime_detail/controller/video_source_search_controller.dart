@@ -1476,7 +1476,10 @@ class VideoSourceSearchController {
   ) async {
     try {
       final media = await adapter
-          .resolvePlaybackMedia(episodeId, skipValidation: true)
+          .resolvePlaybackMedia(
+            episodeId,
+            skipValidation: !adapter.validateAutoMatchedUrls,
+          )
           .timeout(
             _SearchPolicy.directProbeTimeout,
             onTimeout: () => (url: '', httpHeaders: const <String, String>{}),
