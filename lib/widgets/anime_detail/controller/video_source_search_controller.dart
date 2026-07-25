@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
 
@@ -9,60 +8,20 @@ import 'package:baka/source/source_registry.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/services/alias_storage_service.dart';
-import 'package:baka/services/bgm_service.dart';
 import 'package:baka/services/matching/match_memory_service.dart';
 import 'package:baka/services/matching/source_match_engine.dart';
 import 'package:baka/services/player_service.dart';
-import 'package:baka/services/source_reputation_service.dart';
 import 'package:baka/services/source_adapter_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/reg_utils.dart';
 
-// ──────────────────── 预编译正则 ────────────────────
 final _reWhitespace = RegExp(r'\s+');
 final _reAliasSep = RegExp(r'[/／、,，;；\n]');
 final _reBrackets = RegExp(r'[（(].*?[）)]');
 
-// ──────────────────── 工具函数 ────────────────────
-String _normalizeKeyword(String value) =>
-    value.toLowerCase().replaceAll(_reWhitespace, '');
+String _norm(String value) => value.toLowerCase().replaceAll(_reWhitespace, '');
 
-Iterable<String> _splitAliasText(String value) sync* {
-  for (final part in value.split(_reAliasSep)) {
-    final alias = part.trim();
-    if (alias.isNotEmpty) yield alias;
-  }
-}
-
-Iterable<String> _buildKeywordVariants(String keyword) sync* {
-  final text = keyword.trim();
-  if (text.isEmpty) return;
-
-  const replacements = <(String, String)>[
-    ('工房', '工坊'),
-    ('工坊', '工房'),
-    ('后', '後'),
-    ('後', '后'),
-    ('台', '臺'),
-    ('臺', '台'),
-  ];
-  for (final (from, to) in replacements) {
-    if (text.contains(from)) yield text.replaceAll(from, to);
-  }
-
-  final bracketFree = text
-      .replaceAll(_reBrackets, '')
-      .replaceAll(_reWhitespace, ' ')
-      .trim();
-  if (bracketFree.isNotEmpty && bracketFree != text) yield bracketFree;
-
-  final baseTitle = RegUtils.extractBaseTitle(text);
-  if (baseTitle.isNotEmpty && baseTitle != text) yield baseTitle;
-}
-
-// ──────────────────── 数据结构 ────────────────────
-
-/// 响应式搜索与进度状态（带相等性判断，减少无效 UI 刷新）
+/// 响应式搜索与进度状态
 class ProgressState {
   final bool isSearching;
   final Set<String> progressingSources;
@@ -94,17 +53,15 @@ class ProgressState {
   );
 }
 
-/// 搜索结果项（延迟计算附加信息）
+/// 搜索结果项
 class SearchResultItem {
   final String title;
   final String sourceType;
   final Map<String, dynamic> data;
 
-  /// 去重/追踪用的稳定键（只计算一次，避免排序与匹配中反复拼接）
   late final String key =
       '$sourceType|${data['seriesId'] ?? data['id'] ?? data['url'] ?? data['title'] ?? title}';
 
-  /// 匹配候选与其标题指纹/集数等特征在此缓存，多轮排序间复用。
   late final SourceMatchCandidate matchCandidate = SourceMatchCandidate(
     key: key,
     title: title,
@@ -117,8 +74,8 @@ class SearchResultItem {
     final int count when count > 0 => '约 $count 集',
     _ => null,
   };
-  late final String? lineInfo = _extractLineInfo(data);
-  late final String? updateInfo = _extractUpdateInfo(data);
+  late final String? lineInfo = _lineInfo(data);
+  late final String? updateInfo = _updateInfo(data);
 
   SearchResultItem({
     required this.title,
@@ -127,7 +84,7 @@ class SearchResultItem {
   });
 }
 
-String? _extractLineInfo(Map data) {
+String? _lineInfo(Map data) {
   if (data['videos'] case final String s when s.trim().isNotEmpty) {
     final lines = s
         .split('\n')
@@ -141,27 +98,25 @@ String? _extractLineInfo(Map data) {
   return null;
 }
 
-String? _extractUpdateInfo(Map data) {
+String? _updateInfo(Map data) {
   final s = data['time']?.toString().trim() ?? '';
   return s.isEmpty ? null : BgmUtils.formatTimeString(s, '更新时间');
 }
 
-class _SearchPolicy {
-  static const int searchConcurrency = 4;
-  static const int backgroundSearchConcurrency = 2;
-  static const int maxManualAliasKeywords = 3;
-  static const int maxActiveAutoAliasKeywords = 3;
-  static const int minResultsBeforeAliasFallback = 8;
-  static const int perSourceResultLimit = 20;
-  static const int globalResultLimit = 100;
-  static const int autoProbeLimit = 16;
-  static const int autoProbePerSourceLimit = 2;
-  static const int autoProbeConcurrency = 3;
-  static const int backgroundAutoProbeConcurrency = 1;
-  static const int switchAutoProbeLimit = 4;
-  static const Duration resolveTimeout = Duration(seconds: 12);
-  static const Duration directProbeTimeout = Duration(seconds: 8);
-  static const Duration memoryProbeTimeout = Duration(seconds: 5);
+class _Policy {
+  static const searchConcurrency = 4;
+  static const maxManualAliases = 3;
+  static const maxAutoAliases = 3;
+  static const minResultsBeforeAlias = 8;
+  static const perSourceLimit = 20;
+  static const globalLimit = 100;
+  static const autoProbeLimit = 12;
+  static const autoProbePerSource = 2;
+  static const autoProbeConcurrency = 3;
+  static const switchProbeLimit = 4;
+  static const resolveTimeout = Duration(seconds: 12);
+  static const directProbeTimeout = Duration(seconds: 8);
+  static const memoryProbeTimeout = Duration(seconds: 5);
 }
 
 enum SourceProbeStatus { pending, resolving, playable, direct, failed }
@@ -169,7 +124,6 @@ enum SourceProbeStatus { pending, resolving, playable, direct, failed }
 class SourceLineChoice {
   final int index;
   final String name;
-
   const SourceLineChoice({required this.index, required this.name});
 }
 
@@ -179,7 +133,7 @@ class SourceProbeState {
   final int preferredLine;
   SourceProbeStatus status = SourceProbeStatus.pending;
   Map<String, dynamic>? data;
-  List<SourceLineChoice> lines = const <SourceLineChoice>[];
+  List<SourceLineChoice> lines = const [];
   String? directUrl;
   String? routeKey;
   int? resolvedLineIndex;
@@ -215,8 +169,7 @@ class SourceCandidateState {
   bool get isReady => probe.isReady;
 }
 
-/// A playable route. Candidates resolving to the same media URL share one
-/// group; the URL stays in controller state and is never rendered by the UI.
+/// 同一直链 URL 的候选归组。
 class DirectSourceGroup {
   const DirectSourceGroup({
     required this.key,
@@ -232,88 +185,71 @@ class DirectSourceGroup {
   bool get isReady => primary.isReady;
 }
 
-class _SearchSession {
-  final int id;
-  bool autoMatched = false;
-  bool autoMatchRerunRequested = false;
-  bool autoMatchFinalPassRequested = false;
-  Future<void>? autoMatchFuture;
-
-  _SearchSession(this.id);
-}
-
-// ──────────────────── 搜索结果缓存 ────────────────────
-class _CachedEntry {
+class _CacheEntry {
   final List<Map<String, dynamic>> items;
-  final DateTime cachedAt;
-  const _CachedEntry(this.items, this.cachedAt);
-  bool get isFresh =>
-      DateTime.now().difference(cachedAt) < _SearchResultCache.ttl;
+  final DateTime at;
+  const _CacheEntry(this.items, this.at);
+  bool get fresh => DateTime.now().difference(at) < const Duration(minutes: 10);
 }
 
-class _SearchResultCache {
-  static const Duration ttl = Duration(minutes: 10);
-  static const int maxSize = 48;
-  static const int maxItemsPerEntry = 30;
+/// 源搜索结果短时缓存（跨控制器实例共享）。
+class _ResultCache {
+  static const maxSize = 48;
+  static const maxItems = 30;
+  static final _cache = <String, _CacheEntry>{};
+  static final _inflight = <String, Future<List<Map<String, dynamic>>>>{};
 
-  static final LinkedHashMap<String, _CachedEntry> _cache = LinkedHashMap();
-  static final Map<String, Future<List<Map<String, dynamic>>>> _inflight = {};
-
-  static String makeKey(
-    String sourceKey,
-    String keyword, {
-    String version = '',
-  }) => '$sourceKey|${_normalizeKeyword(keyword)}|$version';
+  static String key(String source, String keyword, {String version = ''}) =>
+      '$source|${_norm(keyword)}|$version';
 
   static Future<List<Map<String, dynamic>>> load(
-    String key,
+    String cacheKey,
     Future<List<Map<String, dynamic>>> Function() loader,
   ) async {
-    final cached = _cache[key];
-    if (cached != null && cached.isFresh) {
+    final hit = _cache[cacheKey];
+    if (hit != null && hit.fresh) {
       _cache
-        ..remove(key)
-        ..[key] = cached;
-      return cached.items;
+        ..remove(cacheKey)
+        ..[cacheKey] = hit;
+      return hit.items;
     }
-    _cache.remove(key);
+    _cache.remove(cacheKey);
 
-    final running = _inflight[key];
-    if (running != null) return await running;
+    final running = _inflight[cacheKey];
+    if (running != null) return running;
 
     final future = loader().then((items) {
-      final cachedItems = items.length <= maxItemsPerEntry
+      final clipped = items.length <= maxItems
           ? items
-          : items.sublist(0, maxItemsPerEntry);
+          : items.sublist(0, maxItems);
       if (_cache.length >= maxSize) _cache.remove(_cache.keys.first);
-      _cache[key] = _CachedEntry(cachedItems, DateTime.now());
-      return cachedItems;
+      _cache[cacheKey] = _CacheEntry(clipped, DateTime.now());
+      return clipped;
     });
-    _inflight[key] = future;
+    _inflight[cacheKey] = future;
     try {
       return await future;
     } finally {
-      if (identical(_inflight[key], future)) _inflight.remove(key);
+      if (identical(_inflight[cacheKey], future)) _inflight.remove(cacheKey);
     }
   }
 }
 
-// ──────────────────── 关键词去重辅助 ────────────────────
-class _KeywordList {
-  final List<String> items = [];
-  final Set<String> _normalized = {};
+/// 去重关键词列表。
+class _Keywords {
+  final items = <String>[];
+  final _seen = <String>{};
 
   void add(String? value, {String? exclude}) {
-    final keyword = value?.trim();
-    if (keyword == null || keyword.isEmpty) return;
-    final norm = _normalizeKeyword(keyword);
-    if (norm.isEmpty) return;
-    if (exclude != null && norm == _normalizeKeyword(exclude)) return;
-    if (_normalized.add(norm)) items.add(keyword);
+    final k = value?.trim();
+    if (k == null || k.isEmpty) return;
+    final n = _norm(k);
+    if (n.isEmpty) return;
+    if (exclude != null && n == _norm(exclude)) return;
+    if (_seen.add(n)) items.add(k);
   }
 }
 
-// ──────────────────── 主控制器 ────────────────────
 class VideoSourceSearchController {
   static VideoSourceSearchController? globalCached;
   static String? globalCachedTitle;
@@ -322,75 +258,59 @@ class VideoSourceSearchController {
     String title,
     VideoSourceSearchController controller,
   ) {
-    if (!identical(globalCached, controller)) {
-      globalCached?.dispose();
-    }
+    if (!identical(globalCached, controller)) globalCached?.dispose();
     globalCached = controller;
     globalCachedTitle = title;
   }
 
-  static bool isGlobalCached(VideoSourceSearchController controller) {
-    return globalCached == controller;
-  }
+  static bool isGlobalCached(VideoSourceSearchController controller) =>
+      identical(globalCached, controller);
 
   final String title;
   final String cover;
   final Map<String, dynamic>? seedData;
   final bool autoMatchMode;
   final int targetEpisodeIndex;
-
-  /// 匹配结果回调
   final ValueChanged<Map<String, dynamic>>? onMatchFound;
   final VoidCallback? onMatchFailed;
 
-  // 反应式状态通知器
-  final ValueNotifier<bool> isSearchingNotifier = ValueNotifier<bool>(false);
-  final ValueNotifier<List<SearchResultItem>> resultsNotifier =
-      ValueNotifier<List<SearchResultItem>>([]);
-  final ValueNotifier<ProgressState> progressNotifier =
-      ValueNotifier<ProgressState>(
-        const ProgressState(
-          isSearching: false,
-          progressingSources: {},
-          finishedSources: {},
-          searchErrors: [],
-        ),
-      );
+  final isSearchingNotifier = ValueNotifier(false);
+  final resultsNotifier = ValueNotifier<List<SearchResultItem>>(const []);
+  final progressNotifier = ValueNotifier(
+    const ProgressState(
+      isSearching: false,
+      progressingSources: {},
+      finishedSources: {},
+      searchErrors: [],
+    ),
+  );
+  final manualAliasesNotifier = ValueNotifier<List<String>>(const []);
+  final automaticAliasesNotifier = ValueNotifier<List<String>>(const []);
+  final activeAutoAliasesNotifier = ValueNotifier<Set<String>>({});
+  final candidateRevisionNotifier = ValueNotifier(0);
 
-  final ValueNotifier<List<String>> manualAliasesNotifier =
-      ValueNotifier<List<String>>([]);
-  final ValueNotifier<List<String>> automaticAliasesNotifier =
-      ValueNotifier<List<String>>([]);
-  final ValueNotifier<Set<String>> activeAutoAliasesNotifier =
-      ValueNotifier<Set<String>>({});
+  final _adapter = SourceAdapterService();
+  SourceAdapterService get sourceAdapterService => _adapter;
 
-  final SourceAdapterService _sourceAdapterService = SourceAdapterService();
-  SourceAdapterService get sourceAdapterService => _sourceAdapterService;
+  final _results = <String, SearchResultItem>{};
+  final _sourceCounts = <String, int>{};
+  final _errors = <String>[];
+  final _finished = <String>{};
+  final _progressing = <String>{};
+  final _resolvedCache = <String, Map<String, dynamic>>{};
+  final _resolveFutures = <String, Future<Map<String, dynamic>>>{};
+  final _probes = <String, SourceProbeState>{};
+  final _scoreCache = <String, Map<String, int>>{};
+  final _triedProbes = <String>{};
+  final _engine = const SourceMatchEngine();
 
-  final ValueNotifier<int> candidateRevisionNotifier = ValueNotifier<int>(0);
-
-  final Map<String, SearchResultItem> _resultMap = <String, SearchResultItem>{};
-  final Map<String, int> _sourceResultCounts = <String, int>{};
-  final List<String> _searchErrors = [];
-  final Set<String> _finishedSources = <String>{};
-  final Set<String> _progressingSources = <String>{};
-  final Map<String, Map<String, dynamic>> _resolvedVideoDataCache =
-      <String, Map<String, dynamic>>{};
-  final Map<String, Future<Map<String, dynamic>>> _resolveVideoDataFutures =
-      <String, Future<Map<String, dynamic>>>{};
-  final Map<String, SourceProbeState> _probeStates =
-      <String, SourceProbeState>{};
-  final Map<String, Map<String, int>> _switchScoreCache =
-      <String, Map<String, int>>{};
-  final Set<String> _autoTriedProbeKeys = <String>{};
-  final SourceMatchEngine _matchEngine = const SourceMatchEngine();
-
-  late final String _primaryKeyword;
-  late final String _aliasStorageKey;
-  int _searchRunId = 0;
-  bool _isDisposed = false;
+  late final String _primary;
+  late final String _aliasKey;
+  int _runId = 0;
+  bool _disposed = false;
   bool _userSelected = false;
-  _SearchSession? _activeSession;
+  bool _autoMatched = false;
+  Future<void>? _autoMatchFuture;
   Future<SourceMatchContext>? _matchContextFuture;
 
   void markUserSelected() => _userSelected = true;
@@ -404,20 +324,25 @@ class VideoSourceSearchController {
     this.onMatchFound,
     this.onMatchFailed,
   }) {
-    _primaryKeyword = title.trim();
-    _aliasStorageKey = _buildAliasStorageKey();
+    _primary = title.trim();
+    _aliasKey = _buildAliasKey();
     manualAliasesNotifier.value = _readManualAliases();
-    automaticAliasesNotifier.value = _buildAutomaticAliases();
+    automaticAliasesNotifier.value = _buildAutoAliases();
   }
 
-  bool get isDisposed => _isDisposed;
+  bool get isDisposed => _disposed;
+  bool get hasMatched => _autoMatched;
+  Set<String> get triedKeys => Set.unmodifiable(_triedProbes);
+  List<SearchResultItem> get currentResults =>
+      List.unmodifiable(_results.values);
+  Set<String> get progressingSources => _progressing;
+  List<String> get searchErrors => _errors;
 
   void dispose() {
-    if (_isDisposed) return;
-    _isDisposed = true;
-    _searchRunId++;
-    _activeSession = null;
-    _sourceAdapterService.dispose();
+    if (_disposed) return;
+    _disposed = true;
+    _runId++;
+    _adapter.dispose();
     isSearchingNotifier.dispose();
     resultsNotifier.dispose();
     progressNotifier.dispose();
@@ -427,82 +352,80 @@ class VideoSourceSearchController {
     candidateRevisionNotifier.dispose();
   }
 
-  // ──────── 别名存储 ────────
+  // ── aliases ──
 
-  String _buildAliasStorageKey() {
+  String _buildAliasKey() {
     final bgmId = seedData?['bgmId']?.toString().trim();
     if (bgmId != null && bgmId.isNotEmpty) return 'bgm:$bgmId';
-    return 'title:${_normalizeKeyword(title)}';
+    return 'title:${_norm(title)}';
   }
 
-  List<String> _buildAutomaticAliases() {
-    final candidates = _KeywordList();
-    candidates.add(title);
-    for (final alias in _extractSeedAliasCandidates()) {
-      candidates.add(alias);
+  List<String> _buildAutoAliases() {
+    final pool = _Keywords()..add(title);
+    for (final a in _seedAliases()) {
+      pool.add(a);
     }
 
-    final aliases = _KeywordList();
-    for (final candidate in candidates.items) {
-      aliases.add(candidate, exclude: _primaryKeyword);
-      for (final variant in _buildKeywordVariants(candidate)) {
-        aliases.add(variant, exclude: _primaryKeyword);
-        if (aliases.items.length >= 6) return aliases.items;
-      }
+    final out = _Keywords();
+    for (final c in pool.items) {
+      out.add(c, exclude: _primary);
+      // 去括号 / 去季后缀
+      final noBracket = c
+          .replaceAll(_reBrackets, '')
+          .replaceAll(_reWhitespace, ' ')
+          .trim();
+      if (noBracket.isNotEmpty) out.add(noBracket, exclude: _primary);
+      final base = RegUtils.extractBaseTitle(c);
+      if (base.isNotEmpty) out.add(base, exclude: _primary);
+      if (out.items.length >= 6) break;
     }
-    return aliases.items;
+    return out.items;
   }
 
   List<String> _readManualAliases() {
     final store = AliasStorageService.readStore();
-    final titleKey = 'title:${_normalizeKeyword(title)}';
-    final raw = store[_aliasStorageKey] ?? store[titleKey];
-    if (raw is! List) return [];
-
-    final aliases = _KeywordList();
+    final raw = store[_aliasKey] ?? store['title:${_norm(title)}'];
+    if (raw is! List) return const [];
+    final out = _Keywords();
     for (final item in raw) {
-      aliases.add(item?.toString());
+      out.add(item?.toString());
     }
-    return aliases.items;
+    return out.items;
   }
 
-  Future<void> _saveManualAliases() async {
-    await AliasStorageService.saveAliases(
-      _aliasStorageKey,
-      manualAliasesNotifier.value,
-    );
-  }
+  Future<void> _saveManualAliases() => AliasStorageService.saveAliases(
+    _aliasKey,
+    manualAliasesNotifier.value,
+  );
 
   Future<void> toggleAutoAlias(String alias) async {
     if (isSearchingNotifier.value) return;
-    final nextActive = Set<String>.of(activeAutoAliasesNotifier.value);
-    if (!nextActive.remove(alias)) nextActive.add(alias);
-    activeAutoAliasesNotifier.value = nextActive;
+    final next = Set<String>.of(activeAutoAliasesNotifier.value);
+    if (!next.remove(alias)) next.add(alias);
+    activeAutoAliasesNotifier.value = next;
     await startSearch();
   }
 
   Future<bool> addManualAlias(String value) async {
     if (isSearchingNotifier.value) return false;
-
-    final nextAliases = List<String>.of(manualAliasesNotifier.value);
-    final existingNorm = <String>{
-      _normalizeKeyword(_primaryKeyword),
-      for (final a in manualAliasesNotifier.value) _normalizeKeyword(a),
+    final next = List<String>.of(manualAliasesNotifier.value);
+    final seen = <String>{
+      _norm(_primary),
+      for (final a in next) _norm(a),
       for (final a in automaticAliasesNotifier.value)
-        if (activeAutoAliasesNotifier.value.contains(a)) _normalizeKeyword(a),
+        if (activeAutoAliasesNotifier.value.contains(a)) _norm(a),
     };
     var added = false;
-
-    for (final alias in _splitAliasText(value)) {
-      final normalized = _normalizeKeyword(alias);
-      if (normalized.isNotEmpty && existingNorm.add(normalized)) {
-        nextAliases.add(alias.trim());
+    for (final part in value.split(_reAliasSep)) {
+      final alias = part.trim();
+      if (alias.isEmpty) continue;
+      if (seen.add(_norm(alias))) {
+        next.add(alias);
         added = true;
       }
     }
     if (!added) return false;
-
-    manualAliasesNotifier.value = nextAliases;
+    manualAliasesNotifier.value = next;
     await _saveManualAliases();
     await startSearch();
     return true;
@@ -510,35 +433,30 @@ class VideoSourceSearchController {
 
   Future<void> removeManualAlias(String alias) async {
     if (isSearchingNotifier.value) return;
-    final normAlias = _normalizeKeyword(alias);
+    final n = _norm(alias);
     manualAliasesNotifier.value = manualAliasesNotifier.value
-        .where((item) => _normalizeKeyword(item) != normAlias)
+        .where((a) => _norm(a) != n)
         .toList(growable: false);
     await _saveManualAliases();
     await startSearch();
   }
 
-  // ──────── 种子别名提取 ────────
-
-  Iterable<String> _extractSeedAliasCandidates() sync* {
+  Iterable<String> _seedAliases() sync* {
     final detail = seedData?['bgmDetailData'];
     if (detail is! Map) return;
-
-    yield* _splitAliasText(detail['name_cn']?.toString() ?? '');
-    yield* _splitAliasText(detail['name']?.toString() ?? '');
-
+    yield* _splitAliases(detail['name_cn']?.toString());
+    yield* _splitAliases(detail['name']?.toString());
     final infobox = detail['infobox'];
-    if (infobox is List) {
-      for (final item in infobox) {
-        if (item is! Map) continue;
-        final key = item['key']?.toString() ?? '';
-        if (!_isAliasInfoKey(key)) continue;
-        yield* _flattenAliasValue(item['value']);
-      }
+    if (infobox is! List) return;
+    for (final item in infobox) {
+      if (item is! Map) continue;
+      final key = item['key']?.toString() ?? '';
+      if (!_isAliasKey(key)) continue;
+      yield* _flattenAlias(item['value']);
     }
   }
 
-  bool _isAliasInfoKey(String key) {
+  bool _isAliasKey(String key) {
     final lower = key.toLowerCase();
     return key.contains('别名') ||
         key.contains('中文名') ||
@@ -548,229 +466,201 @@ class VideoSourceSearchController {
         lower.contains('alias');
   }
 
-  Iterable<String> _flattenAliasValue(dynamic value) sync* {
-    if (value is String) {
-      yield* _splitAliasText(value);
-    } else if (value is List) {
-      for (final item in value) {
-        yield* _flattenAliasValue(item);
-      }
-    } else if (value is Map) {
-      final alias = value['v'] ?? value['value'] ?? value['name'];
-      if (alias != null) yield* _splitAliasText(alias.toString());
-    } else if (value != null) {
-      yield* _splitAliasText(value.toString());
+  Iterable<String> _splitAliases(String? value) sync* {
+    if (value == null || value.isEmpty) return;
+    for (final part in value.split(_reAliasSep)) {
+      final a = part.trim();
+      if (a.isNotEmpty) yield a;
     }
   }
 
-  // ──────── 搜索执行 ────────
+  Iterable<String> _flattenAlias(dynamic value) sync* {
+    if (value is String) {
+      yield* _splitAliases(value);
+    } else if (value is List) {
+      for (final item in value) {
+        yield* _flattenAlias(item);
+      }
+    } else if (value is Map) {
+      final v = value['v'] ?? value['value'] ?? value['name'];
+      if (v != null) yield* _splitAliases(v.toString());
+    } else if (value != null) {
+      yield* _splitAliases(value.toString());
+    }
+  }
+
+  // ── search ──
 
   Future<void> startSearch() async {
-    final session = _SearchSession(++_searchRunId);
-    _activeSession = session;
-    _resetSearchState();
+    final runId = ++_runId;
+    _autoMatched = false;
+    _autoMatchFuture = null;
+    _resetState();
     isSearchingNotifier.value = true;
-    _emitProgress(isSearching: true);
+    _emitProgress(true);
 
-    await _sourceAdapterService.init();
-    if (_isSessionStopped(session)) return;
+    await _adapter.init();
+    if (!_alive(runId)) return;
 
-    // 历史命中只是最快路径，失效时不应让完整搜索白等数秒。
-    final rememberedMatchFuture = autoMatchMode
-        ? _tryRememberedMatch(session)
-        : null;
+    // 记忆命中与全量搜索并行；命中则先回调，搜索继续填列表。
+    final memoryFuture = autoMatchMode ? _tryMemory(runId) : null;
 
-    final quickSources = _sourceAdapterService.enabledQuickSearchSources;
-    final customSources = _sourceAdapterService.enabledCustomSources;
-    final keywords = _buildKeywordPlan();
+    final quick = _adapter.enabledQuickSearchSources;
+    final custom = _adapter.enabledCustomSources;
+    final keywords = _keywordPlan();
 
-    _progressingSources
+    _progressing
       ..clear()
       ..addAll([
         'internal',
-        ...quickSources.map((s) => s.key),
-        ...customSources.map((s) => AdapterRegistry.customSourceKey(s.id)),
+        ...quick.map((s) => s.key),
+        ...custom.map((s) => AdapterRegistry.customSourceKey(s.id)),
       ]);
 
-    final searches = <Future<void> Function()>[
+    final tasks = <Future<void> Function()>[
       () => _searchSource(
-        session: session,
+        runId: runId,
         keywords: keywords,
         sourceKey: 'internal',
         version: '',
-        loadFunc: _loadInternalSearch,
+        load: _loadInternal,
         errorMsg: '站内搜索失败',
       ),
-      for (final source in quickSources)
+      for (final s in quick)
         () => _searchSource(
-          session: session,
+          runId: runId,
           keywords: keywords,
-          sourceKey: source.key,
+          sourceKey: s.key,
           version: '',
-          loadFunc: (keyword) => _sourceAdapterService.searchBuiltin(
-            keyword,
-            source,
-            skipBgmEnhancement: true,
-          ),
-          errorMsg: '${source.displayName} 搜索失败',
+          load: (kw) =>
+              _adapter.searchBuiltin(kw, s, skipBgmEnhancement: true),
+          errorMsg: '${s.displayName} 搜索失败',
         ),
-      for (final source in customSources)
+      for (final s in custom)
         () => _searchSource(
-          session: session,
+          runId: runId,
           keywords: keywords,
-          sourceKey: AdapterRegistry.customSourceKey(source.id),
-          version: source.updatedAt.millisecondsSinceEpoch.toString(),
-          loadFunc: (keyword) => _sourceAdapterService.searchCustom(
-            keyword,
-            source,
-            skipBgmEnhancement: true,
-          ),
-          errorMsg: '${source.name} 搜索失败',
+          sourceKey: AdapterRegistry.customSourceKey(s.id),
+          version: s.updatedAt.millisecondsSinceEpoch.toString(),
+          load: (kw) =>
+              _adapter.searchCustom(kw, s, skipBgmEnhancement: true),
+          errorMsg: '${s.name} 搜索失败',
         ),
     ];
 
-    final searchFuture = _runBounded(
-      searches,
-      _SearchPolicy.searchConcurrency,
-      backgroundConcurrency: _SearchPolicy.backgroundSearchConcurrency,
-      isBackground: () => session.autoMatched,
-    );
+    final searchFuture = _runPool(tasks, _Policy.searchConcurrency);
 
-    // A remembered route opens immediately while the rest of the sources keep
-    // filling the route list in the background.
-    if (rememberedMatchFuture != null && await rememberedMatchFuture) {
-      unawaited(_completeSearch(session, searchFuture));
+    if (memoryFuture != null && await memoryFuture) {
+      unawaited(_finishSearch(runId, searchFuture));
       return;
     }
-
-    await _completeSearch(session, searchFuture);
+    await _finishSearch(runId, searchFuture);
   }
 
-  Future<void> _completeSearch(
-    _SearchSession session,
-    Future<void> searchFuture,
-  ) async {
+  Future<void> _finishSearch(int runId, Future<void> searchFuture) async {
     await searchFuture;
-    if (_isSessionStopped(session)) return;
+    if (!_alive(runId)) return;
 
-    final finalMatchFuture = autoMatchMode && !_userSelected
-        ? _queueAutoMatch(session, finalPass: true)
-        : null;
-    if (finalMatchFuture != null) await finalMatchFuture;
-    if (_isDisposed || _activeSession != session) return;
+    if (autoMatchMode && !_userSelected && !_autoMatched) {
+      await _runAutoMatch(runId, finalPass: true);
+    }
+    if (!_alive(runId)) return;
 
     isSearchingNotifier.value = false;
-    _emitProgress(isSearching: false);
+    _emitProgress(false);
 
-    if (autoMatchMode && !session.autoMatched && !_userSelected) {
+    if (autoMatchMode && !_autoMatched && !_userSelected) {
       onMatchFailed?.call();
     }
   }
 
-  Future<void> _runBounded(
+  Future<void> _runPool(
     List<Future<void> Function()> tasks,
-    int concurrency, {
-    int? backgroundConcurrency,
-    bool Function()? isBackground,
-  }) async {
+    int concurrency,
+  ) async {
     var next = 0;
-
-    Future<void> worker(int workerIndex) async {
+    Future<void> worker() async {
       while (next < tasks.length) {
-        if ((isBackground?.call() ?? false) &&
-            workerIndex >= (backgroundConcurrency ?? concurrency)) {
-          return;
-        }
-        final task = tasks[next++];
-        await task();
+        final i = next++;
+        await tasks[i]();
       }
     }
 
-    final workerCount = tasks.length < concurrency ? tasks.length : concurrency;
-    await Future.wait(List.generate(workerCount, worker));
+    final n = tasks.length < concurrency ? tasks.length : concurrency;
+    if (n <= 0) return;
+    await Future.wait(List.generate(n, (_) => worker()));
   }
 
-  bool _isSessionStopped(_SearchSession session) {
-    return _isDisposed ||
-        _activeSession != session ||
-        session.id != _searchRunId;
-  }
+  bool _alive(int runId) => !_disposed && runId == _runId;
 
-  void _resetSearchState() {
-    _resolvedVideoDataCache.clear();
-    _resolveVideoDataFutures.clear();
-    _probeStates.clear();
-    _switchScoreCache.clear();
-    _autoTriedProbeKeys.clear();
+  void _resetState() {
+    _resolvedCache.clear();
+    _resolveFutures.clear();
+    _probes.clear();
+    _scoreCache.clear();
+    _triedProbes.clear();
     _matchContextFuture = null;
-    _resultMap.clear();
-    _sourceResultCounts.clear();
-    _searchErrors.clear();
-    _finishedSources.clear();
-    _progressingSources.clear();
-    resultsNotifier.value = const <SearchResultItem>[];
+    _results.clear();
+    _sourceCounts.clear();
+    _errors.clear();
+    _finished.clear();
+    _progressing.clear();
+    resultsNotifier.value = const [];
   }
 
-  void _emitProgress({required bool isSearching}) {
+  void _emitProgress(bool searching) {
     final next = ProgressState(
-      isSearching: isSearching,
-      progressingSources: Set.unmodifiable(_progressingSources),
-      finishedSources: Set.unmodifiable(_finishedSources),
-      searchErrors: List.unmodifiable(_searchErrors),
+      isSearching: searching,
+      progressingSources: Set.unmodifiable(_progressing),
+      finishedSources: Set.unmodifiable(_finished),
+      searchErrors: List.unmodifiable(_errors),
     );
-    if (next != progressNotifier.value) {
-      progressNotifier.value = next;
-    }
+    if (next != progressNotifier.value) progressNotifier.value = next;
   }
 
   Future<void> _searchSource({
-    required _SearchSession session,
+    required int runId,
     required List<String> keywords,
     required String sourceKey,
     required String version,
-    required Future<List<Map<String, dynamic>>> Function(String keyword)
-    loadFunc,
+    required Future<List<Map<String, dynamic>>> Function(String) load,
     required String errorMsg,
   }) async {
     if (keywords.isEmpty) {
-      _finishSource(session, sourceKey);
+      _finishSource(runId, sourceKey);
       return;
     }
 
     var attempted = 0;
     var failed = 0;
-    var foundForSource = false;
+    var found = false;
 
     for (var i = 0; i < keywords.length; i++) {
-      if (_isSessionStopped(session)) return;
-      if (i > 0 &&
-          _resultMap.length >= _SearchPolicy.minResultsBeforeAliasFallback) {
-        break;
-      }
+      if (!_alive(runId)) return;
+      if (i > 0 && _results.length >= _Policy.minResultsBeforeAlias) break;
 
       attempted++;
-      final keyword = keywords[i];
-      List<Map<String, dynamic>>? rawResults;
+      List<Map<String, dynamic>>? raw;
       try {
-        rawResults = await _SearchResultCache.load(
-          _SearchResultCache.makeKey(sourceKey, keyword, version: version),
-          () => loadFunc(keyword),
+        raw = await _ResultCache.load(
+          _ResultCache.key(sourceKey, keywords[i], version: version),
+          () => load(keywords[i]),
         );
       } catch (_) {
-        rawResults = null;
+        raw = null;
       }
-      if (_isSessionStopped(session)) return;
+      if (!_alive(runId)) return;
 
-      if (rawResults == null) {
+      if (raw == null) {
         failed++;
         continue;
       }
 
       final seen = <String>{};
       final items = <SearchResultItem>[];
-      for (final raw in rawResults) {
-        final data = Map<String, dynamic>.from(raw)
-          ..['_searchKeyword'] = keyword;
+      for (final r in raw) {
+        final data = Map<String, dynamic>.from(r)
+          ..['_searchKeyword'] = keywords[i];
         final item = SearchResultItem(
           title: data['title']?.toString() ?? '',
           sourceType: sourceKey,
@@ -779,394 +669,240 @@ class VideoSourceSearchController {
         if (seen.add(item.key)) items.add(item);
       }
       if (items.isNotEmpty) {
-        foundForSource = true;
-        _appendResults(session, items);
+        found = true;
+        _appendResults(runId, items);
         break;
       }
     }
 
     _finishSource(
-      session,
+      runId,
       sourceKey,
-      error: attempted > 0 && failed == attempted && !foundForSource
-          ? errorMsg
-          : null,
+      error: attempted > 0 && failed == attempted && !found ? errorMsg : null,
     );
   }
 
-  List<String> _buildKeywordPlan() {
-    final kw = _KeywordList();
-    kw.add(_primaryKeyword);
-    for (final alias in manualAliasesNotifier.value.take(
-      _SearchPolicy.maxManualAliasKeywords,
-    )) {
-      kw.add(alias);
+  List<String> _keywordPlan() {
+    final kw = _Keywords()..add(_primary);
+    for (final a in manualAliasesNotifier.value.take(_Policy.maxManualAliases)) {
+      kw.add(a);
     }
-    final activeAuto = activeAutoAliasesNotifier.value;
-    var autoCount = 0;
-    for (final alias in automaticAliasesNotifier.value) {
-      if (!activeAuto.contains(alias)) continue;
-      kw.add(alias);
-      if (++autoCount >= _SearchPolicy.maxActiveAutoAliasKeywords) break;
+    var auto = 0;
+    final active = activeAutoAliasesNotifier.value;
+    for (final a in automaticAliasesNotifier.value) {
+      if (!active.contains(a)) continue;
+      kw.add(a);
+      if (++auto >= _Policy.maxAutoAliases) break;
     }
     return kw.items;
   }
 
-  Future<List<Map<String, dynamic>>> _loadInternalSearch(String keyword) async {
+  Future<List<Map<String, dynamic>>> _loadInternal(String keyword) async {
     final response = await getSearch(keyword);
-    final rawResults = BgmUtils.parseJsonMap(response.data)?['data'];
-    if (rawResults is! List) return const <Map<String, dynamic>>[];
-
-    final results = <Map<String, dynamic>>[];
-    for (final item in rawResults) {
-      if (item is! Map || item['videos'] == null) continue;
-      results.add(Map<String, dynamic>.from(item));
+    final raw = BgmUtils.parseJsonMap(response.data)?['data'];
+    if (raw is! List) return const [];
+    final out = <Map<String, dynamic>>[];
+    for (final item in raw) {
+      if (item is Map && item['videos'] != null) {
+        out.add(Map<String, dynamic>.from(item));
+      }
     }
-    return results;
+    return out;
   }
 
-  void _appendResults(
-    _SearchSession session,
-    List<SearchResultItem> newResults,
-  ) {
-    if (_isSessionStopped(session)) return;
-
+  void _appendResults(int runId, List<SearchResultItem> items) {
+    if (!_alive(runId)) return;
     var accepted = 0;
-    for (final item in newResults) {
-      if (_resultMap.containsKey(item.key)) continue;
-      if (_resultMap.length >= _SearchPolicy.globalResultLimit) break;
-
-      final sourceCount = _sourceResultCounts[item.sourceType] ?? 0;
-      if (sourceCount >= _SearchPolicy.perSourceResultLimit) continue;
-
-      _resultMap[item.key] = item;
-      _sourceResultCounts[item.sourceType] = sourceCount + 1;
+    for (final item in items) {
+      if (_results.containsKey(item.key)) continue;
+      if (_results.length >= _Policy.globalLimit) break;
+      final count = _sourceCounts[item.sourceType] ?? 0;
+      if (count >= _Policy.perSourceLimit) continue;
+      _results[item.key] = item;
+      _sourceCounts[item.sourceType] = count + 1;
       accepted++;
     }
+    if (accepted == 0) return;
 
-    if (accepted > 0) {
-      _switchScoreCache.clear();
-      resultsNotifier.value = List.unmodifiable(_resultMap.values);
-      if (autoMatchMode && !_userSelected) {
-        unawaited(_queueAutoMatch(session));
-      }
+    _scoreCache.clear();
+    resultsNotifier.value = List.unmodifiable(_results.values);
+    if (autoMatchMode && !_userSelected && !_autoMatched) {
+      unawaited(_scheduleAutoMatch(runId));
     }
   }
 
-  void _finishSource(
-    _SearchSession session,
-    String sourceKey, {
-    String? error,
-  }) {
-    if (_isDisposed || _activeSession != session) return;
-
-    if (error != null) _searchErrors.add(error);
-    _progressingSources.remove(sourceKey);
-    _finishedSources.add(sourceKey);
-
-    _emitProgress(isSearching: true);
+  void _finishSource(int runId, String sourceKey, {String? error}) {
+    if (!_alive(runId)) return;
+    if (error != null) _errors.add(error);
+    _progressing.remove(sourceKey);
+    _finished.add(sourceKey);
+    _emitProgress(true);
   }
 
-  // ──────── 自动匹配 ────────
+  // ── auto match ──
 
-  bool _hasPlayableContent(Map<String, dynamic> data) {
-    final videos = data['videos'];
-    if (videos is String && videos.trim().isNotEmpty) return true;
-    final videoList = data['videoList'];
-    if (videoList is List && videoList.isNotEmpty) return true;
-    return false;
-  }
-
-  Future<void> _queueAutoMatch(
-    _SearchSession session, {
-    bool finalPass = false,
-  }) {
-    if (_isSessionStopped(session) || _userSelected) {
+  Future<void> _scheduleAutoMatch(int runId) {
+    if (!_alive(runId) || _userSelected || _autoMatched) {
       return Future.value();
     }
-
-    session.autoMatchRerunRequested = true;
-    if (finalPass) session.autoMatchFinalPassRequested = true;
-
-    final running = session.autoMatchFuture;
-    if (running != null) return running;
-
-    final future = _drainAutoMatchQueue(session);
-    session.autoMatchFuture = future;
-    future.whenComplete(() {
-      if (identical(session.autoMatchFuture, future)) {
-        session.autoMatchFuture = null;
-      }
-    });
-    return future;
+    return _autoMatchFuture ??= _runAutoMatch(runId, finalPass: false)
+        .whenComplete(() => _autoMatchFuture = null);
   }
 
-  Future<void> _drainAutoMatchQueue(_SearchSession session) async {
-    while (session.autoMatchRerunRequested &&
-        !_isSessionStopped(session) &&
-        !_userSelected) {
-      session.autoMatchRerunRequested = false;
-      final finalPass = session.autoMatchFinalPassRequested;
-      session.autoMatchFinalPassRequested = false;
-      await _runAutoMatch(session, finalPass: finalPass);
-    }
-  }
+  Future<void> _runAutoMatch(int runId, {required bool finalPass}) async {
+    if (!_alive(runId) || _userSelected || _autoMatched) return;
 
-  Future<void> _runAutoMatch(
-    _SearchSession session, {
-    required bool finalPass,
-  }) async {
-    final context = await _getMatchContext();
-    if (_isSessionStopped(session) || _userSelected) {
-      return;
-    }
+    final context = await _matchContext();
+    if (!_alive(runId) || _userSelected || _autoMatched) return;
 
-    final ranked = _matchEngine.rank([
-      for (final item in _resultMap.values)
+    final ranked = _engine.rank([
+      for (final item in _results.values)
         if (item.sourceType != 'internal') item.matchCandidate,
     ], context);
 
-    final candidatesBySource = <String, List<SearchResultItem>>{};
-    for (final score in ranked) {
+    // 每源最多 2 个，轮询取样，避免单源占满探测预算。
+    final bySource = <String, List<SearchResultItem>>{};
+    for (final s in ranked) {
       if (finalPass) {
-        if (score.confidence < 0.45) break;
-      } else if (!score.shouldProbeImmediately) {
+        if (s.confidence < 0.45) break;
+      } else if (!s.shouldProbeImmediately) {
         continue;
       }
-      final item = _resultMap[score.candidate.key];
-      if (item != null &&
-          !_autoTriedProbeKeys.contains(
-            _probeKey(item, _targetEpisodeIndex, 1),
-          )) {
-        final sourceCandidates = candidatesBySource.putIfAbsent(
-          item.sourceType,
-          () => <SearchResultItem>[],
-        );
-        if (sourceCandidates.length < _SearchPolicy.autoProbePerSourceLimit) {
-          sourceCandidates.add(item);
-        }
-      }
+      final item = _results[s.candidate.key];
+      if (item == null) continue;
+      final key = _probeKey(item, _ep, 1);
+      if (_triedProbes.contains(key)) continue;
+      final list = bySource.putIfAbsent(item.sourceType, () => []);
+      if (list.length < _Policy.autoProbePerSource) list.add(item);
     }
 
-    // Probe one candidate from every source before trying fallbacks from the
-    // same source. This fills the source-switch list without letting one noisy
-    // site consume the entire background budget.
     final candidates = <SearchResultItem>[];
-    for (
-      var round = 0;
-      round < _SearchPolicy.autoProbePerSourceLimit;
-      round++
-    ) {
-      for (final sourceCandidates in candidatesBySource.values) {
-        if (round < sourceCandidates.length) {
-          candidates.add(sourceCandidates[round]);
-          if (candidates.length >= _SearchPolicy.autoProbeLimit) break;
+    for (var round = 0; round < _Policy.autoProbePerSource; round++) {
+      for (final list in bySource.values) {
+        if (round < list.length) {
+          candidates.add(list[round]);
+          if (candidates.length >= _Policy.autoProbeLimit) break;
         }
       }
-      if (candidates.length >= _SearchPolicy.autoProbeLimit) break;
+      if (candidates.length >= _Policy.autoProbeLimit) break;
     }
+    if (candidates.isEmpty) return;
 
     var next = 0;
-    int? backgroundWorkerIndex;
-    Future<void> worker(int workerIndex) async {
-      while (next < candidates.length && !_isSessionStopped(session)) {
-        if (session.autoMatched) {
-          backgroundWorkerIndex ??= workerIndex;
-          if (backgroundWorkerIndex != workerIndex) return;
-        }
+    Future<void> worker() async {
+      while (next < candidates.length && _alive(runId) && !_autoMatched) {
+        if (_userSelected) return;
         final item = candidates[next++];
-        final key = _probeKey(item, _targetEpisodeIndex, 1);
-        _autoTriedProbeKeys.add(key);
+        _triedProbes.add(_probeKey(item, _ep, 1));
         final probe = await ensureCandidatePlayable(
           item,
-          episodeIndex: _targetEpisodeIndex,
+          episodeIndex: _ep,
           preferredLine: 1,
         );
-        if (_isSessionStopped(session) || _userSelected) return;
-
+        if (!_alive(runId) || _userSelected || _autoMatched) return;
         if (probe.status == SourceProbeStatus.direct && probe.data != null) {
-          if (_claimAutoMatch(session)) {
-            _finishAutoMatch(session, probe.data!);
-            unawaited(_recordMatchSuccess(item, probe.data!));
-          }
-        } else {
-          unawaited(_recordSourceFailure(item.sourceType));
+          _autoMatched = true;
+          onMatchFound?.call(Map<String, dynamic>.from(probe.data!));
+          unawaited(_remember(item, probe.data!));
+          return;
         }
       }
     }
 
-    final concurrency = session.autoMatched
-        ? _SearchPolicy.backgroundAutoProbeConcurrency
-        : _SearchPolicy.autoProbeConcurrency;
-    final workerCount = candidates.length < concurrency
+    final n = candidates.length < _Policy.autoProbeConcurrency
         ? candidates.length
-        : concurrency;
-    await Future.wait(List.generate(workerCount, worker));
-
-    if (finalPass &&
-        candidates.length >= _SearchPolicy.autoProbeLimit &&
-        !_isSessionStopped(session) &&
-        !_userSelected) {
-      session
-        ..autoMatchRerunRequested = true
-        ..autoMatchFinalPassRequested = true;
-    }
+        : _Policy.autoProbeConcurrency;
+    await Future.wait(List.generate(n, (_) => worker()));
   }
 
-  bool _claimAutoMatch(_SearchSession session) {
-    if (_isSessionStopped(session) || session.autoMatched || _userSelected) {
-      return false;
-    }
-    session.autoMatched = true;
-    return true;
+  int get _ep => targetEpisodeIndex < 0 ? 0 : targetEpisodeIndex;
+
+  Future<SourceMatchContext> _matchContext() {
+    return _matchContextFuture ??= Future(() {
+      final detail = BgmUtils.asMap(seedData?['bgmDetailData']);
+      final declared = BgmUtils.toInt(
+        detail?['eps'] ?? detail?['total_episodes'] ?? detail?['totalEpisodes'],
+      );
+      final episodes = detail?['episodes'];
+      final loaded = episodes is List
+          ? episodes
+                .where(
+                  (e) => e is Map && (BgmUtils.toInt(e['type']) ?? 0) == 0,
+                )
+                .length
+          : 0;
+      return SourceMatchContext(
+        primaryTitle: _primary,
+        manualAliases: manualAliasesNotifier.value,
+        automaticAliases: automaticAliasesNotifier.value,
+        bgmEpisodeCount: declared ?? (loaded > 0 ? loaded : null),
+        bgmCompleted: declared != null && loaded >= declared,
+      );
+    });
   }
 
-  void _finishAutoMatch(_SearchSession session, Map<String, dynamic> data) {
-    if (_isDisposed || _activeSession != session || _userSelected) return;
-    onMatchFound?.call(Map<String, dynamic>.from(data));
-  }
+  SourceMatchContext _baseContext({String? currentSource}) =>
+      SourceMatchContext(
+        primaryTitle: _primary,
+        manualAliases: manualAliasesNotifier.value,
+        automaticAliases: automaticAliasesNotifier.value,
+        currentSource: currentSource,
+      );
 
-  Future<SourceMatchContext> _getMatchContext() {
-    return _matchContextFuture ??= _buildMatchContext();
-  }
-
-  Future<SourceMatchContext> _buildMatchContext() async {
-    final detail = BgmUtils.asMap(seedData?['bgmDetailData']);
-    final declaredEpisodeCount = BgmUtils.toInt(
-      detail?['eps'] ?? detail?['total_episodes'] ?? detail?['totalEpisodes'],
-    );
-    final episodes = detail?['episodes'];
-    final loadedEpisodeCount = episodes is List
-        ? episodes.where((episode) {
-            return episode is Map &&
-                (BgmUtils.toInt(episode['type']) ?? 0) == 0;
-          }).length
-        : 0;
-    final episodeCount =
-        declaredEpisodeCount ??
-        (loadedEpisodeCount > 0 ? loadedEpisodeCount : null);
-
-    return _baseMatchContext(
-      bgmEpisodeCount: episodeCount,
-      bgmCompleted:
-          declaredEpisodeCount != null &&
-          loadedEpisodeCount >= declaredEpisodeCount,
-      bgmYear: BgmService.resolveAirYear(detail),
-    );
-  }
-
-  SourceMatchContext _baseMatchContext({
-    String? currentSource,
-    int? bgmEpisodeCount,
-    bool bgmCompleted = false,
-    int? bgmYear,
-  }) {
-    return SourceMatchContext(
-      primaryTitle: _primaryKeyword,
-      manualAliases: manualAliasesNotifier.value,
-      automaticAliases: automaticAliasesNotifier.value,
-      bgmEpisodeCount: bgmEpisodeCount,
-      bgmCompleted: bgmCompleted,
-      bgmYear: bgmYear,
-      sourceReputation: SourceReputationService.snapshotFor(
-        _resultMap.values.map((item) => item.sourceType),
-      ),
-      currentSource: currentSource,
-    );
-  }
-
-  int get _targetEpisodeIndex =>
-      targetEpisodeIndex < 0 ? 0 : targetEpisodeIndex;
-
-  Future<bool> _tryRememberedMatch(_SearchSession session) async {
+  Future<bool> _tryMemory(int runId) async {
     final bgmId = BgmUtils.toInt(seedData?['bgmId']);
     final memory = MatchMemoryService.read(
       bgmId: bgmId,
-      title: _primaryKeyword,
+      title: _primary,
     );
     if (memory == null) return false;
 
     final data = <String, dynamic>{
-      'title': memory.title?.isNotEmpty == true
-          ? memory.title
-          : _primaryKeyword,
+      'title': memory.title?.isNotEmpty == true ? memory.title : _primary,
       'seriesId': memory.seriesId,
       'source': memory.source,
       'sourceDisplayName': memory.sourceDisplayName ?? memory.source,
     };
     final item = SearchResultItem(
-      title: data['title']?.toString() ?? _primaryKeyword,
+      title: data['title']?.toString() ?? _primary,
       sourceType: memory.source,
-      data: _mergeSeedData(data),
+      data: _mergeSeed(data),
     );
 
     try {
       final probe = await ensureCandidatePlayable(
         item,
-        episodeIndex: _targetEpisodeIndex,
+        episodeIndex: _ep,
         preferredLine: 1,
         probeDirect: true,
-      ).timeout(_SearchPolicy.memoryProbeTimeout);
-      if (_isSessionStopped(session) || session.autoMatched || _userSelected) {
-        return true;
-      }
+      ).timeout(_Policy.memoryProbeTimeout);
+      if (!_alive(runId) || _autoMatched || _userSelected) return true;
       if (probe.status == SourceProbeStatus.direct && probe.data != null) {
-        if (_claimAutoMatch(session)) {
-          _finishAutoMatch(session, probe.data!);
-          unawaited(_recordMatchSuccess(item, probe.data!));
-        }
+        _autoMatched = true;
+        onMatchFound?.call(Map<String, dynamic>.from(probe.data!));
+        unawaited(_remember(item, probe.data!));
         return true;
       }
-    } catch (_) {
-      // Fall back to a full search below.
-    }
-    unawaited(_forgetFailedMemory(memory.source, bgmId));
+    } catch (_) {}
+
+    try {
+      await MatchMemoryService.remove(bgmId: bgmId, title: _primary);
+    } catch (_) {}
     return false;
-  }
-
-  Future<void> _recordMatchSuccess(
-    SearchResultItem item,
-    Map<String, dynamic> data,
-  ) async {
-    try {
-      await SourceReputationService.recordSuccess(item.sourceType);
-      await _rememberMatch(item, data);
-    } catch (_) {
-      // 记忆与信誉只用于后续排序，不能阻断本次播放。
-    }
-  }
-
-  Future<void> _recordSourceFailure(String source) async {
-    try {
-      await SourceReputationService.recordFailure(source);
-    } catch (_) {
-      // 信誉写入失败不影响继续尝试下一个候选。
-    }
-  }
-
-  Future<void> _forgetFailedMemory(String source, int? bgmId) async {
-    await _recordSourceFailure(source);
-    try {
-      await MatchMemoryService.remove(bgmId: bgmId, title: _primaryKeyword);
-    } catch (_) {
-      // 清理失败时下次仍会超时回退，但不影响本次完整搜索。
-    }
   }
 
   Future<void> persistMatchMemory(
     SearchResultItem item,
     Map<String, dynamic> data,
-  ) {
-    return _rememberMatch(item, data);
-  }
+  ) => _remember(item, data);
 
-  Future<void> _rememberMatch(
+  Future<void> _remember(
     SearchResultItem item,
     Map<String, dynamic> data,
   ) {
     return MatchMemoryService.writeSuccess(
       bgmId: BgmUtils.toInt(seedData?['bgmId'] ?? data['bgmId']),
-      title: _primaryKeyword,
+      title: _primary,
       source: item.sourceType,
       seriesId:
           item.data['seriesId']?.toString() ??
@@ -1180,54 +916,56 @@ class VideoSourceSearchController {
     );
   }
 
+  // ── switch / probe ──
+
   List<SourceCandidateState> getSwitchCandidates({
     required int episodeIndex,
     required int preferredLine,
     String? currentSource,
   }) {
-    final scoreCache = _switchScoreCache.putIfAbsent(
+    final cache = _scoreCache.putIfAbsent(
       currentSource ?? '',
       () => <String, int>{},
     );
-    SourceMatchContext? context;
-    int scoreFor(SearchResultItem item) => scoreCache.putIfAbsent(
+    SourceMatchContext? ctx;
+    int scoreOf(SearchResultItem item) => cache.putIfAbsent(
       item.key,
-      () => _matchEngine
+      () => _engine
           .score(
             item.matchCandidate,
-            context ??= _baseMatchContext(currentSource: currentSource),
+            ctx ??= _baseContext(currentSource: currentSource),
           )
           .score,
     );
 
-    final scored = <SourceCandidateState>[
-      for (final item in _resultMap.values)
+    final scored = [
+      for (final item in _results.values)
         SourceCandidateState(
           item: item,
-          score: scoreFor(item),
+          score: scoreOf(item),
           probe: _probeFor(item, episodeIndex, preferredLine),
         ),
-    ];
-
-    scored.sort(_compareSwitchCandidates);
+    ]..sort((a, b) {
+      final byStatus = _statusRank(a.status).compareTo(_statusRank(b.status));
+      return byStatus != 0 ? byStatus : b.score.compareTo(a.score);
+    });
     return scored;
   }
 
-  /// Fills the bounded probe window from an already ranked route snapshot.
   void startSwitchProbes(Iterable<SourceCandidateState> candidates) {
     var active = 0;
-    for (final candidate in candidates) {
-      if (candidate.status == SourceProbeStatus.resolving) {
-        if (++active >= _SearchPolicy.switchAutoProbeLimit) return;
-      } else if (candidate.status == SourceProbeStatus.pending) {
+    for (final c in candidates) {
+      if (c.status == SourceProbeStatus.resolving) {
+        if (++active >= _Policy.switchProbeLimit) return;
+      } else if (c.status == SourceProbeStatus.pending) {
         unawaited(
           ensureCandidatePlayable(
-            candidate.item,
-            episodeIndex: candidate.probe.episodeIndex,
-            preferredLine: candidate.probe.preferredLine,
+            c.item,
+            episodeIndex: c.probe.episodeIndex,
+            preferredLine: c.probe.preferredLine,
           ),
         );
-        if (++active >= _SearchPolicy.switchAutoProbeLimit) return;
+        if (++active >= _Policy.switchProbeLimit) return;
       }
     }
   }
@@ -1235,12 +973,12 @@ class VideoSourceSearchController {
   Future<SourceProbeState> resolveSwitchCandidate(
     SourceCandidateState candidate,
   ) {
-    final probe = candidate.probe;
-    if (probe.isReady) return Future.value(probe);
+    final p = candidate.probe;
+    if (p.isReady) return Future.value(p);
     return ensureCandidatePlayable(
       candidate.item,
-      episodeIndex: probe.episodeIndex,
-      preferredLine: probe.preferredLine,
+      episodeIndex: p.episodeIndex,
+      preferredLine: p.preferredLine,
     );
   }
 
@@ -1255,60 +993,27 @@ class VideoSourceSearchController {
       currentSource: currentSource,
     );
     final grouped = <String, List<SourceCandidateState>>{};
-    for (final candidate in candidates) {
-      final key = candidate.probe.routeKey ?? 'candidate:${candidate.item.key}';
-      (grouped[key] ??= <SourceCandidateState>[]).add(candidate);
+    for (final c in candidates) {
+      final key = c.probe.routeKey ?? 'candidate:${c.item.key}';
+      (grouped[key] ??= []).add(c);
     }
-
-    // Candidate order already reflects status and score. Map insertion order
-    // therefore gives the grouped routes the same order without another sort.
-    return <DirectSourceGroup>[
-      for (final entry in grouped.entries)
+    return [
+      for (final e in grouped.entries)
         DirectSourceGroup(
-          key: entry.key,
-          origins: entry.value,
-          status: entry.value.first.status,
+          key: e.key,
+          origins: e.value,
+          status: e.value.first.status,
         ),
     ];
   }
 
-  String _canonicalDirectUrl(String value) {
-    final uri = Uri.tryParse(value);
-    if (uri == null || !uri.hasScheme) return value;
-    final query = uri.queryParametersAll.entries.toList()
-      ..sort((a, b) => a.key.compareTo(b.key));
-    return uri
-        .replace(
-          scheme: uri.scheme.toLowerCase(),
-          host: uri.host.toLowerCase(),
-          fragment: '',
-          queryParameters: {for (final entry in query) entry.key: entry.value},
-        )
-        .toString();
-  }
-
-  int _compareSwitchCandidates(SourceCandidateState a, SourceCandidateState b) {
-    final statusCompare = _probeStatusRank(
-      a.status,
-    ).compareTo(_probeStatusRank(b.status));
-    if (statusCompare != 0) return statusCompare;
-    return b.score.compareTo(a.score);
-  }
-
-  int _probeStatusRank(SourceProbeStatus status) {
-    switch (status) {
-      case SourceProbeStatus.direct:
-        return 0;
-      case SourceProbeStatus.playable:
-        return 1;
-      case SourceProbeStatus.resolving:
-        return 2;
-      case SourceProbeStatus.pending:
-        return 3;
-      case SourceProbeStatus.failed:
-        return 4;
-    }
-  }
+  int _statusRank(SourceProbeStatus s) => switch (s) {
+    SourceProbeStatus.direct => 0,
+    SourceProbeStatus.playable => 1,
+    SourceProbeStatus.resolving => 2,
+    SourceProbeStatus.pending => 3,
+    SourceProbeStatus.failed => 4,
+  };
 
   Future<SourceProbeState> ensureCandidatePlayable(
     SearchResultItem item, {
@@ -1317,11 +1022,7 @@ class VideoSourceSearchController {
     bool probeDirect = true,
   }) {
     final probe = _probeFor(item, episodeIndex, preferredLine);
-    if (probe.status == SourceProbeStatus.direct ||
-        probe.status == SourceProbeStatus.playable) {
-      return Future.value(probe);
-    }
-
+    if (probe.isReady) return Future.value(probe);
     final running = probe.future;
     if (running != null) return running;
 
@@ -1339,7 +1040,7 @@ class VideoSourceSearchController {
     int preferredLine,
   ) {
     final key = _probeKey(item, episodeIndex, preferredLine);
-    return _probeStates.putIfAbsent(
+    return _probes.putIfAbsent(
       key,
       () => SourceProbeState(
         item: item,
@@ -1349,9 +1050,8 @@ class VideoSourceSearchController {
     );
   }
 
-  String _probeKey(SearchResultItem item, int episodeIndex, int preferredLine) {
-    return '${item.key}|$episodeIndex|$preferredLine';
-  }
+  String _probeKey(SearchResultItem item, int ep, int line) =>
+      '${item.key}|$ep|$line';
 
   Future<SourceProbeState> _resolveProbe(
     SourceProbeState probe, {
@@ -1360,20 +1060,26 @@ class VideoSourceSearchController {
     probe
       ..status = SourceProbeStatus.resolving
       ..error = null;
-    _bumpCandidateRevision();
+    _bump();
 
     try {
       final data = await resolveVideoData(
         probe.item,
-      ).timeout(_SearchPolicy.resolveTimeout);
-      if (!_hasPlayableContent(data)) {
+      ).timeout(_Policy.resolveTimeout);
+
+      final hasContent =
+          (data['videos'] is String &&
+              (data['videos'] as String).trim().isNotEmpty) ||
+          (data['videoList'] is List &&
+              (data['videoList'] as List).isNotEmpty);
+      if (!hasContent) {
         probe
           ..status = SourceProbeStatus.failed
           ..error = '没有可播放剧集';
         return probe;
       }
 
-      final lines = _extractLineChoices(data, probe.episodeIndex);
+      final lines = _lineChoices(data, probe.episodeIndex);
       if (lines.isEmpty) {
         probe
           ..status = SourceProbeStatus.failed
@@ -1394,14 +1100,14 @@ class VideoSourceSearchController {
         return probe;
       }
 
-      final direct = await _probeDirectLink(data, probe);
+      final direct = await _probeDirect(data, probe);
       if (direct == null) {
         probe.status = SourceProbeStatus.playable;
       } else {
         probe
           ..status = SourceProbeStatus.direct
           ..directUrl = direct.url
-          ..routeKey = 'direct:${_canonicalDirectUrl(direct.url)}'
+          ..routeKey = 'direct:${_canonicalUrl(direct.url)}'
           ..resolvedLineIndex = direct.lineIndex;
         PlayerService.storePrefetchedPlaybackMedia(
           data,
@@ -1419,7 +1125,7 @@ class VideoSourceSearchController {
         ..error = e.toString();
       return probe;
     } finally {
-      _bumpCandidateRevision();
+      _bump();
     }
   }
 
@@ -1431,38 +1137,34 @@ class VideoSourceSearchController {
       Map<String, String> httpHeaders,
     })?
   >
-  _probeDirectLink(Map<String, dynamic> data, SourceProbeState probe) async {
-    final adapter = _getAdapterForData(data);
+  _probeDirect(Map<String, dynamic> data, SourceProbeState probe) async {
+    final adapter = _adapterFor(data);
     if (adapter == null || adapter.requiresCustomPlayback) return null;
 
     final videoList = VideoUtils.extractVideoList(data);
     if (videoList.isEmpty) return null;
 
-    final episodeIndex = probe.episodeIndex
-        .clamp(0, videoList.length - 1)
-        .toInt();
-    final episode = videoList[episodeIndex];
+    final ep = probe.episodeIndex.clamp(0, videoList.length - 1).toInt();
+    final episode = videoList[ep];
     final lineCount = VideoUtils.getPathCount(episode);
     if (lineCount <= 0) return null;
 
-    final preferredLine = probe.preferredLine.clamp(1, lineCount).toInt();
-    final probeLines = <int>[
-      preferredLine,
+    final preferred = probe.preferredLine.clamp(1, lineCount).toInt();
+    final order = <int>[
+      preferred,
       for (var i = 1; i <= lineCount; i++)
-        if (i != preferredLine) i,
+        if (i != preferred) i,
     ];
 
-    // Resolve one line at a time. Launching multiple speculative requests was
-    // expensive and their successful URLs used to be discarded anyway.
-    for (final lineIndex in probeLines.take(2)) {
-      final episodeId = VideoUtils.getVideoUrl(episode, lineIndex);
+    for (final line in order.take(2)) {
+      final episodeId = VideoUtils.getVideoUrl(episode, line);
       if (episodeId == null || episodeId.isEmpty) continue;
-      final media = await _resolveDirectLink(adapter, episodeId);
+      final media = await _resolveDirect(adapter, episodeId);
       if (media != null) {
         return (
           url: media.url,
           episodeId: episodeId,
-          lineIndex: lineIndex,
+          lineIndex: line,
           httpHeaders: media.httpHeaders,
         );
       }
@@ -1470,7 +1172,7 @@ class VideoSourceSearchController {
     return null;
   }
 
-  Future<({String url, Map<String, String> httpHeaders})?> _resolveDirectLink(
+  Future<({String url, Map<String, String> httpHeaders})?> _resolveDirect(
     AdapterBase adapter,
     String episodeId,
   ) async {
@@ -1481,7 +1183,7 @@ class VideoSourceSearchController {
             skipValidation: !adapter.validateAutoMatchedUrls,
           )
           .timeout(
-            _SearchPolicy.directProbeTimeout,
+            _Policy.directProbeTimeout,
             onTimeout: () => (url: '', httpHeaders: const <String, String>{}),
           );
       return VideoUrlExtractor.isVideoUrl(media.url) ? media : null;
@@ -1490,129 +1192,119 @@ class VideoSourceSearchController {
     }
   }
 
-  AdapterBase? _getAdapterForData(Map<String, dynamic> data) {
+  AdapterBase? _adapterFor(Map<String, dynamic> data) {
     final source = data['source']?.toString();
     if (source == null || source.isEmpty) return null;
 
     if (AdapterRegistry.isCustomSource(source)) {
-      final sourceConfig = data['sourceConfig'];
+      final raw = data['sourceConfig'];
       CustomSourceConfig? config;
-      if (sourceConfig is CustomSourceConfig) {
-        config = sourceConfig;
+      if (raw is CustomSourceConfig) {
+        config = raw;
       } else {
-        final sourceId = source.substring(
-          AdapterRegistry.customSourcePrefix.length,
-        );
-        config = _sourceAdapterService.customSourceById(sourceId);
+        final id = source.substring(AdapterRegistry.customSourcePrefix.length);
+        config = _adapter.customSourceById(id);
       }
-      return config == null
-          ? null
-          : _sourceAdapterService.getCustomAdapter(config);
+      return config == null ? null : _adapter.getCustomAdapter(config);
     }
-
-    return _sourceAdapterService.getBuiltinAdapter(source);
+    return _adapter.getBuiltinAdapter(source);
   }
 
-  List<SourceLineChoice> _extractLineChoices(
+  List<SourceLineChoice> _lineChoices(
     Map<String, dynamic> data,
-    int requestedEpisodeIndex,
+    int requestedEp,
   ) {
     final videoList = VideoUtils.extractVideoList(data);
-    if (videoList.isEmpty) return const <SourceLineChoice>[];
-
-    final episodeIndex = requestedEpisodeIndex
-        .clamp(0, videoList.length - 1)
-        .toInt();
-    final lineCount = VideoUtils.getPathCount(videoList[episodeIndex]);
-    if (lineCount <= 0) return const <SourceLineChoice>[];
+    if (videoList.isEmpty) return const [];
+    final ep = requestedEp.clamp(0, videoList.length - 1).toInt();
+    final lineCount = VideoUtils.getPathCount(videoList[ep]);
+    if (lineCount <= 0) return const [];
 
     final rawNames = data['sourceNames'];
-    final sourceNames = rawNames is List
-        ? rawNames.map((item) => item.toString()).toList(growable: false)
+    final names = rawNames is List
+        ? rawNames.map((e) => e.toString()).toList(growable: false)
         : const <String>[];
 
     return [
       for (var i = 1; i <= lineCount; i++)
         SourceLineChoice(
           index: i,
-          name: (i - 1 < sourceNames.length && sourceNames[i - 1].isNotEmpty)
-              ? sourceNames[i - 1]
+          name: (i - 1 < names.length && names[i - 1].isNotEmpty)
+              ? names[i - 1]
               : '线路$i',
         ),
     ];
   }
 
-  void _bumpCandidateRevision() {
-    if (!_isDisposed) {
-      candidateRevisionNotifier.value = candidateRevisionNotifier.value + 1;
+  String _canonicalUrl(String value) {
+    final uri = Uri.tryParse(value);
+    if (uri == null || !uri.hasScheme) return value;
+    final query = uri.queryParametersAll.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    return uri
+        .replace(
+          scheme: uri.scheme.toLowerCase(),
+          host: uri.host.toLowerCase(),
+          fragment: '',
+          queryParameters: {for (final e in query) e.key: e.value},
+        )
+        .toString();
+  }
+
+  void _bump() {
+    if (!_disposed) {
+      candidateRevisionNotifier.value++;
     }
   }
 
-  // ──────── 数据解析 ────────
+  // ── resolve video data ──
 
   Future<Map<String, dynamic>> resolveVideoData(SearchResultItem item) async {
     final key = item.key;
-    final cached = _resolvedVideoDataCache[key];
+    final cached = _resolvedCache[key];
     if (cached != null) return Map<String, dynamic>.from(cached);
 
-    final running = _resolveVideoDataFutures[key];
+    final running = _resolveFutures[key];
     if (running != null) {
       return running.then((d) => Map<String, dynamic>.from(d));
     }
 
-    final runId = _searchRunId;
-    final future = _resolveVideoDataUncached(item).then((data) {
-      if (!_isDisposed && runId == _searchRunId) {
-        _resolvedVideoDataCache[key] = Map<String, dynamic>.from(data);
+    final runId = _runId;
+    final future = _resolveUncached(item).then((data) {
+      if (!_disposed && runId == _runId) {
+        _resolvedCache[key] = Map<String, dynamic>.from(data);
       }
       return data;
     });
-    _resolveVideoDataFutures[key] = future;
+    _resolveFutures[key] = future;
     try {
       return Map<String, dynamic>.from(await future);
     } finally {
-      if (identical(_resolveVideoDataFutures[key], future)) {
-        _resolveVideoDataFutures.remove(key);
+      if (identical(_resolveFutures[key], future)) {
+        _resolveFutures.remove(key);
       }
     }
   }
 
-  Future<Map<String, dynamic>> _resolveVideoDataUncached(
-    SearchResultItem item,
-  ) async {
-    final itemData = _mergeSeedData(Map<String, dynamic>.from(item.data));
-    if (item.sourceType == 'internal') {
-      return itemData;
-    }
-    final resolved = await _sourceAdapterService.buildPlayerData(itemData);
-    return _mergeSeedData(resolved ?? itemData);
+  Future<Map<String, dynamic>> _resolveUncached(SearchResultItem item) async {
+    final itemData = _mergeSeed(Map<String, dynamic>.from(item.data));
+    if (item.sourceType == 'internal') return itemData;
+    final resolved = await _adapter.buildPlayerData(itemData);
+    return _mergeSeed(resolved ?? itemData);
   }
 
-  Map<String, dynamic> _mergeSeedData(Map<String, dynamic> data) {
+  Map<String, dynamic> _mergeSeed(Map<String, dynamic> data) {
     final seed = seedData;
     if (seed == null || seed.isEmpty) return data;
 
-    final seedBgmId = BgmUtils.toInt(seed['bgmId']);
-    if (seedBgmId != null && seedBgmId > 0) data['bgmId'] = seedBgmId;
-
+    final bgmId = BgmUtils.toInt(seed['bgmId']);
+    if (bgmId != null && bgmId > 0) data['bgmId'] = bgmId;
     if (seed['score'] != null) data['score'] = seed['score'];
     if (seed['bgmDetailData'] != null) {
       data['bgmDetailData'] = seed['bgmDetailData'];
     }
-
-    final seedImageUrl = seed['bgmImageUrl']?.toString().trim();
-    if (seedImageUrl != null && seedImageUrl.isNotEmpty) {
-      data['bgmImageUrl'] = seed['bgmImageUrl'];
-    }
+    final img = seed['bgmImageUrl']?.toString().trim();
+    if (img != null && img.isNotEmpty) data['bgmImageUrl'] = seed['bgmImageUrl'];
     return data;
   }
-
-  // ──────── 公开只读属性 ────────
-
-  bool get hasMatched => _activeSession?.autoMatched ?? false;
-  Set<String> get triedKeys => Set.unmodifiable(_autoTriedProbeKeys);
-  List<SearchResultItem> get currentResults =>
-      List.unmodifiable(_resultMap.values);
-  Set<String> get progressingSources => _progressingSources;
-  List<String> get searchErrors => _searchErrors;
 }

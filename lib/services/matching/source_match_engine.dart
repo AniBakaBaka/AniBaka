@@ -2,10 +2,7 @@ import 'package:baka/utils/bgm_utils.dart';
 
 import 'title_matcher.dart';
 
-/// 参与匹配的候选条目。
-///
-/// 标题指纹、季度、集数、年份等特征都是 `late final`，
-/// 只在首次使用时计算一次；调用方应复用同一实例参与多轮排序。
+/// 参与匹配的候选条目。特征惰性计算，同一实例可复用多轮排序。
 class SourceMatchCandidate {
   SourceMatchCandidate({
     required this.key,
@@ -21,30 +18,24 @@ class SourceMatchCandidate {
 
   late final TitleFingerprint fingerprint = TitleFingerprint(title);
   late final int? season = BgmUtils.extractSeason(title);
-  late final int? episodeCount = _extractEpisodeCount(data);
-  late final int? year = _extractYearFromData(data);
+  late final int? episodeCount = _episodeCount(data);
   late final bool isMovieLike = _movieRe.hasMatch(title);
-  late final bool isTvLike = _tvRe.hasMatch(title);
 
   static final RegExp _movieRe = RegExp(
     r'剧场版|劇場版|映画|movie|the\s+movie|ova|oad|special',
     caseSensitive: false,
   );
-  static final RegExp _tvRe = RegExp(
-    r'\btv\b|テレビ|番组|番組|season|第.+[季期]',
-    caseSensitive: false,
-  );
 
-  static int? _extractEpisodeCount(Map<String, dynamic> data) {
+  static int? _episodeCount(Map<String, dynamic> data) {
     final videoList = data['videoList'];
     if (videoList is List && videoList.isNotEmpty) return videoList.length;
 
     final videos = data['videos'];
     if (videos is String && videos.trim().isNotEmpty) {
-      final count = videos
-          .split('\n')
-          .where((line) => line.trim().isNotEmpty)
-          .length;
+      var count = 0;
+      for (final line in videos.split('\n')) {
+        if (line.trim().isNotEmpty) count++;
+      }
       if (count > 0) return count;
     }
 
@@ -59,28 +50,9 @@ class SourceMatchCandidate {
     }
     return null;
   }
-
-  static int? _extractYearFromData(Map<String, dynamic> data) {
-    final detail = data['bgmDetailData'];
-    for (final value in [
-      data['year'],
-      data['date'],
-      data['airDate'],
-      data['air_date'],
-      data['time'],
-      if (detail is Map) ...[detail['date'], detail['airDate']],
-    ]) {
-      final year = extractYear(value?.toString() ?? '');
-      if (year != null) return year;
-    }
-    return null;
-  }
 }
 
 /// 一次匹配会话的查询上下文。
-///
-/// 标题池指纹与查询季度在首次访问时计算并缓存，
-/// 同一上下文可安全用于整批候选评分。
 class SourceMatchContext {
   SourceMatchContext({
     required this.primaryTitle,
@@ -88,10 +60,8 @@ class SourceMatchContext {
     this.automaticAliases = const <String>[],
     this.bgmEpisodeCount,
     this.bgmCompleted = false,
-    this.bgmYear,
-    int? querySeason,
-    this.sourceReputation = const <String, double>{},
     this.currentSource,
+    int? querySeason,
   }) : _explicitSeason = querySeason;
 
   final String primaryTitle;
@@ -99,29 +69,18 @@ class SourceMatchContext {
   final List<String> automaticAliases;
   final int? bgmEpisodeCount;
   final bool bgmCompleted;
-
-  /// BGM 放送年份。
-  final int? bgmYear;
-
-  /// 源信誉先验，取值 [-1, 1]，见 [SourceReputationService]。
-  final Map<String, double> sourceReputation;
   final String? currentSource;
-
   final int? _explicitSeason;
 
   late final List<TitleFingerprint> queryFingerprints = [
     for (final title in [primaryTitle, ...manualAliases, ...automaticAliases])
-      TitleFingerprint(title),
+      if (title.trim().isNotEmpty) TitleFingerprint(title),
   ];
 
   late final int? querySeason = _explicitSeason ?? _seasonFromTitles();
 
   int? _seasonFromTitles() {
-    for (final title in [
-      primaryTitle,
-      ...manualAliases,
-      ...automaticAliases,
-    ]) {
+    for (final title in [primaryTitle, ...manualAliases, ...automaticAliases]) {
       final season = BgmUtils.extractSeason(title);
       if (season != null) return season;
     }
@@ -136,7 +95,6 @@ class SourceMatchScore {
     required this.titleSimilarity,
     required this.seasonConflict,
     required this.severeEpisodeConflict,
-    required this.consensusSourceCount,
   });
 
   final SourceMatchCandidate candidate;
@@ -146,7 +104,6 @@ class SourceMatchScore {
   final double titleSimilarity;
   final bool seasonConflict;
   final bool severeEpisodeConflict;
-  final int consensusSourceCount;
 
   /// 供 UI 展示的整数分。
   int get score => (confidence * 100).round();
@@ -155,8 +112,7 @@ class SourceMatchScore {
       confidence >= 0.8 && !seasonConflict && !severeEpisodeConflict;
 }
 
-/// 候选源排序引擎：标题相似度打底，季度/集数/年份/类型等
-/// 结构化信号做有界修正，输出单一置信度。
+/// 候选源排序：标题相似度为主，季度/集数/类型做有界修正。
 class SourceMatchEngine {
   const SourceMatchEngine();
 
@@ -164,62 +120,72 @@ class SourceMatchEngine {
     Iterable<SourceMatchCandidate> candidates,
     SourceMatchContext context,
   ) {
-    final list = candidates.toList(growable: false);
-    final consensus = _consensusBySourceCount(list);
-    final scored = [
-      for (final candidate in list)
-        score(
-          candidate,
-          context,
-          consensusSourceCount:
-              consensus[candidate.fingerprint.normalized] ?? 1,
-        ),
-    ];
-
+    final scored = [for (final c in candidates) score(c, context)];
     scored.sort((a, b) {
-      final byConfidence = b.confidence.compareTo(a.confidence);
-      if (byConfidence != 0) return byConfidence;
-      return b.titleSimilarity.compareTo(a.titleSimilarity);
+      final byConf = b.confidence.compareTo(a.confidence);
+      return byConf != 0
+          ? byConf
+          : b.titleSimilarity.compareTo(a.titleSimilarity);
     });
     return scored;
   }
 
   SourceMatchScore score(
     SourceMatchCandidate candidate,
-    SourceMatchContext context, {
-    int consensusSourceCount = 1,
-  }) {
+    SourceMatchContext context,
+  ) {
     var similarity = 0.0;
     for (final query in context.queryFingerprints) {
-      final value = candidate.fingerprint.similarityTo(query);
-      if (value > similarity) similarity = value;
+      final v = candidate.fingerprint.similarityTo(query);
+      if (v > similarity) similarity = v;
       if (similarity >= 1) break;
     }
 
-    final querySeason = context.querySeason;
-    final candidateSeason = candidate.season;
-    final seasonConflict = querySeason != null &&
-        candidateSeason != null &&
-        querySeason != candidateSeason;
-    final severeEpisodeConflict = _isSevereEpisodeConflict(
-      expected: context.bgmEpisodeCount,
-      actual: candidate.episodeCount,
+    final qSeason = context.querySeason;
+    final cSeason = candidate.season;
+    final seasonConflict =
+        qSeason != null && cSeason != null && qSeason != cSeason;
+
+    final expected = context.bgmEpisodeCount;
+    final actual = candidate.episodeCount;
+    final severeEpisodeConflict = _severeEpisodeConflict(
+      expected: expected,
+      actual: actual,
       completed: context.bgmCompleted,
     );
 
-    var confidence = similarity * 0.72 + 0.10;
-    confidence += _seasonSignal(querySeason, candidateSeason);
-    confidence += _episodeSignal(
-      expected: context.bgmEpisodeCount,
-      actual: candidate.episodeCount,
-      completed: context.bgmCompleted,
-    );
-    confidence += _yearSignal(context.bgmYear, candidate.year);
-    confidence += _formatSignal(candidate, context.bgmEpisodeCount);
-    confidence += _consensusSignal(consensusSourceCount);
-    confidence += (context.sourceReputation[candidate.sourceType] ?? 0) * 0.03;
+    // 标题主导；结构化信号只做小幅修正，冲突用硬顶。
+    var confidence = similarity * 0.85 + 0.05;
+
+    if (qSeason != null && cSeason != null) {
+      confidence += cSeason == qSeason ? 0.08 : -0.20;
+    }
+
+    if (expected != null && expected > 0 && actual != null && actual > 0) {
+      final diff = (actual - expected).abs();
+      if (diff == 0) {
+        confidence += 0.05;
+      } else if (diff == 1) {
+        confidence += 0.02;
+      } else if (actual > expected + _tol(expected, 0.35, 3)) {
+        confidence -= 0.05;
+      } else if (context.bgmCompleted &&
+          actual < expected - _tol(expected, 0.25, 2)) {
+        confidence -= 0.03;
+      }
+    }
+
+    // 剧场版 vs 长篇 TV
+    if (candidate.isMovieLike) {
+      final eps = expected ?? 0;
+      if (eps >= 6 && (actual ?? 1) <= 2) {
+        confidence -= 0.06;
+      } else if (eps > 0 && eps <= 2) {
+        confidence += 0.03;
+      }
+    }
+
     if (candidate.sourceType == context.currentSource) confidence += 0.02;
-    if (candidate.episodeCount != null) confidence += 0.02;
 
     if (seasonConflict) confidence = confidence.clamp(0.0, 0.35);
     if (severeEpisodeConflict) confidence = confidence.clamp(0.0, 0.58);
@@ -230,61 +196,10 @@ class SourceMatchEngine {
       titleSimilarity: similarity,
       seasonConflict: seasonConflict,
       severeEpisodeConflict: severeEpisodeConflict,
-      consensusSourceCount: consensusSourceCount,
     );
   }
 
-  double _seasonSignal(int? querySeason, int? candidateSeason) {
-    if (querySeason == null) return candidateSeason == null ? 0 : -0.01;
-    if (candidateSeason == null) return -0.02;
-    if (candidateSeason == querySeason) return 0.07;
-    return -0.25; // 冲突，之后还会被硬性封顶
-  }
-
-  double _episodeSignal({
-    required int? expected,
-    required int? actual,
-    required bool completed,
-  }) {
-    if (expected == null || expected <= 0 || actual == null || actual <= 0) {
-      return 0;
-    }
-    if (actual == expected) return 0.04;
-    if (actual > expected + _tolerance(expected, 0.35, min: 3)) return -0.05;
-    if (completed && actual < expected - _tolerance(expected, 0.25, min: 2)) {
-      return -0.03;
-    }
-    if ((actual - expected).abs() <= 1) return 0.02;
-    return 0;
-  }
-
-  double _yearSignal(int? bgmYear, int? candidateYear) {
-    if (bgmYear == null || candidateYear == null) return 0;
-    final diff = (bgmYear - candidateYear).abs();
-    if (diff == 0) return 0.02;
-    if (diff == 1) return 0.01;
-    if (diff >= 3) return -0.02;
-    return 0;
-  }
-
-  double _formatSignal(SourceMatchCandidate candidate, int? bgmEpisodeCount) {
-    final expected = bgmEpisodeCount ?? 0;
-    if (candidate.isMovieLike) {
-      if (expected >= 6 && (candidate.episodeCount ?? 1) <= 2) return -0.05;
-      if (expected <= 2 && expected > 0) return 0.03;
-      return 0;
-    }
-    if (candidate.isTvLike && expected > 0 && expected <= 2) return -0.03;
-    return 0;
-  }
-
-  double _consensusSignal(int sourceCount) {
-    if (sourceCount >= 3) return 0.03;
-    if (sourceCount >= 2) return 0.02;
-    return 0;
-  }
-
-  bool _isSevereEpisodeConflict({
+  bool _severeEpisodeConflict({
     required int? expected,
     required int? actual,
     required bool completed,
@@ -292,27 +207,13 @@ class SourceMatchEngine {
     if (expected == null || expected <= 0 || actual == null || actual <= 0) {
       return false;
     }
-    if (actual > expected + _tolerance(expected, 0.5, min: 3)) return true;
+    if (actual > expected + _tol(expected, 0.5, 3)) return true;
     if (completed && actual < expected / 2) return true;
     return false;
   }
 
-  int _tolerance(int expected, double ratio, {required int min}) {
+  int _tol(int expected, double ratio, int min) {
     final scaled = (expected * ratio).ceil();
     return scaled > min ? scaled : min;
-  }
-
-  Map<String, int> _consensusBySourceCount(
-    List<SourceMatchCandidate> candidates,
-  ) {
-    final sourcesByTitle = <String, Set<String>>{};
-    for (final candidate in candidates) {
-      final title = candidate.fingerprint.normalized;
-      if (title.isEmpty) continue;
-      (sourcesByTitle[title] ??= <String>{}).add(candidate.sourceType);
-    }
-    return {
-      for (final entry in sourcesByTitle.entries) entry.key: entry.value.length,
-    };
   }
 }

@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:baka/instance.dart';
@@ -7,7 +6,6 @@ import 'package:baka/models/rule_hub.dart';
 import 'package:baka/services/app_storage.dart';
 import 'package:baka/services/source/rule_repository_service.dart';
 import 'package:baka/services/source_adapter_service.dart';
-import 'package:baka/services/source_reputation_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,30 +33,6 @@ void main() {
     await service.clearAllCustomSources();
     await Hive.close();
     await hiveDirectory.delete(recursive: true);
-  });
-
-  test('reputation updates are coalesced without losing samples', () async {
-    await Future.wait<void>([
-      SourceReputationService.recordSuccess('source-a'),
-      SourceReputationService.recordSuccess('source-a'),
-      SourceReputationService.recordFailure('source-b'),
-    ]);
-
-    final snapshot = SourceReputationService.snapshotFor([
-      'source-a',
-      'source-a',
-      'source-b',
-      'unknown',
-    ]);
-    expect(snapshot['source-a'], closeTo(0.36, 0.000001));
-    expect(snapshot['source-b'], closeTo(-0.2, 0.000001));
-    expect(snapshot, isNot(contains('unknown')));
-
-    final stored =
-        jsonDecode(Instances.sp.getString('source_reputation_v2')!)
-            as Map<String, dynamic>;
-    expect(stored['source-a'], closeTo(0.36, 0.000001));
-    expect(stored['source-b'], closeTo(-0.2, 0.000001));
   });
 
   test('custom adapter cache follows the current rule revision', () async {
