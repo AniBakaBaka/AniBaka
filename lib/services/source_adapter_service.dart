@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
@@ -14,23 +13,22 @@ import 'package:baka/source/pipeline_source_adapter.dart';
 import 'package:baka/source/store/bundled_rule_store.dart';
 import 'package:baka/source/store/rule_migrator.dart';
 
-/// 图源状态与适配器调用门面。
+/// 适配器的创建、缓存与搜索/播放调用入口。
 ///
-/// 图源配置由所有实例共享；适配器按服务实例缓存，以隔离 Cookie 和请求状态。
-///
-/// 派生列表（enabled / quickSearch）在变更时物化一次，避免每次 getter 扫全表。
-/// 自定义源按 id / name 建索引，查找为 O(1)。
+/// 只读的源配置查询请直连 [SourceCatalog.instance]；本服务保留会牵动
+/// 适配器缓存失效的变更操作（增删改源、导入、重置）。
+/// 适配器按服务实例缓存，以隔离 Cookie 和请求状态。
 class SourceAdapterService {
   SourceAdapterService();
 
   static final SourceAdapterService instance = SourceAdapterService();
   static const int _maxCachedAdapters = 24;
 
-  final _SourceCatalog _catalog = _SourceCatalog.instance;
+  final SourceCatalog _catalog = SourceCatalog.instance;
 
   /// LinkedHashMap insertion order = LRU (re-insert on hit).
   final LinkedHashMap<String, ({AdapterBase adapter, DateTime? revision})>
-      _adapterCache = LinkedHashMap();
+  _adapterCache = LinkedHashMap();
 
   Future<void> init() async {
     await Future.wait<void>([BundledRuleStore.load(), _catalog.init()]);
@@ -42,19 +40,6 @@ class SourceAdapterService {
     }
     _adapterCache.clear();
   }
-
-  Listenable get customSourcesListenable => _catalog;
-
-  List<CustomSourceConfig> get allCustomSources => _catalog.customSources;
-
-  List<CustomSourceConfig> get enabledCustomSources =>
-      _catalog.enabledCustomSources;
-
-  CustomSourceConfig? customSourceById(String id) =>
-      _catalog.customSourceById(id);
-
-  CustomSourceConfig? customSourceByName(String name) =>
-      _catalog.customSourceByName(name);
 
   Future<bool> addCustomSource(CustomSourceConfig source) async {
     if (AdapterRegistry.isBuiltinSource(source.id)) {
@@ -76,12 +61,6 @@ class SourceAdapterService {
     return ok;
   }
 
-  Future<bool> reorderCustomSource(int oldIndex, int newIndex) =>
-      _catalog.reorderCustomSource(oldIndex, newIndex);
-
-  Future<int> setAllCustomSourcesEnabled(bool enabled) =>
-      _catalog.setAllCustomSourcesEnabled(enabled);
-
   Future<int> importCustomSource(String input) async {
     final count = await _catalog.importCustomSource(input);
     if (count > 0) {
@@ -90,43 +69,10 @@ class SourceAdapterService {
     return count;
   }
 
-  String? exportCustomSource(String id) => _catalog.exportCustomSource(id);
-
-  String? exportCustomSourceAsJson(String id) =>
-      _catalog.exportCustomSourceAsJson(id);
-
-  String exportAllCustomSources() => _catalog.exportAllCustomSources();
-
   Future<void> clearAllCustomSources() async {
     await _catalog.clearCustomSources();
     _removeAdaptersWhere(AdapterRegistry.isCustomSource);
   }
-
-  List<AdapterDescriptor> get allBuiltinSources => _catalog.builtinSources;
-
-  List<AdapterDescriptor> get enabledBuiltinSources =>
-      _catalog.enabledBuiltinSources;
-
-  List<AdapterDescriptor> get enabledQuickSearchSources =>
-      _catalog.quickSearchSources;
-
-  bool isBuiltinSourceEnabled(String key) => _catalog.isBuiltinEnabled(key);
-
-  Future<void> toggleBuiltinSource(String key) =>
-      _catalog.toggleBuiltinSource(key);
-
-  Future<void> setBuiltinSourceEnabled(String key, bool enabled) =>
-      _catalog.setBuiltinEnabled(key, enabled);
-
-  Future<void> enableAllBuiltinSources() => _catalog.enableAllBuiltins();
-
-  Future<void> disableAllBuiltinSources() => _catalog.disableAllBuiltins();
-
-  Future<void> reorderBuiltinSource(int oldIndex, int newIndex) =>
-      _catalog.reorderBuiltinSource(oldIndex, newIndex);
-
-  CustomSourceConfig? builtinSourceById(String key) =>
-      _catalog.builtinSourceById(key);
 
   Future<bool> updateBuiltinSource(
     String key,
@@ -143,14 +89,36 @@ class SourceAdapterService {
     return reset;
   }
 
+  AdapterBase? createAdapterFor(
+    String source, {
+    CustomSourceConfig? config,
+    Map? item,
+  }) {
+    if (AdapterRegistry.isCustomSource(source)) {
+      final sourceId = source.substring(
+        AdapterRegistry.customSourcePrefix.length,
+      );
+      var resolved = _catalog.customSourceById(sourceId) ?? config;
+      if (resolved == null) {
+        final sourceConfig = item?['sourceConfig'];
+        if (sourceConfig is CustomSourceConfig) resolved = sourceConfig;
+      }
+      if (resolved == null) return null;
+      return PipelineSourceAdapter(RuleMigrator.ruleForConfig(resolved));
+    }
+
+    final override = _catalog.builtinOverrideById(source);
+    return override == null
+        ? AdapterRegistry.createAdapter(source)
+        : PipelineSourceAdapter(RuleMigrator.ruleForConfig(override));
+  }
+
   AdapterBase? getBuiltinAdapter(String key) {
     final override = _catalog.builtinOverrideById(key);
     return _getOrCreateAdapter(
       key,
       revision: override?.updatedAt,
-      create: () => override == null
-          ? AdapterRegistry.createAdapter(key)
-          : PipelineSourceAdapter(RuleMigrator.ruleForConfig(override)),
+      create: () => createAdapterFor(key),
     );
   }
 
@@ -161,10 +129,7 @@ class SourceAdapterService {
     return _getOrCreateAdapter(
       sourceKey,
       revision: activeConfig.updatedAt,
-      create: () => AdapterRegistry.createAdapterForSource(
-        sourceKey,
-        customSourceConfig: activeConfig,
-      ),
+      create: () => createAdapterFor(sourceKey, config: activeConfig),
     );
   }
 
@@ -173,16 +138,15 @@ class SourceAdapterService {
     AdapterDescriptor descriptor, {
     String fallbackDescription = '',
     bool skipBgmEnhancement = false,
-  }) =>
-      _search(
-        adapter: getBuiltinAdapter(descriptor.key),
-        query: query,
-        enhanceWithBgm: !skipBgmEnhancement,
-        buildResult: (series) => descriptor.buildSearchResult(
-          series,
-          fallbackDescription: fallbackDescription,
-        ),
-      );
+  }) => _search(
+    adapter: getBuiltinAdapter(descriptor.key),
+    query: query,
+    enhanceWithBgm: !skipBgmEnhancement,
+    buildResult: (series) => descriptor.buildSearchResult(
+      series,
+      fallbackDescription: fallbackDescription,
+    ),
+  );
 
   Future<List<Map<String, dynamic>>> searchCustom(
     String query,
@@ -247,8 +211,9 @@ class SourceAdapterService {
     String sourceKey,
     Map<String, dynamic> item,
   ) {
-    final sourceId =
-        sourceKey.substring(AdapterRegistry.customSourcePrefix.length);
+    final sourceId = sourceKey.substring(
+      AdapterRegistry.customSourcePrefix.length,
+    );
     final current = _catalog.customSourceById(sourceId);
     if (current != null) return current;
 
@@ -299,13 +264,13 @@ class SourceAdapterService {
 /// Shared catalog of builtin enable/order state and custom sources.
 ///
 /// Derived views are rebuilt only on mutation, not on every read.
-class _SourceCatalog extends ChangeNotifier {
+class SourceCatalog extends ChangeNotifier {
   static const String _disabledKeysKey = 'disabled_builtin_sources';
   static const String _orderKeysKey = 'ordered_builtin_sources';
   static const String _customSourcesKey = 'custom_sources';
   static const String _builtinOverridesKey = 'builtin_source_overrides';
 
-  _SourceCatalog._() {
+  SourceCatalog._() {
     _disabledKeys = Instances.sp.getStringList(_disabledKeysKey)?.toSet() ?? {};
     final usedKeys = <String>{};
     final ordered = <AdapterDescriptor>[];
@@ -318,20 +283,22 @@ class _SourceCatalog extends ChangeNotifier {
       if (usedKeys.add(source.key)) ordered.add(source);
     }
     _allSources = List<AdapterDescriptor>.unmodifiable(ordered);
-    _customSourcesView =
-        UnmodifiableListView<CustomSourceConfig>(_customSources);
+    _customSourcesView = UnmodifiableListView<CustomSourceConfig>(
+      _customSources,
+    );
     _rebuildBuiltinViews();
   }
 
-  static final _SourceCatalog instance = _SourceCatalog._();
+  static final SourceCatalog instance = SourceCatalog._();
 
   late Set<String> _disabledKeys;
   late List<AdapterDescriptor> _allSources;
   late List<AdapterDescriptor> _enabledBuiltin;
-  late List<AdapterDescriptor> _quickSearch;
 
   final List<CustomSourceConfig> _customSources = <CustomSourceConfig>[];
   final Map<String, CustomSourceConfig> _builtinOverrides =
+      <String, CustomSourceConfig>{};
+  final Map<String, CustomSourceConfig> _bundledConfigCache =
       <String, CustomSourceConfig>{};
   late final List<CustomSourceConfig> _customSourcesView;
   final Map<String, int> _customIndexById = <String, int>{};
@@ -341,7 +308,7 @@ class _SourceCatalog extends ChangeNotifier {
 
   List<AdapterDescriptor> get builtinSources => _allSources;
   List<AdapterDescriptor> get enabledBuiltinSources => _enabledBuiltin;
-  List<AdapterDescriptor> get quickSearchSources => _quickSearch;
+  List<AdapterDescriptor> get quickSearchSources => _enabledBuiltin;
 
   bool isBuiltinEnabled(String key) => !_disabledKeys.contains(key);
 
@@ -349,8 +316,9 @@ class _SourceCatalog extends ChangeNotifier {
       setBuiltinEnabled(key, !isBuiltinEnabled(key));
 
   Future<void> setBuiltinEnabled(String key, bool enabled) async {
-    final changed =
-        enabled ? _disabledKeys.remove(key) : _disabledKeys.add(key);
+    final changed = enabled
+        ? _disabledKeys.remove(key)
+        : _disabledKeys.add(key);
     if (!changed) return;
     _rebuildBuiltinViews();
     await Instances.sp.setStringList(
@@ -366,20 +334,6 @@ class _SourceCatalog extends ChangeNotifier {
     await Instances.sp.setStringList(_disabledKeysKey, const <String>[]);
   }
 
-  Future<void> disableAllBuiltins() async {
-    final keys = AdapterRegistry.builtinSources.map((s) => s.key).toSet();
-    if (_disabledKeys.length == keys.length &&
-        _disabledKeys.containsAll(keys)) {
-      return;
-    }
-    _disabledKeys = keys;
-    _rebuildBuiltinViews();
-    await Instances.sp.setStringList(
-      _disabledKeysKey,
-      keys.toList(growable: false),
-    );
-  }
-
   Future<void> reorderBuiltinSource(int oldIndex, int newIndex) async {
     final next = _reorderList(_allSources, oldIndex, newIndex);
     if (next == null) return;
@@ -393,21 +347,19 @@ class _SourceCatalog extends ChangeNotifier {
 
   void _rebuildBuiltinViews() {
     final enabled = <AdapterDescriptor>[];
-    final quick = <AdapterDescriptor>[];
     for (final source in _allSources) {
       if (_disabledKeys.contains(source.key)) continue;
       enabled.add(source);
-      if (source.quickSearchEnabled) quick.add(source);
     }
     _enabledBuiltin = List<AdapterDescriptor>.unmodifiable(enabled);
-    _quickSearch = List<AdapterDescriptor>.unmodifiable(quick);
   }
 
   Future<void> init() => _initialization ??= _loadSources();
 
   Future<void> _loadSources() async {
-    final storedOverrides =
-        AppStorage.customSourcesBox.get(_builtinOverridesKey);
+    final storedOverrides = AppStorage.customSourcesBox.get(
+      _builtinOverridesKey,
+    );
     if (storedOverrides is List) {
       for (final json in storedOverrides.whereType<Map>()) {
         final source = CustomSourceConfig.fromJson(
@@ -428,8 +380,7 @@ class _SourceCatalog extends ChangeNotifier {
         );
         if (AdapterRegistry.isBuiltinSource(source.id)) {
           final current = _builtinOverrides[source.id];
-          if (current == null ||
-              source.updatedAt.isAfter(current.updatedAt)) {
+          if (current == null || source.updatedAt.isAfter(current.updatedAt)) {
             _builtinOverrides[source.id] = source;
           }
           migratedBuiltin = true;
@@ -454,9 +405,7 @@ class _SourceCatalog extends ChangeNotifier {
       ),
       AppStorage.customSourcesBox.put(
         _builtinOverridesKey,
-        _builtinOverrides.values
-            .map((s) => s.toJson())
-            .toList(growable: false),
+        _builtinOverrides.values.map((s) => s.toJson()).toList(growable: false),
       ),
     ]);
     notifyListeners();
@@ -491,11 +440,18 @@ class _SourceCatalog extends ChangeNotifier {
 
   CustomSourceConfig? builtinOverrideById(String key) => _builtinOverrides[key];
 
+  /// 内置源的只读配置视图。
+  /// （override 命中优先于查表，更新/重置只写 _builtinOverrides）。
   CustomSourceConfig? builtinSourceById(String key) {
     final override = _builtinOverrides[key];
     if (override != null) return override;
+
+    final cached = _bundledConfigCache[key];
+    if (cached != null) return cached;
+
     final rule = BundledRuleStore.ruleFor(key);
-    return rule == null ? null : CustomSourceConfig.fromJson(rule.toJson());
+    if (rule == null) return null;
+    return _bundledConfigCache[key] = CustomSourceConfig.fromJson(rule.toJson());
   }
 
   Future<bool> updateBuiltinSource(
@@ -612,26 +568,6 @@ class _SourceCatalog extends ChangeNotifier {
       throw FormatException('规则校验失败: ${validation.errors.join('; ')}');
     }
     return config;
-  }
-
-  String? exportCustomSource(String id) {
-    final source = customSourceById(id);
-    if (source == null) return null;
-    return _encodeToUri(<CustomSourceConfig>[source]);
-  }
-
-  String? exportCustomSourceAsJson(String id) {
-    final source = customSourceById(id);
-    if (source == null) return null;
-    return const JsonEncoder.withIndent('  ').convert(source.toJson());
-  }
-
-  String exportAllCustomSources() => _encodeToUri(_customSources);
-
-  String _encodeToUri(List<CustomSourceConfig> sources) {
-    return SourceCodec.encode(
-      sources.map((s) => s.toJson()).toList(growable: false),
-    );
   }
 
   Future<void> clearCustomSources() async {

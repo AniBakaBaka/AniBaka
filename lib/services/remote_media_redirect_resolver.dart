@@ -78,9 +78,7 @@ class RemoteMediaRedirectResolver {
           }
           return current.toString();
         }
-        debugPrint(
-          '[RemoteMediaResolver] HTTP $status for ${current.host}',
-        );
+        debugPrint('[RemoteMediaResolver] HTTP $status for ${current.host}');
         return remoteUrl;
       }
       debugPrint(

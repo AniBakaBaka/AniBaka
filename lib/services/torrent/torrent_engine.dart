@@ -176,12 +176,6 @@ class TorrentEngine {
     return completer.future;
   }
 
-  /// 从已有的 TorrentMetadata 开始下载
-  Future<String?> startFromMetadata(TorrentMetadata metadata) async {
-    _metadata = metadata;
-    return await _startDownload();
-  }
-
   Future<String?> _startDownload() async {
     final meta = _metadata!;
     debugPrint('[TorrentEngine] 开始下载: ${meta.name}');

@@ -22,14 +22,28 @@ class SystemProxyService {
   /// Single-server form (`host:port`) or per-scheme map (`http=...;https=...`).
   static String? _defaultProxy;
   static Map<String, String> _proxyByScheme = const {};
-  static List<_BypassRule> _bypassRules = const [];
+  static List<RegExp> _bypassRules = const [];
   static bool _bypassLocal = false;
+
+  /// 环境变量代理在进程生命周期内不变，启动时判定一次即可；
+  /// findProxy 因此不必对每个请求都跑一遍 findProxyFromEnvironment。
+  static bool _envProxyPresent = false;
+
+  static const _envProxyKeys = <String>[
+    'http_proxy',
+    'HTTP_PROXY',
+    'https_proxy',
+    'HTTPS_PROXY',
+    'all_proxy',
+    'ALL_PROXY',
+  ];
 
   static void initialize() {
     _defaultProxy = null;
     _proxyByScheme = const {};
     _bypassRules = const [];
     _bypassLocal = false;
+    _envProxyPresent = _envProxyKeys.any(Platform.environment.containsKey);
     if (!Platform.isWindows) return;
 
     RegistryKey? key;
@@ -68,8 +82,10 @@ class SystemProxyService {
   static String directProxy(Uri _) => 'DIRECT';
 
   static String findProxy(Uri uri) {
-    final environmentProxy = HttpClient.findProxyFromEnvironment(uri);
-    if (environmentProxy != 'DIRECT') return environmentProxy;
+    if (_envProxyPresent) {
+      final environmentProxy = HttpClient.findProxyFromEnvironment(uri);
+      if (environmentProxy != 'DIRECT') return environmentProxy;
+    }
 
     final server = _proxyForScheme(uri.scheme);
     if (server == null || _shouldBypass(uri.host)) return 'DIRECT';
@@ -94,7 +110,7 @@ class SystemProxyService {
 
   static void _parseBypass(String raw) {
     if (raw.isEmpty) return;
-    final rules = <_BypassRule>[];
+    final rules = <RegExp>[];
     var local = false;
     for (final part in raw.split(';')) {
       final pattern = part.trim().toLowerCase();
@@ -105,7 +121,7 @@ class SystemProxyService {
       }
       final hostPattern = pattern.split(':').first;
       final regexPattern = RegExp.escape(hostPattern).replaceAll(r'\*', '.*');
-      rules.add(_BypassRule(RegExp('^$regexPattern\$')));
+      rules.add(RegExp('^$regexPattern\$'));
     }
     _bypassLocal = local;
     _bypassRules = rules;
@@ -136,14 +152,8 @@ class SystemProxyService {
     }
     if (_bypassLocal && !lower.contains('.')) return true;
     for (final rule in _bypassRules) {
-      if (rule.matches(lower)) return true;
+      if (rule.hasMatch(lower)) return true;
     }
     return false;
   }
-}
-
-class _BypassRule {
-  const _BypassRule(this._pattern);
-  final RegExp _pattern;
-  bool matches(String host) => _pattern.hasMatch(host);
 }

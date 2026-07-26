@@ -15,10 +15,12 @@ class ThreadChannel {
 /// 单频道运行时状态（数据与加载标志合一，避免平行数组）
 class ThreadTab {
   final ThreadChannel channel;
-  List comments = const [];
+  List comments = [];
+  final Set<Object?> seenIds = <Object?>{};
   bool isRefreshing = false;
   bool isLoadingMore = false;
   bool hasMore = true;
+
   /// 已成功加载的页数；0 表示尚未加载
   int page = 0;
   DateTime? lastLoadTime;
@@ -46,8 +48,10 @@ class ThreadService {
     ThreadChannel('#里世界', 10),
   ];
 
-  final List<ThreadTab> tabs =
-      List.generate(channels.length, (i) => ThreadTab(channels[i]));
+  final List<ThreadTab> tabs = List.generate(
+    channels.length,
+    (i) => ThreadTab(channels[i]),
+  );
 
   // ─── Cache ───
 
@@ -73,6 +77,15 @@ class ThreadService {
     }
   }
 
+  static void _resetSeenIds(ThreadTab tab) {
+    tab.seenIds
+      ..clear()
+      ..addAll(<Object?>[
+        for (final c in tab.comments)
+          if (c is Map) c['id'],
+      ]);
+  }
+
   // ─── Fetch ───
 
   Future<List> _fetchPage(int pid, int page) async {
@@ -89,6 +102,7 @@ class ThreadService {
       final cached = _readCache(tab.pid);
       if (cached == null) return false;
       tab.comments = List.of(cached);
+      _resetSeenIds(tab);
       // 缓存只保证首页数据；hasMore 保守为 true，由后续 loadMore 校正
       tab.page = 1;
       tab.hasMore = cached.length >= pageSize;
@@ -109,6 +123,7 @@ class ThreadService {
     try {
       final list = await _fetchPage(tab.pid, 1);
       tab.comments = list;
+      _resetSeenIds(tab);
       tab.page = 1;
       tab.hasMore = list.length >= pageSize;
       tab.lastLoadTime = DateTime.now();
@@ -124,7 +139,13 @@ class ThreadService {
 
   bool canLoadMore(int tabIndex) {
     final tab = tabs[tabIndex];
-    if (tab.isRefreshing || tab.isLoadingMore || !tab.hasMore) return false;
+    // page == 0 表示首页还没成功加载过，此时没有「下一页」可言。
+    if (tab.page == 0 ||
+        tab.isRefreshing ||
+        tab.isLoadingMore ||
+        !tab.hasMore) {
+      return false;
+    }
     final last = tab.lastLoadTime;
     return last == null || DateTime.now().difference(last) >= loadThrottle;
   }
@@ -143,14 +164,9 @@ class ThreadService {
         return null;
       }
 
-      // 按 id 去重后 append，防止接口边界重叠
-      final existingIds = <Object?>{
-        for (final c in tab.comments)
-          if (c is Map) c['id'],
-      };
       final fresh = [
         for (final c in page)
-          if (c is! Map || !existingIds.contains(c['id'])) c,
+          if (c is! Map || tab.seenIds.add(c['id'])) c,
       ];
 
       if (fresh.isEmpty) {
@@ -158,17 +174,10 @@ class ThreadService {
         return null;
       }
 
-      tab.comments = [...tab.comments, ...fresh];
+      tab.comments.addAll(fresh);
       tab.page = nextPage;
       tab.hasMore = page.length >= pageSize;
       tab.lastLoadTime = DateTime.now();
-      // 只缓存首页体量，避免 Hive 写入膨胀
-      await _writeCache(
-        tab.pid,
-        tab.comments.length > pageSize
-            ? tab.comments.sublist(0, pageSize)
-            : tab.comments,
-      );
       return tab.comments;
     } catch (e) {
       debugPrint('加载更多评论失败: $e');

@@ -20,9 +20,6 @@ class QrLoginServer {
   String? _localIp;
   String? get localIp => _localIp;
 
-  /// 会话 ID
-  String get sessionId => _sessionId ?? '';
-
   /// 二维码内容（手机扫码后访问的 URL）
   String get qrContent {
     final ip = _localIp ?? '127.0.0.1';
@@ -98,8 +95,8 @@ class QrLoginServer {
       if (!_completer.isCompleted) {
         _completer.complete({
           'token': token,
-          if (refreshToken != null) 'refresh_token': refreshToken,
-          if (tokenExpiresAt != null) 'token_expires_at': tokenExpiresAt,
+          'refresh_token': ?refreshToken,
+          'token_expires_at': ?tokenExpiresAt,
           'user': user,
         });
       }

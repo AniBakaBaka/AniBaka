@@ -12,7 +12,6 @@ import 'package:baka/source/adapter_base.dart';
 import 'package:baka/source/source_registry.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/collection.dart';
-import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/services/app_storage.dart';
@@ -28,71 +27,8 @@ import 'package:baka/widgets/danmaku/controller.dart';
 class VideoUtils {
   static Box<Map> get _progressBox => AppStorage.videoProgressBox;
 
-  /// Count playable lines (`$`-separated) in a serialized episode item.
-  static int getPathCount(String? videoItem) {
-    if (videoItem == null || videoItem.isEmpty) return 0;
-    var count = 0;
-    for (var i = 0; i < videoItem.length; i++) {
-      if (videoItem.codeUnitAt(i) == 0x24 /* $ */ ) count++;
-    }
-    return count;
-  }
-
-  /// Read a line value (1-based) without allocating a full split list.
-  static String? getVideoUrl(String? videoItem, int lineIndex) {
-    if (videoItem == null || videoItem.isEmpty || lineIndex <= 0) return null;
-    var start = -1;
-    for (var i = 0; i < lineIndex; i++) {
-      start = videoItem.indexOf(PlaybackEpisode.separator, start + 1);
-      if (start < 0) return null;
-    }
-    final end = videoItem.indexOf(PlaybackEpisode.separator, start + 1);
-    return videoItem.substring(start + 1, end < 0 ? videoItem.length : end);
-  }
-
-  /// Prefer `videoList`; fall back to newline-split `videos`.
-  static List<String> extractVideoList(Map data) {
-    final rawList = data['videoList'];
-    if (rawList is List) {
-      final out = <String>[];
-      for (final item in rawList) {
-        if (item is String && item.trim().isNotEmpty) out.add(item);
-      }
-      if (out.isNotEmpty) return out;
-    }
-    final raw = data['videos'];
-    if (raw is! String || raw.isEmpty) return const [];
-
-    // Scan in place instead of `split` + `trim`, which creates two temporary
-    // strings for every serialized episode (including blank lines).
-    final lines = <String>[];
-    var start = 0;
-    for (var end = 0; end <= raw.length; end++) {
-      if (end != raw.length && raw.codeUnitAt(end) != 0x0A) continue;
-      var hasContent = false;
-      for (var i = start; i < end; i++) {
-        if (raw.codeUnitAt(i) > 0x20) {
-          hasContent = true;
-          break;
-        }
-      }
-      if (hasContent) lines.add(raw.substring(start, end));
-      start = end + 1;
-    }
-    return lines;
-  }
-
-  static bool isEpisodeWatched(
-    String videoId,
-    int episodeIndex,
-    Duration? totalDuration,
-  ) {
-    final position = getVideoProgress('${videoId}_${episodeIndex}_1');
-    if (position == Duration.zero) return false;
-    final total = totalDuration?.inSeconds ?? 0;
-    if (total <= 0) return position.inSeconds > 30;
-    return position.inSeconds / total >= 0.9;
-  }
+  static bool isEpisodeWatched(String videoId, int episodeIndex) =>
+      getVideoProgress('${videoId}_${episodeIndex}_1').inSeconds > 30;
 
   static Future<void> saveVideoProgress(String videoKey, Duration position) =>
       _progressBox.put(videoKey, {
@@ -267,7 +203,7 @@ class PlayerService {
     );
   }
 
-  void _applySelection(({int episodeIndex, int lineIndex}) selection) {
+  void applySelection(({int episodeIndex, int lineIndex}) selection) {
     currPlayIndex = selection.episodeIndex;
     currUrl = selection.lineIndex;
     data['currPlayIndex'] = currPlayIndex;
@@ -284,29 +220,20 @@ class PlayerService {
     final serialized = nextVideoList
         .map((episode) => episode.serialize())
         .toList(growable: false);
-    data['videos'] = serialized.join('\n');
+    // 移除过期的 videos 串，避免 videoList 为空时回落到旧数据
+    data.remove('videos');
     data['videoList'] = serialized;
     if (sourceNames != null) {
       this.sourceNames = List.unmodifiable(sourceNames);
       data['sourceNames'] = this.sourceNames;
     }
 
-    _applySelection(
+    applySelection(
       normalizeSelection(
         preferredEpisodeIndex ?? currPlayIndex,
         preferredLineIndex ?? currUrl,
       ),
     );
-  }
-
-  /// 准备切换集数的数据，返回 true 表示确实需要切换。
-  bool prepareSwitchEpisode(int episodeIndex, {int? lineIndex}) {
-    final target = normalizeSelection(episodeIndex, lineIndex ?? currUrl);
-    if (target.episodeIndex == currPlayIndex && target.lineIndex == currUrl) {
-      return false;
-    }
-    _applySelection(target);
-    return true;
   }
 
   /// 加载视频详情数据（不涉及播放器控制器初始化）。
@@ -359,7 +286,7 @@ class PlayerService {
 
     syncVideoData(
       PlaybackEpisodeCatalog.parse(
-        VideoUtils.extractVideoList(data),
+        PlaybackEpisodeCatalog.rawEpisodesOf(data),
         mergeDuplicateTitles: true,
       ),
       sourceNames: _parseSourceNames(data['sourceNames']),
@@ -372,21 +299,9 @@ class PlayerService {
     if (source == null || source.isEmpty) return null;
     if (_adapterSource == source) return _adapter;
 
-    CustomSourceConfig? typedConfig;
-    if (AdapterRegistry.isCustomSource(source)) {
-      final sourceId = source.substring(
-        AdapterRegistry.customSourcePrefix.length,
-      );
-      typedConfig = SourceAdapterService.instance.customSourceById(sourceId);
-      final embeddedConfig = data['customConfig'] ?? data['sourceConfig'];
-      if (typedConfig == null && embeddedConfig is CustomSourceConfig) {
-        typedConfig = embeddedConfig;
-      }
-    }
-
-    _adapter = AdapterRegistry.createAdapterForSource(
+    _adapter = SourceAdapterService.instance.createAdapterFor(
       source,
-      customSourceConfig: typedConfig,
+      item: data,
     );
     _adapterSource = source;
     return _adapter;
@@ -403,10 +318,7 @@ class PlayerService {
 
     if (videoList.isEmpty || sourceNames == null) {
       final seriesUrl = data['seriesUrl'] ?? data['id'].toString();
-      final sources = await adapter.getSourcesWithContext(
-        seriesUrl.toString(),
-        Map<String, dynamic>.from(data),
-      );
+      final sources = await adapter.getSources(seriesUrl.toString());
       if (sources.isEmpty) throw Exception('无法获取剧集信息');
       final episodes = PlaybackEpisodeCatalog.parse(
         buildAdapterVideoList(sources),
@@ -450,8 +362,8 @@ class PlayerService {
           if (alternateId == null || alternateId.isEmpty) continue;
           final alternate = await adapter.resolvePlaybackMedia(alternateId);
           if (alternate.url.isEmpty) continue;
-          currUrl = line;
-          data['currUrl'] = line;
+          // 只切换线路不动集数
+          applySelection((episodeIndex: currPlayIndex, lineIndex: line));
           media = alternate;
           break;
         }
@@ -487,6 +399,12 @@ class PlayerService {
     _playbackKeepAliveGeneration++;
     _playbackKeepAliveAdapter?.stopPlaybackKeepAlive();
     _playbackKeepAliveAdapter = null;
+  }
+
+  /// 从另一份视频数据搬运预取直链（如换源面板返回的数据），避免调用方直写魔法键。
+  void adoptPrefetchedPlayback(Map from) {
+    final v = from[_prefetchedPlaybackKey];
+    if (v != null) data[_prefetchedPlaybackKey] = v;
   }
 
   ({String url, Map<String, String> httpHeaders})? _readPrefetchedPlaybackMedia(
@@ -530,17 +448,6 @@ class PlayerService {
     if (rawData == null) return null;
     final jsonData = rawData is String ? jsonDecode(rawData) : rawData;
     return jsonData?['data']?['url'];
-  }
-
-  Future<String?> getVideoUrl() async {
-    try {
-      final videoUrl = currentVideoItem?.lineAt(currUrl);
-      if (videoUrl == null) return null;
-      return await _resolvePlayUrl(videoUrl);
-    } catch (e) {
-      debugPrint('获取视频URL失败: $e');
-      return null;
-    }
   }
 
   Future<String?> resolveEpisodeUrl(int episodeIndex) async {
@@ -765,7 +672,9 @@ class PlayerService {
 
   void dispose() {
     stopAdapterPlaybackKeepAlive();
+    _adapter?.dispose();
     _adapter = null;
+    _adapterSource = null;
     TorrentService.instance.stopStream();
   }
 }

@@ -13,8 +13,6 @@ class BgmService {
   static final Map<String, Future<List<BgmSubjectInfo>>> _searchCache = {};
   static final Map<int, Future<BgmSubjectInfo?>> _detailCache = {};
 
-  static final _yearPattern = RegExp(r'\b(19\d{2}|20\d{2})\b');
-
   static Future<BgmInfo> resolveFromData(Map data) async {
     final existing = BgmUtils.readFromData(data);
     if (existing.subjectId != null) return existing;
@@ -62,16 +60,6 @@ class BgmService {
     episodes.sort((a, b) => a.sort.compareTo(b.sort));
     final episode = episodes[episodeIndex];
     return (episodeId: episode.id, name: episode.name);
-  }
-
-  static int? resolveAirYear(Map<String, dynamic>? detailData) {
-    if (detailData == null) return null;
-
-    for (final key in const ['date', 'air_date', 'airDate']) {
-      final match = _yearPattern.firstMatch(detailData[key]?.toString() ?? '');
-      if (match != null) return int.tryParse(match.group(1)!);
-    }
-    return null;
   }
 
   static Future<BgmSubjectInfo?> resolveSubject({
@@ -133,6 +121,7 @@ class BgmService {
   static Future<BgmSubjectInfo?> _findSubject(_SearchTitle original) async {
     BgmSubjectInfo? best;
     BgmSubjectInfo? fallback;
+    final candidatesBySubject = <int, List<_SearchTitle>>{};
     var bestMatch = 0;
     var bestRating = -1.0;
 
@@ -144,7 +133,13 @@ class BgmService {
       if (subjects.isNotEmpty) fallback ??= subjects.first;
 
       for (final subject in subjects) {
-        final match = _matchScore(query, subject);
+        final candidates = candidatesBySubject.putIfAbsent(
+          subject.subjectId,
+          () => [
+            for (final title in subject.searchTitles) _SearchTitle.from(title),
+          ],
+        );
+        final match = _matchScore(query, candidates);
         final rating = subject.score ?? -1;
         if (match > bestMatch ||
             (match == bestMatch && match > 0 && rating > bestRating)) {
@@ -173,12 +168,19 @@ class BgmService {
     }
   }
 
-  static int _matchScore(_SearchTitle query, BgmSubjectInfo subject) {
-    final subjectSeason = query.season == null ? null : _subjectSeason(subject);
+  static int _matchScore(_SearchTitle query, List<_SearchTitle> candidates) {
+    int? subjectSeason;
+    if (query.season != null) {
+      for (final candidate in candidates) {
+        if (candidate.season != null) {
+          subjectSeason = candidate.season;
+          break;
+        }
+      }
+    }
     var best = 0;
 
-    for (final title in subject.searchTitles) {
-      final candidate = _SearchTitle.from(title);
+    for (final candidate in candidates) {
       int score;
       if (query.normalized == candidate.normalized) {
         score = 100;
@@ -203,14 +205,6 @@ class BgmService {
       if (score > best) best = score;
     }
     return best;
-  }
-
-  static int? _subjectSeason(BgmSubjectInfo subject) {
-    for (final title in subject.lookupTitles) {
-      final season = BgmUtils.extractSeason(title);
-      if (season != null) return season;
-    }
-    return null;
   }
 
   static Future<BgmSubjectInfo?> _detail(int subjectId) async {
@@ -336,61 +330,51 @@ class BgmService {
   }) {
     final result = <Map<String, dynamic>>[];
     for (final item in items) {
-      final raw = trending && item is Map ? item['subject'] ?? item : item;
-      if (raw is! Map) continue;
+      final subject = trending && item is Map ? item['subject'] ?? item : item;
+      if (subject is! Map) continue;
 
-      final converted = _convertSubject(raw, trending: trending);
-      if (converted != null) result.add(converted);
+      final id = BgmUtils.toInt(subject['id']);
+      if (id == null || id <= 0) continue;
+      final nameCn = BgmUtils.trimmed(subject[trending ? 'nameCN' : 'name_cn']);
+      final name = BgmUtils.trimmed(subject['name']);
+      final title = nameCn ?? name;
+      if (title == null) continue;
+
+      final imageUrl = BgmUtils.pickImageUrl(subject['images']) ?? '';
+      final rating = subject['rating'];
+      final converted = <String, dynamic>{
+        'id': id,
+        'title': title,
+        'subtitle': nameCn != null && name != null && name != nameCn
+            ? name
+            : '',
+        'content': imageUrl,
+        'bgmImageUrl': imageUrl,
+        'tag': '动画',
+        'sort': trending ? '推荐' : '',
+        'status': 'public',
+        'time': BgmUtils.trimmed(subject['date']) ?? '',
+        'bgmId': id,
+        'score': BgmUtils.extractScore(rating) ?? 0.0,
+        'rank': trending
+            ? BgmUtils.toInt(rating is Map ? rating['rank'] : null) ?? 0
+            : BgmUtils.toInt(subject['rank']) ?? 0,
+        'summary': BgmUtils.trimmed(subject['summary']) ?? '',
+        'eps': subject['eps'] ?? subject['total_episodes'] ?? 0,
+        'source': 'bgm',
+      };
+      if (trending) {
+        converted['info'] = BgmUtils.trimmed(subject['info']) ?? '';
+        converted['videos'] = '';
+      }
+      result.add(converted);
     }
     return result;
-  }
-
-  static Map<String, dynamic>? _convertSubject(
-    Map subject, {
-    required bool trending,
-  }) {
-    final id = BgmUtils.toInt(subject['id']);
-    if (id == null || id <= 0) return null;
-
-    final nameCn = BgmUtils.trimmed(subject[trending ? 'nameCN' : 'name_cn']);
-    final name = BgmUtils.trimmed(subject['name']);
-    final title = nameCn ?? name;
-    if (title == null) return null;
-
-    final imageUrl = BgmUtils.pickImageUrl(subject['images']) ?? '';
-    final rating = subject['rating'];
-    final rank = trending
-        ? BgmUtils.toInt(rating is Map ? rating['rank'] : null) ?? 0
-        : BgmUtils.toInt(subject['rank']) ?? 0;
-
-    final converted = <String, dynamic>{
-      'id': id,
-      'title': title,
-      'subtitle': nameCn != null && name != null && name != nameCn ? name : '',
-      'content': imageUrl,
-      'bgmImageUrl': imageUrl,
-      'tag': '动画',
-      'sort': trending ? '推荐' : '',
-      'status': 'public',
-      'time': BgmUtils.trimmed(subject['date']) ?? '',
-      'bgmId': id,
-      'score': BgmUtils.extractScore(rating) ?? 0.0,
-      'rank': rank,
-      'summary': BgmUtils.trimmed(subject['summary']) ?? '',
-      'eps': subject['eps'] ?? subject['total_episodes'] ?? 0,
-      'source': 'bgm',
-    };
-    if (trending) {
-      converted['info'] = BgmUtils.trimmed(subject['info']) ?? '';
-      converted['videos'] = '';
-    }
-    return converted;
   }
 }
 
 class _SearchTitle {
   static final _spaces = RegExp(r'\s+');
-  static final _chinese = RegExp(r'[\u4e00-\u9fa5]+');
 
   final String original;
   final String normalized;
@@ -409,7 +393,7 @@ class _SearchTitle {
     return _SearchTitle(
       original: clean,
       normalized: BgmUtils.normalizeTitle(clean),
-      chinese: _chinese.allMatches(clean).map((match) => match[0]!).join(),
+      chinese: BgmUtils.chineseOnly(clean),
       season: BgmUtils.extractSeason(clean),
     );
   }

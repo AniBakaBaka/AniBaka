@@ -20,6 +20,10 @@ class DownloadService {
   static final DownloadService instance = DownloadService._();
   DownloadService._();
 
+  static final _bandwidthRe = RegExp(r'BANDWIDTH=(\d+)');
+  static final _illegalPathCharsRe = RegExp(r'[\\/:*?"<>|\r\n]+');
+  static final _whitespaceRe = RegExp(r'\s+');
+
   final ValueNotifier<List<DownloadTask>> tasksNotifier = ValueNotifier([]);
   List<DownloadTask> get tasks => tasksNotifier.value;
 
@@ -358,33 +362,30 @@ class DownloadService {
     return response.data ?? '';
   }
 
+  /// 取码率最高的变体。单趟扫描直接留最大值，不再物化整张变体表再排序。
   Uri? _selectBestVariant(String content, Uri playlistUrl) {
-    final lines = const LineSplitter().convert(_normalizeM3u8Newlines(content));
-    final variants = <_M3u8Variant>[];
+    final lines = const LineSplitter().convert(content);
+    Uri? best;
+    var bestBandwidth = -1;
 
     for (var i = 0; i < lines.length; i++) {
       final line = lines[i].trim();
       if (!line.startsWith('#EXT-X-STREAM-INF')) continue;
 
       final bandwidth =
-          int.tryParse(
-            RegExp(r'BANDWIDTH=(\d+)').firstMatch(line)?.group(1) ?? '',
-          ) ??
-          0;
+          int.tryParse(_bandwidthRe.firstMatch(line)?.group(1) ?? '') ?? 0;
+      if (bandwidth <= bestBandwidth) continue;
+
       for (var j = i + 1; j < lines.length; j++) {
         final next = lines[j].trim();
         if (next.isEmpty) continue;
         if (next.startsWith('#')) break;
-        variants.add(
-          _M3u8Variant(url: playlistUrl.resolve(next), bandwidth: bandwidth),
-        );
+        best = playlistUrl.resolve(next);
+        bestBandwidth = bandwidth;
         break;
       }
     }
-
-    if (variants.isEmpty) return null;
-    variants.sort((a, b) => b.bandwidth.compareTo(a.bandwidth));
-    return variants.first.url;
+    return best;
   }
 
   Future<_HlsCacheResult> _cacheMediaPlaylist({
@@ -393,9 +394,8 @@ class DownloadService {
     required Directory cacheDir,
     required CancelToken cancelToken,
   }) async {
-    final lines = const LineSplitter().convert(
-      _normalizeM3u8Newlines(playlist.content),
-    );
+    // LineSplitter 本身按 CR / LF / CRLF 切分，无需先把整份清单重建两遍。
+    final lines = const LineSplitter().convert(playlist.content);
     final rewritten = <String>[];
     final assets = <_HlsAsset>[];
     final localNameByUrl = <String, String>{};
@@ -413,28 +413,24 @@ class DownloadService {
 
     for (final line in lines) {
       final trimmed = line.trim();
-      if (trimmed.startsWith('#EXT-X-KEY')) {
-        final uri = _extractM3u8Attribute(line, 'URI');
-        if (uri == null || uri.isEmpty) {
+      final isKey = trimmed.startsWith('#EXT-X-KEY');
+      if (isKey || trimmed.startsWith('#EXT-X-MAP')) {
+        final uri = _m3u8Attribute(line, 'URI');
+        if (uri == null || uri.value.isEmpty) {
           rewritten.add(line);
           continue;
         }
         final localName = addAsset(
-          uri,
-          'key_${(keyIndex++).toString().padLeft(3, '0')}${_extensionFromUrl(uri, '.key')}',
+          uri.value,
+          isKey
+              ? 'key_${(keyIndex++).toString().padLeft(3, '0')}'
+                    '${_extensionFromUrl(uri.value, '.key')}'
+              : 'map_${(mapIndex++).toString().padLeft(3, '0')}'
+                    '${_extensionFromUrl(uri.value, '.mp4')}',
         );
-        rewritten.add(_replaceM3u8Attribute(line, 'URI', localName));
-      } else if (trimmed.startsWith('#EXT-X-MAP')) {
-        final uri = _extractM3u8Attribute(line, 'URI');
-        if (uri == null || uri.isEmpty) {
-          rewritten.add(line);
-          continue;
-        }
-        final localName = addAsset(
-          uri,
-          'map_${(mapIndex++).toString().padLeft(3, '0')}${_extensionFromUrl(uri, '.mp4')}',
+        rewritten.add(
+          line.replaceRange(uri.start, uri.end, 'URI="$localName"'),
         );
-        rewritten.add(_replaceM3u8Attribute(line, 'URI', localName));
       } else if (trimmed.isEmpty || trimmed.startsWith('#')) {
         rewritten.add(line);
       } else {
@@ -567,27 +563,35 @@ class DownloadService {
     return false;
   }
 
-  String _normalizeM3u8Newlines(String content) {
-    return content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-  }
+  /// 定位 `NAME=` 属性并同时给出值与可替换区间。
+  ///
+  /// 取代原先「按属性名现编正则、读一次、再编一次同样的正则写回」的两趟写法：
+  /// 属性语法只有「引号包裹」和「读到逗号为止」两种，单趟扫描即可，且每行零正则编译。
+  static ({int start, int end, String value})? _m3u8Attribute(
+    String line,
+    String name,
+  ) {
+    final at = line.indexOf('$name=');
+    if (at < 0) return null;
 
-  String? _extractM3u8Attribute(String line, String name) {
-    final match = RegExp(
-      '$name=("([^"]*)"|\'([^\']*)\'|[^,]*)',
-    ).firstMatch(line);
-    if (match == null) return null;
-
-    final raw = match.group(1) ?? '';
-    if ((raw.startsWith('"') && raw.endsWith('"')) ||
-        (raw.startsWith("'") && raw.endsWith("'"))) {
-      return raw.substring(1, raw.length - 1);
+    final valueStart = at + name.length + 1;
+    if (valueStart < line.length) {
+      final quote = line.codeUnitAt(valueStart);
+      if (quote == 0x22 || quote == 0x27) {
+        final close = line.indexOf(String.fromCharCode(quote), valueStart + 1);
+        if (close > 0) {
+          return (
+            start: at,
+            end: close + 1,
+            value: line.substring(valueStart + 1, close),
+          );
+        }
+      }
     }
-    return raw.trim();
-  }
 
-  String _replaceM3u8Attribute(String line, String name, String value) {
-    final pattern = RegExp('$name=("([^"]*)"|\'([^\']*)\'|[^,]*)');
-    return line.replaceFirstMapped(pattern, (_) => '$name="$value"');
+    var end = line.indexOf(',', valueStart);
+    if (end < 0) end = line.length;
+    return (start: at, end: end, value: line.substring(valueStart, end).trim());
   }
 
   String _extensionFromUrl(String url, String fallback) {
@@ -609,8 +613,8 @@ class DownloadService {
 
   String _sanitizePathPart(String value) {
     final sanitized = value
-        .replaceAll(RegExp(r'[\\/:*?"<>|\r\n]+'), '_')
-        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll(_illegalPathCharsRe, '_')
+        .replaceAll(_whitespaceRe, ' ')
         .trim();
     if (sanitized.isEmpty) return 'download';
     return sanitized.length > 80 ? sanitized.substring(0, 80) : sanitized;
@@ -644,13 +648,6 @@ class _M3u8Playlist {
   final String content;
 
   const _M3u8Playlist({required this.url, required this.content});
-}
-
-class _M3u8Variant {
-  final Uri url;
-  final int bandwidth;
-
-  const _M3u8Variant({required this.url, required this.bandwidth});
 }
 
 class _HlsAsset {

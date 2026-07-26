@@ -2,6 +2,12 @@ import 'package:baka/instance.dart';
 import 'package:baka/theme.dart';
 
 class ThemeService {
+  /// 下标即主题模式值。`AppState.setThemeMode` 只接受 0..2。
+  static const themeModeLabels = <String>['跟随系统', '浅色模式', '深色模式'];
+
+  static String themeModeLabel(int mode) =>
+      themeModeLabels[mode.clamp(0, themeModeLabels.length - 1)];
+
   static const _themeModeKey = 'theme_mode';
   static const _dynamicColorKey = 'dynamic_color';
   static const _reduceVisualEffectsKey = 'reduce_visual_effects';

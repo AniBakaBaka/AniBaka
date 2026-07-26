@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'dart:async';
 
 import 'package:baka/services/torrent/torrent_engine.dart';
-import 'package:baka/services/torrent/torrent_model.dart';
 
 /// Global BT download and streaming service.
 class TorrentService {
@@ -100,18 +99,6 @@ class TorrentService {
     }
   }
 
-  /// Start streaming from resolved torrent metadata.
-  Future<String?> startStreamFromMetadata(TorrentMetadata metadata) async {
-    await stopStream();
-
-    final engine = TorrentEngine();
-    _engine = engine;
-    _bindCallbacks(engine);
-
-    final streamUrl = await engine.startFromMetadata(metadata);
-    return _finalizeStart(engine, streamUrl);
-  }
-
   /// Stop the current streaming/download engine.
   Future<void> stopStream() async {
     final engine = _engine;
@@ -128,14 +115,8 @@ class TorrentService {
   /// Current download stats.
   TorrentStats? getStats() => _engine?.getStats();
 
-  /// Current local stream URL if started.
-  String? get currentStreamUrl => _engine?.streamServer.streamUrl;
-
   /// Current target-file download progress.
   double get progress => _engine?.pieceManager?.progress ?? 0.0;
-
-  /// Whether enough data has been buffered for playback.
-  bool get isBuffered => _engine?.pieceManager?.isReadyToPlay ?? false;
 
   Future<void> _waitUntilBuffered(
     TorrentEngine activeEngine,

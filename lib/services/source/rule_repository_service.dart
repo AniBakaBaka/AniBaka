@@ -80,15 +80,6 @@ class RuleRepositoryService extends ChangeNotifier {
     return true;
   }
 
-  Future<void> resetSubscriptions() async {
-    for (final url in _storedSubscriptions()) {
-      await Instances.sp.remove('$_cacheKeyPrefix$url');
-    }
-    await Instances.sp.remove(_subscriptionsKey);
-    _memoryCache.clear();
-    notifyListeners();
-  }
-
   Future<List<RuleHubIndex>> fetchAll({bool forceRefresh = false}) async {
     final indices = <RuleHubIndex>[];
     for (final url in subscriptions) {
@@ -221,7 +212,7 @@ class RuleRepositoryService extends ChangeNotifier {
   /// 一次建立本地图源索引，再批量检查规则安装状态。
   Map<RuleHubItem, RuleInstallInfo> inspectItems(Iterable<RuleHubItem> items) {
     final installed = _InstalledSourceIndex(
-      SourceAdapterService.instance.allCustomSources,
+      SourceCatalog.instance.customSources,
     );
     final result = Map<RuleHubItem, RuleInstallInfo>.identity();
 
@@ -232,7 +223,7 @@ class RuleRepositoryService extends ChangeNotifier {
           ? null
           : Instances.sp.getString('$_sourceIdKeyPrefix$storageKey')?.trim();
       final source = builtin
-          ? SourceAdapterService.instance.builtinSourceById(item.id)
+          ? SourceCatalog.instance.builtinSourceById(item.id)
           : installed.find(item, mappedId: mappedId);
       final version = storageKey == null
           ? 0
@@ -262,42 +253,42 @@ class RuleRepositoryService extends ChangeNotifier {
     RuleHubItem item, {
     CustomSourceConfig? config,
   }) {
-    final service = SourceAdapterService.instance;
+    final catalog = SourceCatalog.instance;
     final storageKey = _storageKey(item);
     final mappedId = storageKey == null
         ? null
         : Instances.sp.getString('$_sourceIdKeyPrefix$storageKey')?.trim();
 
     if (mappedId?.isNotEmpty ?? false) {
-      final source = service.customSourceById(mappedId!);
+      final source = catalog.customSourceById(mappedId!);
       if (source != null) return source;
     }
 
     final itemId = item.id.trim();
     if (itemId.isNotEmpty) {
-      final source = service.customSourceById(itemId);
+      final source = catalog.customSourceById(itemId);
       if (source != null) return source;
     }
     final configId = config?.id.trim();
     if (configId?.isNotEmpty ?? false) {
-      final source = service.customSourceById(configId!);
+      final source = catalog.customSourceById(configId!);
       if (source != null) return source;
     }
 
     final itemName = item.name.trim();
     if (itemName.isNotEmpty) {
-      final source = service.customSourceByName(itemName);
+      final source = catalog.customSourceByName(itemName);
       if (source != null) return source;
     }
     final configName = config?.name.trim();
     if (configName?.isNotEmpty ?? false) {
-      final source = service.customSourceByName(configName!);
+      final source = catalog.customSourceByName(configName!);
       if (source != null) return source;
     }
 
     final itemUrl = item.baseUrl?.trim();
     final configUrl = config?.baseUrl.trim();
-    for (final source in service.allCustomSources) {
+    for (final source in catalog.customSources) {
       final url = source.baseUrl.trim();
       if ((itemUrl?.isNotEmpty ?? false) && url == itemUrl) return source;
       if ((configUrl?.isNotEmpty ?? false) && url == configUrl) return source;
@@ -370,10 +361,7 @@ class RuleRepositoryService extends ChangeNotifier {
     if (decoded is! Map) {
       throw const FormatException('规则库索引格式无效');
     }
-    return RuleHubIndex.fromJson(
-      Map<String, dynamic>.from(decoded),
-      sourceUrl: url,
-    );
+    return RuleHubIndex.fromJson(decoded, sourceUrl: url);
   }
 
   RuleHubIndex? _loadPersistedIndex(String url) {

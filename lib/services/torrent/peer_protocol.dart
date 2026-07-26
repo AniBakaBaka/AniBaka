@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -29,7 +29,6 @@ const _extensionProtocolMask = 0x10;
 const _utMetadataLocalId = 1;
 const _metadataBlockSize = 16 * 1024;
 const _maxMetadataSize = 8 * 1024 * 1024;
-
 
 abstract class _PeerBase {
   final PeerAddress address;
@@ -238,7 +237,6 @@ abstract class _PeerBase {
   /// 子类可覆盖以从扩展握手中提取额外字段（如 metadata_size）。
   void _onExtendedHandshakeParsed(Map handshake) {}
 }
-
 
 class PeerConnection extends _PeerBase {
   final PieceManager pieceManager;
@@ -541,7 +539,6 @@ class PeerConnection extends _PeerBase {
     _sendExtended(remoteId, Bencode.encode({'msg_type': 2, 'piece': piece}));
   }
 }
-
 
 class MetadataPeerConnection extends _PeerBase {
   int? _metadataSize;

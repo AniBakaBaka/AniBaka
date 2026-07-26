@@ -18,6 +18,7 @@ class HomeDataService {
 
   static const String _xinfanSort = '新番';
   static const String _swiperTag = '幻灯';
+  static const String _swiperCacheKey = 'home_swiper_backdrop_v1';
   static final Map<String, Future<dynamic>> _requests = {};
 
   final _feed = _FeedNotifier();
@@ -44,7 +45,7 @@ class HomeDataService {
       'home_feed_$recommendTag',
       allowExpired: true,
     );
-    final cachedSwipers = _readCache('home_swiper', allowExpired: true);
+    final cachedSwipers = _readCache(_swiperCacheKey, allowExpired: true);
     final cachedRank = _readCache('home_rank_0', allowExpired: true);
     final cachedSchedule = _readCache('home_xinfan', allowExpired: true);
 
@@ -233,7 +234,7 @@ class HomeDataService {
   Future<void> loadSwipers({bool force = false}) async {
     try {
       swipers.value = _listOf(
-        await _cached('home_swiper_backdrop_v1', _fetchSwipers, force: force),
+        await _cached(_swiperCacheKey, _fetchSwipers, force: force),
       );
     } catch (error) {
       debugPrint('home swipers: $error');

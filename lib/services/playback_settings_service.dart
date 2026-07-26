@@ -32,23 +32,29 @@ class PlaybackSettingsService {
   static const _hwdecModeKey = 'player_hwdecMode';
   static const _videoRendererKey = 'player_videoRenderer';
 
-  static const hwdecModeOptions = <String>['auto', 'auto-safe', 'no'];
+  /// 候选值 → 显示文案。Map 保持插入序，因此 [hwdecModeOptions] 之类的
+  /// 下标视图直接由 keys 派生，不再维护第二份平行的字符串字面量。
   static const hwdecModeLabels = <String, String>{
     'auto': '自动',
     'auto-safe': '安全模式',
     'no': '软件解码',
   };
 
-  static const videoRendererOptions = <String>[
-    'auto',
-    'compatibility',
-    'quality',
-  ];
   static const videoRendererLabels = <String, String>{
     'auto': '自动',
     'compatibility': 'GPU 兼容',
     'quality': 'GPU 高质量',
   };
+
+  static const doubleTapActionLabels = <String, String>{
+    'seek': '快进快退',
+    'play_pause': '播放暂停',
+  };
+
+  static final hwdecModeOptions = hwdecModeLabels.keys.toList(growable: false);
+  static final videoRendererOptions = videoRendererLabels.keys.toList(
+    growable: false,
+  );
 
   /// 旧 vo=gpu / gpu-next 迁移到 libmpv 渲染档位。
   static const _rendererMigrate = <String, String>{
@@ -72,14 +78,14 @@ class PlaybackSettingsService {
   static final _speedLabelTrim = RegExp(r'\.?0+$');
 
   static String normalizeHwdecMode(String? mode) {
-    if (mode != null && hwdecModeOptions.contains(mode)) return mode;
+    if (mode != null && hwdecModeLabels.containsKey(mode)) return mode;
     return Instances.isTV ? 'auto-safe' : 'auto';
   }
 
   static String normalizeVideoRenderer(String? renderer) {
     if (renderer == null) return 'auto';
     return _rendererMigrate[renderer] ??
-        (videoRendererOptions.contains(renderer) ? renderer : 'auto');
+        (videoRendererLabels.containsKey(renderer) ? renderer : 'auto');
   }
 
   static double normalizePlaybackSpeed(double? speed) =>
@@ -101,10 +107,8 @@ class PlaybackSettingsService {
   static double getDefaultPlaybackSpeed() =>
       normalizePlaybackSpeed(_prefs.getDouble(_defaultPlaybackSpeedKey));
 
-  static Future<void> setDefaultPlaybackSpeed(double speed) => _prefs.setDouble(
-    _defaultPlaybackSpeedKey,
-    normalizePlaybackSpeed(speed),
-  );
+  static Future<void> setDefaultPlaybackSpeed(double speed) =>
+      _prefs.setDouble(_defaultPlaybackSpeedKey, normalizePlaybackSpeed(speed));
 
   static bool getDefaultSubtitleOff() =>
       _prefs.getBool(_defaultSubtitleOffKey) ?? false;
@@ -130,8 +134,17 @@ class PlaybackSettingsService {
   static Future<void> setAutoMatchSource(bool value) =>
       _prefs.setBool(_autoMatchSourceKey, value);
 
-  static Future<void> setShowSubtitle(bool value) =>
-      _prefs.setBool(_showSubtitleKey, value);
+  static String getHwdecMode() =>
+      normalizeHwdecMode(_prefs.getString(_hwdecModeKey));
+
+  static Future<void> setHwdecMode(String mode) =>
+      _prefs.setString(_hwdecModeKey, normalizeHwdecMode(mode));
+
+  static String getVideoRenderer() =>
+      normalizeVideoRenderer(_prefs.getString(_videoRendererKey));
+
+  static Future<void> setVideoRenderer(String renderer) =>
+      _prefs.setString(_videoRendererKey, normalizeVideoRenderer(renderer));
 
   static Future<PlaybackPreferences> loadAll() async {
     final sp = _prefs;
@@ -172,72 +185,56 @@ class PlaybackSettingsService {
     final sp = _prefs;
     final writes = <Future<void>>[];
 
-    void writeBool(String key, bool before, bool after) {
-      if (before != after) writes.add(sp.setBool(key, after));
+    /// 一个写入器覆盖全部标量类型：SharedPreferences 的四个 setter 由运行时
+    /// 类型分派，取代按类型各写一遍的四个同构闭包。
+    void write(String key, Object before, Object after) {
+      if (before == after) return;
+      writes.add(switch (after) {
+        final bool value => sp.setBool(key, value),
+        final int value => sp.setInt(key, value),
+        final double value => sp.setDouble(key, value),
+        _ => sp.setString(key, after as String),
+      });
     }
 
-    void writeInt(String key, int before, int after) {
-      if (before != after) writes.add(sp.setInt(key, after));
-    }
-
-    void writeDouble(String key, double before, double after) {
-      if (before != after) writes.add(sp.setDouble(key, after));
-    }
-
-    void writeString(String key, String before, String after) {
-      if (before != after) writes.add(sp.setString(key, after));
-    }
-
-    writeBool(
+    write(
       _rememberLastPositionKey,
       previous.rememberLastPosition,
       next.rememberLastPosition,
     );
-    writeBool(_autoFullscreenKey, previous.autoFullscreen, next.autoFullscreen);
-    writeBool(_enableSkipOpEdKey, previous.enableSkipOpEd, next.enableSkipOpEd);
-    writeBool(
+    write(_autoFullscreenKey, previous.autoFullscreen, next.autoFullscreen);
+    write(_enableSkipOpEdKey, previous.enableSkipOpEd, next.enableSkipOpEd);
+    write(
       _defaultDanmakuOffKey,
       previous.defaultDanmakuOff,
       next.defaultDanmakuOff,
     );
-    writeDouble(
+    write(
       _defaultPlaybackSpeedKey,
       previous.defaultPlaybackSpeed,
       next.defaultPlaybackSpeed,
     );
-    writeDouble(
-      _longPressSpeedKey,
-      previous.longPressSpeed,
-      next.longPressSpeed,
-    );
-    writeBool(
+    write(_longPressSpeedKey, previous.longPressSpeed, next.longPressSpeed);
+    write(
       _showNextEpisodeButtonKey,
       previous.showNextEpisodeButton,
       next.showNextEpisodeButton,
     );
-    writeBool(
-      _enableDoubleTapKey,
-      previous.enableDoubleTap,
-      next.enableDoubleTap,
-    );
-    writeString(
-      _doubleTapActionKey,
-      previous.doubleTapAction,
-      next.doubleTapAction,
-    );
-    writeInt(
+    write(_enableDoubleTapKey, previous.enableDoubleTap, next.enableDoubleTap);
+    write(_doubleTapActionKey, previous.doubleTapAction, next.doubleTapAction);
+    write(
       _doubleTapSeekDurationKey,
       previous.doubleTapSeekDuration,
       next.doubleTapSeekDuration,
     );
-    writeBool(_showSystemTimeKey, previous.showSystemTime, next.showSystemTime);
-    writeInt(_skipOpWaitTimeKey, previous.skipOpWaitTime, next.skipOpWaitTime);
-    writeInt(_skipOpDurationKey, previous.skipOpDuration, next.skipOpDuration);
-    writeBool(_enableAnime4KKey, previous.enableAnime4K, next.enableAnime4K);
-    writeString(_anime4KLevelKey, previous.anime4KLevel, next.anime4KLevel);
-    writeBool(_showSubtitleKey, previous.showSubtitle, next.showSubtitle);
-    writeString(_hwdecModeKey, previous.hwdecMode, next.hwdecMode);
-    writeString(_videoRendererKey, previous.videoRenderer, next.videoRenderer);
+    write(_showSystemTimeKey, previous.showSystemTime, next.showSystemTime);
+    write(_skipOpWaitTimeKey, previous.skipOpWaitTime, next.skipOpWaitTime);
+    write(_skipOpDurationKey, previous.skipOpDuration, next.skipOpDuration);
+    write(_enableAnime4KKey, previous.enableAnime4K, next.enableAnime4K);
+    write(_anime4KLevelKey, previous.anime4KLevel, next.anime4KLevel);
+    write(_showSubtitleKey, previous.showSubtitle, next.showSubtitle);
+    write(_hwdecModeKey, previous.hwdecMode, next.hwdecMode);
+    write(_videoRendererKey, previous.videoRenderer, next.videoRenderer);
 
     if (previous.subtitleConfig != next.subtitleConfig) {
       writes.add(next.subtitleConfig.save());

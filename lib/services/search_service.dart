@@ -72,8 +72,8 @@ class SearchService {
   Future<void> reloadCustomSources() async {
     await _sourceAdapterService.init();
     if (_disposed) return;
-    customSources = _sourceAdapterService.enabledCustomSources;
-    builtinAdapterSources = _sourceAdapterService.enabledBuiltinSources;
+    customSources = SourceCatalog.instance.enabledCustomSources;
+    builtinAdapterSources = SourceCatalog.instance.enabledBuiltinSources;
 
     sourceLabelsNotifier.value = List<String>.unmodifiable([
       'BGM',

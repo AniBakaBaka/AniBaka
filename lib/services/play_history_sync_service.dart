@@ -311,23 +311,4 @@ class PlayHistorySyncService {
     ]);
   }
 
-  /// 删除指定历史记录（支持 videoId 或 bgmId）
-  static Future<void> removeHistory(String videoId, {int? bgmId}) async {
-    final prefix = (bgmId != null && bgmId > 0)
-        ? 'bgm_$bgmId::'
-        : 'id_$videoId::';
-    final list = getHistoryList();
-    list.removeWhere((item) => _localKey(item).startsWith(prefix));
-    final resume = _readList(_resumeKey)
-      ..removeWhere((item) {
-        if (bgmId != null && bgmId > 0) {
-          return BgmUtils.toInt(item['bgmId']) == bgmId;
-        }
-        return item['id']?.toString() == videoId;
-      });
-    await Future.wait([
-      _persist(list),
-      AppStorage.playHistoryBox.put(_resumeKey, resume),
-    ]);
-  }
 }
