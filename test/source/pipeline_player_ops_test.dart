@@ -12,7 +12,7 @@ import 'package:baka/source/engine/rule_validator.dart';
 import 'package:baka/source/model/source_rule.dart';
 import 'package:baka/source/runtime/request_scheduler.dart';
 
-class _PlayerOpsHost implements PipelineHost, PipelineWebviewReadyHost {
+class _PlayerOpsHost implements PipelineHost {
   _PlayerOpsHost([this.responses = const {}]);
 
   final Map<String, String> responses;
@@ -100,10 +100,7 @@ class _PlayerOpsHost implements PipelineHost, PipelineWebviewReadyHost {
   List<String> selectAll(String html, String selector, String attr) => const [];
 
   @override
-  Future<String> renderWithWebview(String url) async => '';
-
-  @override
-  Future<String> renderWithWebviewReady(
+  Future<String> renderWithWebview(
     String url, {
     bool Function(String html)? isReady,
     Duration timeout = const Duration(seconds: 30),

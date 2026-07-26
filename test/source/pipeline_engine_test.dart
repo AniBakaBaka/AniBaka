@@ -98,7 +98,12 @@ class FakeHost implements PipelineHost {
   List<String> selectAll(String html, String selector, String attr) => const [];
 
   @override
-  Future<String> renderWithWebview(String url) async => '';
+  Future<String> renderWithWebview(
+    String url, {
+    bool Function(String html)? isReady,
+    Duration timeout = const Duration(seconds: 30),
+    Duration settleDelay = const Duration(seconds: 1),
+  }) async => '';
   @override
   Future<String> sniffWithWebview(String url) async => '';
 }
@@ -155,7 +160,7 @@ class VerifyCheckHost extends FakeHost {
   }
 }
 
-class AltchaWebviewHost extends FakeHost implements PipelineWebviewReadyHost {
+class AltchaWebviewHost extends FakeHost {
   AltchaWebviewHost()
     : super(const {
         'https://example.com/blocked':
@@ -170,7 +175,7 @@ class AltchaWebviewHost extends FakeHost implements PipelineWebviewReadyHost {
   bool get allowWebview => true;
 
   @override
-  Future<String> renderWithWebviewReady(
+  Future<String> renderWithWebview(
     String url, {
     bool Function(String html)? isReady,
     Duration timeout = const Duration(seconds: 30),

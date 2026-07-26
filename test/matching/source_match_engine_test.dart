@@ -15,10 +15,7 @@ void main() {
       key: key,
       title: title,
       sourceType: source,
-      data: {
-        'title': title,
-        'episodeCount': episodes,
-      },
+      data: {'title': title, 'episodeCount': episodes},
     );
   }
 
@@ -76,5 +73,16 @@ void main() {
     expect(ranked.first.candidate.key, 'single');
     expect(pack.severeEpisodeConflict, isTrue);
     expect(pack.confidence, lessThan(0.8));
+  });
+
+  test('counts video rows without allocating split substrings', () {
+    final item = SourceMatchCandidate(
+      key: 'videos',
+      title: 'Example',
+      sourceType: 'source',
+      data: const {'videos': '  \r\n第1集\$ep-1\r\n\t\n第2集\$ep-2\n第3集\$ep-3'},
+    );
+
+    expect(item.episodeCount, 3);
   });
 }

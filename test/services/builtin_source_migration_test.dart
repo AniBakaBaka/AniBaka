@@ -65,10 +65,10 @@ void main() {
       final service = SourceAdapterService.instance;
       await service.init();
 
-      expect(service.customSourceById('akianime'), isNull);
-      expect(service.customSourceById('custom-only'), isNotNull);
+      expect(SourceCatalog.instance.customSourceById('akianime'), isNull);
+      expect(SourceCatalog.instance.customSourceById('custom-only'), isNotNull);
       expect(
-        service.builtinSourceById('akianime')?.baseUrl,
+        SourceCatalog.instance.builtinSourceById('akianime')?.baseUrl,
         'https://migrated.akianime.example',
       );
 

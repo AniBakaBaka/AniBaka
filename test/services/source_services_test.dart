@@ -143,17 +143,17 @@ void main() {
       );
 
       expect(result, RuleInstallResult.updated);
-      expect(service.customSourceById('akianime'), isNull);
+      expect(SourceCatalog.instance.customSourceById('akianime'), isNull);
       expect(
-        service.allCustomSources.where((source) => source.id == 'akianime'),
+        SourceCatalog.instance.customSources.where((source) => source.id == 'akianime'),
         isEmpty,
       );
       expect(
-        service.builtinSourceById('akianime')?.baseUrl,
+        SourceCatalog.instance.builtinSourceById('akianime')?.baseUrl,
         'https://updated.akianime.example',
       );
       expect(
-        service.builtinSourceById('akianime')?.iconUrl,
+        SourceCatalog.instance.builtinSourceById('akianime')?.iconUrl,
         'https://updated.akianime.example/icon.png',
       );
       final updatedAdapter = service.getBuiltinAdapter('akianime');

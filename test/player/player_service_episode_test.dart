@@ -86,22 +86,44 @@ void main() {
       PlaybackEpisode(title: '第二集', lines: ['c']),
     ]);
 
-    expect(service.prepareSwitchEpisode(0, lineIndex: 2), isTrue);
+    service.applySelection(service.normalizeSelection(0, 2));
     expect(service.currentEpisodeId, 'b');
-    expect(service.prepareSwitchEpisode(0, lineIndex: 2), isFalse);
-    expect(service.prepareSwitchEpisode(1, lineIndex: 2), isTrue);
+    // 同集同线路的归一化结果与当前状态相同，调用方据此判等即可跳过切换
+    final repeated = service.normalizeSelection(0, 2);
+    expect(repeated.episodeIndex, service.currPlayIndex);
+    expect(repeated.lineIndex, service.currUrl);
+    service.applySelection(service.normalizeSelection(1, 2));
     expect(service.currUrl, 1);
     expect(service.currentEpisodeId, 'c');
   });
 
-  test('serialized line lookup scans only the requested segment', () {
-    const episode = 'episode\$first\$second\$third';
+  test('episodeAt parses only the requested episode', () {
+    final data = <String, dynamic>{
+      'videos': 'ep1\$a1\$a2\nep2\$first\$second\$third\n\nep3\$c1',
+    };
 
-    expect(VideoUtils.getPathCount(episode), 3);
-    expect(VideoUtils.getVideoUrl(episode, 1), 'first');
-    expect(VideoUtils.getVideoUrl(episode, 2), 'second');
-    expect(VideoUtils.getVideoUrl(episode, 3), 'third');
-    expect(VideoUtils.getVideoUrl(episode, 4), isNull);
+    expect(PlaybackEpisodeCatalog.countFrom(data), 3);
+
+    final episode = PlaybackEpisodeCatalog.episodeAt(data, 1);
+    expect(episode, isNotNull);
+    expect(episode!.title, 'ep2');
+    expect(episode.lineCount, 3);
+    expect(episode.lineAt(1), 'first');
+    expect(episode.lineAt(2), 'second');
+    expect(episode.lineAt(3), 'third');
+    expect(episode.lineAt(4), isNull);
+
+    expect(PlaybackEpisodeCatalog.episodeAt(data, 3), isNull);
+  });
+
+  test('episodeAt skips blank videoList entries like rawEpisodesOf', () {
+    final data = <String, dynamic>{
+      'videoList': ['', 'ep1\$a', '   ', 'ep2\$b'],
+    };
+
+    expect(PlaybackEpisodeCatalog.countFrom(data), 2);
+    expect(PlaybackEpisodeCatalog.rawEpisodesOf(data), ['ep1\$a', 'ep2\$b']);
+    expect(PlaybackEpisodeCatalog.episodeAt(data, 1)?.title, 'ep2');
   });
 
   test('playback keep-alive follows the active media lifecycle', () async {

@@ -17,11 +17,11 @@ void main() {
     },
   );
 
-  group('pickAniBakaTmdbPoster', () {
-    test('prefers the Chinese TMDB poster over BGM and other languages', () {
+  group('pickAniBakaTmdbBackdrop', () {
+    test('prefers the Chinese TMDB backdrop over BGM and other languages', () {
       final detail = <String, dynamic>{
         'images': {
-          'posters': [
+          'backdrops': [
             {
               'source': 'bgm',
               'lang': 'zh',
@@ -42,15 +42,15 @@ void main() {
       };
 
       expect(
-        BgmUtils.pickAniBakaTmdbPoster(detail),
+        BgmUtils.pickAniBakaTmdbBackdrop(detail),
         'https://example.test/tmdb-zh.jpg',
       );
     });
 
-    test('uses another TMDB poster when no Chinese variant exists', () {
+    test('uses another TMDB backdrop when no Chinese variant exists', () {
       final detail = <String, dynamic>{
         'images': {
-          'posters': [
+          'backdrops': [
             {
               'source': 'tmdb',
               'lang': 'ja',
@@ -61,40 +61,40 @@ void main() {
       };
 
       expect(
-        BgmUtils.pickAniBakaTmdbPoster(detail),
+        BgmUtils.pickAniBakaTmdbBackdrop(detail),
         'https://example.test/tmdb-ja-thumb.jpg',
       );
     });
 
-    test('does not treat a BGM poster as a TMDB poster', () {
+    test('does not treat a BGM backdrop as a TMDB backdrop', () {
       final detail = <String, dynamic>{
         'images': {
-          'posters': [
+          'backdrops': [
             {'source': 'bgm', 'url': 'https://example.test/bgm.jpg'},
           ],
         },
       };
 
-      expect(BgmUtils.pickAniBakaTmdbPoster(detail), isNull);
+      expect(BgmUtils.pickAniBakaTmdbBackdrop(detail), isNull);
     });
-  });
 
-  test('picks the TMDB backdrop independently from posters', () {
-    final detail = <String, dynamic>{
-      'images': {
-        'posters': [
-          {'source': 'tmdb', 'url': 'https://example.test/poster.jpg'},
-        ],
-        'backdrops': [
-          {'source': 'bgm', 'url': 'https://example.test/bgm-backdrop.jpg'},
-          {'source': 'tmdb', 'url': 'https://example.test/tmdb-backdrop.jpg'},
-        ],
-      },
-    };
+    test('ignores posters when picking the backdrop', () {
+      final detail = <String, dynamic>{
+        'images': {
+          'posters': [
+            {'source': 'tmdb', 'url': 'https://example.test/poster.jpg'},
+          ],
+          'backdrops': [
+            {'source': 'bgm', 'url': 'https://example.test/bgm-backdrop.jpg'},
+            {'source': 'tmdb', 'url': 'https://example.test/tmdb-backdrop.jpg'},
+          ],
+        },
+      };
 
-    expect(
-      BgmUtils.pickAniBakaTmdbBackdrop(detail),
-      'https://example.test/tmdb-backdrop.jpg',
-    );
+      expect(
+        BgmUtils.pickAniBakaTmdbBackdrop(detail),
+        'https://example.test/tmdb-backdrop.jpg',
+      );
+    });
   });
 }
