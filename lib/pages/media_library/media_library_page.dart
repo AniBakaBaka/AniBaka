@@ -82,7 +82,7 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
       return;
     }
 
-    final result = await FilePicker.platform.getDirectoryPath();
+    final result = await FilePicker.getDirectoryPath();
     if (result == null) return;
 
     final config = StorageConfig(

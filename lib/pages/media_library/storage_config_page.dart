@@ -111,9 +111,7 @@ class _StorageConfigPageState extends State<StorageConfigPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_isEditing ? '编辑 WebDAV' : '添加 WebDAV'),
-        actions: [
-          TextButton(onPressed: _save, child: const Text('保存')),
-        ],
+        actions: [TextButton(onPressed: _save, child: const Text('保存'))],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),

@@ -1,13 +1,12 @@
-import 'package:baka/api/post.dart';
-import 'package:baka/app_state.dart';
-import 'package:baka/instance.dart';
-import 'package:baka/services/network_service.dart';
-import 'package:baka/utils/toast_utils.dart';
-import 'package:get/get.dart';
-import 'package:baka/widgets/common/tab_indicator.dart';
 import 'package:flutter/material.dart';
-import 'dart:convert';
+import 'package:flutter/services.dart';
 
+import 'package:baka/instance.dart';
+import 'package:baka/services/login_service.dart';
+import 'package:baka/utils/toast_utils.dart';
+import 'package:baka/widgets/common/scale_button.dart';
+
+/// 登录 / 注册页面
 class Login extends StatefulWidget {
   const Login({super.key});
 
@@ -15,193 +14,321 @@ class Login extends StatefulWidget {
   LoginState createState() => LoginState();
 }
 
-class LoginState extends State<Login> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class LoginState extends State<Login> {
+  final _service = LoginService();
+  final _formKey = GlobalKey<FormState>();
+
   final _nameController = TextEditingController();
   final _pwdController = TextEditingController();
   final _qqController = TextEditingController();
 
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-  }
+  bool _isRegister = false;
+  bool _submitting = false;
+  bool _obscurePassword = true;
 
   @override
   void dispose() {
-    _tabController.dispose();
     _nameController.dispose();
     _pwdController.dispose();
     _qqController.dispose();
     super.dispose();
   }
 
-  Future<void> _login() async {
-    final name = _nameController.text.trim();
-    final pwd = _pwdController.text.trim();
-    if (name.isEmpty || pwd.isEmpty) {
-      showSnackBar('什么都没有输入');
-      return;
-    }
-    showSnackBar('登录中···');
+  void _switchMode(bool isRegister) {
+    if (_isRegister == isRegister || _submitting) return;
+    HapticFeedback.lightImpact();
+    setState(() => _isRegister = isRegister);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _formKey.currentState?.reset();
+    });
+  }
+
+  Future<void> _submit() async {
+    if (_submitting || !(_formKey.currentState?.validate() ?? false)) return;
+
+    HapticFeedback.lightImpact();
+    setState(() => _submitting = true);
+
     try {
-      final res = jsonDecode(
-        (await login({'name': name, 'pwd': pwd, 'platform': 'app'})).data,
-      );
-      if (res['code'] != 200) {
-        showSnackBar(res['msg']);
-        return;
+      if (_isRegister) {
+        final result = await _service.performRegister(
+          name: _nameController.text,
+          pwd: _pwdController.text,
+          qq: _qqController.text,
+        );
+        showSnackBar(result.message, isError: !result.success);
+        if (result.success && mounted) {
+          _switchMode(false);
+        }
+      } else {
+        final result = await _service.performLogin(
+          name: _nameController.text,
+          pwd: _pwdController.text,
+        );
+        if (!result.success) {
+          showSnackBar(result.message, isError: true);
+        } else if (mounted) {
+          Navigator.pop(context);
+        }
       }
-      await NetUtils.saveTokenResponse(Map<String, dynamic>.from(res));
-      await Instances.sp.setString('userinfo', jsonEncode(res['user']));
-      Get.find<AppState>().triggerLoginRefresh();
-      if (!mounted) return;
-      Navigator.pop(context);
-    } catch (_) {
-      showSnackBar('登录失败，请检查网络');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
     }
-  }
-
-  Future<void> _register() async {
-    final name = _nameController.text.trim();
-    final pwd = _pwdController.text.trim();
-    final qq = _qqController.text.trim();
-    if (name.isEmpty || pwd.isEmpty || qq.isEmpty) {
-      showSnackBar('请填写完整信息');
-      return;
-    }
-    try {
-      final res = jsonDecode(
-        (await register({'name': name, 'pwd': pwd, 'qq': qq})).data,
-      );
-      showSnackBar(res['msg']);
-      if (res['code'] == 200) {
-        _tabController.index = 0;
-      }
-    } catch (_) {
-      showSnackBar('注册失败，请检查网络');
-    }
-  }
-
-  Widget _buildInput({
-    required String hint,
-    required TextEditingController controller,
-    bool obscure = false,
-  }) {
-    return Container(
-      margin: const EdgeInsets.all(10.0),
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(30),
-        color: Colors.black12,
-      ),
-      child: TextField(
-        controller: controller,
-        obscureText: obscure,
-        decoration: InputDecoration.collapsed(hintText: hint),
-      ),
-    );
-  }
-
-  ButtonStyle get _buttonStyle => ButtonStyle(
-    backgroundColor: WidgetStateProperty.all(
-      Theme.of(context).colorScheme.primary,
-    ),
-    shape: WidgetStateProperty.all(
-      RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-    ),
-  );
-
-  Widget buildLogin() {
-    return Column(
-      children: [
-        _buildInput(hint: '用户名或qq', controller: _nameController),
-        _buildInput(hint: '密码', controller: _pwdController, obscure: true),
-        Padding(
-          padding: const EdgeInsets.all(10),
-          child: ElevatedButton(
-            style: _buttonStyle,
-            onPressed: _login,
-            child: const Text(
-              '登录',
-              style: TextStyle(color: Colors.white, fontSize: 16),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget buildRegister() {
-    return Column(
-      children: [
-        _buildInput(hint: 'QQ', controller: _qqController),
-        _buildInput(hint: '用户名', controller: _nameController),
-        _buildInput(hint: '密码', controller: _pwdController, obscure: true),
-        Padding(
-          padding: const EdgeInsets.all(10),
-          child: ElevatedButton(
-            style: _buttonStyle,
-            onPressed: _register,
-            child: const Text(
-              '注册',
-              style: TextStyle(color: Colors.white, fontSize: 16),
-            ),
-          ),
-        ),
-      ],
-    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final reduceMotion = context.reduceMotion;
+
     return Scaffold(
-      appBar: AppBar(
-        iconTheme: IconThemeData(color: Theme.of(context).colorScheme.primary),
-      ),
+      backgroundColor: theme.scaffoldBackgroundColor,
+      appBar: AppBar(leading: const BackButton()),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(50),
-          child: Column(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: Image.asset('assets/ic_launcher.png', height: 80),
-              ),
-              const SizedBox(height: 30),
-              TabBar(
-                tabAlignment: TabAlignment.center,
-                controller: _tabController,
-                isScrollable: true,
-                labelStyle: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-                unselectedLabelStyle: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.normal,
-                ),
-                indicator: ArcTabIndicator(
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                dividerColor: Colors.transparent,
-                tabs: const [
-                  Center(child: Text('登录')),
-                  Center(child: Text('注册')),
-                ],
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 10),
-                  child: TabBarView(
-                    controller: _tabController,
-                    children: [buildLogin(), buildRegister()],
+        child: Center(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: Form(
+                key: _formKey,
+                child: AutofillGroup(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildHeader(theme, reduceMotion),
+                      const SizedBox(height: 28),
+                      _buildModeSwitcher(theme, reduceMotion),
+                      const SizedBox(height: 24),
+                      _buildFormFields(theme, reduceMotion),
+                      const SizedBox(height: 28),
+                      _buildSubmitButton(theme),
+                    ],
                   ),
                 ),
               ),
-            ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(ThemeData theme, bool reduceMotion) {
+    return Center(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Image.asset('assets/ic_launcher.png', height: 72, width: 72),
+      ),
+    );
+  }
+
+  Widget _buildModeSwitcher(ThemeData theme, bool reduceMotion) {
+    final isDark = theme.brightness == Brightness.dark;
+    final trackColor = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.black.withValues(alpha: 0.05);
+
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: trackColor,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Stack(
+        children: [
+          AnimatedAlign(
+            duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            alignment: _isRegister ? Alignment.centerRight : Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: 0.5,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              _buildTabOption('登录', !_isRegister, theme, reduceMotion),
+              _buildTabOption('注册', _isRegister, theme, reduceMotion),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabOption(
+    String label,
+    bool isSelected,
+    ThemeData theme,
+    bool reduceMotion,
+  ) {
+    return Expanded(
+      child: ScaleButton(
+        onTap: () => _switchMode(label == '注册'),
+        child: Container(
+          color: Colors.transparent,
+          alignment: Alignment.center,
+          child: AnimatedDefaultTextStyle(
+            duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+              letterSpacing: 1,
+              color: isSelected
+                  ? Colors.white
+                  : theme.colorScheme.onSurface.withValues(alpha: 0.6),
+            ),
+            child: Text(label),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFormFields(ThemeData theme, bool reduceMotion) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AnimatedSize(
+          duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          child: _isRegister
+              ? Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: TextFormField(
+                    controller: _qqController,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.next,
+                    enabled: !_submitting,
+                    decoration: _inputDecoration(
+                      theme,
+                      hintText: '请填写 QQ 号',
+                      prefixIcon: Icons.badge_outlined,
+                    ),
+                    validator: (v) => _isRegister && (v == null || v.trim().isEmpty)
+                        ? '请填写 QQ 号'
+                        : null,
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+        TextFormField(
+          controller: _nameController,
+          textInputAction: TextInputAction.next,
+          enabled: !_submitting,
+          autofillHints: const [AutofillHints.username],
+          decoration: _inputDecoration(
+            theme,
+            hintText: _isRegister ? '用户名' : '用户名或 QQ',
+            prefixIcon: Icons.person_outline,
+          ),
+          validator: (v) => (v == null || v.trim().isEmpty) ? '请填写用户名' : null,
+        ),
+        const SizedBox(height: 14),
+        TextFormField(
+          controller: _pwdController,
+          obscureText: _obscurePassword,
+          textInputAction: TextInputAction.done,
+          enabled: !_submitting,
+          autofillHints: const [AutofillHints.password],
+          onFieldSubmitted: (_) => _submit(),
+          decoration: _inputDecoration(
+            theme,
+            hintText: '密码',
+            prefixIcon: Icons.lock_outline,
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                size: 20,
+              ),
+              tooltip: _obscurePassword ? '显示密码' : '隐藏密码',
+              onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+            ),
+          ),
+          validator: (v) => (v == null || v.trim().isEmpty) ? '请填写密码' : null,
+        ),
+      ],
+    );
+  }
+
+  InputDecoration _inputDecoration(
+    ThemeData theme, {
+    required String hintText,
+    required IconData prefixIcon,
+    Widget? suffixIcon,
+  }) {
+    final isDark = theme.brightness == Brightness.dark;
+    final fillColor = isDark
+        ? Colors.white.withValues(alpha: 0.06)
+        : Colors.black.withValues(alpha: 0.03);
+
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: BorderSide.none,
+    );
+
+    final focusBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: BorderSide(color: theme.colorScheme.primary, width: 1.5),
+    );
+
+    return InputDecoration(
+      hintText: hintText,
+      hintStyle: TextStyle(
+        fontSize: 14,
+        color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+      ),
+      prefixIcon: Icon(prefixIcon, size: 20),
+      suffixIcon: suffixIcon,
+      filled: true,
+      fillColor: fillColor,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      border: border,
+      enabledBorder: border,
+      focusedBorder: focusBorder,
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: theme.colorScheme.error, width: 1),
+      ),
+    );
+  }
+
+  Widget _buildSubmitButton(ThemeData theme) {
+    return ScaleButton(
+      onTap: _submitting ? null : _submit,
+      child: Container(
+        height: 52,
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primary,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        alignment: Alignment.center,
+        child: _submitting
+            ? SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: theme.colorScheme.onPrimary,
+                ),
+              )
+            : Text(
+                _isRegister ? '注 册' : '登 录',
+                style: TextStyle(
+                  color: theme.colorScheme.onPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 2,
+                ),
+              ),
       ),
     );
   }

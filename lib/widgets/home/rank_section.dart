@@ -28,11 +28,11 @@ class RankSection extends StatelessWidget {
       children: [
         _buildHeader(context),
         SizedBox(
-          height: _cardHeight + 60,
+          height: _cardHeight + 42,
           child: items.isEmpty
               ? _buildLoadingCards()
               : ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 10),
+                  padding: EdgeInsets.zero,
                   scrollDirection: Axis.horizontal,
                   physics: const BouncingScrollPhysics(),
                   itemCount: items.length,
@@ -47,7 +47,7 @@ class RankSection extends StatelessWidget {
   Widget _buildLoadingCards() {
     return AppShimmer(
       child: ListView.separated(
-        padding: const EdgeInsets.only(bottom: 10),
+        padding: EdgeInsets.zero,
         scrollDirection: Axis.horizontal,
         physics: const NeverScrollableScrollPhysics(),
         itemCount: 5,
@@ -87,7 +87,7 @@ class RankSection extends StatelessWidget {
 
   Widget _buildHeader(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [

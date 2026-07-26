@@ -20,6 +20,7 @@ class SourceManagementPage extends StatefulWidget {
 
 class _SourceManagementPageState extends State<SourceManagementPage> {
   final _sources = SourceAdapterService.instance;
+  final _catalog = SourceCatalog.instance;
   final _repo = RuleRepositoryService.instance;
   final Set<String> _installing = <String>{};
 
@@ -37,20 +38,20 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
   @override
   void initState() {
     super.initState();
-    _sources.customSourcesListenable.addListener(_onSourcesChanged);
+    _catalog.addListener(_onSourcesChanged);
     _loadData();
   }
 
   @override
   void dispose() {
-    _sources.customSourcesListenable.removeListener(_onSourcesChanged);
+    _catalog.removeListener(_onSourcesChanged);
     super.dispose();
   }
 
   void _onSourcesChanged() {
     if (!mounted) return;
 
-    final sources = _sources.allCustomSources;
+    final sources = _catalog.customSources;
     if (_batchInstalling || _installing.isNotEmpty) {
       _customSources = sources;
       return;
@@ -71,7 +72,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
     if (!mounted) return;
 
     setState(() {
-      _customSources = _sources.allCustomSources;
+      _customSources = _catalog.customSources;
       _hubCatalog = _HubCatalog.build(_indices, _repo);
       _loadingSources = false;
     });
@@ -153,8 +154,8 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
 
   Future<void> _enableAllSources() async {
     HapticFeedback.mediumImpact();
-    await _sources.enableAllBuiltinSources();
-    await _sources.setAllCustomSourcesEnabled(true);
+    await _catalog.enableAllBuiltins();
+    await _catalog.setAllCustomSourcesEnabled(true);
     if (mounted) setState(() {});
   }
 
@@ -169,7 +170,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
 
     setState(() {
       _installing.remove(key);
-      _customSources = _sources.allCustomSources;
+      _customSources = _catalog.customSources;
       _hubCatalog = _HubCatalog.build(_indices, _repo);
     });
 
@@ -211,7 +212,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
 
     setState(() {
       _batchInstalling = false;
-      _customSources = _sources.allCustomSources;
+      _customSources = _catalog.customSources;
       _hubCatalog = _HubCatalog.build(_indices, _repo);
     });
     showSnackBar(
@@ -286,7 +287,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
 
   @override
   Widget build(BuildContext context) {
-    final builtinSources = _sources.allBuiltinSources;
+    final builtinSources = _catalog.builtinSources;
     final canInstallAll =
         !_batchInstalling && _hubCatalog.installable.isNotEmpty;
 
@@ -406,7 +407,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
                         items: builtinSources,
                         keyOf: (source) => source.key,
                         iconBuilder: (source) {
-                          final config = _sources.builtinSourceById(source.key);
+                          final config = _catalog.builtinSourceById(source.key);
                           final hub =
                               _hubCatalog.installedBySourceId[source.key];
                           return SourceIcon(
@@ -415,7 +416,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
                                 ? config!.iconUrl
                                 : hub?.item.iconUrl,
                             baseUrl: config?.baseUrl,
-                            enabled: _sources.isBuiltinSourceEnabled(
+                            enabled: _catalog.isBuiltinEnabled(
                               source.key,
                             ),
                             size: 26,
@@ -425,7 +426,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
                         titleOf: (source) => source.displayName,
                         subtitleOf: (source) => source.statusLabel ?? '',
                         onReorder: (oldIndex, newIndex) async {
-                          await _sources.reorderBuiltinSource(
+                          await _catalog.reorderBuiltinSource(
                             oldIndex,
                             newIndex,
                           );
@@ -455,7 +456,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
                             Uri.tryParse(source.baseUrl)?.host ??
                             source.baseUrl,
                         onReorder: (oldIndex, newIndex) async {
-                          await _sources.reorderCustomSource(
+                          await _catalog.reorderCustomSource(
                             oldIndex,
                             newIndex,
                           );
@@ -592,9 +593,9 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
           (context, index) {
             if (index < customStart) {
               final source = builtinSources[index];
-              final config = _sources.builtinSourceById(source.key);
+              final config = _catalog.builtinSourceById(source.key);
               final rule = _hubCatalog.installedBySourceId[source.key];
-              final enabled = _sources.isBuiltinSourceEnabled(source.key);
+              final enabled = _catalog.isBuiltinEnabled(source.key);
               final hasUpdate = rule?.status == InstallStatus.updateAvailable;
               final busy =
                   rule != null && _installing.contains(rule.operationKey);
@@ -628,7 +629,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
                     ? null
                     : () async {
                         HapticFeedback.lightImpact();
-                        await _sources.toggleBuiltinSource(source.key);
+                        await _catalog.toggleBuiltinSource(source.key);
                         if (mounted) setState(() {});
                       },
                 onButtonPressed: hasUpdate && rule != null

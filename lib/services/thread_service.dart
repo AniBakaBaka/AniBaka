@@ -38,7 +38,7 @@ class ThreadTab {
 class ThreadService {
   static const int pageSize = 20;
   static const int cacheExpiryMs = 3600 * 1000; // 1h
-  static const Duration loadThrottle = Duration(seconds: 2);
+  static const Duration loadThrottle = Duration(milliseconds: 400);
 
   static const channels = <ThreadChannel>[
     ThreadChannel('#茶馆', 6),
@@ -55,12 +55,14 @@ class ThreadService {
 
   // ─── Cache ───
 
-  List? _readCache(int pid) {
+  List? _readCache(int pid, {bool ignoreExpiry = true}) {
     final raw = AppStorage.threadCommentsBox.get('comments_$pid');
     if (raw is! Map) return null;
-    final ts = raw['timestamp'] as int? ?? 0;
-    if (DateTime.now().millisecondsSinceEpoch - ts >= cacheExpiryMs) {
-      return null;
+    if (!ignoreExpiry) {
+      final ts = raw['timestamp'] as int? ?? 0;
+      if (DateTime.now().millisecondsSinceEpoch - ts >= cacheExpiryMs) {
+        return null;
+      }
     }
     final data = raw['data'];
     return data is List ? data : null;
@@ -96,11 +98,11 @@ class ThreadService {
   }
 
   /// 尝试用本地缓存填充 [tabIndex]；命中返回 true。
-  bool loadCached(int tabIndex) {
+  bool loadCached(int tabIndex, {bool ignoreExpiry = true}) {
     final tab = tabs[tabIndex];
     try {
-      final cached = _readCache(tab.pid);
-      if (cached == null) return false;
+      final cached = _readCache(tab.pid, ignoreExpiry: ignoreExpiry);
+      if (cached == null || cached.isEmpty) return false;
       tab.comments = List.of(cached);
       _resetSeenIds(tab);
       // 缓存只保证首页数据；hasMore 保守为 true，由后续 loadMore 校正
@@ -141,7 +143,6 @@ class ThreadService {
     final tab = tabs[tabIndex];
     // page == 0 表示首页还没成功加载过，此时没有「下一页」可言。
     if (tab.page == 0 ||
-        tab.isRefreshing ||
         tab.isLoadingMore ||
         !tab.hasMore) {
       return false;

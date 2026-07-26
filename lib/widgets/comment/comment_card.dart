@@ -19,6 +19,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 class CommentList extends StatefulWidget {
   const CommentList({
     required this.pid,
+    this.comments,
     this.size,
     this.onTapLink,
     this.autoLoad = true,
@@ -27,6 +28,7 @@ class CommentList extends StatefulWidget {
   });
 
   final int pid;
+  final List? comments;
   final int? size;
   final Function(String, String?, String)? onTapLink;
   final bool autoLoad;
@@ -46,23 +48,24 @@ class CommentListState extends State<CommentList> {
   );
 
   late final Map userInfo = getUserInfo();
-  List? _comments;
+  List? _internalComments;
   int _requestSerial = 0;
 
-  bool get needsLoad => _comments == null;
-  List get comments => _comments ?? const [];
+  List? get _effectiveComments => widget.comments ?? _internalComments;
+  bool get needsLoad => _effectiveComments == null;
+  List get comments => _effectiveComments ?? const [];
 
   @override
   void initState() {
     super.initState();
-    if (widget.autoLoad) _loadComments();
+    if (widget.comments == null && widget.autoLoad) _loadComments();
   }
 
   @override
   void didUpdateWidget(covariant CommentList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.pid != oldWidget.pid) {
-      _comments = null;
+    if (widget.pid != oldWidget.pid && widget.comments == null) {
+      _internalComments = null;
       _loadComments();
     }
   }
@@ -83,7 +86,7 @@ class CommentListState extends State<CommentList> {
     }
 
     if (!mounted || requestSerial != _requestSerial) return;
-    setState(() => _comments = result);
+    setState(() => _internalComments = result);
   }
 
   static int _timeToSeconds(String value) {
@@ -134,13 +137,13 @@ class CommentListState extends State<CommentList> {
 
   void setComments(List newComments) {
     if (!mounted) return;
-    setState(() => _comments = newComments);
+    setState(() => _internalComments = newComments);
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final comments = _comments;
+    final comments = _effectiveComments;
 
     if (comments == null) {
       const loading = AppShimmer(

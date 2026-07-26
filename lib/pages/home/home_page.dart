@@ -52,7 +52,7 @@ class _HomePageState extends State<HomePage>
     }
     // 先让各板块订阅数据源，再执行首次刷新，避免启动阶段的结果早于页面挂载。
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _refresh();
+      if (mounted) _refresh(force: false);
     });
     VersionService.checkAndShowUpdate().catchError((_) {});
   }
@@ -74,12 +74,12 @@ class _HomePageState extends State<HomePage>
   }
 
   /// 服务会同步恢复缓存；刷新只更新真正变化的数据。
-  Future<void> _refresh() async {
+  Future<void> _refresh({bool force = true}) async {
     await Future.wait([
-      _svc.loadFeed(force: true),
-      if (!Instances.isTV) _svc.loadRank(force: true),
-      if (!Instances.isTV) _svc.loadSwipers(force: true),
-      if (Instances.isWindows) _svc.loadSchedule(force: true),
+      _svc.loadFeed(force: force),
+      if (!Instances.isTV) _svc.loadRank(force: force),
+      if (!Instances.isTV) _svc.loadSwipers(force: force),
+      if (Instances.isWindows) _svc.loadSchedule(force: force),
     ]);
   }
 
@@ -101,75 +101,26 @@ class _HomePageState extends State<HomePage>
     }
 
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final reduceVisualEffects =
-        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       extendBodyBehindAppBar: true,
-      body: Stack(
-        children: [
-          if (!reduceVisualEffects)
-            Positioned.fill(
-              child: Stack(
-                children: [
-                  Positioned(
-                    top: -100,
-                    right: -50,
-                    child: Container(
-                      width: 300,
-                      height: 300,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: theme.colorScheme.primary.withValues(
-                          alpha: isDark ? 0.15 : 0.08,
-                        ),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    bottom: 200,
-                    left: -100,
-                    child: Container(
-                      width: 400,
-                      height: 400,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: theme.colorScheme.secondary.withValues(
-                          alpha: isDark ? 0.1 : 0.05,
-                        ),
-                      ),
-                    ),
-                  ),
-                  Positioned.fill(
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 80, sigmaY: 80),
-                      child: const SizedBox(),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          RefreshWrapper(
-            onLoadMore: _svc.loadMore,
-            onRefresh: _refresh,
-            loadMoreResetListenable: _svc.feed,
-            showInitialIndicator: false,
-            child: CustomScrollView(
-              controller: _scrollController,
-              physics: const BouncingScrollPhysics(),
-              slivers: [
-                _buildAppBar(),
-                _buildBanner(),
-                _buildRankSection(),
-                _buildTagRow(),
-                _buildFeedGrid(),
-                const SliverToBoxAdapter(child: SizedBox(height: 80)),
-              ],
-            ),
-          ),
-        ],
+      body: RefreshWrapper(
+        onLoadMore: _svc.loadMore,
+        onRefresh: _refresh,
+        loadMoreResetListenable: _svc.feed,
+        showInitialIndicator: false,
+        child: CustomScrollView(
+          controller: _scrollController,
+          physics: const BouncingScrollPhysics(),
+          slivers: [
+            _buildAppBar(),
+            _buildBanner(),
+            _buildRankSection(),
+            _buildTagRow(),
+            _buildFeedGrid(),
+            const SliverToBoxAdapter(child: SizedBox(height: 32)),
+          ],
+        ),
       ),
     );
   }
@@ -177,52 +128,50 @@ class _HomePageState extends State<HomePage>
   Widget _buildAppBar() {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final reduceVisualEffects =
-        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    final content = Container(
-      height: 52,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.black.withValues(alpha: reduceVisualEffects ? 0.9 : 0.4)
-            : Colors.white.withValues(alpha: reduceVisualEffects ? 0.95 : 0.5),
-        borderRadius: BorderRadius.circular(100),
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.12)
-              : Colors.black.withValues(alpha: 0.05),
-          width: 1.2,
-        ),
-        boxShadow: reduceVisualEffects
-            ? null
-            : [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 16,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildNavTabBar(),
-          const SizedBox(width: 12),
-          _buildIconButton(
-            'assets/li-font.svg',
-            () => _push(
-              const WebViewPage(url: 'https://www.bgm.tv', title: '里世界'),
+    final reduceVisualEffects = context.reduceMotion;
+    final content = ClipRRect(
+      borderRadius: BorderRadius.circular(100),
+      child: BackdropFilter(
+        filter: reduceVisualEffects
+            ? ImageFilter.blur(sigmaX: 0, sigmaY: 0)
+            : ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: isDark
+                ? const Color(0xFF1B1B1F).withValues(alpha: reduceVisualEffects ? 0.96 : 0.84)
+                : Colors.white.withValues(alpha: reduceVisualEffects ? 0.98 : 0.88),
+            borderRadius: BorderRadius.circular(100),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.18)
+                  : Colors.black.withValues(alpha: 0.08),
+              width: 1.2,
             ),
           ),
-          const SizedBox(width: 8),
-          _buildIconButton(
-            'assets/Search.svg',
-            () => _push(const SearchPage()),
-            iconSize: 22,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildNavTabBar(),
+              const SizedBox(width: 12),
+              _buildIconButton(
+                'assets/li-font.svg',
+                () => _push(
+                  const WebViewPage(url: 'https://www.bgm.tv', title: '里世界'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _buildIconButton(
+                'assets/Search.svg',
+                () => _push(const SearchPage()),
+                iconSize: 22,
+              ),
+              const SizedBox(width: 12),
+              _buildUserAvatar(),
+            ],
           ),
-          const SizedBox(width: 12),
-          _buildUserAvatar(),
-        ],
+        ),
       ),
     );
 
@@ -232,25 +181,15 @@ class _HomePageState extends State<HomePage>
       snap: true,
       backgroundColor: Colors.transparent,
       elevation: 0,
-      toolbarHeight: 68,
+      toolbarHeight: 64,
       centerTitle: true,
-      title: ClipRRect(
-        borderRadius: BorderRadius.circular(100),
-        child: reduceVisualEffects
-            ? content
-            : BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-                child: content,
-              ),
-      ),
+      title: content,
     );
   }
 
   Widget _buildNavTabBar() {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final reduceVisualEffects =
-        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
 
     return Container(
       width: ScreenUtils(context).isTablet ? 240.0 : 160.0,
@@ -258,8 +197,8 @@ class _HomePageState extends State<HomePage>
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: isDark
-            ? Colors.white.withValues(alpha: 0.08)
-            : Colors.black.withValues(alpha: 0.05),
+            ? Colors.white.withValues(alpha: 0.14)
+            : Colors.black.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(100),
       ),
       child: TabBar(
@@ -272,9 +211,9 @@ class _HomePageState extends State<HomePage>
         isScrollable: false,
         dividerColor: Colors.transparent,
         labelColor: Colors.white,
-        unselectedLabelColor: theme.textTheme.bodyMedium?.color?.withValues(
-          alpha: 0.7,
-        ),
+        unselectedLabelColor: isDark
+            ? Colors.white.withValues(alpha: 0.85)
+            : Colors.black.withValues(alpha: 0.75),
         overlayColor: WidgetStateProperty.all(Colors.transparent),
         labelStyle: const TextStyle(
           fontSize: 14,
@@ -283,28 +222,19 @@ class _HomePageState extends State<HomePage>
         ),
         unselectedLabelStyle: const TextStyle(
           fontSize: 14,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w700,
           letterSpacing: 0.8,
         ),
         indicator: BoxDecoration(
           gradient: LinearGradient(
             colors: [
               theme.colorScheme.primary,
-              theme.colorScheme.primary.withValues(alpha: 0.8),
+              theme.colorScheme.primary.withValues(alpha: 0.85),
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(100),
-          boxShadow: reduceVisualEffects
-              ? null
-              : [
-                  BoxShadow(
-                    color: theme.colorScheme.primary.withValues(alpha: 0.4),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
         ),
         onTap: (index) {
           HapticFeedback.lightImpact();
@@ -315,7 +245,7 @@ class _HomePageState extends State<HomePage>
           if (target != null) {
             Scrollable.ensureVisible(
               target,
-              duration: reduceVisualEffects
+              duration: context.reduceMotion
                   ? Duration.zero
                   : const Duration(milliseconds: 600),
               curve: Curves.easeOutQuart,
@@ -349,8 +279,8 @@ class _HomePageState extends State<HomePage>
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : Colors.black.withValues(alpha: 0.05),
+              ? Colors.white.withValues(alpha: 0.12)
+              : Colors.black.withValues(alpha: 0.07),
           shape: BoxShape.circle,
         ),
         child: SvgPicture.asset(
@@ -371,8 +301,6 @@ class _HomePageState extends State<HomePage>
       final avatar = _appState.userInfo.value['qq']?.toString() ?? '';
       final isLoggedIn = _appState.isLoggedIn;
       final theme = Theme.of(context);
-      final reduceVisualEffects =
-          MediaQuery.maybeOf(context)?.disableAnimations ?? false;
 
       return InkWell(
         onLongPress: isLoggedIn ? _confirmLogout : null,
@@ -389,15 +317,6 @@ class _HomePageState extends State<HomePage>
               color: theme.colorScheme.primary.withValues(alpha: 0.5),
               width: 1.5,
             ),
-            boxShadow: reduceVisualEffects
-                ? null
-                : [
-                    BoxShadow(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.2),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
           ),
           child: ClipOval(
             child: CachedNetworkImage(
@@ -452,38 +371,19 @@ class _HomePageState extends State<HomePage>
         final horizontalPadding = isTablet
             ? MediaQuery.sizeOf(context).width * 0.15
             : 20.0;
-        final radius = BorderRadius.circular(isTablet ? 24 : 28);
-        final reduceVisualEffects =
-            MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+        final radius = BorderRadius.circular(isTablet ? 20 : 24);
 
         return SliverToBoxAdapter(
           child: Padding(
             padding: EdgeInsets.symmetric(
               horizontal: horizontalPadding,
-              vertical: 12,
+              vertical: 8,
             ),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: radius,
-                boxShadow: reduceVisualEffects
-                    ? null
-                    : [
-                        BoxShadow(
-                          color: Theme.of(
-                            context,
-                          ).shadowColor.withValues(alpha: 0.15),
-                          blurRadius: 30,
-                          offset: const Offset(0, 16),
-                          spreadRadius: -8,
-                        ),
-                      ],
-              ),
-              child: ClipRRect(
-                borderRadius: radius,
-                child: AspectRatio(
-                  aspectRatio: isTablet ? 24 / 9 : 16 / 9.5,
-                  child: SwiperBanner(swiperData: swipers),
-                ),
+            child: ClipRRect(
+              borderRadius: radius,
+              child: AspectRatio(
+                aspectRatio: isTablet ? 24 / 9 : 16 / 9.5,
+                child: SwiperBanner(swiperData: swipers),
               ),
             ),
           ),
@@ -495,7 +395,7 @@ class _HomePageState extends State<HomePage>
   Widget _buildRankSection() {
     return SliverToBoxAdapter(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
         child: KeyedSubtree(
           key: _rankSectionKey,
           child: ValueListenableBuilder<int>(
@@ -518,83 +418,76 @@ class _HomePageState extends State<HomePage>
   Widget _buildTagRow() {
     return SliverToBoxAdapter(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
         child: ValueListenableBuilder<String>(
           valueListenable: _svc.tag,
           builder: (context, selected, _) {
             final theme = Theme.of(context);
             return Row(
               children: [
-                Expanded(child: _buildTagCapsules(theme, selected)),
-                const SizedBox(width: 12),
-                _buildTagExpandButton(theme),
+                Expanded(
+                  child: SingleChildScrollView(
+                    key: _tagSectionKey,
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (final text in _svc.displayTags)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 14),
+                            child: GestureDetector(
+                              onTap: () {
+                                HapticFeedback.lightImpact();
+                                _svc.selectTag(text);
+                              },
+                              behavior: HitTestBehavior.opaque,
+                              child: AnimatedDefaultTextStyle(
+                                duration: const Duration(milliseconds: 200),
+                                curve: Curves.easeOutCubic,
+                                style: TextStyle(
+                                  fontSize: text == selected ? 17 : 15,
+                                  fontWeight: text == selected
+                                      ? FontWeight.w800
+                                      : FontWeight.w600,
+                                  color: text == selected
+                                      ? theme.colorScheme.primary
+                                      : theme.textTheme.bodyMedium?.color
+                                            ?.withValues(alpha: 0.5),
+                                  letterSpacing: 0.4,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 4,
+                                  ),
+                                  child: Text(text),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: () async {
+                    HapticFeedback.lightImpact();
+                    final next = await TagFilterSheet.show(context, selected);
+                    if (next != null) await _svc.selectTag(next);
+                  },
+                  icon: const Icon(Icons.keyboard_arrow_down),
+                  color: theme.colorScheme.primary,
+                  iconSize: 22,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  splashRadius: 20,
+                ),
               ],
             );
           },
         ),
       ),
-    );
-  }
-
-  Widget _buildTagCapsules(ThemeData theme, String selected) {
-    return Container(
-      key: _tagSectionKey,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final tag in _svc.displayTags)
-              _buildTagCapsule(theme, tag, tag == selected),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTagCapsule(ThemeData theme, String text, bool isSelected) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 20),
-      child: GestureDetector(
-        onTap: () {
-          HapticFeedback.lightImpact();
-          _svc.selectTag(text);
-        },
-        behavior: HitTestBehavior.opaque,
-        child: AnimatedDefaultTextStyle(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
-          style: TextStyle(
-            fontSize: isSelected ? 18 : 16,
-            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-            color: isSelected
-                ? theme.colorScheme.primary
-                : theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.5),
-            letterSpacing: 0.5,
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text(text),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTagExpandButton(ThemeData theme) {
-    return IconButton(
-      onPressed: () async {
-        HapticFeedback.lightImpact();
-        final newTag = await TagFilterSheet.show(context, _svc.tag.value);
-        if (newTag != null) await _svc.selectTag(newTag);
-      },
-      icon: const Icon(Icons.keyboard_arrow_down),
-      color: theme.colorScheme.primary,
-      iconSize: 24,
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(),
-      splashRadius: 24,
     );
   }
 
@@ -608,18 +501,18 @@ class _HomePageState extends State<HomePage>
             : width > 900
             ? 5
             : 3;
-        // 卡片高度 = 2:3 封面 + 间距 + 单行标题，算出固定行高让网格惰性布局。
-        final itemWidth = (width - 32 - (columns - 1) * 16) / columns;
+        // 卡片高度 = 2:3 封面 + 间距 + 单行标题
+        final itemWidth = (width - 40 - (columns - 1) * 12) / columns;
         final titleHeight = MediaQuery.textScalerOf(context).scale(13) * 1.2;
 
         return SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
           sliver: SliverGrid(
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: columns,
-              mainAxisSpacing: 16,
-              crossAxisSpacing: 16,
-              mainAxisExtent: itemWidth * 1.5 + 10 + titleHeight,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              mainAxisExtent: itemWidth * 1.5 + 8 + titleHeight,
             ),
             delegate: SliverChildBuilderDelegate(
               (_, index) {

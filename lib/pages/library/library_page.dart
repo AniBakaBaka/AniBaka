@@ -158,8 +158,14 @@ class _LibraryPageState extends State<LibraryPage> {
         slivers: [
           SliverAppBar(
             pinned: true,
-            title: const Text('我的片库'),
+            title: const Text(
+              '我的片库',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+            scrolledUnderElevation: 0,
             actions: [
               if (_selectedIndex == 0 && _historyList.isNotEmpty)
                 IconButton(
@@ -211,22 +217,87 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   Widget _buildSegmentedControl() {
-    return SegmentedButton<int>(
-      segments: const [
-        ButtonSegment<int>(value: 0, label: Text('历史记录')),
-        ButtonSegment<int>(value: 1, label: Text('我的追番')),
-      ],
-      selected: {_selectedIndex},
-      showSelectedIcon: false,
-      onSelectionChanged: (Set<int> newSelection) {
-        if (_selectedIndex == newSelection.first) return;
-        HapticFeedback.selectionClick();
-        setState(() => _selectedIndex = newSelection.first);
-        if (_selectedIndex == 1 && _collectionList.isEmpty && _isLoggedIn) {
-          _fetchCollectionData();
-          if (_stats == null) _fetchStats();
-        }
-      },
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.06)
+            : Colors.black.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildSegmentTab(
+              label: '历史记录',
+              isSelected: _selectedIndex == 0,
+              onTap: () {
+                if (_selectedIndex == 0) return;
+                HapticFeedback.selectionClick();
+                setState(() => _selectedIndex = 0);
+              },
+            ),
+          ),
+          Expanded(
+            child: _buildSegmentTab(
+              label: '我的追番',
+              isSelected: _selectedIndex == 1,
+              onTap: () {
+                if (_selectedIndex == 1) return;
+                HapticFeedback.selectionClick();
+                setState(() => _selectedIndex = 1);
+                if (_collectionList.isEmpty && _isLoggedIn) {
+                  _fetchCollectionData();
+                  if (_stats == null) _fetchStats();
+                }
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSegmentTab({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
+          color: isSelected
+              ? (isDark
+                  ? theme.colorScheme.primaryContainer
+                  : theme.colorScheme.primary)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(9),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+            color: isSelected
+                ? (isDark
+                    ? theme.colorScheme.onPrimaryContainer
+                    : theme.colorScheme.onPrimary)
+                : (isDark ? Colors.white60 : Colors.black54),
+          ),
+        ),
+      ),
     );
   }
 
@@ -239,9 +310,11 @@ class _LibraryPageState extends State<LibraryPage> {
       (4, '搁置'),
       (5, '抛弃'),
     ];
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return SizedBox(
-      height: 36,
+      height: 34,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: filters.length,
@@ -249,15 +322,34 @@ class _LibraryPageState extends State<LibraryPage> {
         itemBuilder: (context, index) {
           final (statusValue, label) = filters[index];
           final count = _getFilterCount(statusValue);
+          final isSelected = _collectionStatusFilter == statusValue;
 
           return ChoiceChip(
-            label: Text(count != null ? '$label $count' : label),
-            selected: _collectionStatusFilter == statusValue,
+            label: Text(
+              count != null ? '$label $count' : label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                color: isSelected
+                    ? (isDark
+                        ? theme.colorScheme.onPrimaryContainer
+                        : theme.colorScheme.onPrimary)
+                    : (isDark ? Colors.white70 : Colors.black87),
+              ),
+            ),
+            selected: isSelected,
             onSelected: (_) => _onStatusFilterChanged(statusValue),
             showCheckmark: false,
-            labelStyle: const TextStyle(fontSize: 12),
+            selectedColor: isDark
+                ? theme.colorScheme.primaryContainer
+                : theme.colorScheme.primary,
+            backgroundColor: isDark
+                ? Colors.white.withValues(alpha: 0.06)
+                : Colors.black.withValues(alpha: 0.04),
+            side: BorderSide.none,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(17),
             ),
           );
         },
@@ -428,6 +520,7 @@ class _HistoryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final progressInfo = resolveProgressInfo(data);
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final episodeIndex = int.tryParse(data['index']?.toString() ?? '');
 
     return Column(
@@ -441,9 +534,12 @@ class _HistoryCard extends StatelessWidget {
                 top: 8,
                 right: 8,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.primary.withValues(alpha: 0.9),
+                    color: Colors.black.withValues(alpha: 0.65),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
@@ -451,7 +547,7 @@ class _HistoryCard extends StatelessWidget {
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 10,
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
@@ -474,7 +570,7 @@ class _HistoryCard extends StatelessWidget {
               style: TextStyle(
                 color: theme.colorScheme.primary,
                 fontSize: 10,
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ],
@@ -484,7 +580,8 @@ class _HistoryCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(2),
           child: LinearProgressIndicator(
             value: progressInfo.progress,
-            backgroundColor: theme.colorScheme.surfaceContainerHighest,
+            backgroundColor:
+                isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.08),
             valueColor: AlwaysStoppedAnimation<Color>(
               theme.colorScheme.primary,
             ),
@@ -525,7 +622,8 @@ class _CollectionCard extends StatelessWidget {
       'title': title.isNotEmpty ? title : '未知番剧',
       'content': collection.displayCover,
       'url': collection.displayCover,
-      '_heroTag': 'collection_${collection.postId ?? collection.bgmId ?? collection.hashCode}',
+      '_heroTag':
+          'collection_${collection.postId ?? collection.bgmId ?? collection.hashCode}',
     };
 
     String? remainingText;
@@ -554,7 +652,10 @@ class _CollectionCard extends StatelessWidget {
                 children: [
                   if (statusText.isNotEmpty)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         color: statusColor.withValues(alpha: 0.9),
                         borderRadius: BorderRadius.circular(6),
@@ -564,14 +665,18 @@ class _CollectionCard extends StatelessWidget {
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 10,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
-                  if (collection.bgmRating != null && collection.bgmRating! > 0) ...[
+                  if (collection.bgmRating != null &&
+                      collection.bgmRating! > 0) ...[
                     const SizedBox(width: 4),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.amber.withValues(alpha: 0.9),
                         borderRadius: BorderRadius.circular(6),
@@ -579,7 +684,11 @@ class _CollectionCard extends StatelessWidget {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.star_rounded, size: 10, color: Colors.white),
+                          const Icon(
+                            Icons.star_rounded,
+                            size: 10,
+                            color: Colors.white,
+                          ),
                           const SizedBox(width: 2),
                           Text(
                             collection.bgmRating!.toStringAsFixed(1),
@@ -597,7 +706,10 @@ class _CollectionCard extends StatelessWidget {
               ),
               if (remainingText != null)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: statusColor.withValues(alpha: 0.9),
                     borderRadius: BorderRadius.circular(6),

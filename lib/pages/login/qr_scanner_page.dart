@@ -88,9 +88,8 @@ class _QrScannerPageState extends State<QrScannerPage> {
       request.write(
         jsonEncode({
           'token': token,
-          if (refreshToken?.isNotEmpty == true)
-            'refresh_token': refreshToken,
-          if (tokenExpiresAt != null) 'token_expires_at': tokenExpiresAt,
+          if (refreshToken?.isNotEmpty == true) 'refresh_token': refreshToken,
+          'token_expires_at': ?tokenExpiresAt,
           'user': user,
         }),
       );

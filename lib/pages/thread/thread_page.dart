@@ -70,29 +70,26 @@ class _ThreadPageState extends State<ThreadPage>
 
   // ─── Data ───
 
-  void _pushComments(int i) {
-    _uis[i].commentKey.currentState?.setComments(_svc.tabs[i].comments);
-  }
+  // ─── Data ───
 
   Future<void> _ensureLoaded(int i) async {
-    if (_svc.loadCached(i)) {
-      if (mounted) {
-        _pushComments(i);
-        setState(() {});
-      }
+    final hasCache = _svc.loadCached(i, ignoreExpiry: true);
+    if (hasCache) {
+      if (mounted) setState(() {});
+      _refresh(i, silent: true);
       return;
     }
     await _refresh(i);
   }
 
-  Future<void> _refresh(int i) async {
+  Future<void> _refresh(int i, {bool silent = false}) async {
     if (!mounted || _svc.tabs[i].isRefreshing) return;
+    if (!silent && mounted) setState(() {});
     try {
       await _svc.refresh(i);
-      if (mounted) _pushComments(i);
     } catch (e) {
       debugPrint('刷新评论出错: $e');
-      if (mounted && i == _index) showSnackBar('加载评论失败，请检查网络');
+      if (mounted && i == _index && !silent) showSnackBar('加载评论失败，请检查网络');
     } finally {
       if (mounted) setState(() {});
     }
@@ -100,9 +97,8 @@ class _ThreadPageState extends State<ThreadPage>
 
   Future<void> _loadMore(int i) async {
     if (!mounted) return;
-    final list = await _svc.loadMore(i);
+    await _svc.loadMore(i);
     if (!mounted) return;
-    if (list != null) _pushComments(i);
     setState(() {});
   }
 
@@ -111,7 +107,7 @@ class _ThreadPageState extends State<ThreadPage>
     if (!c.hasClients) return;
 
     if (_svc.canLoadMore(i) &&
-        c.position.pixels >= c.position.maxScrollExtent - 200) {
+        c.position.pixels >= c.position.maxScrollExtent - 400) {
       _loadMore(i);
     }
 
@@ -130,12 +126,15 @@ class _ThreadPageState extends State<ThreadPage>
     if (!fromPage) {
       _pageController.animateToPage(
         i,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
       );
     }
-    final needsLoad = _uis[i].commentKey.currentState?.needsLoad ?? true;
-    if (needsLoad) _ensureLoaded(i);
+    if (_svc.tabs[i].comments.isEmpty && _svc.tabs[i].page == 0) {
+      _ensureLoaded(i);
+    } else {
+      _refresh(i, silent: true);
+    }
   }
 
   Future<void> _sendComment() async {
@@ -160,9 +159,9 @@ class _ThreadPageState extends State<ThreadPage>
     try {
       final data = await _svc.resolveGvLink(match.group(1)!);
       if (data != null && mounted) {
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => PlayerPage(data: data)),
-        );
+        Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => PlayerPage(data: data)));
       } else {
         showSnackBar('无法获取视频信息');
       }
@@ -200,35 +199,48 @@ class _ThreadPageState extends State<ThreadPage>
   Widget _page(int i, ThemeData theme) {
     final tab = _svc.tabs[i];
     final ui = _uis[i];
+    final showSkeleton = tab.page == 0 && tab.isRefreshing && tab.comments.isEmpty;
+
     return RefreshIndicator(
       onRefresh: () => _refresh(i),
       color: theme.colorScheme.primary,
       backgroundColor: theme.colorScheme.surface,
       displacement: 24,
       strokeWidth: 2.5,
-      // CustomScrollView + asSliver：惰性构建可见项，避免 shrinkWrap 全量布局
-      child: CustomScrollView(
-        controller: ui.scroll,
-        physics: const AlwaysScrollableScrollPhysics(
-          parent: BouncingScrollPhysics(),
-        ),
-        slivers: [
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
-            sliver: CommentList(
-              pid: tab.pid,
-              key: ui.commentKey,
-              autoLoad: false,
-              asSliver: true,
-              onTapLink: _onLink,
-            ),
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (scrollInfo) {
+          if (scrollInfo.metrics.pixels >=
+              scrollInfo.metrics.maxScrollExtent - 400) {
+            if (_svc.canLoadMore(i)) {
+              _loadMore(i);
+            }
+          }
+          return false;
+        },
+        child: CustomScrollView(
+          controller: ui.scroll,
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: BouncingScrollPhysics(),
           ),
-          if (tab.isLoadingMore)
-            SliverToBoxAdapter(child: _loadingMore(theme)),
-          if (!tab.hasMore && tab.comments.isNotEmpty)
-            const SliverToBoxAdapter(child: _EndIndicator()),
-          const SliverToBoxAdapter(child: SizedBox(height: 80)),
-        ],
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
+              sliver: CommentList(
+                pid: tab.pid,
+                comments: showSkeleton ? null : tab.comments,
+                key: ui.commentKey,
+                autoLoad: false,
+                asSliver: true,
+                onTapLink: _onLink,
+              ),
+            ),
+            if (tab.isLoadingMore)
+              SliverToBoxAdapter(child: _loadingMore(theme)),
+            if (!tab.hasMore && tab.comments.isNotEmpty)
+              const SliverToBoxAdapter(child: _EndIndicator()),
+            const SliverToBoxAdapter(child: SizedBox(height: 80)),
+          ],
+        ),
       ),
     );
   }
@@ -287,7 +299,7 @@ class _ThreadPageState extends State<ThreadPage>
     final muted = isDark
         ? Colors.white54
         : theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.55) ??
-            Colors.black54;
+              Colors.black54;
 
     return GestureDetector(
       onTap: () {
@@ -295,25 +307,16 @@ class _ThreadPageState extends State<ThreadPage>
         _switch(i);
       },
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 260),
+        duration: const Duration(milliseconds: 220),
         curve: Curves.easeOutCubic,
         margin: const EdgeInsets.symmetric(horizontal: 2),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
         decoration: BoxDecoration(
           color: selected ? theme.colorScheme.primary : Colors.transparent,
           borderRadius: BorderRadius.circular(100),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: theme.colorScheme.primary.withValues(alpha: 0.25),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ]
-              : null,
         ),
         child: AnimatedDefaultTextStyle(
-          duration: const Duration(milliseconds: 260),
+          duration: const Duration(milliseconds: 220),
           style: TextStyle(
             fontSize: 13,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
@@ -344,8 +347,9 @@ class _ThreadPageState extends State<ThreadPage>
             ? ShimmerCircle(
                 size: 18,
                 baseColor: theme.colorScheme.primary.withValues(alpha: 0.18),
-                highlightColor:
-                    theme.colorScheme.primary.withValues(alpha: 0.5),
+                highlightColor: theme.colorScheme.primary.withValues(
+                  alpha: 0.5,
+                ),
               )
             : Icon(Icons.refresh_rounded, size: 19, color: iconColor),
       ),
@@ -355,12 +359,29 @@ class _ThreadPageState extends State<ThreadPage>
   Widget _loadingMore(ThemeData theme) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 20),
-        child: ShimmerTextLine(
-          width: 96,
-          height: 10,
-          baseColor: theme.colorScheme.primary.withValues(alpha: 0.14),
-          highlightColor: theme.colorScheme.primary.withValues(alpha: 0.36),
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: theme.colorScheme.primary.withValues(alpha: 0.7),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              '正在加载更多...',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.4),
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -375,9 +396,8 @@ class _EndIndicator extends StatelessWidget {
     final theme = Theme.of(context);
     final muted =
         theme.textTheme.bodySmall?.color?.withValues(alpha: 0.15) ??
-            Colors.grey.withValues(alpha: 0.15);
-    final textColor =
-        theme.textTheme.bodySmall?.color?.withValues(alpha: 0.25);
+        Colors.grey.withValues(alpha: 0.15);
+    final textColor = theme.textTheme.bodySmall?.color?.withValues(alpha: 0.25);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 28),

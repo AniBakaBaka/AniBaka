@@ -80,12 +80,23 @@ class _AppBottomNavigationState extends State<AppBottomNavigation> {
 
     final bgDecoration = BoxDecoration(
       color: isDark
-          ? colors.surfaceContainerHighest.withValues(alpha: 0.75)
-          : colors.surface.withValues(alpha: 0.75),
+          ? (colors.surface.computeLuminance() < 0.05
+              ? const Color(0xFF1C1C1E).withValues(alpha: 0.85)
+              : colors.surfaceContainer.withValues(alpha: 0.85))
+          : colors.surface.withValues(alpha: 0.85),
       borderRadius: BorderRadius.circular(32),
       border: Border.all(
-        color: colors.onSurface.withValues(alpha: isDark ? 0.10 : 0.06),
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.12)
+            : colors.onSurface.withValues(alpha: 0.08),
       ),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: isDark ? 0.40 : 0.08),
+          blurRadius: 16,
+          offset: const Offset(0, 4),
+        ),
+      ],
     );
 
     return SafeArea(
@@ -151,9 +162,9 @@ class _AppBottomNavigationState extends State<AppBottomNavigation> {
                                       height: 52,
                                       decoration: BoxDecoration(
                                         borderRadius: BorderRadius.circular(26),
-                                        color: colors.primary.withValues(
-                                          alpha: isDark ? 0.22 : 0.12,
-                                        ),
+                                        color: isDark
+                                            ? colors.primary.withValues(alpha: 0.28)
+                                            : colors.primary.withValues(alpha: 0.12),
                                       ),
                                     ),
                                   ),
@@ -164,9 +175,15 @@ class _AppBottomNavigationState extends State<AppBottomNavigation> {
                                 children: List.generate(widget.items.length, (i) {
                                   final selected = highlightedIndex == i;
                                   final item = widget.items[i];
+                                  final primaryColor = isDark
+                                      ? Color.lerp(colors.primary, Colors.white, 0.25)!
+                                      : colors.primary;
+                                  final unselectedColor = isDark
+                                      ? colors.onSurface.withValues(alpha: 0.45)
+                                      : colors.onSurfaceVariant.withValues(alpha: 0.65);
                                   final itemColor = selected
-                                      ? colors.primary
-                                      : colors.onSurfaceVariant;
+                                      ? primaryColor
+                                      : unselectedColor;
 
                                   return Expanded(
                                     child: GestureDetector(
