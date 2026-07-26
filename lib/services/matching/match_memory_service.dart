@@ -40,13 +40,13 @@ class MatchMemoryEntry {
   }
 
   Map<String, dynamic> toJson() => {
-        'source': source,
-        'seriesId': seriesId,
-        'updatedAtMs': updatedAtMs,
-        if (title?.isNotEmpty ?? false) 'title': title,
-        if (sourceDisplayName?.isNotEmpty ?? false)
-          'sourceDisplayName': sourceDisplayName,
-      };
+    'source': source,
+    'seriesId': seriesId,
+    'updatedAtMs': updatedAtMs,
+    if (title?.isNotEmpty ?? false) 'title': title,
+    if (sourceDisplayName?.isNotEmpty ?? false)
+      'sourceDisplayName': sourceDisplayName,
+  };
 }
 
 /// 记住某部番剧上次自动匹配成功的源，下次直接优先探测。

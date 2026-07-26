@@ -1,3 +1,4 @@
+import 'package:baka/models/playback_episode.dart';
 import 'package:baka/utils/bgm_utils.dart';
 
 import 'title_matcher.dart';
@@ -27,17 +28,9 @@ class SourceMatchCandidate {
   );
 
   static int? _episodeCount(Map<String, dynamic> data) {
-    final videoList = data['videoList'];
-    if (videoList is List && videoList.isNotEmpty) return videoList.length;
-
-    final videos = data['videos'];
-    if (videos is String && videos.trim().isNotEmpty) {
-      var count = 0;
-      for (final line in videos.split('\n')) {
-        if (line.trim().isNotEmpty) count++;
-      }
-      if (count > 0) return count;
-    }
+    // 与播放器目录同一个扫描器：过去这里手抄了一份，对 videoList 还漏了空串过滤。
+    final counted = PlaybackEpisodeCatalog.countFrom(data);
+    if (counted > 0) return counted;
 
     for (final key in const [
       'episodeCount',
@@ -121,13 +114,14 @@ class SourceMatchEngine {
     SourceMatchContext context,
   ) {
     final scored = [for (final c in candidates) score(c, context)];
-    scored.sort((a, b) {
-      final byConf = b.confidence.compareTo(a.confidence);
-      return byConf != 0
-          ? byConf
-          : b.titleSimilarity.compareTo(a.titleSimilarity);
-    });
+    scored.sort(compareScores);
     return scored;
+  }
+
+  /// 排序比较器：置信度降序，相同时按标题相似度降序。
+  static int compareScores(SourceMatchScore a, SourceMatchScore b) {
+    final byConf = b.confidence.compareTo(a.confidence);
+    return byConf != 0 ? byConf : b.titleSimilarity.compareTo(a.titleSimilarity);
   }
 
   SourceMatchScore score(

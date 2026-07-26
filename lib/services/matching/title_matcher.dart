@@ -1,3 +1,5 @@
+import 'package:baka/utils/bgm_utils.dart';
+
 /// 标题模糊匹配：归一化 + 字符 bigram Dice。
 ///
 /// bigram 用 `codeUnit << 16 | codeUnit` 存成 `Set<int>`，
@@ -15,11 +17,9 @@ class TitleFingerprint {
 
   bool get isEmpty => normalized.isEmpty;
 
-  static final RegExp _nonTitleRe = RegExp(r'[^a-z0-9\u4e00-\u9fa5]+');
-
-  /// 小写并去掉所有非中英文数字字符。
-  static String normalize(String title) =>
-      title.toLowerCase().replaceAll(_nonTitleRe, '');
+  /// 小写并去掉所有非中英文数字字符。字符集与 [BgmUtils.normalizeTitle] 共用，
+  /// 但保留季号——季度冲突由 SourceMatchEngine 单独判定。
+  static String normalize(String title) => BgmUtils.keepTitleUnits(title);
 
   /// 相似度 ∈ [0,1]。
   double similarityTo(TitleFingerprint other) {
@@ -37,8 +37,9 @@ class TitleFingerprint {
     final total = bigrams.length + other.bigrams.length;
     if (total == 0) return 0;
 
-    final small =
-        bigrams.length <= other.bigrams.length ? bigrams : other.bigrams;
+    final small = bigrams.length <= other.bigrams.length
+        ? bigrams
+        : other.bigrams;
     final large = identical(small, bigrams) ? other.bigrams : bigrams;
     var overlap = 0;
     for (final g in small) {
