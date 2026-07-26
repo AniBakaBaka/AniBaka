@@ -19,13 +19,25 @@ String getSuo(String? content) {
 }
 
 /// 纯数字视为 QQ 号走 QQ 头像，否则取 MD5 走 cravatar。
+///
+/// 这个函数在评论列表 / 首页头像的 build 里被逐条调用，非 QQ 号分支每次都要跑
+/// 一次 MD5，因此结果按 avatar 串记忆化（小表，超出容量丢最早一条）。
 String getAvatar({String avatar = ''}) {
   if (_pureDigitsRe.hasMatch(avatar)) {
     return 'https://q1.qlogo.cn/g?b=qq&nk=$avatar&s=640';
   }
+  final cached = _avatarUrlCache[avatar];
+  if (cached != null) return cached;
+
+  if (_avatarUrlCache.length >= _avatarCacheLimit) {
+    _avatarUrlCache.remove(_avatarUrlCache.keys.first);
+  }
   final hash = md5.convert(utf8.encode(avatar));
-  return 'https://cravatar.cn/avatar/$hash?d=wavatar';
+  return _avatarUrlCache[avatar] = 'https://cravatar.cn/avatar/$hash?d=wavatar';
 }
+
+const _avatarCacheLimit = 64;
+final _avatarUrlCache = <String, String>{};
 
 class RegUtils {
   /// 标题尾部的季/篇/部标识（第X季、Season X、上篇、剧场版……）
@@ -43,13 +55,38 @@ class RegUtils {
     caseSensitive: false,
   );
 
+  /// [_seasonSuffixRe] 锚在串尾且尾部不允许空白，所以能匹配时原串的最后一个
+  /// 字符必然是某个季度标记的末字符：季/期、篇、章、版、上下前后，
+  /// 或 Season 2 / S2 / Part 2 的数字。
+  static final Set<int> _suffixEndUnits = '季期篇章版上下前后'.codeUnits.toSet();
+
+  static bool _mayHaveSeasonSuffix(String title) {
+    final unit = title.codeUnitAt(title.length - 1);
+    return (unit >= 0x30 && unit <= 0x39) || _suffixEndUnits.contains(unit);
+  }
+
+  /// [_seasonBracketRe] 允许尾随空白，但括号必须以 `)` 收口。
+  /// `trimRight` 无需裁剪时返回原实例，因此常见路径不分配。
+  static bool _mayHaveSeasonBracket(String title) {
+    final tail = title.trimRight();
+    return tail.isNotEmpty && tail.codeUnitAt(tail.length - 1) == 0x29;
+  }
+
   /// 提取番剧核心标题：剥离尾部季/篇标识（含括号形式）。结果为空时回退原标题。
+  ///
+  /// 两条正则各自的末字符集互不相交，用 O(1) 的尾字符判断代替无条件的两次
+  /// 全串扫描——任一守卫不成立时，对应的 `replaceFirst` 本就是空操作。
   static String extractBaseTitle(String fullTitle) {
     if (fullTitle.isEmpty) return '';
-    final base = fullTitle
-        .replaceFirst(_seasonSuffixRe, '')
-        .replaceFirst(_seasonBracketRe, '')
-        .trim();
+
+    var base = fullTitle;
+    if (_mayHaveSeasonSuffix(base)) {
+      base = base.replaceFirst(_seasonSuffixRe, '');
+    }
+    if (base.isNotEmpty && _mayHaveSeasonBracket(base)) {
+      base = base.replaceFirst(_seasonBracketRe, '');
+    }
+    base = base.trim();
     return base.isEmpty ? fullTitle : base;
   }
 

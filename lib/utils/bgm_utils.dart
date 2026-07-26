@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:baka/utils/date_util.dart';
 import 'package:baka/utils/reg_utils.dart';
 
 class BgmInfo {
@@ -21,14 +20,11 @@ class BgmSubjectInfo {
   final List<String> aliases;
   final bool hasDetail;
 
-  late final List<String> lookupTitles = BgmUtils.compactTitles([
+  late final List<String> searchTitles = BgmUtils.buildSubjectSearchTitles([
     nameCn,
     name,
     ...aliases,
   ]);
-  late final List<String> searchTitles = BgmUtils.buildSearchTitles(
-    lookupTitles,
-  );
 
   BgmSubjectInfo({
     required this.subjectId,
@@ -44,8 +40,6 @@ class BgmSubjectInfo {
 
 class BgmUtils {
   static final _spaceRe = RegExp(r'\s+');
-  static final _nonTitleRe = RegExp(r'[^a-z0-9\u4e00-\u9fa5]+');
-  static final _chineseRe = RegExp(r'[\u4e00-\u9fa5]+');
   static final _trailingBracketRe = RegExp(
     r'\s*[\(\[（【][^\)\]）】]+[\)\]）】]\s*$',
   );
@@ -67,6 +61,7 @@ class BgmUtils {
   static final _airDateKeyRe = RegExp(r'放送|上映|发售|首播');
 
   static Map<String, dynamic>? parseJsonMap(dynamic raw) {
+    if (raw is Map<String, dynamic>) return raw;
     if (raw is Map) return Map<String, dynamic>.from(raw);
     if (raw is String && raw.isNotEmpty) {
       try {
@@ -92,16 +87,40 @@ class BgmUtils {
   }
 
   static Map<String, dynamic>? asMap(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
     if (value is Map) return Map<String, dynamic>.from(value);
     return null;
   }
 
+  /// JSON 数组 → 模型列表。已经是 `Map<String, dynamic>` 的条目直接透传，
+  /// 只有类型不精确时才复制；非 Map 条目跳过。
+  static List<T> mapList<T>(
+    dynamic raw,
+    T Function(Map<String, dynamic> json) fromJson,
+  ) {
+    if (raw is! List) return const [];
+    final out = <T>[];
+    for (final item in raw) {
+      if (item is Map<String, dynamic>) {
+        out.add(fromJson(item));
+      } else if (item is Map) {
+        out.add(fromJson(Map<String, dynamic>.from(item)));
+      }
+    }
+    return out;
+  }
+
   static List<Map<String, dynamic>> asMapList(dynamic value) {
     if (value is! List) return const [];
-    return value
-        .whereType<Map>()
-        .map((e) => Map<String, dynamic>.from(e))
-        .toList();
+    final out = <Map<String, dynamic>>[];
+    for (final item in value) {
+      if (item is Map<String, dynamic>) {
+        out.add(item);
+      } else if (item is Map) {
+        out.add(Map<String, dynamic>.from(item));
+      }
+    }
+    return out;
   }
 
   static int? toInt(dynamic value) {
@@ -115,6 +134,20 @@ class BgmUtils {
     if (value is double) return value;
     if (value is num) return value.toDouble();
     if (value is String) return double.tryParse(value);
+    return null;
+  }
+
+  static bool toBool(dynamic value, {bool orElse = false}) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) return value == '1' || value.toLowerCase() == 'true';
+    return orElse;
+  }
+
+  static DateTime? toDateTime(dynamic value) {
+    if (value is DateTime) return value;
+    if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+    if (value is String && value.isNotEmpty) return DateTime.tryParse(value);
     return null;
   }
 
@@ -142,32 +175,27 @@ class BgmUtils {
       '/v0/subjects/$subjectId/image',
       const {'type': 'large'},
     );
+    return bgmImageProxyUrl(source.toString());
+  }
+
+  /// Wraps any Bangumi image URL (lain.bgm.tv is blocked for many users)
+  /// with the same wsrv.nl cache used by search covers.
+  static String bgmImageProxyUrl(String url, {int width = 360}) {
+    if (url.isEmpty) return url;
     return Uri.https('wsrv.nl', '/', {
-      'url': source.toString(),
-      'w': '360',
+      'url': url,
+      'w': '$width',
       'output': 'webp',
       'q': '85',
     }).toString();
   }
 
-  /// Picks the poster supplied by AniBaka's TMDB image source.
-  ///
-  /// Prefer a Chinese poster when the API provides multiple TMDB variants.
-  static String? pickAniBakaTmdbPoster(Map<String, dynamic>? detail) {
-    return _pickAniBakaTmdbImage(detail, 'posters');
-  }
-
   /// Picks the backdrop supplied by AniBaka's TMDB image source.
+  ///
+  /// Prefer a Chinese backdrop when the API provides multiple TMDB variants.
   static String? pickAniBakaTmdbBackdrop(Map<String, dynamic>? detail) {
-    return _pickAniBakaTmdbImage(detail, 'backdrops');
-  }
-
-  static String? _pickAniBakaTmdbImage(
-    Map<String, dynamic>? detail,
-    String collection,
-  ) {
     final images = asMap(detail?['images']);
-    final candidates = asMapList(images?[collection]);
+    final candidates = asMapList(images?['backdrops']);
     Map<String, dynamic>? fallback;
 
     for (final candidate in candidates) {
@@ -237,8 +265,17 @@ class BgmUtils {
   /// 解析 1-99 范围内的中文数字（一、十二、二十三……）。
   static int? _parseChineseNumber(String raw) {
     const digits = <String, int>{
-      '零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4,
-      '五': 5, '六': 6, '七': 7, '八': 8, '九': 9,
+      '零': 0,
+      '一': 1,
+      '二': 2,
+      '两': 2,
+      '三': 3,
+      '四': 4,
+      '五': 5,
+      '六': 6,
+      '七': 7,
+      '八': 8,
+      '九': 9,
     };
     final tenIndex = raw.indexOf('十');
     if (tenIndex == -1) return digits[raw];
@@ -249,9 +286,6 @@ class BgmUtils {
     if (tens == null || ones == null) return null;
     return tens * 10 + ones;
   }
-
-  static String formatRelativeTime(int timestamp) =>
-      DateTime.fromMillisecondsSinceEpoch(timestamp * 1000).toRelativeTime();
 
   static String formatTimeString(String raw, String prefix) {
     if (raw.length >= 8 && _yyyymmddRe.hasMatch(raw)) {
@@ -335,18 +369,57 @@ class BgmUtils {
 
   /// 匹配用归一化：剥离季/篇后缀，小写，仅保留中英文与数字。
   static String normalizeTitle(String title) =>
-      RegUtils.extractBaseTitle(title).toLowerCase().replaceAll(_nonTitleRe, '');
+      keepTitleUnits(RegUtils.extractBaseTitle(title));
+
+  static bool _isTitleUnit(int unit) =>
+      (unit >= 0x61 && unit <= 0x7A) || // a-z
+      (unit >= 0x30 && unit <= 0x39) || // 0-9
+      (unit >= 0x4E00 && unit <= 0x9FA5); // CJK
+
+  /// 单趟扫描完成「小写 + 过滤」，取代 `toLowerCase()` 与正则 `replaceAll`
+  /// 各分配一次全串的写法；输入已是规范形式时原样返回，零分配。
+  static String keepTitleUnits(String text) {
+    var i = 0;
+    while (i < text.length && _isTitleUnit(text.codeUnitAt(i))) {
+      i++;
+    }
+    if (i == text.length) return text;
+
+    final buffer = StringBuffer(text.substring(0, i));
+    for (; i < text.length; i++) {
+      final unit = text.codeUnitAt(i);
+      if (unit >= 0x41 && unit <= 0x5A) {
+        buffer.writeCharCode(unit + 0x20); // A-Z -> a-z
+      } else if (unit == 0x130) {
+        buffer.writeCharCode(0x69); // İ 小写为 i + 组合点，组合点本就会被过滤
+      } else if (unit == 0x212A) {
+        buffer.writeCharCode(0x6B); // 开尔文符号 K 小写为 k
+      } else if (_isTitleUnit(unit)) {
+        buffer.writeCharCode(unit);
+      }
+    }
+    return buffer.toString();
+  }
+
+  /// 仅保留汉字，用于派生「纯中文」搜索变体。
+  static String chineseOnly(String text) {
+    final buffer = StringBuffer();
+    for (var i = 0; i < text.length; i++) {
+      final unit = text.codeUnitAt(i);
+      if (unit >= 0x4E00 && unit <= 0x9FA5) buffer.writeCharCode(unit);
+    }
+    return buffer.toString();
+  }
 
   /// 去重压缩标题列表：按归一化结果去重，保留首个原始写法（空白折叠为单空格）。
   static List<String> compactTitles(Iterable<String?> titles) {
     final values = <String>[];
     final seen = <String>{};
-
     for (final raw in titles) {
       final title = trimmed(raw)?.replaceAll(_spaceRe, ' ');
       if (title == null) continue;
-      final n = normalizeTitle(title);
-      if (n.isNotEmpty && seen.add(n)) values.add(title);
+      final key = normalizeTitle(title);
+      if (key.isNotEmpty && seen.add(key)) values.add(title);
     }
     return values;
   }
@@ -355,23 +428,77 @@ class BgmUtils {
   static List<String> buildSearchTitles(Iterable<String?> titles) {
     final values = <String>[];
     final seen = <String>{};
-
-    void tryAdd(String? raw) {
-      final title = trimmed(raw)?.replaceAll(_spaceRe, ' ');
-      if (title == null) return;
-      final n = normalizeTitle(title);
-      if (n.isNotEmpty && seen.add(n)) values.add(title);
-    }
-
     for (final raw in titles) {
-      final title = trimmed(raw);
+      final title = trimmed(raw)?.replaceAll(_spaceRe, ' ');
       if (title == null) continue;
-      tryAdd(title);
-      tryAdd(RegUtils.extractBaseTitle(title));
-      tryAdd(title.replaceAll(_trailingBracketRe, ''));
-      tryAdd(_chineseRe.allMatches(title).map((m) => m.group(0)!).join());
+      _mergeVariants(_variantsOf(title), seen, values);
     }
-
     return values;
+  }
+
+  /// compactTitles + buildSearchTitles 的单趟融合：主标题键已见过的标题
+  /// 整个跳过（等价于先 compact 再展开——变体键不参与主键判重）。
+  static List<String> buildSubjectSearchTitles(Iterable<String?> titles) {
+    final values = <String>[];
+    final mainSeen = <String>{};
+    final seen = <String>{};
+    for (final raw in titles) {
+      final title = trimmed(raw)?.replaceAll(_spaceRe, ' ');
+      if (title == null) continue;
+      final variants = _variantsOf(title);
+      final mainKey = variants.first.$2;
+      if (mainKey.isEmpty || !mainSeen.add(mainKey)) continue;
+      _mergeVariants(variants, seen, values);
+    }
+    return values;
+  }
+
+  static void _mergeVariants(
+    List<(String, String)> variants,
+    Set<String> seen,
+    List<String> values,
+  ) {
+    for (final (value, key) in variants) {
+      if (key.isNotEmpty && seen.add(key)) values.add(value);
+    }
+  }
+
+  static const _variantCacheLimit = 512;
+  static final _variantCache = <String, List<(String, String)>>{};
+
+  /// 标题（空白已折叠）→ [(候选写法, 归一化键)]，首元素恒为主标题对。
+  /// 每个变体的归一化只算一次；纯函数，配有界记忆化——同一 subject 在
+  /// 多轮搜索中反复展开时命中缓存零计算。
+  static List<(String, String)> _variantsOf(String title) {
+    final cached = _variantCache[title];
+    if (cached != null) return cached;
+
+    final base = RegUtils.extractBaseTitle(title);
+    final pairs = [(title, keepTitleUnits(base))];
+    // 去季号变体只在堆叠后缀（extractBaseTitle 非幂等）时才产出新键。
+    final base2 = RegUtils.extractBaseTitle(base);
+    if (base2 != base) pairs.add((base, keepTitleUnits(base2)));
+    // 无尾括号时剥括号只会产出与原文相同的串，去重后必被丢弃。
+    if (_endsWithBracket(title)) {
+      final stripped = title.replaceFirst(_trailingBracketRe, '');
+      if (stripped.isNotEmpty) {
+        pairs.add((stripped, keepTitleUnits(RegUtils.extractBaseTitle(stripped))));
+      }
+    }
+    final zh = chineseOnly(title);
+    if (zh.isNotEmpty) pairs.add((zh, keepTitleUnits(RegUtils.extractBaseTitle(zh))));
+
+    if (_variantCache.length >= _variantCacheLimit) {
+      _variantCache.remove(_variantCache.keys.first);
+    }
+    return _variantCache[title] = pairs;
+  }
+
+  static final Set<int> _closingBrackets = ')]）】'.codeUnits.toSet();
+
+  static bool _endsWithBracket(String title) {
+    final tail = title.trimRight();
+    return tail.isNotEmpty &&
+        _closingBrackets.contains(tail.codeUnitAt(tail.length - 1));
   }
 }

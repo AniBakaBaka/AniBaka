@@ -51,7 +51,6 @@ class _PlayerOpsHost implements PipelineHost {
     String? referer,
     String? contentType,
     RequestPriority priority = RequestPriority.search,
-    RequestCancelToken? cancelToken,
   }) async {
     return responses[url] ?? '';
   }

@@ -119,7 +119,7 @@ class ImageUtils {
       return imageData.fileName;
     }
 
-    final savePath = await FilePicker.platform.saveFile(
+    final savePath = await FilePicker.saveFile(
       dialogTitle: 'Save image',
       fileName: imageData.fileName,
       type: FileType.custom,

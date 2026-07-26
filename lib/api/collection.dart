@@ -79,42 +79,6 @@ class CollectionApi {
     fallback: null,
   );
 
-  /// 快速更新收藏状态（通过 post_id）
-  static Future<bool> updateStatus(int postId, int status) => _request(
-    () => NetUtils.put('$_host/api/v1/collection/status/$postId', {
-      'status': status,
-    }),
-    fallback: false,
-  );
-
-  /// 快速更新收藏状态（通过 bgm_id）
-  static Future<bool> updateStatusByBgmId(int bgmId, int status) => _request(
-    () =>
-        NetUtils.put('$_host/api/v1/bgm-collection/$bgmId', {'status': status}),
-    fallback: false,
-  );
-
-  /// 更新观看集数
-  static Future<bool> updateEpisode(int postId, int epWatched) => _request(
-    () => NetUtils.put('$_host/api/v1/collection/episode/$postId', {
-      'ep_watched': epWatched,
-    }),
-    fallback: false,
-  );
-
-  /// 批量更新收藏状态
-  static Future<int> batchUpdateStatus(List<int> postIds, int status) {
-    if (postIds.isEmpty) return Future.value(0);
-    return _request(
-      () => NetUtils.post('$_host/api/v1/collection/batch-status', {
-        'post_ids': postIds,
-        'status': status,
-      }),
-      parser: (data) => (data['count'] as int?) ?? 0,
-      fallback: 0,
-    );
-  }
-
   /// 删除追番收藏（通过 post_id）
   static Future<bool> delete(int postId) => _request(
     () => NetUtils.delete('$_host/api/v1/collection/$postId'),
@@ -126,12 +90,4 @@ class CollectionApi {
     () => NetUtils.delete('$_host/api/v1/bgm-collection/$bgmId'),
     fallback: false,
   );
-
-  /// 获取番剧收藏人数统计（无需认证）
-  static Future<CollectionStats?> getPostCollectionCount(int postId) =>
-      _request(
-        () => NetUtils.get('$_host/api/v1/collection/count/$postId'),
-        parser: (data) => CollectionStats.fromJson(data),
-        fallback: null,
-      );
 }

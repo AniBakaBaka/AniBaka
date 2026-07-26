@@ -51,30 +51,6 @@ class PlayHistoryApi {
     );
   }
 
-  /// 获取单个视频的播放进度
-  static Future<PlayHistory?> getPlayProgress(int videoId, {int? episodeId}) {
-    final query = episodeId != null ? '?episode_id=$episodeId' : '';
-    return _request(
-      NetUtils.get('$_baseUrl/play-history/$videoId$query'),
-      (data) => PlayHistory.fromJson(data),
-    );
-  }
-
-  /// 删除单条播放历史
-  static Future<bool> deletePlayHistory(int id) async =>
-      await _request<bool>(NetUtils.delete('$_baseUrl/play-history/$id')) ??
-      false;
-
-  /// 批量删除播放历史
-  static Future<int> batchDeletePlayHistory(List<int> ids) async {
-    if (ids.isEmpty) return 0;
-    return await _request<int>(
-          NetUtils.post('$_baseUrl/play-history/batch-delete', {'ids': ids}),
-          (data) => data['count'] ?? 0,
-        ) ??
-        0;
-  }
-
   /// 清空播放历史
   static Future<bool> clearPlayHistory() async =>
       await _request<bool>(NetUtils.delete('$_baseUrl/play-history-clear')) ??

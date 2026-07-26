@@ -51,7 +51,6 @@ class FakeHost implements PipelineHost {
     String? referer,
     String? contentType,
     RequestPriority priority = RequestPriority.search,
-    RequestCancelToken? cancelToken,
   }) async {
     fetched.add(url);
     return responses[url] ?? '';
@@ -125,7 +124,6 @@ class VerifyCheckHost extends FakeHost {
     String? referer,
     String? contentType,
     RequestPriority priority = RequestPriority.search,
-    RequestCancelToken? cancelToken,
   }) async {
     fetched.add(url);
     if (url == 'https://example.com/index.php/ajax/verify_check?type=search') {

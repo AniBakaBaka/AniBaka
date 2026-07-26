@@ -35,26 +35,6 @@ Future getRank(int day) {
   return NetUtils.get('$host/rank?day=$day');
 }
 
-Future getUser(String? name) {
-  return NetUtils.get('$host/user?uname=$name');
-}
-
-Future addPost(dynamic data) {
-  return NetUtils.post('$host/post/add', data);
-}
-
-Future updatePost(dynamic data) {
-  return NetUtils.post('$host/post/add', data);
-}
-
-Future getUsers(String? names) {
-  return NetUtils.get('$host/users?names=$names');
-}
-
-Future getUserById(int? uid) {
-  return NetUtils.get('$host/user?uid=$uid');
-}
-
 Future getComments(int? pid, int pageSize, String? runame, {int page = 1}) {
   return NetUtils.get(
     '$host/comments?pid=$pid&runame=$runame&page=$page&pageSize=$pageSize',
@@ -92,16 +72,8 @@ Future getGonggao() {
   return NetUtils.get('$host/post/1');
 }
 
-Future updateUv(dynamic pid, dynamic name) {
-  return NetUtils.post('$host/post/uv?pid=$pid&name=$name', {});
-}
-
 Future updateCommentUv(dynamic cid, dynamic name) {
   return NetUtils.post('$host/comment/uv?cid=$cid&name=$name', {});
-}
-
-Future deleteComment(int commentId, String token) {
-  return NetUtils.get('$host/comment/delete/$commentId?token=$token');
 }
 
 final Map<int, Future<Map<String, dynamic>?>> _animeDetailRequests = {};

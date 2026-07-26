@@ -25,10 +25,6 @@ Future<Response> searchBgmAnime(String title) {
   });
 }
 
-Future<Response> getBgmAnimeDetail(int subjectId) {
-  return _get('$_bgmApiBase/subject/$subjectId');
-}
-
 Map<String, dynamic>? getCachedBgmAnimeFullDetail(int subjectId) {
   final cached = _fullDetailCache[subjectId];
   if (cached != null && !cached.isExpired) {

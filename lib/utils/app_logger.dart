@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:io';
@@ -92,17 +92,57 @@ class AppLogger {
     info('Logger initialized (${_logFile?.path})', tag: 'Logger');
   }
 
-  void debug(Object? message, {String? tag, Object? error, StackTrace? stackTrace}) =>
-      _log(LogLevel.debug, message, tag: tag, error: error, stackTrace: stackTrace);
+  void debug(
+    Object? message, {
+    String? tag,
+    Object? error,
+    StackTrace? stackTrace,
+  }) => _log(
+    LogLevel.debug,
+    message,
+    tag: tag,
+    error: error,
+    stackTrace: stackTrace,
+  );
 
-  void info(Object? message, {String? tag, Object? error, StackTrace? stackTrace}) =>
-      _log(LogLevel.info, message, tag: tag, error: error, stackTrace: stackTrace);
+  void info(
+    Object? message, {
+    String? tag,
+    Object? error,
+    StackTrace? stackTrace,
+  }) => _log(
+    LogLevel.info,
+    message,
+    tag: tag,
+    error: error,
+    stackTrace: stackTrace,
+  );
 
-  void warning(Object? message, {String? tag, Object? error, StackTrace? stackTrace}) =>
-      _log(LogLevel.warning, message, tag: tag, error: error, stackTrace: stackTrace);
+  void warning(
+    Object? message, {
+    String? tag,
+    Object? error,
+    StackTrace? stackTrace,
+  }) => _log(
+    LogLevel.warning,
+    message,
+    tag: tag,
+    error: error,
+    stackTrace: stackTrace,
+  );
 
-  void error(Object? message, {String? tag, Object? error, StackTrace? stackTrace}) =>
-      _log(LogLevel.error, message, tag: tag, error: error, stackTrace: stackTrace);
+  void error(
+    Object? message, {
+    String? tag,
+    Object? error,
+    StackTrace? stackTrace,
+  }) => _log(
+    LogLevel.error,
+    message,
+    tag: tag,
+    error: error,
+    stackTrace: stackTrace,
+  );
 
   Future<void> flush() => _writeQueue;
 
@@ -163,7 +203,7 @@ class AppLogger {
         ? null
         : await archive.file.readAsBytes();
 
-    final savePath = await FilePicker.platform.saveFile(
+    final savePath = await FilePicker.saveFile(
       dialogTitle: 'Export Baka logs',
       fileName: archive.fileName,
       type: FileType.custom,

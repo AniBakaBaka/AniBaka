@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -36,7 +36,7 @@ class Instances {
     final preferences = SharedPreferences.getInstance();
     final version = PackageInfo.fromPlatform().then(
       (info) => info.version,
-      onError: (Object _, StackTrace __) => '0.0.0',
+      onError: (Object _, StackTrace _) => '0.0.0',
     );
 
     sp = await preferences;
@@ -45,8 +45,8 @@ class Instances {
 
   static Future<Directory> desktopDataDirectory([String child = '']) {
     return _desktopDirectories.putIfAbsent(child, () async {
-      final documents =
-          await (_documentsDirectory ??= getApplicationDocumentsDirectory());
+      final documents = await (_documentsDirectory ??=
+          getApplicationDocumentsDirectory());
       final separator = Platform.pathSeparator;
       final root = '${documents.path}$separator$desktopDataFolderName';
       final path = child.isEmpty ? root : '$root$separator$child';
@@ -119,20 +119,11 @@ class Instances {
   }
 }
 
-class Config {
-  static Future<String> downloadPath() async {
-    if (Instances.isDesktopPlatform) {
-      return (await Instances.desktopDataDirectory('downloads')).path;
-    }
-    return (await getExternalStorageDirectory())!.path;
-  }
-
-  // 是否开发环境
-  static const bool isDev = !bool.fromEnvironment('dart.vm.product');
-}
-
 extension ScreenUtils on BuildContext {
   bool get isTablet => MediaQuery.sizeOf(this).shortestSide >= 600;
-  bool get isPhone => !isTablet;
-  bool get isLargeTablet => MediaQuery.sizeOf(this).shortestSide >= 720;
+
+  /// 是否降低动效。走 `disableAnimationsOf` 只订阅该字段，
+  /// 而旧写法 `MediaQuery.maybeOf(this)` 会把调用方订阅到 MediaQuery 的每一个
+  /// 字段——键盘弹出、旋转、字号变化都会触发整页重建。
+  bool get reduceMotion => MediaQuery.disableAnimationsOf(this);
 }

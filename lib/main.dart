@@ -332,8 +332,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     }
 
     final theme = Theme.of(context);
-    final reduceVisualEffects =
-        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final reduceVisualEffects = context.reduceMotion;
     final navigationDuration = reduceVisualEffects
         ? Duration.zero
         : const Duration(milliseconds: 300);
@@ -389,16 +388,23 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                 if (_appState.currentPageIndex.value != 2) {
                   return const SizedBox.shrink();
                 }
+                // 底栏总高 = 70 + max(系统底部安全区, 10)：FAB 必须跟着安全区抬升，
+                // 否则在手势条/三键导航设备上会叠进半透明栏里被模糊。
+                final safeBottom = MediaQuery.paddingOf(context).bottom;
+                final navBarBottom = 70 + (safeBottom < 10 ? 10.0 : safeBottom);
                 return Positioned(
                   right: 24,
-                  bottom: 96,
+                  bottom: navBarBottom + 16,
                   child: AnimatedSlide(
                     duration: navigationDuration,
                     curve: Curves.easeOutCubic,
                     offset: _appState.isBottomNavVisible.value
                         ? Offset.zero
                         : const Offset(0, 3),
-                    child: _buildPostButton(theme),
+                    child: ExcludeSemantics(
+                      excluding: !_appState.isBottomNavVisible.value,
+                      child: _buildPostButton(theme),
+                    ),
                   ),
                 );
               }),
@@ -412,10 +418,15 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   offset: _appState.isBottomNavVisible.value
                       ? Offset.zero
                       : const Offset(0, 1),
-                  child: AppBottomNavigation(
-                    currentIndex: _appState.currentPageIndex.value,
-                    onTap: _appState.changePage,
-                    items: _navItems,
+                  // AnimatedSlide 只平移绘制，不隐藏语义节点：
+                  // 隐藏时要把 tab 从无障碍树里摘掉，避免读屏聚焦到屏外控件。
+                  child: ExcludeSemantics(
+                    excluding: !_appState.isBottomNavVisible.value,
+                    child: AppBottomNavigation(
+                      currentIndex: _appState.currentPageIndex.value,
+                      onTap: _appState.changePage,
+                      items: _navItems,
+                    ),
                   ),
                 ),
               )
@@ -426,8 +437,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
   Widget _buildPostButton(ThemeData theme) {
     const radius = BorderRadius.all(Radius.circular(28));
-    final reduceVisualEffects =
-        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final reduceVisualEffects = context.reduceMotion;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -442,13 +452,14 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           decoration: BoxDecoration(
             color: theme.colorScheme.primary,
             borderRadius: radius,
+            // 光晕减淡：按钮悬在毛玻璃底栏上方，重阴影会被玻璃取样成彩色涂抹。
             boxShadow: reduceVisualEffects
                 ? null
                 : [
                     BoxShadow(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.4),
-                      blurRadius: 16,
-                      offset: const Offset(0, 8),
+                      color: theme.colorScheme.primary.withValues(alpha: 0.22),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
                     ),
                   ],
           ),

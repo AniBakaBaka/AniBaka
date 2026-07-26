@@ -20,14 +20,8 @@ void main() {
   });
 
   test('shares the latest detail search controller with source switching', () {
-    final detailController = VideoSourceSearchController(
-      title: 'Example',
-      cover: '',
-    );
-    final replacement = VideoSourceSearchController(
-      title: 'Other',
-      cover: '',
-    );
+    final detailController = VideoSourceSearchController(title: 'Example');
+    final replacement = VideoSourceSearchController(title: 'Other');
 
     VideoSourceSearchController.cacheGlobal('Example', detailController);
 
@@ -47,7 +41,7 @@ void main() {
   });
 
   test('reuses an already verified switch candidate', () async {
-    final controller = VideoSourceSearchController(title: 'Example', cover: '');
+    final controller = VideoSourceSearchController(title: 'Example');
     addTearDown(controller.dispose);
 
     final item = SearchResultItem(
@@ -60,7 +54,6 @@ void main() {
         SourceProbeState(item: item, episodeIndex: 3, preferredLine: 1)
           ..status = SourceProbeStatus.direct
           ..data = data
-          ..directUrl = 'https://example.com/video.m3u8'
           ..resolvedLineIndex = 2;
     final candidate = SourceCandidateState(
       item: item,
@@ -134,7 +127,7 @@ void main() {
 }
 
 class _ProbeCountingController extends VideoSourceSearchController {
-  _ProbeCountingController() : super(title: 'Example', cover: '');
+  _ProbeCountingController() : super(title: 'Example');
 
   final probes = <String, SourceProbeState>{};
   int calls = 0;

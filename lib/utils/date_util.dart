@@ -51,13 +51,3 @@ extension DurationFormatting on Duration {
         : '${twoDigits(m)}:${twoDigits(s)}';
   }
 }
-
-String dateFormatter(String time) => DateTime.parse(time).toEnDate();
-
-String dateFormatter2(String time) =>
-    DateTime.tryParse(time)?.toZhWeekTime() ?? time;
-
-String formatDuration(Duration duration) => duration.toTimeString();
-
-String relativeTime(int ts) =>
-    DateTime.fromMillisecondsSinceEpoch(ts * 1000).toRelativeTime();

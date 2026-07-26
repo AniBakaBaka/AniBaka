@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:test/test.dart';
@@ -5,6 +6,7 @@ import 'package:test/test.dart';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/services/source/source_codec.dart';
 import 'package:baka/source/engine/rule_validator.dart';
+import 'package:baka/source/model/source_rule.dart';
 import 'package:baka/source/store/bundled_rule_store.dart';
 import 'package:baka/source/store/rule_migrator.dart';
 
@@ -51,6 +53,16 @@ void main() {
         reason: '$name invalid: ${validation.errors.join('; ')}',
       );
     }
+  });
+
+  test('each bundled asset decodes to a rule id matching its registry key', () {
+    BundledRuleStore.builtinAssets.forEach((key, path) {
+      final decoded = jsonDecode(File(path).readAsStringSync());
+      final rule = SourceRule.fromJson(
+        Map<String, dynamic>.from(decoded as Map),
+      );
+      expect(rule.id, key, reason: '$path id must match registry key $key');
+    });
   });
 
   test('pubspec bundles the built-in asset directory only', () {
