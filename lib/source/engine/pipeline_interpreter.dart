@@ -30,7 +30,6 @@ class _PipelineContext {
     required String inputName,
     required Object input,
     required this.priority,
-    this.cancelToken,
   }) : vars = <String, Object?>{
          baseUrlVar: baseUrl,
          inputName: input,
@@ -48,7 +47,6 @@ class _PipelineContext {
     : host = source.host,
       vars = Map<String, Object?>.of(source.vars),
       priority = source.priority,
-      cancelToken = source.cancelToken,
       value = source.value,
       pageUrl = source.pageUrl,
       _seriesById = source._seriesById,
@@ -63,7 +61,6 @@ class _PipelineContext {
   final PipelineHost host;
   final Map<String, Object?> vars;
   final RequestPriority priority;
-  final RequestCancelToken? cancelToken;
 
   Object? value;
   String pageUrl;
@@ -115,12 +112,18 @@ class _PipelineContext {
   void beginSink() => sinkRuns++;
 }
 
+typedef _OpHandler =
+    FutureOr<void> Function(
+      PipelineInterpreter,
+      PipelineStep,
+      _PipelineContext,
+    );
+
 /// anx-rule/2 顺序解释器；实例无状态，可并发复用。
 class PipelineInterpreter {
   const PipelineInterpreter();
 
   static final RegExp _templatePattern = RegExp(r'\{([a-zA-Z0-9_]+)(:raw)?\}');
-  static final RegExp _jsonIndexPattern = RegExp(r'^(.*?)\[(\d+)\]$');
   static final RegExp _viewportMetaPattern = RegExp(
     r'''<meta\b(?=[^>]*\bname\s*=\s*["']viewport["'])[^>]*\bid\s*=\s*["']([^"']+)["'][^>]*>''',
     caseSensitive: false,
@@ -150,12 +153,35 @@ class PipelineInterpreter {
     caseSensitive: false,
   );
   static final RegExp _nonHexPattern = RegExp(r'[^0-9a-fA-F]');
+  static final RegExp _httpSchemePattern = RegExp(
+    r'^https?://',
+    caseSensitive: false,
+  );
+  static final RegExp _trailingSlashesPattern = RegExp(r'/+$');
+
+  /// 规则里的 `regex`/`replace` pattern 绝大多数是固定串，却在每个源 × 每次
+  /// 搜索时重新编译。按 pattern+flags 缓存编译结果，超限整体清空兜底
+  /// （含模板变量的动态 pattern 不会无界增长）。
+  static const _regexCacheLimit = 64;
+  static final Map<String, RegExp> _regexCache = {};
+
+  static RegExp _cachedRegExp(
+    String pattern, {
+    bool ignoreCase = false,
+    bool dotAll = false,
+  }) {
+    final key = '$pattern\u0000${ignoreCase ? 1 : 0}${dotAll ? 1 : 0}';
+    final hit = _regexCache[key];
+    if (hit != null) return hit;
+    final regex = RegExp(pattern, caseSensitive: !ignoreCase, dotAll: dotAll);
+    if (_regexCache.length >= _regexCacheLimit) _regexCache.clear();
+    return _regexCache[key] = regex;
+  }
 
   Future<List<Series>> runSearch(
     SourceRule rule,
     PipelineHost host,
     String keyword, {
-    RequestCancelToken? cancelToken,
     RequestPriority priority = RequestPriority.search,
   }) async {
     final ctx = _PipelineContext(
@@ -164,7 +190,6 @@ class PipelineInterpreter {
       inputName: 'keyword',
       input: keyword,
       priority: priority,
-      cancelToken: cancelToken,
     );
     await _runSteps(rule.search, ctx);
     return ctx.seriesOut;
@@ -174,7 +199,6 @@ class PipelineInterpreter {
     SourceRule rule,
     PipelineHost host,
     String seriesId, {
-    RequestCancelToken? cancelToken,
     RequestPriority priority = RequestPriority.search,
   }) async {
     final ctx = _PipelineContext(
@@ -183,7 +207,6 @@ class PipelineInterpreter {
       inputName: 'seriesId',
       input: seriesId,
       priority: priority,
-      cancelToken: cancelToken,
     );
     ctx.pageUrl = host.toAbsolute(seriesId, rule.baseUrl);
     await _runSteps(rule.detail, ctx);
@@ -194,21 +217,14 @@ class PipelineInterpreter {
     SourceRule rule,
     PipelineHost host,
     String episodeId, {
-    RequestCancelToken? cancelToken,
     RequestPriority priority = RequestPriority.play,
-  }) async => (await runPlayMedia(
-    rule,
-    host,
-    episodeId,
-    cancelToken: cancelToken,
-    priority: priority,
-  )).url;
+  }) async =>
+      (await runPlayMedia(rule, host, episodeId, priority: priority)).url;
 
   Future<PipelinePlayResult> runPlayMedia(
     SourceRule rule,
     PipelineHost host,
     String episodeId, {
-    RequestCancelToken? cancelToken,
     RequestPriority priority = RequestPriority.play,
   }) async {
     final ctx = _PipelineContext(
@@ -217,7 +233,6 @@ class PipelineInterpreter {
       inputName: 'episodeId',
       input: episodeId,
       priority: priority,
-      cancelToken: cancelToken,
     );
     ctx.pageUrl = host.toAbsolute(episodeId, rule.baseUrl);
     await _runSteps(rule.play, ctx);
@@ -240,105 +255,107 @@ class PipelineInterpreter {
 
   Future<void> _runSteps(List<PipelineStep> steps, _PipelineContext ctx) async {
     for (final step in steps) {
-      ctx.cancelToken?.throwIfCancelled();
       final result = _runStep(step, ctx);
       if (result is Future<void>) await result;
     }
   }
 
-  FutureOr<void> _runStep(PipelineStep step, _PipelineContext ctx) {
-    switch (step.op) {
-      case 'template':
-        ctx.value = _render(step.str('value') ?? '', ctx);
-        break;
-      case 'setVar':
-        ctx.vars[step.str('name') ?? '_'] = _render(
-          step.str('value') ?? '',
-          ctx,
-        );
-        break;
-      case 'query':
-        _opQuery(step, ctx);
-        break;
-      case 'fetch':
-      case 'follow':
-        return _opFetch(step, ctx);
-      case 'select':
-        _opSelect(step, ctx);
-        break;
-      case 'regex':
-        _opRegex(step, ctx);
-        break;
-      case 'replace':
-        _opReplace(step, ctx);
-        break;
-      case 'json':
-        _opJson(step, ctx);
-        break;
-      case 'pick':
-        _opPick(step, ctx);
-        break;
-      case 'crypto':
-        _opCrypto(step, ctx);
-        break;
-      case 'baseN':
-        _opBaseN(step, ctx);
-        break;
-      case 'ecPlayer':
-        _opEcPlayer(step, ctx);
-        break;
-      case 'maccmsVerify':
-        return _opMacCmsVerify(step, ctx);
-      case 'first':
-        return _opFirst(step, ctx);
-      case 'searchList':
-        _opSearchList(step, ctx);
-        break;
-      case 'jsonSeries':
-        _opJsonSeries(step, ctx);
-        break;
-      case 'episodes':
-        _opEpisodes(step, ctx);
-        break;
-      case 'jsonEpisodes':
-        _opJsonEpisodes(step, ctx);
-        break;
-      case 'maccmsApiEpisodes':
-        _opMaccmsApiEpisodes(step, ctx);
-        break;
-      case 'videoUrl':
-        _opVideoUrl(step, ctx);
-        break;
-      case 'setMediaHeaders':
-        _opSetMediaHeaders(step, ctx);
-        break;
-      case 'playerAaaa':
-        _opPlayerAaaa(step, ctx);
-        break;
-      case 'playerDecrypt':
-        _opPlayerDecrypt(step, ctx);
-        break;
-      case 'sniff':
-        return _opSniff(step, ctx);
-      case 'anime1Search':
-        return _opAnime1Search(step, ctx);
-      case 'anime1Detail':
-        return _opAnime1Detail(step, ctx);
-      case 'anime1Play':
-        return _opAnime1Play(step, ctx);
-      case 'hhPlayer':
-        return _opHhPlayer(step, ctx);
-      case 'torrentRecords':
-        _opTorrentRecords(step, ctx);
-        break;
-      case 'maccmsSuggest':
-        return _opMaccmsSuggest(step, ctx);
-      default:
-        _debugLog('[pipeline] 未知 op: ${step.op}');
-        ctx.value = '';
-    }
-  }
+  /// op 名 → 执行函数的路由表。同步 op 一律使用块体，避免把非 void
+  /// 返回值当 Future 误 await；异步 op 直接透传 Future。
+  static final Map<String, _OpHandler> _opHandlers = {
+    'template': (self, step, ctx) {
+      ctx.value = self._render(step.str('value') ?? '', ctx);
+    },
+    'setVar': (self, step, ctx) {
+      ctx.vars[step.str('name') ?? '_'] = self._render(
+        step.str('value') ?? '',
+        ctx,
+      );
+    },
+    'query': (self, step, ctx) {
+      self._opQuery(step, ctx);
+    },
+    'fetch': _handleFetch,
+    'follow': _handleFetch,
+    'select': (self, step, ctx) {
+      self._opSelect(step, ctx);
+    },
+    'regex': (self, step, ctx) {
+      self._opRegex(step, ctx);
+    },
+    'replace': (self, step, ctx) {
+      self._opReplace(step, ctx);
+    },
+    'json': (self, step, ctx) {
+      self._opJson(step, ctx);
+    },
+    'pick': (self, step, ctx) {
+      self._opPick(step, ctx);
+    },
+    'crypto': (self, step, ctx) {
+      self._opCrypto(step, ctx);
+    },
+    'baseN': (self, step, ctx) {
+      self._opBaseN(step, ctx);
+    },
+    'ecPlayer': (self, step, ctx) {
+      self._opEcPlayer(step, ctx);
+    },
+    'maccmsVerify': (self, step, ctx) => self._opMacCmsVerify(step, ctx),
+    'first': (self, step, ctx) => self._opFirst(step, ctx),
+    'searchList': (self, step, ctx) {
+      self._opSearchList(step, ctx);
+    },
+    'jsonSeries': (self, step, ctx) {
+      self._opJsonSeries(step, ctx);
+    },
+    'episodes': (self, step, ctx) {
+      self._opEpisodes(step, ctx);
+    },
+    'jsonEpisodes': (self, step, ctx) {
+      self._opJsonEpisodes(step, ctx);
+    },
+    'maccmsApiEpisodes': (self, step, ctx) {
+      self._opMaccmsApiEpisodes(step, ctx);
+    },
+    'videoUrl': (self, step, ctx) {
+      self._opVideoUrl(step, ctx);
+    },
+    'setMediaHeaders': (self, step, ctx) {
+      self._opSetMediaHeaders(step, ctx);
+    },
+    'playerAaaa': (self, step, ctx) {
+      self._opPlayerAaaa(step, ctx);
+    },
+    'playerDecrypt': (self, step, ctx) {
+      self._opPlayerDecrypt(step, ctx);
+    },
+    'sniff': (self, step, ctx) => self._opSniff(step, ctx),
+    'anime1Search': (self, step, ctx) => self._opAnime1Search(step, ctx),
+    'anime1Detail': (self, step, ctx) => self._opAnime1Detail(step, ctx),
+    'anime1Play': (self, step, ctx) => self._opAnime1Play(step, ctx),
+    'hhPlayer': (self, step, ctx) => self._opHhPlayer(step, ctx),
+    'torrentRecords': (self, step, ctx) {
+      self._opTorrentRecords(step, ctx);
+    },
+    'maccmsSuggest': (self, step, ctx) => self._opMaccmsSuggest(step, ctx),
+  };
 
+  static Future<void> _handleFetch(
+    PipelineInterpreter self,
+    PipelineStep step,
+    _PipelineContext ctx,
+  ) => self._opFetch(step, ctx);
+
+  FutureOr<void> _runStep(PipelineStep step, _PipelineContext ctx) {
+    final handler = _opHandlers[step.op];
+    if (handler == null) {
+      _debugLog('[pipeline] 未知 op: ${step.op}');
+      ctx.value = '';
+      return null;
+    }
+    return handler(this, step, ctx);
+  }
 
   /// `fetch` / `follow`：发起 HTTP 请求，当前值变为响应体。
   /// `follow` 默认使用当前值作为 URL。
@@ -377,7 +394,6 @@ class PipelineInterpreter {
       referer: ctx.pageUrl.isEmpty ? null : ctx.pageUrl,
       contentType: step.str('contentType'),
       priority: ctx.priority,
-      cancelToken: ctx.cancelToken,
     );
     ctx.pageUrl = url;
   }
@@ -433,7 +449,7 @@ class PipelineInterpreter {
     }
     final group = step.intValue('group') ?? 1;
     try {
-      final regex = RegExp(pattern, caseSensitive: !step.flag('ignoreCase'));
+      final regex = _cachedRegExp(pattern, ignoreCase: step.flag('ignoreCase'));
       if (step.flag('all')) {
         final values = <String>[];
         for (final match in regex.allMatches(source)) {
@@ -474,9 +490,9 @@ class PipelineInterpreter {
 
     try {
       if (step.flag('regex')) {
-        final regex = RegExp(
+        final regex = _cachedRegExp(
           pattern,
-          caseSensitive: !step.flag('ignoreCase'),
+          ignoreCase: step.flag('ignoreCase'),
           dotAll: step.flag('dotAll'),
         );
         ctx.value = step.flag('first')
@@ -497,7 +513,7 @@ class PipelineInterpreter {
   void _opJson(PipelineStep step, _PipelineContext ctx) {
     final data = _asJson(ctx.value);
     final path = step.str('path') ?? '';
-    ctx.value = _jsonPath(data, path);
+    ctx.value = AnimeRuleOps.jsonPath(data, path);
   }
 
   /// `crypto`：加解密 / 摘要变换。
@@ -732,7 +748,6 @@ class PipelineInterpreter {
         url,
         headers: headers,
         priority: ctx.priority,
-        cancelToken: ctx.cancelToken,
       );
       ctx.pageUrl = url;
 
@@ -744,7 +759,7 @@ class PipelineInterpreter {
         }
       }
 
-      final found = _jsonPath(_asJson(candidate), listPath);
+      final found = AnimeRuleOps.jsonPath(_asJson(candidate), listPath);
       if (found is List && found.isNotEmpty) {
         list = found;
         break;
@@ -764,7 +779,8 @@ class PipelineInterpreter {
     }
 
     final encryptedUrl = config['url']?.toString().replaceAll(r'\/', '/') ?? '';
-    final uid = _jsonPath(config, 'config.uid')?.toString().trim() ?? '';
+    final uid =
+        AnimeRuleOps.jsonPath(config, 'config.uid')?.toString().trim() ?? '';
     if (encryptedUrl.isEmpty || uid.isEmpty) {
       ctx.value = '';
       return;
@@ -816,25 +832,37 @@ class PipelineInterpreter {
     final token = md5
         .convert(utf8.encode('${ts}Lmm2026@VipS3cr3t!Kx9PqZ'))
         .toString();
-    final base = ctx.baseUrl.replaceFirst(RegExp(r'/+$'), '');
-    final verifyUrl = ctx.host.toAbsolute('/index.php/ajax/smart_verify', base);
+    return _submitMacCmsVerify(
+      '/index.php/ajax/smart_verify',
+      {'smart_token': token, 'ts': ts.toString()},
+      pageUrl,
+      ctx,
+    );
+  }
+
+  /// 以表单 POST 提交 MacCMS 验证请求；成功后重新请求 [pageUrl] 并返回
+  /// 响应体，失败或 [pageUrl] 为空时返回 `null`。
+  Future<String?> _submitMacCmsVerify(
+    String verifyUrl,
+    Map<String, String> body,
+    String pageUrl,
+    _PipelineContext ctx,
+  ) async {
+    final base = ctx.baseUrl.replaceFirst(_trailingSlashesPattern, '');
     final response = await ctx.host.fetch(
-      verifyUrl,
+      ctx.host.toAbsolute(verifyUrl, base),
       method: 'POST',
-      body: {'smart_token': token, 'ts': ts.toString()},
+      body: body,
       headers: const {'X-Requested-With': 'XMLHttpRequest'},
       referer: pageUrl.isEmpty ? '$base/' : pageUrl,
       contentType: 'form',
       priority: ctx.priority,
-      cancelToken: ctx.cancelToken,
     );
-    if (!_isMacCmsVerifySuccess(response)) return null;
-    if (pageUrl.isEmpty) return null;
+    if (!_isMacCmsVerifySuccess(response) || pageUrl.isEmpty) return null;
     return ctx.host.fetch(
       pageUrl,
       referer: pageUrl,
       priority: ctx.priority,
-      cancelToken: ctx.cancelToken,
     );
   }
 
@@ -871,29 +899,11 @@ class PipelineInterpreter {
       ),
     );
 
-    final base = ctx.baseUrl.replaceFirst(RegExp(r'/+$'), '');
     final rawVerifyUrl = urlMatch
         .group(1)!
         .replaceAll(r'\/', '/')
         .replaceAll('&amp;', '&');
-    final verifyUrl = ctx.host.toAbsolute(rawVerifyUrl, base);
-    final response = await ctx.host.fetch(
-      verifyUrl,
-      method: 'POST',
-      body: {'i': token},
-      headers: const {'X-Requested-With': 'XMLHttpRequest'},
-      referer: pageUrl.isEmpty ? '$base/' : pageUrl,
-      contentType: 'form',
-      priority: ctx.priority,
-      cancelToken: ctx.cancelToken,
-    );
-    if (!_isMacCmsVerifySuccess(response) || pageUrl.isEmpty) return null;
-    return ctx.host.fetch(
-      pageUrl,
-      referer: pageUrl,
-      priority: ctx.priority,
-      cancelToken: ctx.cancelToken,
-    );
+    return _submitMacCmsVerify(rawVerifyUrl, {'i': token}, pageUrl, ctx);
   }
 
   /// 依次试跑分支，仅提交首个成功分支的状态。
@@ -971,7 +981,7 @@ class PipelineInterpreter {
   void _opJsonSeries(PipelineStep step, _PipelineContext ctx) {
     ctx.beginSink();
     final data = _asJson(ctx.value);
-    final list = _jsonPath(data, step.str('listPath') ?? '');
+    final list = AnimeRuleOps.jsonPath(data, step.str('listPath') ?? '');
     if (list is! List) return;
 
     _appendJsonSeries(list, step, ctx);
@@ -1074,7 +1084,7 @@ class PipelineInterpreter {
     final data = _asJson(ctx.value);
     final episodesPath = step.str('episodesPath') ?? '';
     if (episodesPath.isNotEmpty) {
-      final epList = _jsonPath(data, episodesPath);
+      final epList = AnimeRuleOps.jsonPath(data, episodesPath);
       if (epList is! List) return;
       final episodes = _buildJsonEpisodes(epList, step, ctx);
       if (episodes.isEmpty) return;
@@ -1083,7 +1093,10 @@ class PipelineInterpreter {
       return;
     }
 
-    final sourcesList = _jsonPath(data, step.str('sourcesPath') ?? '');
+    final sourcesList = AnimeRuleOps.jsonPath(
+      data,
+      step.str('sourcesPath') ?? '',
+    );
     if (sourcesList is! List) return;
 
     final epListKey = step.str('episodesKey') ?? 'episodes';
@@ -1113,7 +1126,7 @@ class PipelineInterpreter {
   void _opMaccmsApiEpisodes(PipelineStep step, _PipelineContext ctx) {
     ctx.beginSink();
     final data = _asJson(ctx.value);
-    final list = _jsonPath(data, step.str('listPath') ?? 'list');
+    final list = AnimeRuleOps.jsonPath(data, step.str('listPath') ?? 'list');
     if (list is! List || list.isEmpty) return;
 
     final requestedIndex = step.intValue('index') ?? 0;
@@ -1144,10 +1157,7 @@ class PipelineInterpreter {
             .trim()
             .replaceAll(r'\/', '/');
         if (rawId.isEmpty) continue;
-        final isDirect = RegExp(
-          r'^https?://',
-          caseSensitive: false,
-        ).hasMatch(rawId);
+        final isDirect = _httpSchemePattern.hasMatch(rawId);
         if (directOnly && !isDirect) continue;
         final episodeId = isDirect
             ? ctx.host.normalizeUrl(rawId, ctx.pageUrl)
@@ -1169,17 +1179,16 @@ class PipelineInterpreter {
       );
     }
     if (step.flag('preferHls')) {
-      final hlsSources = sources.where(
-        (source) => source.episodes.any(
+      // 单遍分桶，保持与原 where 过滤一致的相对顺序：HLS 线路整体前置。
+      final hls = <Source>[];
+      final others = <Source>[];
+      for (final source in sources) {
+        final isHls = source.episodes.any(
           (episode) => episode.episodeId.toLowerCase().contains('.m3u8'),
-        ),
-      );
-      final otherSources = sources.where(
-        (source) => !source.episodes.any(
-          (episode) => episode.episodeId.toLowerCase().contains('.m3u8'),
-        ),
-      );
-      ctx.emitSources([...hlsSources, ...otherSources]);
+        );
+        (isHls ? hls : others).add(source);
+      }
+      ctx.emitSources([...hls, ...others]);
       return;
     }
     ctx.emitSources(sources);
@@ -1240,7 +1249,7 @@ class PipelineInterpreter {
     final jsonPath = step.str('jsonPath') ?? '';
     if (jsonPath.isNotEmpty) {
       final data = _asJson(ctx.value);
-      final headers = _jsonPath(data, jsonPath);
+      final headers = AnimeRuleOps.jsonPath(data, jsonPath);
       if (headers is Map) {
         updated ??= Map<String, String>.of(ctx.mediaHeaders);
         for (final entry in headers.entries) {
@@ -1446,23 +1455,16 @@ class PipelineInterpreter {
       final settleMs = (step.intValue('settleMs') ?? 1000)
           .clamp(0, 30000)
           .toInt();
-      final host = ctx.host;
-      if (host is PipelineWebviewReadyHost) {
-        ctx.value = await (host as PipelineWebviewReadyHost)
-            .renderWithWebviewReady(
-              url,
-              isReady: hasReadiness ? isReady : null,
-              timeout: Duration(milliseconds: timeoutMs),
-              settleDelay: Duration(milliseconds: settleMs),
-            );
-      } else {
-        ctx.value = await host.renderWithWebview(url);
-      }
+      ctx.value = await ctx.host.renderWithWebview(
+        url,
+        isReady: hasReadiness ? isReady : null,
+        timeout: Duration(milliseconds: timeoutMs),
+        settleDelay: Duration(milliseconds: settleMs),
+      );
     } else {
       ctx.value = await ctx.host.sniffWithWebview(url);
     }
   }
-
 
   /// `anime1Search`：从 Anime1 CloudFront catalog JSON 搜索番剧。
   Future<void> _opAnime1Search(PipelineStep step, _PipelineContext ctx) async {
@@ -1477,7 +1479,6 @@ class PipelineInterpreter {
     final payload = await ctx.host.fetch(
       url,
       priority: ctx.priority,
-      cancelToken: ctx.cancelToken,
     );
     final results = AnimeRuleOps.parseAnime1Catalog(
       payload,
@@ -1507,7 +1508,6 @@ class PipelineInterpreter {
       fetchPage: (pageUrl) => ctx.host.fetch(
         pageUrl,
         priority: ctx.priority,
-        cancelToken: ctx.cancelToken,
       ),
       itemSelector: step.str('itemSelector') ?? 'video[data-apireq]',
       tokenAttribute: step.str('tokenAttribute') ?? 'data-apireq',
@@ -1544,7 +1544,6 @@ class PipelineInterpreter {
       body: {tokenField: Uri.decodeComponent(token)},
       headers: _renderMap(step.params['headers'], ctx),
       priority: ctx.priority,
-      cancelToken: ctx.cancelToken,
     );
 
     final cookieNames = step.strList('cookieNames');
@@ -1574,7 +1573,6 @@ class PipelineInterpreter {
     final iframeHtml = await ctx.host.fetch(
       ctx.host.toAbsolute(iframeUrl, ctx.baseUrl),
       priority: ctx.priority,
-      cancelToken: ctx.cancelToken,
     );
 
     final charMapRaw = step.params['charMap'];
@@ -1627,7 +1625,6 @@ class PipelineInterpreter {
       body: body,
       headers: headers.isEmpty ? null : headers,
       priority: ctx.priority,
-      cancelToken: ctx.cancelToken,
     );
 
     ctx.value = AnimeRuleOps.parseHhPlayerResponse(
@@ -1667,7 +1664,6 @@ class PipelineInterpreter {
       ctx.emitSeries(series);
     }
   }
-
 
   String _encodeLittleEndianBaseN(int value, String alphabet) {
     if (alphabet.length < 2 || value < 0) return value.toString();
@@ -1723,6 +1719,21 @@ class PipelineInterpreter {
     };
   }
 
+  /// 渲染字符串模板：把 `{name}` 替换为 [resolve] 的返回值（`null` 视为空串），
+  /// 并做 URL 编码（除非用 `{name:raw}`）。
+  static String renderTemplate(
+    String template,
+    String? Function(String name) resolve,
+  ) {
+    if (!template.contains('{')) return template;
+    return template.replaceAllMapped(_templatePattern, (m) {
+      final name = m.group(1)!;
+      final raw = m.group(2) != null;
+      final value = resolve(name) ?? '';
+      return raw ? value : Uri.encodeComponent(value);
+    });
+  }
+
   /// 渲染字符串模板：把 `{name}` 替换为变量值。
   /// 内置变量：keyword/seriesId/episodeId/baseUrl/timestamp/url（当前字符串值）；
   /// keyword 会做 URL 编码（除非用 `{keyword:raw}`）。
@@ -1731,20 +1742,10 @@ class PipelineInterpreter {
     _PipelineContext ctx, {
     Map<String, String?>? extra,
   }) {
-    if (!template.contains('{')) return template;
-    return template.replaceAllMapped(_templatePattern, (m) {
-      final name = m.group(1)!;
-      final raw = m.group(2) != null;
-      String? value;
-      if (extra != null && extra.containsKey(name)) {
-        value = extra[name];
-      } else if (name == 'url') {
-        value = ctx.currentString;
-      } else {
-        value = ctx.vars[name]?.toString();
-      }
-      value ??= '';
-      return raw ? value : Uri.encodeComponent(value);
+    return renderTemplate(template, (name) {
+      if (extra != null && extra.containsKey(name)) return extra[name];
+      if (name == 'url') return ctx.currentString;
+      return ctx.vars[name]?.toString();
     });
   }
 
@@ -1775,29 +1776,5 @@ class PipelineInterpreter {
     } catch (_) {
       return null;
     }
-  }
-
-  /// 点路径取值：`data.list[0].url`；空路径返回原对象。
-  dynamic _jsonPath(dynamic data, String path) {
-    if (path.trim().isEmpty) return data;
-    dynamic current = data;
-    for (final segment in path.split('.')) {
-      if (segment.isEmpty) continue;
-      final bracket = _jsonIndexPattern.firstMatch(segment);
-      if (bracket != null) {
-        final key = bracket.group(1)!;
-        final index = int.parse(bracket.group(2)!);
-        if (key.isNotEmpty) {
-          current = current is Map ? current[key] : null;
-        }
-        current = current is List && index < current.length
-            ? current[index]
-            : null;
-      } else {
-        current = current is Map ? current[segment] : null;
-      }
-      if (current == null) return null;
-    }
-    return current;
   }
 }

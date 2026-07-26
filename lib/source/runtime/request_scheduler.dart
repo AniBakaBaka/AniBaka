@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:collection';
 
-/// 请求优先级：用户直接触发的播放解析优先于后台探针，探针优先于搜索。
-enum RequestPriority { search, probe, play }
+/// 请求优先级：用户直接触发的播放解析优先于搜索。
+enum RequestPriority { search, play }
 
 /// 取消令牌。切页 / 换关键词时取消整棵请求树，避免慢源继续占用配额。
 class RequestCancelToken {
@@ -43,7 +43,7 @@ class RequestCancelledException implements Exception {
 /// 全局请求调度器。
 ///
 /// 所有源的网络请求都经过这里，统一实现：
-/// - **优先级**：play > probe > search，高优先级任务先出队。
+/// - **优先级**：play > search，高优先级任务先出队。
 /// - **per-host 限流**：同一域名并发上限，避免请求风暴触发反爬。
 /// - **全局并发上限**：控制多源聚合搜索时的整体压力。
 /// - **取消**：通过 [RequestCancelToken] 取消尚未开始的排队任务。

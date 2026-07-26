@@ -62,8 +62,15 @@ class TorrentRecordParser {
     if (html.trim().isEmpty) return const <Series>[];
     final config = _configFor(params);
     final document = html_parser.parse(html);
+    final base = Uri.tryParse(baseUrl);
     final rows = _selectRows(document, config.rowSelectors);
-    final records = _recordsFromRows(rows, config: config, baseUrl: baseUrl);
+    final records = _recordsFromRows(
+      rows,
+      config: config,
+      baseUrl: baseUrl,
+      base: base,
+      needScore: false,
+    );
 
     final grouped = <String, List<TorrentReleaseRecord>>{};
     final displayNames = <String, String>{};
@@ -111,7 +118,7 @@ class TorrentRecordParser {
           : _render(config.descriptionTemplate, variables);
       results.add(
         Series(
-          _absolute(id, baseUrl),
+          _absolute(id, baseUrl, base),
           name,
           description: description.isEmpty ? null : description,
           image: image.isEmpty ? null : image,
@@ -130,6 +137,7 @@ class TorrentRecordParser {
     if (html.trim().isEmpty) return const <Source>[];
     final config = _configFor(params);
     final document = html_parser.parse(html);
+    final base = Uri.tryParse(baseUrl);
     final expectedAnimeKey = _normalizeKey(
       _expectedAnimeName(config, contextUrl: contextUrl),
     );
@@ -147,7 +155,9 @@ class TorrentRecordParser {
           rows,
           config: config,
           baseUrl: baseUrl,
+          base: base,
           forcedSourceName: label,
+          needImage: false,
         );
         final source = _buildSource(
           records,
@@ -162,7 +172,13 @@ class TorrentRecordParser {
     }
 
     final rows = _selectRows(document, config.rowSelectors);
-    final records = _recordsFromRows(rows, config: config, baseUrl: baseUrl);
+    final records = _recordsFromRows(
+      rows,
+      config: config,
+      baseUrl: baseUrl,
+      base: base,
+      needImage: false,
+    );
     final grouped = <String, List<TorrentReleaseRecord>>{};
     final displayNames = <String, String>{};
     for (final record in records) {
@@ -200,6 +216,7 @@ class TorrentRecordParser {
       _selectRows(document, config.rowSelectors),
       config: config,
       baseUrl: baseUrl,
+      base: Uri.tryParse(baseUrl),
     );
   }
 
@@ -218,7 +235,10 @@ class TorrentRecordParser {
     List<Element> rows, {
     required _TorrentRecordConfig config,
     required String baseUrl,
+    required Uri? base,
     String forcedSourceName = '',
+    bool needScore = true,
+    bool needImage = true,
   }) {
     final records = <TorrentReleaseRecord>[];
     for (var i = 0; i < rows.length; i++) {
@@ -236,6 +256,7 @@ class TorrentRecordParser {
         rawId,
         exactSource: exactSource,
         baseUrl: baseUrl,
+        base: base,
       );
       final explicitSourceName = forcedSourceName.isNotEmpty
           ? forcedSourceName
@@ -245,11 +266,9 @@ class TorrentRecordParser {
               config.sourceNameAttrs,
             );
       final size = _firstValue(row, config.sizeSelectors, config.sizeAttrs);
-      final rawImage = _firstValue(
-        row,
-        config.imageSelectors,
-        config.imageAttrs,
-      );
+      final rawImage = needImage
+          ? _firstValue(row, config.imageSelectors, config.imageAttrs)
+          : '';
       final parts = _parseRelease(
         title,
         explicitSourceName: explicitSourceName,
@@ -266,9 +285,9 @@ class TorrentRecordParser {
           fansub: parts.fansub,
           sourceName: sourceName,
           size: size,
-          image: rawImage.isEmpty ? '' : _absolute(rawImage, baseUrl),
+          image: rawImage.isEmpty ? '' : _absolute(rawImage, baseUrl, base),
           episode: parts.episode,
-          score: _score(title, sourceName, config),
+          score: needScore ? _score(title, sourceName, config) : 0,
           excluded: parts.excluded,
           order: i,
         ),
@@ -479,27 +498,11 @@ class TorrentRecordParser {
 
   static String _firstValue(
     Element row,
-    List<String> selectors,
+    List<_RowAccessor> accessors,
     List<String> attrs,
   ) {
-    for (final selector in selectors) {
-      final normalized = selector.trim();
-      Element? element;
-      try {
-        final nthChild = _nthChildPattern.firstMatch(normalized);
-        if (nthChild == null) {
-          element = normalized.isEmpty ? row : row.querySelector(normalized);
-        } else {
-          final index = int.parse(nthChild.group(2)!) - 1;
-          if (index >= 0 && index < row.children.length) {
-            final candidate = row.children[index];
-            final tag = nthChild.group(1)?.toLowerCase();
-            if (tag == null || candidate.localName == tag) element = candidate;
-          }
-        }
-      } catch (_) {
-        element = null;
-      }
+    for (final accessor in accessors) {
+      final element = accessor.resolve(row);
       if (element == null) continue;
       final value = _elementValue(element, attrs);
       if (value.isNotEmpty) return value;
@@ -549,35 +552,37 @@ class TorrentRecordParser {
     });
   }
 
-  static String _absolute(String value, String baseUrl) {
+  static String _absolute(String value, String baseUrl, Uri? base) {
     final trimmed = value.trim();
     if (trimmed.isEmpty || trimmed.toLowerCase().startsWith('magnet:')) {
       return trimmed;
     }
     final parsed = Uri.tryParse(trimmed);
     if (parsed != null && parsed.hasScheme) return trimmed;
-    try {
-      return Uri.parse(baseUrl).resolve(trimmed).toString();
-    } catch (_) {
-      final separator = baseUrl.endsWith('/') || trimmed.startsWith('/')
-          ? ''
-          : '/';
-      return '$baseUrl$separator$trimmed';
+    if (base != null) {
+      try {
+        return base.resolve(trimmed).toString();
+      } catch (_) {}
     }
+    final separator = baseUrl.endsWith('/') || trimmed.startsWith('/')
+        ? ''
+        : '/';
+    return '$baseUrl$separator$trimmed';
   }
 
   static String _attachExactSource(
     String resourceId, {
     required String exactSource,
     required String baseUrl,
+    required Uri? base,
   }) {
     final id = resourceId.trim();
     if (id.isEmpty) return '';
     if (!id.toLowerCase().startsWith('magnet:') || exactSource.trim().isEmpty) {
-      return _absolute(id, baseUrl);
+      return _absolute(id, baseUrl, base);
     }
 
-    final exactUrl = _absolute(exactSource, baseUrl);
+    final exactUrl = _absolute(exactSource, baseUrl, base);
     if (exactUrl.isEmpty) return id;
     try {
       final uri = Uri.parse(id);
@@ -603,55 +608,46 @@ class TorrentRecordParser {
 
 class _TorrentRecordConfig {
   _TorrentRecordConfig(Map<String, dynamic> params)
-    : rowSelectors = _strings(params['rowSelectors'] ?? params['rowSelector']),
-      sourceContainerSelectors = _strings(
-        params['sourceContainerSelectors'] ?? params['sourceContainerSelector'],
-      ),
-      sourceLabelSelectors = _strings(
-        params['sourceLabelSelectors'] ?? params['sourceLabelSelector'],
-      ),
-      sourceLabelAttrs = _strings(
-        params['sourceLabelAttrs'] ?? params['sourceLabelAttr'],
+    : rowSelectors = _aliased(params, 'rowSelector'),
+      sourceContainerSelectors = _aliased(params, 'sourceContainerSelector'),
+      sourceLabelSelectors = _aliased(params, 'sourceLabelSelector'),
+      sourceLabelAttrs = _aliased(
+        params,
+        'sourceLabelAttr',
         fallback: const <String>['text'],
       ),
-      titleSelectors = _strings(
-        params['titleSelectors'] ?? params['titleSelector'],
-      ),
-      titleAttrs = _strings(
-        params['titleAttrs'] ?? params['titleAttr'],
+      titleSelectors = _accessors(_aliased(params, 'titleSelector')),
+      titleAttrs = _aliased(
+        params,
+        'titleAttr',
         fallback: const <String>['text'],
       ),
-      idSelectors = _strings(params['idSelectors'] ?? params['idSelector']),
-      idAttrs = _strings(
-        params['idAttrs'] ?? params['idAttr'],
+      idSelectors = _accessors(_aliased(params, 'idSelector')),
+      idAttrs = _aliased(params, 'idAttr', fallback: const <String>['href']),
+      exactSourceSelectors = _accessors(
+        _aliased(params, 'exactSourceSelector'),
+      ),
+      exactSourceAttrs = _aliased(
+        params,
+        'exactSourceAttr',
         fallback: const <String>['href'],
       ),
-      exactSourceSelectors = _strings(
-        params['exactSourceSelectors'] ?? params['exactSourceSelector'],
-      ),
-      exactSourceAttrs = _strings(
-        params['exactSourceAttrs'] ?? params['exactSourceAttr'],
-        fallback: const <String>['href'],
-      ),
-      sourceNameSelectors = _strings(
-        params['sourceNameSelectors'] ?? params['sourceNameSelector'],
-      ),
-      sourceNameAttrs = _strings(
-        params['sourceNameAttrs'] ?? params['sourceNameAttr'],
+      sourceNameSelectors = _accessors(_aliased(params, 'sourceNameSelector')),
+      sourceNameAttrs = _aliased(
+        params,
+        'sourceNameAttr',
         fallback: const <String>['text'],
       ),
-      sizeSelectors = _strings(
-        params['sizeSelectors'] ?? params['sizeSelector'],
-      ),
-      sizeAttrs = _strings(
-        params['sizeAttrs'] ?? params['sizeAttr'],
+      sizeSelectors = _accessors(_aliased(params, 'sizeSelector')),
+      sizeAttrs = _aliased(
+        params,
+        'sizeAttr',
         fallback: const <String>['text'],
       ),
-      imageSelectors = _strings(
-        params['imageSelectors'] ?? params['imageSelector'],
-      ),
-      imageAttrs = _strings(
-        params['imageAttrs'] ?? params['imageAttr'],
+      imageSelectors = _accessors(_aliased(params, 'imageSelector')),
+      imageAttrs = _aliased(
+        params,
+        'imageAttr',
         fallback: const <String>['data-src', 'src'],
       ),
       episodePatterns = _patterns(params['episodePatterns']),
@@ -683,17 +679,17 @@ class _TorrentRecordConfig {
   final List<String> sourceContainerSelectors;
   final List<String> sourceLabelSelectors;
   final List<String> sourceLabelAttrs;
-  final List<String> titleSelectors;
+  final List<_RowAccessor> titleSelectors;
   final List<String> titleAttrs;
-  final List<String> idSelectors;
+  final List<_RowAccessor> idSelectors;
   final List<String> idAttrs;
-  final List<String> exactSourceSelectors;
+  final List<_RowAccessor> exactSourceSelectors;
   final List<String> exactSourceAttrs;
-  final List<String> sourceNameSelectors;
+  final List<_RowAccessor> sourceNameSelectors;
   final List<String> sourceNameAttrs;
-  final List<String> sizeSelectors;
+  final List<_RowAccessor> sizeSelectors;
   final List<String> sizeAttrs;
-  final List<String> imageSelectors;
+  final List<_RowAccessor> imageSelectors;
   final List<String> imageAttrs;
   final List<_PatternSpec> episodePatterns;
   final List<_PatternSpec> excludePatterns;
@@ -716,6 +712,18 @@ class _TorrentRecordConfig {
   final bool dedupeByEpisode;
   final bool sortDescending;
   final int sourceNameBonus;
+
+  static List<String> _aliased(
+    Map<String, dynamic> params,
+    String singular, {
+    List<String> fallback = const <String>[],
+  }) => _strings(
+    params['${singular}s'] ?? params[singular],
+    fallback: fallback,
+  );
+
+  static List<_RowAccessor> _accessors(List<String> selectors) =>
+      selectors.map(_RowAccessor.compile).toList(growable: false);
 
   static List<String> _strings(
     Object? value, {
@@ -771,6 +779,50 @@ class _TorrentRecordConfig {
   static int _integer(Object? value) {
     if (value is num) return value.toInt();
     return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+}
+
+class _RowAccessor {
+  const _RowAccessor.css(String this._selector)
+    : _nthIndex = null,
+      _nthTag = null;
+
+  const _RowAccessor.nth(int this._nthIndex, this._nthTag) : _selector = null;
+
+  const _RowAccessor.none()
+    : _selector = null,
+      _nthIndex = null,
+      _nthTag = null;
+
+  final String? _selector;
+  final int? _nthIndex;
+  final String? _nthTag;
+
+  Element? resolve(Element row) {
+    final index = _nthIndex;
+    if (index != null) {
+      if (index >= row.children.length) return null;
+      final candidate = row.children[index];
+      return _nthTag == null || candidate.localName == _nthTag
+          ? candidate
+          : null;
+    }
+    final selector = _selector;
+    if (selector == null) return null;
+    if (selector.isEmpty) return row;
+    try {
+      return row.querySelector(selector);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static _RowAccessor compile(String selector) {
+    final nthChild = TorrentRecordParser._nthChildPattern.firstMatch(selector);
+    if (nthChild == null) return _RowAccessor.css(selector);
+    final index = (int.tryParse(nthChild.group(2)!) ?? 0) - 1;
+    if (index < 0) return const _RowAccessor.none();
+    return _RowAccessor.nth(index, nthChild.group(1)?.toLowerCase());
   }
 }
 

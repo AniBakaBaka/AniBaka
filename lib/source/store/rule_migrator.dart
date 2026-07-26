@@ -22,7 +22,6 @@ class RuleMigrator {
       'baseUrl': config.baseUrl,
       'iconUrl': config.iconUrl,
       'description': config.description,
-      'enabled': config.enabled,
       ...pipeline,
     });
   }

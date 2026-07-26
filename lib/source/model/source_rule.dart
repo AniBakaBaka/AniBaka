@@ -3,6 +3,8 @@
 /// search / detail / play 都是一组可序列化、可静态校验的 [PipelineStep]。
 library;
 
+import 'dart:collection';
+
 /// v2 规则格式标识。
 const String kSourceRuleFormatV2 = 'anx-rule/2';
 
@@ -27,16 +29,15 @@ class PipelineStep {
   PipelineStep._(this.op, this.params, this._parsedBranches);
 
   factory PipelineStep.fromJson(Map<String, dynamic> json) {
-    final op = (json['op'] as String?)?.trim() ?? '';
     final params = <String, dynamic>{
       for (final entry in json.entries)
-        if (entry.key != 'op') entry.key: entry.value,
+        if (entry.key != 'op' && entry.key != 'branches')
+          entry.key: entry.value,
     };
-    final branches = _parseBranches(params.remove('branches'));
     return PipelineStep._(
-      op,
-      Map<String, dynamic>.unmodifiable(params),
-      branches,
+      (json['op'] as String?)?.trim() ?? '',
+      UnmodifiableMapView(params),
+      _parseBranches(json['branches']),
     );
   }
 
@@ -76,14 +77,7 @@ class PipelineStep {
   }
 
   /// `first` 的分支列表；JSON 规则在载入时只解析一次。
-  List<List<PipelineStep>> get branches {
-    if (_parsedBranches != null) {
-      return _parsedBranches;
-    }
-    final value = params['branches'];
-    if (value is List<List<PipelineStep>>) return value;
-    return _parseBranches(value) ?? const [];
-  }
+  List<List<PipelineStep>> get branches => _parsedBranches ?? const [];
 
   static List<List<PipelineStep>>? _parseBranches(Object? value) {
     if (value is! List) return null;
@@ -141,10 +135,6 @@ class SourceRule {
   final bool useWebview;
   final bool directConnection;
 
-  final bool enabled;
-  final DateTime createdAt;
-  final DateTime updatedAt;
-
   SourceRule({
     required this.id,
     required this.name,
@@ -158,16 +148,11 @@ class SourceRule {
     List<PipelineStep>? play,
     this.useWebview = false,
     this.directConnection = false,
-    this.enabled = true,
-    DateTime? createdAt,
-    DateTime? updatedAt,
   }) : headers = Map.unmodifiable(headers ?? const {}),
        recipes = List.unmodifiable(recipes ?? const []),
        search = List.unmodifiable(search ?? const []),
        detail = List.unmodifiable(detail ?? const []),
-       play = List.unmodifiable(play ?? const []),
-       createdAt = createdAt ?? DateTime.now(),
-       updatedAt = updatedAt ?? DateTime.now();
+       play = List.unmodifiable(play ?? const []);
 
   /// 判断一个 JSON 是否声明为 v2 规则格式。
   static bool isV2Json(Map<String, dynamic> json) {
@@ -191,11 +176,7 @@ class SourceRule {
       id: (json['id'] as String?)?.trim() ?? '',
       name: (json['name'] as String?)?.trim() ?? '未命名源',
       baseUrl: (json['baseUrl'] as String?)?.trim() ?? '',
-      iconUrl:
-          (json['iconUrl'] ?? json['icon'] ?? json['favicon'] ?? json['badge'])
-              ?.toString()
-              .trim() ??
-          '',
+      iconUrl: json['iconUrl']?.toString().trim() ?? '',
       description: (json['description'] as String?)?.trim() ?? '',
       headers: json['headers'] is Map
           ? {
@@ -213,13 +194,6 @@ class SourceRule {
       play: parseSteps(json['play']),
       useWebview: json['useWebview'] == true,
       directConnection: json['directConnection'] == true,
-      enabled: json['enabled'] is bool ? json['enabled'] as bool : true,
-      createdAt: json['createdAt'] is String
-          ? DateTime.tryParse(json['createdAt'] as String)
-          : null,
-      updatedAt: json['updatedAt'] is String
-          ? DateTime.tryParse(json['updatedAt'] as String)
-          : null,
     );
   }
 
@@ -237,9 +211,6 @@ class SourceRule {
     'play': play.map((s) => s.toJson()).toList(),
     if (useWebview) 'useWebview': true,
     if (directConnection) 'directConnection': true,
-    'enabled': enabled,
-    'createdAt': createdAt.toIso8601String(),
-    'updatedAt': updatedAt.toIso8601String(),
   };
 
   SourceRule copyWith({
@@ -255,9 +226,6 @@ class SourceRule {
     List<PipelineStep>? play,
     bool? useWebview,
     bool? directConnection,
-    bool? enabled,
-    DateTime? createdAt,
-    DateTime? updatedAt,
   }) {
     return SourceRule(
       id: id ?? this.id,
@@ -272,9 +240,6 @@ class SourceRule {
       play: play ?? this.play,
       useWebview: useWebview ?? this.useWebview,
       directConnection: directConnection ?? this.directConnection,
-      enabled: enabled ?? this.enabled,
-      createdAt: createdAt ?? this.createdAt,
-      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 }

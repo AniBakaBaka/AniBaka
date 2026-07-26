@@ -38,6 +38,8 @@ class HhPlayerBootstrap {
 class AnimeRuleOps {
   AnimeRuleOps._();
 
+  static final RegExp _indexPattern = RegExp(r'^(.*?)\[(\d+)\]$');
+
   /// Parses Anime1's array-of-arrays catalog and applies the adapter's original
   /// bidirectional substring match.
   static List<Series> parseAnime1Catalog(
@@ -189,7 +191,7 @@ class AnimeRuleOps {
       return '';
     }
 
-    final rawUrl = _jsonPath(decoded, sourcePath)?.toString().trim() ?? '';
+    final rawUrl = jsonPath(decoded, sourcePath)?.toString().trim() ?? '';
     if (rawUrl.isEmpty) return '';
     try {
       return Uri.parse(mediaBaseUrl).resolve(rawUrl).toString();
@@ -317,9 +319,9 @@ class AnimeRuleOps {
     } catch (_) {
       return '';
     }
-    final code = _jsonPath(decoded, codePath)?.toString() ?? '';
+    final code = jsonPath(decoded, codePath)?.toString() ?? '';
     if (code != successCode) return '';
-    return _jsonPath(decoded, urlPath)?.toString().trim() ?? '';
+    return jsonPath(decoded, urlPath)?.toString().trim() ?? '';
   }
 
   static String _regexGroup(
@@ -343,12 +345,13 @@ class AnimeRuleOps {
     }
   }
 
-  static Object? _jsonPath(Object? value, String path) {
+  /// Walks a dot path (with optional `[n]` list indexes) through decoded JSON.
+  static Object? jsonPath(Object? value, String path) {
     Object? current = value;
     if (path.trim().isEmpty) return current;
     for (final segment in path.split('.')) {
       if (segment.isEmpty) continue;
-      final indexed = RegExp(r'^(.*?)\[(\d+)\]$').firstMatch(segment);
+      final indexed = _indexPattern.firstMatch(segment);
       if (indexed != null) {
         final key = indexed.group(1)!;
         final index = int.parse(indexed.group(2)!);

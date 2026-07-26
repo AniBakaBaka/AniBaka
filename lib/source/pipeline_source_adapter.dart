@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:flutter/foundation.dart';
+import 'package:html/dom.dart' show Document;
 import 'package:html/parser.dart' show parse;
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:xpath_selector_html_parser/xpath_selector_html_parser.dart';
@@ -21,18 +22,14 @@ import 'package:baka/source/engine/recipes.dart';
 import 'package:baka/source/model/source_rule.dart';
 import 'package:baka/source/runtime/request_scheduler.dart';
 import 'package:baka/source/runtime/scheduler_interceptor.dart';
+import 'package:baka/services/bgm_service.dart';
 import 'package:baka/services/remote_media_redirect_resolver.dart';
 
 /// Connects a source rule to the adapter and pipeline host contracts.
-class PipelineSourceAdapter extends AdapterBase
-    implements PipelineHost, PipelineWebviewReadyHost {
+class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
   PipelineSourceAdapter(SourceRule rule)
     : rule = Recipes.expand(rule),
-      super(
-        rule.name,
-        description: rule.description,
-        useWebview: rule.useWebview,
-      );
+      super(rule.name);
 
   final SourceRule rule;
   static const PipelineInterpreter _interpreter = PipelineInterpreter();
@@ -48,10 +45,20 @@ class PipelineSourceAdapter extends AdapterBase
   Map<String, Uri> _hlsProxyTargets = const {};
   Map<String, String> _hlsProxyHeaders = const {};
   late final _playFeatures = _inspectPlayFeatures(rule.play);
-  // Rule Hub rev 1 of 4kcz predates this flag. Keep installed copies working
-  // while rev 2 rolls out; new rules opt in explicitly.
+  // 遗留规则兼容 shim（与下方 validateAutoMatchedUrls 的 cycani 特判同类）：
+  // 早期已安装副本的 play 步骤缺失这些 flag，且遗留规则 play 可能为空列表，
+  // 无法经 RuleMigrator 注入，只能按 id 兜底。新规则应在步骤里显式声明。
   late final bool _followsEmbeddedPlayer =
       rule.id == '4kcz' || _playFeatures.followsEmbeddedPlayer;
+  late final bool _materializesHls =
+      rule.id == 'ani_pekolove' || _playFeatures.materializesHls;
+  // 同一页面 HTML 常被连续多个 select/searchList/episodes 步骤解析；
+  // 按 identity 缓存最近一次的 DOM，避免重复全量解析（消费方均只读）。
+  String? _lastParsedHtml;
+  Document? _lastParsedDoc;
+
+  static final RegExp _whitespacePattern = RegExp(r'\s+');
+  static final RegExp _hlsUriAttrPattern = RegExp(r'URI="([^"]+)"');
 
   @override
   String get baseUrl => rule.baseUrl;
@@ -84,6 +91,8 @@ class PipelineSourceAdapter extends AdapterBase
   @override
   bool get validatesOwnUrls => _playFeatures.validatesWithCookies;
 
+  // cycani 内置副本经 BundledRuleStore 直载 assets 规则，不经过
+  // RuleMigrator.ruleForConfig 的 flag 注入，故保留按 id 特判。
   @override
   bool get validateAutoMatchedUrls => rule.id == 'cycani';
 
@@ -92,6 +101,7 @@ class PipelineSourceAdapter extends AdapterBase
     _webViewTaskScope?.cancel();
     _mediaRedirectResolver?.close();
     stopPlaybackKeepAlive();
+    _dropParseCache();
     super.dispose();
   }
 
@@ -107,25 +117,86 @@ class PipelineSourceAdapter extends AdapterBase
     String bangumiName,
     String searchKeyword, {
     bool enhanceWithBgm = true,
-  }) => performStandardSearch(
-    bangumiName: bangumiName,
-    searchKeyword: searchKeyword,
-    searchFn: (keyword) => _interpreter.runSearch(rule, this, keyword),
-    enhanceWithBgm: enhanceWithBgm,
-  );
+  }) async {
+    try {
+      final unique = <String, Series>{};
+      if (bangumiName.isNotEmpty) {
+        for (final series in await _interpreter.runSearch(
+          rule,
+          this,
+          bangumiName,
+        )) {
+          unique[series.seriesId] = series;
+        }
+      }
+      if (searchKeyword.isNotEmpty && searchKeyword != bangumiName) {
+        for (final series in await _interpreter.runSearch(
+          rule,
+          this,
+          searchKeyword,
+        )) {
+          unique[series.seriesId] = series;
+        }
+      }
+      final series = unique.values.toList(growable: false);
+      if (!enhanceWithBgm) return series;
+      try {
+        return await _enhanceWithBgmInfo(series);
+      } catch (e) {
+        debugPrint('$name BGM enhancement failed: $e');
+        return series;
+      }
+    } catch (e) {
+      debugPrint('$name 搜索失败: $e');
+      return [];
+    } finally {
+      _dropParseCache();
+    }
+  }
+
+  Future<List<Series>> _enhanceWithBgmInfo(
+    List<Series> seriesList, {
+    int concurrency = 5,
+  }) async {
+    final results = List<Series>.of(seriesList, growable: false);
+    for (var i = 0; i < seriesList.length; i += concurrency) {
+      final end = (i + concurrency).clamp(0, seriesList.length);
+      final enhanced = await Future.wait(
+        List<Future<Series>>.generate(end - i, (offset) async {
+          final series = seriesList[i + offset];
+          try {
+            final subject = await BgmService.resolveSubject(title: series.name);
+            return Series(
+              series.seriesId,
+              series.name,
+              image: subject?.imageUrl ?? series.image,
+              description: subject?.summary ?? series.description ?? '暂无简介',
+              bgmId: subject?.subjectId ?? series.bgmId,
+              score: subject?.score ?? series.score,
+            );
+          } catch (_) {
+            return series;
+          }
+        }, growable: false),
+      );
+      results.setRange(i, end, enhanced);
+    }
+    return results;
+  }
 
   @override
-  Future<List<Source>> getSources(String seriesId) =>
-      _interpreter.runDetail(rule, this, seriesId);
+  Future<List<Source>> getSources(String seriesId) => _interpreter
+      .runDetail(rule, this, seriesId)
+      .whenComplete(_dropParseCache);
 
   @override
   Future<String> getDownloadUrl(String episodeId) {
-    if (!_playFeatures.usesCookies) {
-      return _interpreter.runPlay(rule, this, episodeId);
-    }
-    return _withPlayCookieSnapshot(
-      () => _interpreter.runPlay(rule, this, episodeId),
-    );
+    final future = !_playFeatures.usesCookies
+        ? _interpreter.runPlay(rule, this, episodeId)
+        : _withPlayCookieSnapshot(
+            () => _interpreter.runPlay(rule, this, episodeId),
+          );
+    return future.whenComplete(_dropParseCache);
   }
 
   @override
@@ -145,7 +216,7 @@ class PipelineSourceAdapter extends AdapterBase
         return (url: '', httpHeaders: const <String, String>{});
       }
       return (url: media.url, httpHeaders: await _resolveMediaHeaders(media));
-    });
+    }).whenComplete(_dropParseCache);
   }
 
   @override
@@ -162,15 +233,18 @@ class PipelineSourceAdapter extends AdapterBase
     final declaredVariables = step.params['variables'];
     if (declaredVariables is Map) {
       for (final entry in declaredVariables.entries) {
-        variables[entry.key.toString()] = _renderPlaybackTemplate(
+        variables[entry.key.toString()] = PipelineInterpreter.renderTemplate(
           entry.value.toString(),
-          variables,
+          (name) => variables[name],
         );
       }
     }
 
     final urlTemplate = step.str('url')?.trim() ?? '';
-    final keepAliveUrl = _renderPlaybackTemplate(urlTemplate, variables);
+    final keepAliveUrl = PipelineInterpreter.renderTemplate(
+      urlTemplate,
+      (name) => variables[name],
+    );
     final keepAliveUri = Uri.tryParse(keepAliveUrl);
     if (keepAliveUri == null || !keepAliveUri.hasScheme) {
       debugPrint('${rule.id}: invalid playback keep-alive URL: $keepAliveUrl');
@@ -181,9 +255,9 @@ class PipelineSourceAdapter extends AdapterBase
     final rawHeaders = step.params['headers'];
     if (rawHeaders is Map) {
       for (final entry in rawHeaders.entries) {
-        headers[entry.key.toString()] = _renderPlaybackTemplate(
+        headers[entry.key.toString()] = PipelineInterpreter.renderTemplate(
           entry.value.toString(),
-          variables,
+          (name) => variables[name],
         );
       }
     }
@@ -230,7 +304,7 @@ class PipelineSourceAdapter extends AdapterBase
       }
     }
 
-    if (!(rule.id == 'ani_pekolove' || _playFeatures.materializesHls) ||
+    if (!_materializesHls ||
         !prepared.url.toLowerCase().contains('.m3u8')) {
       return prepared;
     }
@@ -445,7 +519,6 @@ class PipelineSourceAdapter extends AdapterBase
     Uri manifestUri,
     String Function(Uri target) proxyUrlFor,
   ) {
-    final uriAttribute = RegExp(r'URI="([^"]+)"');
     return body
         .replaceAll('\r\n', '\n')
         .split('\n')
@@ -455,7 +528,7 @@ class PipelineSourceAdapter extends AdapterBase
           if (!trimmed.startsWith('#')) {
             return proxyUrlFor(manifestUri.resolve(trimmed));
           }
-          return line.replaceAllMapped(uriAttribute, (match) {
+          return line.replaceAllMapped(_hlsUriAttrPattern, (match) {
             final resolved = manifestUri.resolve(match.group(1)!);
             return 'URI="${proxyUrlFor(resolved)}"';
           });
@@ -503,21 +576,6 @@ class PipelineSourceAdapter extends AdapterBase
         _playbackKeepAliveInFlightGeneration = null;
       }
     }
-  }
-
-  static final RegExp _playbackTemplatePattern = RegExp(
-    r'\{([a-zA-Z0-9_]+)(:raw)?\}',
-  );
-
-  static String _renderPlaybackTemplate(
-    String template,
-    Map<String, String> variables,
-  ) {
-    if (!template.contains('{')) return template;
-    return template.replaceAllMapped(_playbackTemplatePattern, (match) {
-      final value = variables[match.group(1)!] ?? '';
-      return match.group(2) == null ? Uri.encodeComponent(value) : value;
-    });
   }
 
   Future<T> _withPlayCookieSnapshot<T>(Future<T> Function() action) async {
@@ -630,7 +688,7 @@ class PipelineSourceAdapter extends AdapterBase
 
   @override
   String toAbsolute(String url, String base) =>
-      ensureAbsoluteUrl(url, base.isEmpty ? baseUrl : base);
+      VideoUrlExtractor.toAbsolute(url.trim(), base.isEmpty ? baseUrl : base);
 
   @override
   String normalizeUrl(String url, String pageUrl) =>
@@ -652,7 +710,6 @@ class PipelineSourceAdapter extends AdapterBase
     String? referer,
     String? contentType,
     RequestPriority priority = RequestPriority.search,
-    RequestCancelToken? cancelToken,
   }) async {
     try {
       final resp = await dio.request(
@@ -668,10 +725,7 @@ class PipelineSourceAdapter extends AdapterBase
             if (referer != null && referer.isNotEmpty) 'Referer': referer,
             ...?headers,
           },
-          extra: {
-            SchedulerInterceptor.priorityKey: priority.index,
-            SchedulerInterceptor.cancelKey: ?cancelToken,
-          },
+          extra: {SchedulerInterceptor.priorityKey: priority},
         ),
       );
       return resp.data?.toString() ?? '';
@@ -686,12 +740,28 @@ class PipelineSourceAdapter extends AdapterBase
     String html, {
     required List<String> selectors,
     String? detailPattern,
-  }) => HtmlParser.parseSearchResults(
-    html,
-    baseUrl: baseUrl,
-    selectors: selectors,
-    detailPattern: detailPattern,
-  );
+  }) {
+    if (html.trim().isEmpty) return const [];
+    return HtmlParser.parseSearchResults(
+      _parseCached(html),
+      baseUrl: baseUrl,
+      selectors: selectors,
+      detailPattern: detailPattern,
+    );
+  }
+
+  Document _parseCached(String html) {
+    if (!identical(html, _lastParsedHtml)) {
+      _lastParsedDoc = parse(html);
+      _lastParsedHtml = html;
+    }
+    return _lastParsedDoc!;
+  }
+
+  void _dropParseCache() {
+    _lastParsedHtml = null;
+    _lastParsedDoc = null;
+  }
 
   @override
   List<Series> parseSearchListXPath(
@@ -702,7 +772,7 @@ class PipelineSourceAdapter extends AdapterBase
   }) {
     final results = <Series>[];
     try {
-      final docEl = parse(html).documentElement;
+      final docEl = _parseCached(html).documentElement;
       if (docEl == null) return results;
       final nodes = docEl.queryXPath(listXPath).nodes;
       for (final node in nodes) {
@@ -718,7 +788,7 @@ class PipelineSourceAdapter extends AdapterBase
             '';
         results.add(
           Series(
-            ensureAbsoluteUrl(href, baseUrl),
+            toAbsolute(href, baseUrl),
             name.trim().isEmpty ? '未知标题' : name.trim(),
           ),
         );
@@ -737,7 +807,7 @@ class PipelineSourceAdapter extends AdapterBase
   }) {
     if (html.trim().isEmpty) return const [];
     return HtmlParser.parseSources(
-      parse(html),
+      _parseCached(html),
       baseUrl: baseUrl,
       listSelectors: listSelectors.isEmpty ? null : listSelectors,
       tabSelectors: tabSelectors,
@@ -752,7 +822,7 @@ class PipelineSourceAdapter extends AdapterBase
   }) {
     final sources = <Source>[];
     try {
-      final docEl = parse(html).documentElement;
+      final docEl = _parseCached(html).documentElement;
       if (docEl == null) return sources;
       final roads = docEl.queryXPath(roadsXPath).nodes;
       var count = 1;
@@ -762,9 +832,10 @@ class PipelineSourceAdapter extends AdapterBase
         for (var i = 0; i < items.length; i++) {
           final href = items[i].attributes['href'] ?? '';
           if (href.isEmpty) continue;
-          var name = items[i].node.text?.replaceAll(RegExp(r'\s+'), '') ?? '';
+          var name =
+              items[i].node.text?.replaceAll(_whitespacePattern, '') ?? '';
           if (name.isEmpty) name = '第${i + 1}集';
-          episodes.add(Episode(ensureAbsoluteUrl(href, baseUrl), i, name));
+          episodes.add(Episode(toAbsolute(href, baseUrl), i, name));
         }
         if (episodes.isNotEmpty) {
           sources.add(Source(episodes, '播放列表$count'));
@@ -787,7 +858,7 @@ class PipelineSourceAdapter extends AdapterBase
   @override
   String? selectAttr(String html, String selector, String attr) {
     try {
-      final element = parse(html).querySelector(selector);
+      final element = _parseCached(html).querySelector(selector);
       if (element == null) return null;
       return attr == 'text' ? element.text.trim() : element.attributes[attr];
     } catch (_) {
@@ -798,7 +869,7 @@ class PipelineSourceAdapter extends AdapterBase
   @override
   List<String> selectAll(String html, String selector, String attr) {
     try {
-      return parse(html)
+      return _parseCached(html)
           .querySelectorAll(selector)
           .map(
             (e) => attr == 'text' ? e.text.trim() : (e.attributes[attr] ?? ''),
@@ -811,10 +882,7 @@ class PipelineSourceAdapter extends AdapterBase
   }
 
   @override
-  Future<String> renderWithWebview(String url) => renderWithWebviewReady(url);
-
-  @override
-  Future<String> renderWithWebviewReady(
+  Future<String> renderWithWebview(
     String url, {
     bool Function(String html)? isReady,
     Duration timeout = const Duration(seconds: 30),
@@ -830,7 +898,7 @@ class PipelineSourceAdapter extends AdapterBase
         userAgent: requestUserAgent,
         taskScope: _webViewTaskScope ??= WebViewTaskScope(),
       );
-      if (cookies.isNotEmpty) await storeWebViewCookies(url, cookies);
+      if (cookies.isNotEmpty) await _storeWebViewCookies(url, cookies);
       return html;
     } catch (e) {
       debugPrint('$name: WebView 渲染失败: $e');
@@ -838,8 +906,7 @@ class PipelineSourceAdapter extends AdapterBase
     }
   }
 
-  @override
-  Future<void> storeWebViewCookies(String url, String cookieString) async {
+  Future<void> _storeWebViewCookies(String url, String cookieString) async {
     final raw = cookieString.trim();
     if (raw.isEmpty) return;
     try {

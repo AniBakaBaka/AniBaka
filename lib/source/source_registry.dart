@@ -4,7 +4,6 @@ import 'package:baka/source/models/source.dart';
 import 'package:baka/source/pipeline_source_adapter.dart';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/source/store/bundled_rule_store.dart';
-import 'package:baka/source/store/rule_migrator.dart';
 import 'package:flutter/material.dart';
 
 typedef AdapterFactory = AdapterBase? Function();
@@ -19,7 +18,6 @@ class AdapterDescriptor {
   final String displayName;
   final String playerContent;
   final String? idPattern;
-  final bool quickSearchEnabled;
   final IconData icon;
   final Color color;
   final String? statusLabel;
@@ -33,7 +31,6 @@ class AdapterDescriptor {
     required this.color,
     required this.factory,
     this.idPattern,
-    this.quickSearchEnabled = true,
     this.statusLabel,
   });
 
@@ -62,10 +59,7 @@ class AdapterDescriptor {
     required AdapterBase adapter,
     required Map<String, dynamic> item,
   }) async {
-    final sources = await adapter.getSourcesWithContext(
-      item['seriesId'].toString(),
-      item,
-    );
+    final sources = await adapter.getSources(item['seriesId'].toString());
     return _buildPlayerPayload(
       sourceKey: key,
       displayName: displayName,
@@ -201,10 +195,6 @@ class AdapterRegistry {
     for (final source in builtinSources) source.key: source,
   };
 
-  static final List<AdapterDescriptor> quickSearchSources = builtinSources
-      .where((source) => source.quickSearchEnabled)
-      .toList(growable: false);
-
   static AdapterDescriptor? descriptorFor(String key) => _builtinSourceMap[key];
 
   static bool isBuiltinSource(String source) =>
@@ -223,27 +213,6 @@ class AdapterRegistry {
 
   static AdapterBase? createAdapter(String key) {
     return descriptorFor(key)?.createAdapter();
-  }
-
-  static AdapterBase? createAdapterForSource(
-    String? source, {
-    CustomSourceConfig? customSourceConfig,
-  }) {
-    if (source == null || source.isEmpty) {
-      return null;
-    }
-
-    if (isCustomSource(source)) {
-      if (customSourceConfig == null) {
-        return null;
-      }
-
-      return PipelineSourceAdapter(
-        RuleMigrator.ruleForConfig(customSourceConfig),
-      );
-    }
-
-    return createAdapter(source);
   }
 }
 
@@ -285,10 +254,7 @@ Future<Map<String, dynamic>?> buildCustomSourcePlayerData({
   required AdapterBase adapter,
   required Map<String, dynamic> item,
 }) async {
-  final sources = await adapter.getSourcesWithContext(
-    item['seriesId'].toString(),
-    item,
-  );
+  final sources = await adapter.getSources(item['seriesId'].toString());
   return _buildPlayerPayload(
     sourceKey: AdapterRegistry.customSourceKey(config.id),
     displayName: config.name,
@@ -352,14 +318,11 @@ Map<String, dynamic>? _buildPlayerPayload({
     if (item['score'] != null) 'score': item['score'],
     if (item['bgmImageUrl']?.toString().isNotEmpty ?? false)
       'bgmImageUrl': item['bgmImageUrl'],
-    ...?sourceConfig == null
-        ? null
-        : <String, dynamic>{'sourceConfig': sourceConfig},
+    'sourceConfig': ?sourceConfig,
   };
 }
 
 List<String> buildAdapterVideoList(List<Source> sources) {
-  var maxEpisodeIndex = -1;
   final lines = <int, _VideoLine>{};
   for (var sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
     final source = sources[sourceIndex];
@@ -376,17 +339,14 @@ List<String> buildAdapterVideoList(List<Source> sources) {
         line.episodeIds.add(episode.episodeId);
         line.lastSourceIndex = sourceIndex;
       }
-      if (index > maxEpisodeIndex) maxEpisodeIndex = index;
     }
   }
 
-  final videoList = <String>[];
-  for (var i = 0; i <= maxEpisodeIndex; i++) {
-    final line = lines[i];
-    if (line == null) continue;
-    videoList.add([line.title, ...line.episodeIds].join(r'$'));
-  }
-  return videoList;
+  final indexes = lines.keys.toList()..sort();
+  return [
+    for (final i in indexes)
+      [lines[i]!.title, ...lines[i]!.episodeIds].join(r'$'),
+  ];
 }
 
 class _VideoLine {

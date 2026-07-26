@@ -193,10 +193,11 @@ class RuleValidator {
     }
   }
 
+  static final RegExp _templatePlaceholderPattern = RegExp(
+    r'\{[a-zA-Z0-9_]+(?::raw)?\}',
+  );
+
   static String _regexValidationPattern(String pattern) {
-    return pattern.replaceAllMapped(
-      RegExp(r'\{[a-zA-Z0-9_]+(?::raw)?\}'),
-      (_) => '0',
-    );
+    return pattern.replaceAllMapped(_templatePlaceholderPattern, (_) => '0');
   }
 }

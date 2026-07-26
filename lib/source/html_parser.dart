@@ -1,8 +1,8 @@
 import 'package:html/dom.dart' show Document, Element;
-import 'package:html/parser.dart';
 import 'package:baka/source/models/series.dart';
 import 'package:baka/source/models/episode.dart';
 import 'package:baka/source/models/source.dart';
+import 'package:baka/source/video_url_extractor.dart';
 
 /// Stateless HTML parsing for search results and episode lists.
 class HtmlParser {
@@ -23,12 +23,11 @@ class HtmlParser {
   ];
 
   static List<Series> parseSearchResults(
-    String html, {
+    Document doc, {
     required String baseUrl,
     List<String>? selectors,
     String? detailPattern,
   }) {
-    final doc = parse(html);
     final allSelectors =
         selectors?.followedBy(_searchSelectors) ?? _searchSelectors;
 
@@ -60,15 +59,14 @@ class HtmlParser {
     final link = _findLink(element, detailPattern);
     if (link == null) return null;
 
+    if (!_isUsableLink(link, detailPattern)) return null;
     final href = link.attributes['href'] ?? '';
-    if (href.isEmpty || href.startsWith('javascript')) return null;
-    if (detailPattern != null && !href.contains(detailPattern)) return null;
 
     final name = _extractTitle(element, link);
     if (name.isEmpty) return null;
 
     return Series(
-      _toAbsolute(href, baseUrl),
+      VideoUrlExtractor.toAbsolute(href, baseUrl),
       name,
       image: _extractImage(element, baseUrl),
     );
@@ -123,7 +121,9 @@ class HtmlParser {
         element.attributes['data-original'] ??
         element.attributes['data-src'] ??
         element.attributes['src'];
-    return (src != null && src.isNotEmpty) ? _toAbsolute(src, baseUrl) : null;
+    return (src != null && src.isNotEmpty)
+        ? VideoUrlExtractor.toAbsolute(src, baseUrl)
+        : null;
   }
 
   static List<Series> _fallbackByDetailLinks(
@@ -138,7 +138,7 @@ class HtmlParser {
       if (href.isEmpty || !seen.add(href)) continue;
       final name = (link.attributes['title'] ?? link.text).trim();
       if (name.length < 2) continue;
-      results.add(Series(_toAbsolute(href, baseUrl), name));
+      results.add(Series(VideoUrlExtractor.toAbsolute(href, baseUrl), name));
     }
     return results;
   }
@@ -188,14 +188,6 @@ class HtmlParser {
       final containers = doc.querySelectorAll(selector);
       if (containers.isEmpty) continue;
 
-      if (containers.length == 1) {
-        final episodes = _extractEpisodes(containers[0], baseUrl);
-        if (episodes.isNotEmpty) {
-          return [Source(episodes, _sourceName(0, labels))];
-        }
-        continue;
-      }
-
       final sources = <Source>[];
       for (final container in containers) {
         final episodes = _extractEpisodes(container, baseUrl);
@@ -230,7 +222,7 @@ class HtmlParser {
     final episodes = <Episode>[];
     final seen = <String>{};
     for (var i = 0; i < validLinks.length; i++) {
-      final episodeId = _toAbsolute(hrefs[i], baseUrl);
+      final episodeId = VideoUrlExtractor.toAbsolute(hrefs[i], baseUrl);
       if (!seen.add(episodeId)) continue;
 
       final number = episodeNumbers[i];
@@ -327,51 +319,11 @@ class HtmlParser {
   }
 
   static List<Source> _dedupe(List<Source> sources) {
-    final buckets = <int, List<Source>>{};
-    final unique = <Source>[];
-    for (final source in sources) {
-      if (source.episodes.isEmpty) continue;
-      var hash = 0;
-      for (final episode in source.episodes) {
-        hash = 0x1fffffff & (hash * 31 + episode.episodeId.hashCode);
-      }
-      final bucket = buckets[hash];
-      var duplicate = false;
-      if (bucket != null) {
-        for (final candidate in bucket) {
-          if (_sameEpisodeIds(source, candidate)) {
-            duplicate = true;
-            break;
-          }
-        }
-      }
-      if (duplicate) continue;
-      (buckets[hash] ??= <Source>[]).add(source);
-      unique.add(source);
-    }
-    return unique;
-  }
-
-  static bool _sameEpisodeIds(Source a, Source b) {
-    if (a.episodes.length != b.episodes.length) return false;
-    for (var i = 0; i < a.episodes.length; i++) {
-      if (a.episodes[i].episodeId != b.episodes[i].episodeId) return false;
-    }
-    return true;
-  }
-
-  static String _toAbsolute(String url, String baseUrl) {
-    if (url.isEmpty) return url;
-    if (url.startsWith('http')) return url;
-    if (url.startsWith('//')) {
-      final scheme = Uri.tryParse(baseUrl)?.scheme ?? 'https';
-      return '$scheme:$url';
-    }
-    try {
-      return Uri.parse(baseUrl).resolve(url).toString();
-    } catch (_) {
-      final sep = url.startsWith('/') || baseUrl.endsWith('/') ? '' : '/';
-      return '$baseUrl$sep$url';
-    }
+    final seen = <String>{};
+    return [
+      for (final source in sources)
+        if (seen.add(source.episodes.map((e) => e.episodeId).join('\x00')))
+          source,
+    ];
   }
 }

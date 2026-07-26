@@ -46,25 +46,42 @@ class VideoUrlExtractor {
 
   static final _expiringSignRegex = RegExp(r'^.+:\d{9,}$');
 
-  static const _queryParamKeys = [
-    'url', 'u', 'src', 'file', 'video', 'videoUrl', 'play_url', 'path',
-  ];
+  static final _trailingJunkPattern = RegExp(r'[,;.\s]+$');
 
+  static const _queryParamKeys = [
+    'url',
+    'u',
+    'src',
+    'file',
+    'video',
+    'videoUrl',
+    'play_url',
+    'path',
+  ];
 
   static bool isVideoUrl(String url) {
     if (url.isEmpty) return false;
     final lower = url.toLowerCase();
+    return _isVideoUrlLower(lower) || _cdnSignedRegex.hasMatch(lower);
+  }
+
+  static bool _isVideoUrlLower(String lower) {
     return _videoExtRegex.hasMatch(lower) ||
         lower.contains('type=m3u8') ||
         lower.contains('/hls/') ||
         lower.contains('/video/tos/') ||
         lower.contains('mime_type=video') ||
-        lower.contains('mime=video') ||
-        _cdnSignedRegex.hasMatch(lower);
+        lower.contains('mime=video');
   }
 
   static bool isSignedCdnUrl(String url) {
-    if (_cdnSignedRegex.hasMatch(url.toLowerCase())) return true;
+    final lower = url.toLowerCase();
+    return _cdnSignedRegex.hasMatch(lower) || _hasExpiringSign(url, lower);
+  }
+
+  /// query 中是否带过期型 sign 参数（`sign=xxx:时间戳`）。
+  static bool _hasExpiringSign(String url, String lower) {
+    if (!lower.contains('sign=')) return false;
     try {
       final uri = Uri.parse(url);
       for (final entry in uri.queryParameters.entries) {
@@ -82,26 +99,36 @@ class VideoUrlExtractor {
     final lower = url.toLowerCase();
     if (lower.startsWith('blob:') || lower == 'about:blank') return false;
     if (lower.contains('mime=image') || lower.contains('image/')) return false;
-    if (!isSignedCdnUrl(url) && _nonVideoRegex.hasMatch(lower)) return false;
-    return isVideoUrl(url) ||
+    final signed =
+        _cdnSignedRegex.hasMatch(lower) || _hasExpiringSign(url, lower);
+    if (!signed && _nonVideoRegex.hasMatch(lower)) return false;
+    return signed ||
+        _isVideoUrlLower(lower) ||
         lower.contains('.aliyuncs.com') ||
         lower.contains('.myqcloud.com') ||
         lower.contains('cloudflarestorage') ||
-        lower.contains('objstorage') ||
-        isSignedCdnUrl(url);
+        lower.contains('objstorage');
   }
 
+  /// 单趟反转义常见的 JS/HTML 转义序列（长序列在前，双反斜杠放最后兜底）。
+  static final _escapePattern = RegExp(
+    r'''\\u002F|\\u0026|\\"|\\'|\\/|\\\\|&amp;|&quot;''',
+  );
+
+  static const _escapeMap = {
+    r'\u002F': '/',
+    r'\u0026': '&',
+    r'\"': '"',
+    r"\'": "'",
+    r'\/': '/',
+    r'\\': '',
+    '&amp;': '&',
+    '&quot;': '"',
+  };
 
   static String normalizeUrlText(String text) {
-    return text
-        .replaceAll(r'\"', '"')
-        .replaceAll(r"\'", "'")
-        .replaceAll(r'\/', '/')
-        .replaceAll(r'\u002F', '/')
-        .replaceAll(r'\u0026', '&')
-        .replaceAll(r'\\', '')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&quot;', '"');
+    if (!text.contains(r'\') && !text.contains('&')) return text;
+    return text.replaceAllMapped(_escapePattern, (m) => _escapeMap[m[0]]!);
   }
 
   static String? tryBase64Decode(String value) {
@@ -125,7 +152,6 @@ class VideoUrlExtractor {
       return null;
     }
   }
-
 
   /// Extract the best video direct-link from page content.
   /// m3u8 is preferred; otherwise first playable URL wins.
@@ -159,8 +185,8 @@ class VideoUrlExtractor {
       final raw = match.group(0) ?? '';
       // Check nested URL in query params (e.g. `/player?url=...m3u8`)
       final nested = _extractNestedUrl(raw);
+      if (nested == null && !isPlayable(raw)) continue;
       final url = nested ?? raw;
-      if (!isPlayable(url)) continue;
       final abs = toAbsolute(url, pageUrl);
       if (abs.contains('.m3u8')) return abs;
       fallback ??= abs;
@@ -169,6 +195,7 @@ class VideoUrlExtractor {
   }
 
   static String? _extractNestedUrl(String playerUrl) {
+    if (!playerUrl.contains('?')) return null;
     try {
       final uri = Uri.parse(playerUrl);
       for (final key in _queryParamKeys) {
@@ -176,7 +203,9 @@ class VideoUrlExtractor {
         if (value == null || value.isEmpty) continue;
         var decoded = value;
         if (decoded.contains('%')) {
-          try { decoded = Uri.decodeComponent(decoded); } catch (_) {}
+          try {
+            decoded = Uri.decodeComponent(decoded);
+          } catch (_) {}
         }
         if (isPlayable(decoded)) return decoded;
         final nested = decodeEncodedVideoUrl(decoded);
@@ -185,7 +214,6 @@ class VideoUrlExtractor {
     } catch (_) {}
     return null;
   }
-
 
   static String toAbsolute(String url, String baseUrl) {
     if (url.isEmpty) return url;
@@ -224,11 +252,13 @@ class VideoUrlExtractor {
           final decoded = Uri.decodeComponent(text);
           if (decoded == text) break;
           text = decoded;
-        } catch (_) { break; }
+        } catch (_) {
+          break;
+        }
       }
     }
 
-    text = text.replaceAll(RegExp(r'[,;.\s]+$'), '');
+    text = text.replaceAll(_trailingJunkPattern, '');
 
     final nested = _extractNestedUrl(text);
     if (nested != null && nested.isNotEmpty) return toAbsolute(nested, pageUrl);

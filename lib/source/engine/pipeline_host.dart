@@ -37,7 +37,6 @@ abstract class PipelineHost {
     String? referer,
     String? contentType,
     RequestPriority priority = RequestPriority.search,
-    RequestCancelToken? cancelToken,
   });
 
   /// 用 CSS 选择器从 HTML 解析搜索结果列表。
@@ -79,22 +78,17 @@ abstract class PipelineHost {
   List<String> selectAll(String html, String selector, String attr);
 
   /// WebView 渲染取页面 HTML；未启用返回空串。
-  Future<String> renderWithWebview(String url);
-
-  /// WebView 嗅探视频直链；未启用返回空串。
-  Future<String> sniffWithWebview(String url);
-}
-
-/// 可选的 WebView HTML 就绪等待能力。
-///
-/// 普通测试宿主只需实现 [PipelineHost.renderWithWebview]；真实宿主实现本接口后，
-/// 管线里的 `sniff(goal: html)` 可以把规则声明的就绪条件和超时参数传到底层
-/// WebView，避免在 JS challenge 或客户端渲染尚未完成时过早读取 HTML。
-abstract class PipelineWebviewReadyHost {
-  Future<String> renderWithWebviewReady(
+  ///
+  /// 管线里的 `sniff(goal: html)` 可以通过 [isReady] 把规则声明的就绪条件
+  /// 传到底层 WebView，配合 [timeout] / [settleDelay] 避免在 JS challenge
+  /// 或客户端渲染尚未完成时过早读取 HTML。
+  Future<String> renderWithWebview(
     String url, {
     bool Function(String html)? isReady,
     Duration timeout = const Duration(seconds: 30),
     Duration settleDelay = const Duration(seconds: 1),
   });
+
+  /// WebView 嗅探视频直链；未启用返回空串。
+  Future<String> sniffWithWebview(String url);
 }

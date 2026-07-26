@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:webview_flutter/webview_flutter.dart';
@@ -28,11 +29,6 @@ class WebViewAdapter {
   static const String desktopUserAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
-
-  /// 移动端 User-Agent
-  static const String mobileUserAgent =
-      'Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 '
-      '(KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36';
 
   /// 视频嗅探脚本，幂等安装。
   ///
@@ -496,27 +492,16 @@ class WebViewAdapter {
 
   static String _cleanJsResult(dynamic result) {
     if (result == null) return '';
-    final s = result.toString().replaceAll(RegExp(r'^"|"$'), '').trim();
+    var s = result.toString().trim();
+    if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+      try {
+        s = (jsonDecode(s) as String).trim();
+      } catch (_) {
+        s = s.substring(1, s.length - 1).trim();
+      }
+    }
     if (s == 'null' || s == 'undefined' || s.startsWith('blob:')) return '';
     return s;
-  }
-
-  static final RegExp _escapePattern = RegExp(
-    r'\\u([0-9a-fA-F]{4})|\\(["\\/nrt])',
-  );
-
-  static String _decodeUnicodeEscapes(String input) {
-    if (!input.contains(r'\')) return input;
-    return input.replaceAllMapped(_escapePattern, (m) {
-      final hex = m.group(1);
-      if (hex != null) return String.fromCharCode(int.parse(hex, radix: 16));
-      return switch (m.group(2)!) {
-        'n' => '\n',
-        'r' => '\r',
-        't' => '\t',
-        final c => c,
-      };
-    });
   }
 
   static Future<String?> _pollSniffedUrl(
@@ -560,20 +545,16 @@ class WebViewAdapter {
     caseSensitive: false,
   );
 
-  static bool _isTransientChallengeHtml(String html) {
-    if (html.trim().isEmpty) return false;
-    return _transientChallengePattern.hasMatch(html);
-  }
+  static bool _isTransientChallengeHtml(String html) =>
+      _transientChallengePattern.hasMatch(html);
 
   static final RegExp _macCmsSmartVerifyPattern = RegExp(
     r'smart-verify-btn|smart_verify',
     caseSensitive: false,
   );
 
-  static bool _isMacCmsSmartVerifyPage(String html) {
-    if (html.trim().isEmpty) return false;
-    return _macCmsSmartVerifyPattern.hasMatch(html);
-  }
+  static bool _isMacCmsSmartVerifyPage(String html) =>
+      _macCmsSmartVerifyPattern.hasMatch(html);
 
   static Future<(String, String)> _pollPageContent(
     Future<dynamic> Function(String js) exec,
@@ -601,25 +582,23 @@ class WebViewAdapter {
     var html = '';
     while (!cancelled() && DateTime.now().isBefore(deadline)) {
       try {
-        final current = _decodeUnicodeEscapes(
-          _cleanJsResult(await exec(_htmlExtractScript)),
-        );
+        final current = _cleanJsResult(await exec(_htmlExtractScript));
         if (current.isNotEmpty) {
           html = current;
+          // JS/CDN challenge 页面只是中间态。即使文档已经 complete，也要
+          // 等其自动 POST / reload 完成后再把 HTML 交给管线。
+          final transient = _isTransientChallengeHtml(current);
+          if (!transient && (isReady == null || isReady(current))) {
+            break;
+          }
           // MacCMS 智能验证页：自动点击验证按钮，页面会自行 POST 并 reload。
-          if (_isMacCmsSmartVerifyPage(current)) {
+          if (transient && _isMacCmsSmartVerifyPage(current)) {
             try {
               await exec(
                 'try{var b=document.getElementById("smart-verify-btn");'
                 'if(b)b.click();}catch(e){}',
               );
             } catch (_) {}
-          }
-          // JS/CDN challenge 页面只是中间态。即使文档已经 complete，也要
-          // 等其自动 POST / reload 完成后再把 HTML 交给管线。
-          if (!_isTransientChallengeHtml(current) &&
-              (isReady == null || isReady(current))) {
-            break;
           }
         }
       } catch (_) {}
@@ -655,23 +634,6 @@ class WebViewAdapter {
     onCancelled: () => null,
   );
 
-  /// 短超时嗅探：适合直链就写在页面状态（全局变量 / DOM）里的站点。
-  static Future<String?> extractVideoUrlFromPageState(
-    String playerUrl, {
-    String? userAgent,
-    Duration timeout = const Duration(seconds: 8),
-    WebViewTaskScope? taskScope,
-  }) => _run(
-    url: playerUrl,
-    userAgent: userAgent ?? desktopUserAgent,
-    timeout: timeout + const Duration(seconds: 5),
-    sniff: true,
-    taskScope: taskScope,
-    poll: (exec, cancelled) => _pollSniffedUrl(exec, cancelled, timeout, false),
-    onTimeout: () => null,
-    onCancelled: () => null,
-  );
-
   /// 加载页面并返回 (HTML, JS 可见 cookie)。
   /// cookie 可由调用方回写到 Dio 的 CookieJar 以延续普通渲染会话。
   static Future<(String html, String cookies)> getPageContentWithCookies(
@@ -697,20 +659,4 @@ class WebViewAdapter {
     onTimeout: () => throw Exception('获取页面内容超时'),
     onCancelled: () => ('', ''),
   );
-
-  static Future<String> getPageContent(
-    String url, {
-    bool Function(String html)? isReady,
-    Duration timeout = const Duration(seconds: 30),
-    Duration settleDelay = const Duration(seconds: 1),
-    String? userAgent,
-    WebViewTaskScope? taskScope,
-  }) async => (await getPageContentWithCookies(
-    url,
-    isReady: isReady,
-    timeout: timeout,
-    settleDelay: settleDelay,
-    userAgent: userAgent,
-    taskScope: taskScope,
-  )).$1;
 }

@@ -50,8 +50,6 @@ class BundledRuleStore {
   static Map<String, SourceRule> _rules = const <String, SourceRule>{};
   static Future<void>? _loading;
 
-  static Iterable<String> get keys => builtinAssets.keys;
-
   static Future<void> load() => _loading ??= _load();
 
   static SourceRule? ruleFor(String key) => _rules[key];
@@ -59,28 +57,34 @@ class BundledRuleStore {
   static int versionFor(String key) => builtinVersions[key] ?? 0;
 
   static Future<void> _load() async {
-    final loaded = <String, SourceRule>{};
-    for (final entry in builtinAssets.entries) {
-      final raw = await rootBundle.loadString(entry.value);
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map) {
-        throw FormatException('${entry.value}: rule root must be an object');
-      }
-      final rule = SourceRule.fromJson(Map<String, dynamic>.from(decoded));
-      final validation = RuleValidator.validate(rule);
-      if (!validation.isValid) {
-        throw FormatException(
-          '${entry.value}: ${validation.errors.join('; ')}',
-        );
-      }
-      if (rule.id != entry.key) {
-        throw FormatException(
-          '${entry.value}: asset id ${rule.id} does not match '
-          'registry key ${entry.key}',
-        );
-      }
-      loaded[entry.key] = rule;
-    }
-    _rules = Map<String, SourceRule>.unmodifiable(loaded);
+    final loaded = await Future.wait(
+      builtinAssets.entries.map((entry) async {
+        final raw = await rootBundle.loadString(entry.value);
+        final decoded = jsonDecode(raw);
+        if (decoded is! Map) {
+          throw FormatException('${entry.value}: rule root must be an object');
+        }
+        final rule = SourceRule.fromJson(Map<String, dynamic>.from(decoded));
+        assert(() {
+          final validation = RuleValidator.validate(rule);
+          if (!validation.isValid) {
+            throw FormatException(
+              '${entry.value}: ${validation.errors.join('; ')}',
+            );
+          }
+          if (rule.id != entry.key) {
+            throw FormatException(
+              '${entry.value}: asset id ${rule.id} does not match '
+              'registry key ${entry.key}',
+            );
+          }
+          return true;
+        }());
+        return MapEntry(entry.key, rule);
+      }),
+    );
+    _rules = Map<String, SourceRule>.unmodifiable(
+      Map<String, SourceRule>.fromEntries(loaded),
+    );
   }
 }

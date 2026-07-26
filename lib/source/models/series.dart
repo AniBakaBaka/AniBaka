@@ -15,14 +15,6 @@ class Series {
     this.score,
   });
 
-  Series.fromDynamicJson(dynamic json)
-    : seriesId = json['seriesId']?.toString() ?? '',
-      name = json['name']?.toString() ?? '',
-      description = json['description']?.toString(),
-      image = json['image']?.toString(),
-      bgmId = (json['bgmId'] as num?)?.toInt(),
-      score = (json['score'] as num?)?.toDouble();
-
   @override
   String toString() => 'Name: $name\nId: $seriesId\nDescription: $description';
 }

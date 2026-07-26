@@ -1,13 +1,10 @@
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 import 'package:baka/source/models/series.dart';
 import 'package:baka/source/models/source.dart';
 import 'package:baka/source/video_url_extractor.dart';
 import 'package:baka/source/webview_adapter.dart';
-import 'package:baka/services/bgm_service.dart';
 import 'package:baka/services/system_proxy_service.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/source/runtime/scheduler_interceptor.dart';
@@ -15,13 +12,11 @@ import 'package:baka/source/runtime/scheduler_interceptor.dart';
 /// Base class for all video source adapters.
 abstract class AdapterBase {
   final String name;
-  final String? description;
-  final bool useWebview;
 
   String get baseUrl;
 
   Dio? _dio;
-  AdapterBase(this.name, {this.description, this.useWebview = false});
+  AdapterBase(this.name);
 
   /// Signed media sources can opt out when their token and playback requests
   /// must use the same direct network exit.
@@ -60,8 +55,6 @@ abstract class AdapterBase {
   static const String defaultUserAgent = WebViewAdapter.desktopUserAgent;
   String get requestUserAgent => defaultUserAgent;
 
-  Future<void> storeWebViewCookies(String url, String cookieString) async {}
-
   /// Releases source-scoped background work when its owning service closes.
   void dispose() {
     _dio?.close(force: true);
@@ -74,11 +67,6 @@ abstract class AdapterBase {
     bool enhanceWithBgm = true,
   });
   Future<List<Source>> getSources(String seriesId);
-
-  Future<List<Source>> getSourcesWithContext(
-    String seriesId,
-    Map<String, dynamic> context,
-  ) => getSources(seriesId);
 
   Future<String> getDownloadUrl(String episodeId);
 
@@ -204,8 +192,6 @@ abstract class AdapterBase {
     }
   }
 
-  bool get requiresCustomPlayback => false;
-
   Future<({String url, Map<String, String> httpHeaders})> resolvePlaybackMedia(
     String episodeId, {
     bool skipValidation = false,
@@ -234,95 +220,6 @@ abstract class AdapterBase {
 
   /// Stops the active playback authorization refresh, if any.
   void stopPlaybackKeepAlive() {}
-
-  Future<void> play(String episodeId, VideoController controller) async {
-    final media = await resolvePlaybackMedia(episodeId);
-    if (media.url.isEmpty) throw Exception('未能解析出播放链接');
-    await controller.player.open(
-      Media(
-        media.url,
-        httpHeaders: media.httpHeaders.isNotEmpty ? media.httpHeaders : null,
-      ),
-    );
-  }
-
-  Future<List<Series>> performStandardSearch({
-    required String bangumiName,
-    required String searchKeyword,
-    required Future<List<Series>> Function(String keyword) searchFn,
-    bool enhanceWithBgm = true,
-  }) async {
-    try {
-      final unique = <String, Series>{};
-      if (bangumiName.isNotEmpty) {
-        for (final series in await searchFn(bangumiName)) {
-          unique[series.seriesId] = series;
-        }
-      }
-      if (searchKeyword.isNotEmpty && searchKeyword != bangumiName) {
-        for (final series in await searchFn(searchKeyword)) {
-          unique[series.seriesId] = series;
-        }
-      }
-      final series = unique.values.toList(growable: false);
-      if (!enhanceWithBgm) return series;
-      try {
-        return await _enhanceWithBgmInfo(series);
-      } catch (e) {
-        debugPrint('$name BGM enhancement failed: $e');
-        return series;
-      }
-    } catch (e) {
-      debugPrint('$name 搜索失败: $e');
-      return [];
-    }
-  }
-
-  Future<List<Series>> _enhanceWithBgmInfo(
-    List<Series> seriesList, {
-    int concurrency = 5,
-  }) async {
-    final results = List<Series>.of(seriesList, growable: false);
-    for (var i = 0; i < seriesList.length; i += concurrency) {
-      final end = (i + concurrency).clamp(0, seriesList.length);
-      final enhanced = await Future.wait(
-        List<Future<Series>>.generate(end - i, (offset) async {
-          final series = seriesList[i + offset];
-          try {
-            final subject = await BgmService.resolveSubject(title: series.name);
-            return Series(
-              series.seriesId,
-              series.name,
-              image: subject?.imageUrl ?? series.image,
-              description: subject?.summary ?? series.description ?? '暂无简介',
-              bgmId: subject?.subjectId ?? series.bgmId,
-              score: subject?.score ?? series.score,
-            );
-          } catch (_) {
-            return series;
-          }
-        }, growable: false),
-      );
-      results.setRange(i, end, enhanced);
-    }
-    return results;
-  }
-
-  String ensureAbsoluteUrl(String url, String baseUrl) {
-    if (url.isEmpty) return url;
-    final trimmed = url.trim();
-    if (trimmed.startsWith('http')) return trimmed;
-    if (trimmed.startsWith('//')) {
-      final scheme = Uri.parse(baseUrl).scheme;
-      return '$scheme:$trimmed';
-    }
-    try {
-      return Uri.parse(baseUrl).resolve(trimmed).toString();
-    } catch (_) {
-      final sep = trimmed.startsWith('/') || baseUrl.endsWith('/') ? '' : '/';
-      return '$baseUrl$sep$trimmed';
-    }
-  }
 
   @override
   String toString() => name;

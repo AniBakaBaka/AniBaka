@@ -5,20 +5,14 @@ import 'package:baka/source/runtime/request_scheduler.dart';
 /// 把 Dio 请求接入 [RequestScheduler] 的拦截器。
 ///
 /// 挂到适配器共享的 Dio 上后，**所有源**（内置源、v1 规则源、v2 管线源）的
-/// HTTP 请求自动获得全局优先级调度、per-host 限流与取消能力，无需各适配器
-/// 自行改造。
+/// HTTP 请求自动获得全局优先级调度与 per-host 限流，无需各适配器自行改造。
 ///
 /// 调用方可通过 request options 的 extra 传递调度参数：
-/// - [priorityKey]: [RequestPriority] 的 index（int）
-/// - [cancelKey]:   [RequestCancelToken]
+/// - [priorityKey]: [RequestPriority]
 class SchedulerInterceptor extends Interceptor {
   static const String priorityKey = 'anx.priority';
-  static const String cancelKey = 'anx.cancelToken';
 
-  final RequestScheduler scheduler;
-
-  SchedulerInterceptor([RequestScheduler? scheduler])
-      : scheduler = scheduler ?? RequestScheduler.instance;
+  final RequestScheduler scheduler = RequestScheduler.instance;
 
   @override
   void onRequest(
@@ -26,28 +20,9 @@ class SchedulerInterceptor extends Interceptor {
     RequestInterceptorHandler handler,
   ) async {
     final host = options.uri.host;
-    final priorityIndex = options.extra[priorityKey];
-    final priority = priorityIndex is int &&
-            priorityIndex >= 0 &&
-            priorityIndex < RequestPriority.values.length
-        ? RequestPriority.values[priorityIndex]
-        : RequestPriority.search;
-    final cancelToken = options.extra[cancelKey];
-
-    try {
-      await scheduler.acquire(
-        host,
-        priority: priority,
-        cancelToken: cancelToken is RequestCancelToken ? cancelToken : null,
-      );
-    } on RequestCancelledException {
-      return handler.reject(
-        DioException.requestCancelled(
-          requestOptions: options,
-          reason: 'cancelled by RequestCancelToken',
-        ),
-      );
-    }
+    final p = options.extra[priorityKey];
+    final priority = p is RequestPriority ? p : RequestPriority.search;
+    await scheduler.acquire(host, priority: priority);
     options.extra['anx.acquired'] = host;
     handler.next(options);
   }
