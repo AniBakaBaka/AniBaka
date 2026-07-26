@@ -42,7 +42,9 @@ class WebViewAdapter {
   static const String _snifferScript = r'''
 (function () {
   if (window.__bakaSniffer) return;
-  var S = window.__bakaSniffer = { best: '', rank: 9 };
+  var S = window.__bakaSniffer = {
+    best: '', rank: 9, frame: '', frameFollowed: false
+  };
 
   var RE_BAD = /adposter|advertis|\/ads?\/|ad\.m3u8|ad\.mp4|poster|thumbnail|loading\.|ploading|(?:pre|mid|post)roll|commercial|promo\.|mime=image|image\/|解密失败|解析失败|decrypt(?:ion)?[_ .-]?fail|\.(?:jpe?g|png|webp|gif|bmp|svg)(?:[?#\/&]|$)/i;
   var RANKS = [
@@ -144,6 +146,21 @@ class WebViewAdapter {
     }
   }
 
+  function considerFrame(el) {
+    if (!el || S.frame || S.best) return;
+    var raw = '';
+    try { raw = el.src || el.getAttribute('src') || ''; } catch (e) {}
+    if (!raw || RE_BAD.test(raw)) return;
+    var hint = ((el.id || '') + ' ' + (el.className || '') + ' ' + raw).toLowerCase();
+    if (!/(?:player|play|parser|jiexi|url=)/.test(hint)) return;
+    try {
+      var absolute = new URL(raw, location.href).href;
+      if (/^https?:\/\//i.test(absolute) && absolute !== location.href) {
+        S.frame = absolute;
+      }
+    } catch (e) {}
+  }
+
   function hookSrc(proto) {
     try {
       var d = Object.getOwnPropertyDescriptor(proto, 'src');
@@ -229,6 +246,10 @@ class WebViewAdapter {
       var nodes = document.querySelectorAll('video, source, iframe, embed, object');
       for (var i = 0; i < nodes.length && i < 50; i++) {
         var el = nodes[i];
+        if (el.tagName === 'IFRAME') {
+          considerFrame(el);
+          continue;
+        }
         consider(el.currentSrc || el.src || el.data ||
           (el.getAttribute && (el.getAttribute('src') || el.getAttribute('data-src') || el.getAttribute('data'))), 1);
       }
@@ -243,6 +264,18 @@ class WebViewAdapter {
     } catch (e) {}
     return S.best;
   };
+  S.followFrame = function () {
+    if (S.best || S.frameFollowed) return false;
+    S.scan();
+    if (!S.frame) return false;
+    S.frameFollowed = true;
+    try {
+      location.assign(S.frame);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
 })();
 ''';
 
@@ -251,6 +284,8 @@ class WebViewAdapter {
   static const String _snifferMissing = '__baka_missing__';
   static const String _snifferPollScript =
       "(function(){var s=window.__bakaSniffer;return s?(s.best||s.scan()):'$_snifferMissing';})()";
+  static const String _snifferFollowFrameScript =
+      '(function(){var s=window.__bakaSniffer;return !!(s&&s.followFrame&&s.followFrame());})()';
 
   /// 读取当前文档 JS 可见的 cookie（HttpOnly cookie 读不到，符合预期）。
   static const String _cookieReadScript =
@@ -422,7 +457,9 @@ class WebViewAdapter {
         final controller = _mobileController ??= WebViewController()
           ..setJavaScriptMode(JavaScriptMode.unrestricted);
         // TV 环境下强制使用桌面 UA 伪装，以绕过大部分针对移动端的反爬虫及验证码检测
-        final effectiveUserAgent = Instances.isTV ? desktopUserAgent : userAgent;
+        final effectiveUserAgent = Instances.isTV
+            ? desktopUserAgent
+            : userAgent;
         await controller.setUserAgent(effectiveUserAgent);
         if (sniff) {
           // 移动端没有文档创建期注入，在导航前后各补一次（脚本幂等）。
@@ -486,8 +523,11 @@ class WebViewAdapter {
     Future<dynamic> Function(String js) exec,
     bool Function() cancelled,
     Duration timeout,
+    bool followEmbeddedPlayer,
   ) async {
     final deadline = DateTime.now().add(timeout);
+    final followAfter = DateTime.now().add(const Duration(milliseconds: 1200));
+    var followedEmbeddedPlayer = false;
     var intervalMs = 250;
     while (!cancelled() && DateTime.now().isBefore(deadline)) {
       try {
@@ -496,6 +536,12 @@ class WebViewAdapter {
           await exec(_snifferScript);
         } else if (url.isNotEmpty) {
           return url;
+        }
+        if (followEmbeddedPlayer &&
+            !followedEmbeddedPlayer &&
+            DateTime.now().isAfter(followAfter)) {
+          followedEmbeddedPlayer = true;
+          await exec(_snifferFollowFrameScript);
         }
       } catch (_) {}
       await Future.delayed(Duration(milliseconds: intervalMs));
@@ -591,6 +637,7 @@ class WebViewAdapter {
   static Future<String?> extractVideoUrl(
     String playerUrl, {
     String? userAgent,
+    bool followEmbeddedPlayer = false,
     WebViewTaskScope? taskScope,
   }) => _run(
     url: playerUrl,
@@ -598,8 +645,12 @@ class WebViewAdapter {
     timeout: const Duration(seconds: 60),
     sniff: true,
     taskScope: taskScope,
-    poll: (exec, cancelled) =>
-        _pollSniffedUrl(exec, cancelled, const Duration(seconds: 58)),
+    poll: (exec, cancelled) => _pollSniffedUrl(
+      exec,
+      cancelled,
+      const Duration(seconds: 58),
+      followEmbeddedPlayer,
+    ),
     onTimeout: () => null,
     onCancelled: () => null,
   );
@@ -616,7 +667,7 @@ class WebViewAdapter {
     timeout: timeout + const Duration(seconds: 5),
     sniff: true,
     taskScope: taskScope,
-    poll: (exec, cancelled) => _pollSniffedUrl(exec, cancelled, timeout),
+    poll: (exec, cancelled) => _pollSniffedUrl(exec, cancelled, timeout, false),
     onTimeout: () => null,
     onCancelled: () => null,
   );

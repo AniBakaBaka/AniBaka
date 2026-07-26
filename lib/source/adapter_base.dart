@@ -68,8 +68,6 @@ abstract class AdapterBase {
     _dio = null;
   }
 
-  // ── Abstract contract ───────────────────────────────────────────────
-
   Future<List<Series>> search(
     String bangumiName,
     String searchKeyword, {
@@ -84,11 +82,9 @@ abstract class AdapterBase {
 
   Future<String> getDownloadUrl(String episodeId);
 
-  // ── Direct-link resolution with cache + validation ──────────────────
-
   static const Duration _cacheTtl = Duration(minutes: 10);
   static const int _cacheLimit = 128;
-  static final Map<String, ({String url, DateTime expiry})> _cache = {};
+  static final Map<String, ({String url, int expiresAt})> _cache = {};
 
   bool get validatesOwnUrls => false;
 
@@ -110,7 +106,9 @@ abstract class AdapterBase {
     if (!forceRefresh) {
       final cached = _cache[key];
       if (cached != null) {
-        if (cached.expiry.isAfter(DateTime.now())) return cached.url;
+        if (cached.expiresAt > DateTime.now().millisecondsSinceEpoch) {
+          return cached.url;
+        }
         _cache.remove(key);
       }
     }
@@ -132,7 +130,11 @@ abstract class AdapterBase {
     }
 
     if (_cache.length >= _cacheLimit) _cache.remove(_cache.keys.first);
-    _cache[key] = (url: url, expiry: DateTime.now().add(_cacheTtl));
+    _cache[key] = (
+      url: url,
+      expiresAt:
+          DateTime.now().millisecondsSinceEpoch + _cacheTtl.inMilliseconds,
+    );
     return url;
   }
 
@@ -167,7 +169,7 @@ abstract class AdapterBase {
       return false;
     }
     if (VideoUrlExtractor.isSignedCdnUrl(url)) return false;
-    
+
     // TV 环境下网络通常较差，跳过验证以加速播放并减少误判
     if (Instances.isTV) return false;
 
@@ -202,8 +204,6 @@ abstract class AdapterBase {
     }
   }
 
-  // ── Playback ────────────────────────────────────────────────────────
-
   bool get requiresCustomPlayback => false;
 
   Future<({String url, Map<String, String> httpHeaders})> resolvePlaybackMedia(
@@ -236,19 +236,15 @@ abstract class AdapterBase {
   void stopPlaybackKeepAlive() {}
 
   Future<void> play(String episodeId, VideoController controller) async {
-    final url = await resolveDownloadUrl(episodeId);
-    if (url.isEmpty) throw Exception('未能解析出播放链接');
-    final headers = Map<String, String>.from(mediaValidationHeaders)
-      ..removeWhere((_, value) => value.isEmpty);
-    if (VideoUrlExtractor.isSignedCdnUrl(url)) {
-      headers.removeWhere((key, _) => key.toLowerCase() == 'referer');
-    }
+    final media = await resolvePlaybackMedia(episodeId);
+    if (media.url.isEmpty) throw Exception('未能解析出播放链接');
     await controller.player.open(
-      Media(url, httpHeaders: headers.isNotEmpty ? headers : null),
+      Media(
+        media.url,
+        httpHeaders: media.httpHeaders.isNotEmpty ? media.httpHeaders : null,
+      ),
     );
   }
-
-  // ── Search helpers ──────────────────────────────────────────────────
 
   Future<List<Series>> performStandardSearch({
     required String bangumiName,
@@ -256,19 +252,25 @@ abstract class AdapterBase {
     required Future<List<Series>> Function(String keyword) searchFn,
     bool enhanceWithBgm = true,
   }) async {
-    final results = <Series>[];
     try {
-      if (bangumiName.isNotEmpty) results.addAll(await searchFn(bangumiName));
-      if (searchKeyword.isNotEmpty && searchKeyword != bangumiName) {
-        results.addAll(await searchFn(searchKeyword));
+      final unique = <String, Series>{};
+      if (bangumiName.isNotEmpty) {
+        for (final series in await searchFn(bangumiName)) {
+          unique[series.seriesId] = series;
+        }
       }
-      final unique = {for (final s in results) s.seriesId: s}.values.toList();
-      if (!enhanceWithBgm) return unique;
+      if (searchKeyword.isNotEmpty && searchKeyword != bangumiName) {
+        for (final series in await searchFn(searchKeyword)) {
+          unique[series.seriesId] = series;
+        }
+      }
+      final series = unique.values.toList(growable: false);
+      if (!enhanceWithBgm) return series;
       try {
-        return await _enhanceWithBgmInfo(unique);
+        return await _enhanceWithBgmInfo(series);
       } catch (e) {
         debugPrint('$name BGM enhancement failed: $e');
-        return unique;
+        return series;
       }
     } catch (e) {
       debugPrint('$name 搜索失败: $e');
@@ -280,12 +282,12 @@ abstract class AdapterBase {
     List<Series> seriesList, {
     int concurrency = 5,
   }) async {
-    final results = <Series>[];
+    final results = List<Series>.of(seriesList, growable: false);
     for (var i = 0; i < seriesList.length; i += concurrency) {
       final end = (i + concurrency).clamp(0, seriesList.length);
-      final batch = seriesList.sublist(i, end);
       final enhanced = await Future.wait(
-        batch.map((series) async {
+        List<Future<Series>>.generate(end - i, (offset) async {
+          final series = seriesList[i + offset];
           try {
             final subject = await BgmService.resolveSubject(title: series.name);
             return Series(
@@ -299,14 +301,12 @@ abstract class AdapterBase {
           } catch (_) {
             return series;
           }
-        }),
+        }, growable: false),
       );
-      results.addAll(enhanced);
+      results.setRange(i, end, enhanced);
     }
     return results;
   }
-
-  // ── URL utilities ───────────────────────────────────────────────────
 
   String ensureAbsoluteUrl(String url, String baseUrl) {
     if (url.isEmpty) return url;

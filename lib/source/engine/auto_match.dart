@@ -25,16 +25,10 @@ class AutoMatchResult {
   });
 }
 
-/// Auto-detect site type and build a working pipeline from just a baseUrl.
-///
-/// Strategies (tried in order):
-/// 1. MacCMS JSON suggest API → maccms recipe pipeline
-/// 2. MacCMS HTML search page → maccms HTML pipeline
-/// 3. Generic HTML search patterns → HTML pipeline with auto-selectors
+/// Detects a site type and builds a verified pipeline from its base URL.
 class AutoMatchService {
   AutoMatchService._();
 
-  /// Common search URL patterns for HTML sites.
   static const _searchUrlPatterns = [
     '/index.php/vod/search/wd/{keyword}.html',
     '/search?q={keyword}',
@@ -43,37 +37,15 @@ class AutoMatchService {
     '/index.php/vod/search.html?wd={keyword}',
   ];
 
-  /// Default episode list selectors (tried in order).
-  static const _defaultEpisodeSelectors = [
-    '.module-play-list',
-    '.play_list',
-    '.playlist',
-    '.anthology-list-play',
-    '.module-player-list',
-    '.episode-list',
-    '.content_playlist',
-  ];
+  static final RegExp _trailingSlashPattern = RegExp(r'/+$');
 
-  /// Default search list selectors for HTML mode.
-  static const _defaultSearchSelectors = [
-    '.module-items .module-item',
-    '.stui-vodlist__box',
-    '.search-list .item',
-    'ul.items li',
-    '.list-item',
-  ];
-
-  /// Auto-detect site type and test the full chain (search → episodes → play URL).
-  ///
-  /// [searchSelectors] / [episodeSelectors] override the built-in selectors
-  /// when provided. Leave them null for full auto-detection.
   static Future<AutoMatchResult> autoMatch({
     required String baseUrl,
     List<String>? searchSelectors,
     List<String>? episodeSelectors,
     String testKeyword = '孤独摇滚',
   }) async {
-    final cleanUrl = baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final cleanUrl = baseUrl.trim().replaceAll(_trailingSlashPattern, '');
     final log = StringBuffer();
     final dio = _createDio();
 
@@ -88,17 +60,41 @@ class AutoMatchService {
         );
         final raw = resp.data?.toString() ?? '';
         final data = raw.isNotEmpty ? jsonDecode(raw) : <String, dynamic>{};
-        if (data is Map && data['list'] is List && (data['list'] as List).isNotEmpty) {
-          log.writeln('  ✅ MacCMS API 可用，返回 ${(data['list'] as List).length} 条结果');
+        if (data is Map &&
+            data['list'] is List &&
+            (data['list'] as List).isNotEmpty) {
+          final items = data['list'] as List;
+          log.writeln('  ✅ MacCMS API 可用，返回 ${items.length} 条结果');
           final pipeline = _buildMaccmsPipeline(episodeSelectors);
-          final test = await _testFullChain(cleanUrl, pipeline, testKeyword, log);
-          if (test.success) {
+          Map? first;
+          for (final item in items) {
+            if (item is Map &&
+                (item['id']?.toString().isNotEmpty ?? false) &&
+                (item['name']?.toString().isNotEmpty ?? false)) {
+              first = item;
+              break;
+            }
+          }
+          final id = first?['id']?.toString() ?? '';
+          final seriesUrl = Uri.parse(
+            cleanUrl,
+          ).resolve('/index.php/vod/detail/id/$id.html').toString();
+          final test = id.isEmpty
+              ? null
+              : await _testFromSeries(
+                  cleanUrl,
+                  pipeline,
+                  seriesUrl,
+                  first?['name']?.toString() ?? '',
+                  log,
+                );
+          if (test != null) {
             return AutoMatchResult(
               success: true,
               pipeline: pipeline,
               detectedType: 'maccms',
               log: log.toString(),
-              seriesUrl: test.seriesUrl,
+              seriesUrl: seriesUrl,
               episodeUrl: test.episodeUrl,
               playUrl: test.playUrl,
             );
@@ -126,15 +122,26 @@ class AutoMatchService {
           );
           if (results.isNotEmpty) {
             log.writeln('  ✅ MacCMS HTML 搜索成功，找到 ${results.length} 条结果');
-            final pipeline = _buildMaccmsHtmlPipeline(searchSelectors, episodeSelectors);
-            final test = await _testFullChain(cleanUrl, pipeline, testKeyword, log);
-            if (test.success) {
+            final pipeline = _buildHtmlPipeline(
+              '/index.php/vod/search/wd/{keyword}.html',
+              searchSelectors,
+              episodeSelectors,
+              detailPattern: '/vod/detail/',
+            );
+            final test = await _testFromSeries(
+              cleanUrl,
+              pipeline,
+              results.first.seriesId,
+              results.first.name,
+              log,
+            );
+            if (test != null) {
               return AutoMatchResult(
                 success: true,
                 pipeline: pipeline,
                 detectedType: 'maccms-html',
                 log: log.toString(),
-                seriesUrl: test.seriesUrl,
+                seriesUrl: results.first.seriesId,
                 episodeUrl: test.episodeUrl,
                 playUrl: test.playUrl,
               );
@@ -166,14 +173,20 @@ class AutoMatchService {
             searchSelectors,
             episodeSelectors,
           );
-          final test = await _testFullChain(cleanUrl, pipeline, testKeyword, log);
-          if (test.success) {
+          final test = await _testFromSeries(
+            cleanUrl,
+            pipeline,
+            results.first.seriesId,
+            results.first.name,
+            log,
+          );
+          if (test != null) {
             return AutoMatchResult(
               success: true,
               pipeline: pipeline,
               detectedType: 'html',
               log: log.toString(),
-              seriesUrl: test.seriesUrl,
+              seriesUrl: results.first.seriesId,
               episodeUrl: test.episodeUrl,
               playUrl: test.playUrl,
             );
@@ -194,9 +207,9 @@ class AutoMatchService {
     }
   }
 
-
-  /// MacCMS pipeline using JSON suggest API for search.
-  static Map<String, dynamic> _buildMaccmsPipeline(List<String>? episodeSelectors) {
+  static Map<String, dynamic> _buildMaccmsPipeline(
+    List<String>? episodeSelectors,
+  ) {
     return {
       'search': [
         {
@@ -217,80 +230,42 @@ class AutoMatchService {
         {'op': 'follow'},
         {
           'op': 'episodes',
-          'listSelectors': episodeSelectors?.isNotEmpty == true
-              ? episodeSelectors
-              : _defaultEpisodeSelectors,
+          if (episodeSelectors?.isNotEmpty ?? false)
+            'listSelectors': episodeSelectors,
         },
       ],
       'play': _defaultPlayPipeline,
     };
   }
 
-  /// MacCMS pipeline using HTML search page instead of JSON API.
-  static Map<String, dynamic> _buildMaccmsHtmlPipeline(
-    List<String>? searchSelectors,
-    List<String>? episodeSelectors,
-  ) {
-    return {
-      'search': [
-        {
-          'op': 'fetch',
-          'url': '/index.php/vod/search/wd/{keyword}.html',
-        },
-        {
-          'op': 'searchList',
-          'selectors': searchSelectors?.isNotEmpty == true
-              ? searchSelectors
-              : _defaultSearchSelectors,
-          'detailPattern': '/vod/detail/',
-        },
-      ],
-      'detail': [
-        {'op': 'follow'},
-        {
-          'op': 'episodes',
-          'listSelectors': episodeSelectors?.isNotEmpty == true
-              ? episodeSelectors
-              : _defaultEpisodeSelectors,
-        },
-      ],
-      'play': _defaultPlayPipeline,
-    };
-  }
-
-  /// Generic HTML pipeline.
   static Map<String, dynamic> _buildHtmlPipeline(
     String searchUrlPattern,
     List<String>? searchSelectors,
-    List<String>? episodeSelectors,
-  ) {
+    List<String>? episodeSelectors, {
+    String? detailPattern,
+  }) {
     return {
       'search': [
-        {
-          'op': 'fetch',
-          'url': searchUrlPattern.replaceAll('{keyword}', '{keyword}'),
-        },
+        {'op': 'fetch', 'url': searchUrlPattern},
         {
           'op': 'searchList',
-          'selectors': searchSelectors?.isNotEmpty == true
-              ? searchSelectors
-              : _defaultSearchSelectors,
+          if (searchSelectors?.isNotEmpty ?? false)
+            'selectors': searchSelectors,
+          'detailPattern': ?detailPattern,
         },
       ],
       'detail': [
         {'op': 'follow'},
         {
           'op': 'episodes',
-          'listSelectors': episodeSelectors?.isNotEmpty == true
-              ? episodeSelectors
-              : _defaultEpisodeSelectors,
+          if (episodeSelectors?.isNotEmpty ?? false)
+            'listSelectors': episodeSelectors,
         },
       ],
       'play': _defaultPlayPipeline,
     };
   }
 
-  /// Default play pipeline: try player_aaaa → videoUrl → sniff.
   static const _defaultPlayPipeline = [
     {'op': 'follow'},
     {
@@ -309,11 +284,11 @@ class AutoMatchService {
     },
   ];
 
-
-  static Future<_ChainTestResult> _testFullChain(
+  static Future<({String episodeUrl, String playUrl})?> _testFromSeries(
     String baseUrl,
     Map<String, dynamic> pipeline,
-    String keyword,
+    String seriesUrl,
+    String seriesName,
     StringBuffer log,
   ) async {
     final config = CustomSourceConfig(
@@ -323,73 +298,50 @@ class AutoMatchService {
       pipeline: pipeline,
     );
     final adapter = PipelineSourceAdapter(RuleMigrator.ruleForConfig(config));
+    try {
+      log.writeln('  ✅ 搜索成功: $seriesName → $seriesUrl');
+      log.writeln('  [测试] 获取剧集列表…');
+      final sources = await adapter.getSources(seriesUrl);
+      if (sources.isEmpty || sources.first.episodes.isEmpty) {
+        log.writeln('  ❌ 未找到播放源/剧集');
+        return null;
+      }
+      final episodeUrl = sources.first.episodes.first.episodeId;
+      log.writeln('  ✅ 找到 ${sources.length} 条线路，首集: $episodeUrl');
 
-    log.writeln('  [测试] 搜索 "$keyword"…');
-    final searchResults = await adapter.search('', keyword);
-    if (searchResults.isEmpty) {
-      log.writeln('  ❌ 搜索无结果');
-      return const _ChainTestResult(success: false);
-    }
-    final seriesUrl = searchResults.first.seriesId;
-    log.writeln('  ✅ 搜索成功: ${searchResults.first.name} → $seriesUrl');
-
-    log.writeln('  [测试] 获取剧集列表…');
-    final sources = await adapter.getSources(seriesUrl);
-    if (sources.isEmpty || sources.first.episodes.isEmpty) {
-      log.writeln('  ❌ 未找到播放源/剧集');
-      return _ChainTestResult(success: false, seriesUrl: seriesUrl);
-    }
-    final episodeUrl = sources.first.episodes.first.episodeId;
-    log.writeln('  ✅ 找到 ${sources.length} 条线路，首集: $episodeUrl');
-
-    log.writeln('  [测试] 提取播放直链…');
-    final playUrl = await adapter.resolveDownloadUrl(episodeUrl, forceRefresh: true);
-    if (playUrl.isEmpty) {
-      log.writeln('  ❌ 未能提取播放直链');
-      return _ChainTestResult(
-        success: false,
-        seriesUrl: seriesUrl,
-        episodeUrl: episodeUrl,
+      log.writeln('  [测试] 提取播放直链…');
+      final playUrl = await adapter.resolveDownloadUrl(
+        episodeUrl,
+        forceRefresh: true,
       );
-    }
-    log.writeln('  ✅ 直链提取成功: $playUrl');
+      if (playUrl.isEmpty) {
+        log.writeln('  ❌ 未能提取播放直链');
+        return null;
+      }
+      log.writeln('  ✅ 直链提取成功: $playUrl');
 
-    return _ChainTestResult(
-      success: true,
-      seriesUrl: seriesUrl,
-      episodeUrl: episodeUrl,
-      playUrl: playUrl,
-    );
+      return (episodeUrl: episodeUrl, playUrl: playUrl);
+    } finally {
+      adapter.dispose();
+    }
   }
 
   static Dio _createDio() {
-    return Dio(BaseOptions(
-      headers: {
-        'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
-        'Accept':
-            'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-      },
-      followRedirects: true,
-      maxRedirects: 5,
-      validateStatus: (s) => s != null && s < 600,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 15),
-    ));
+    return Dio(
+      BaseOptions(
+        headers: {
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+          'Accept':
+              'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        },
+        followRedirects: true,
+        maxRedirects: 5,
+        validateStatus: (s) => s != null && s < 600,
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 15),
+      ),
+    );
   }
-}
-
-class _ChainTestResult {
-  final bool success;
-  final String? seriesUrl;
-  final String? episodeUrl;
-  final String? playUrl;
-
-  const _ChainTestResult({
-    required this.success,
-    this.seriesUrl,
-    this.episodeUrl,
-    this.playUrl,
-  });
 }

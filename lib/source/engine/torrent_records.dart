@@ -5,11 +5,7 @@ import 'package:baka/source/models/episode.dart';
 import 'package:baka/source/models/series.dart';
 import 'package:baka/source/models/source.dart';
 
-/// A normalized release row extracted from an HTML torrent catalogue.
-///
-/// The parser deliberately knows nothing about individual sites. Selectors,
-/// title parsing expressions, filters, scoring, and output templates all come
-/// from pipeline step parameters.
+/// A normalized release row from an HTML torrent catalogue.
 class TorrentReleaseRecord {
   const TorrentReleaseRecord({
     required this.title,
@@ -38,31 +34,24 @@ class TorrentReleaseRecord {
   final int order;
 }
 
-/// Configurable HTML release parser used by the `torrentRecords` pipeline op.
-///
-/// The intended adapter bridge is deliberately small:
-///
-/// ```dart
-/// final series = TorrentRecordParser.parseSeries(
-///   html: ctx.currentString,
-///   params: step.params,
-///   baseUrl: rule.baseUrl,
-///   contextUrl: ctx.pageUrl,
-/// );
-/// ```
-///
-/// Important step parameters:
-///
-/// - DOM: `rowSelector`, `sourceContainerSelector`, `sourceLabelSelector`;
-/// - fields: `titleSelectors`, `idSelectors`, `sourceNameSelectors`,
-///   `sizeSelectors`, `imageSelectors`, with matching `*Attrs` lists;
-/// - release parsing: `episodePatterns`, `excludePatterns`, `fansubPattern`,
-///   `titleStripPatterns`, `animeNamePatterns`, `animeCleanupPatterns`;
-/// - output: `seriesIdTemplate`, `descriptionTemplate`,
-///   `episodeNameTemplate`, `episodeIndexMode`, `dedupeByEpisode`;
-/// - ranking: `scoreRules` and `sourceNameBonus`.
+/// Rule-configured parser used by the `torrentRecords` pipeline operation.
 class TorrentRecordParser {
   TorrentRecordParser._();
+
+  static final Expando<_TorrentRecordConfig> _configCache =
+      Expando<_TorrentRecordConfig>('torrent-record-config');
+  static final RegExp _whitespacePattern = RegExp(r'\s+');
+  static final RegExp _trailingSlashPattern = RegExp(r'/+$');
+  static final RegExp _templatePattern = RegExp(r'\{([a-zA-Z0-9_]+)(:raw)?\}');
+  static final RegExp _keyNoisePattern = RegExp(
+    r'[^a-z0-9\u3040-\u30ff\u3400-\u9fff]+',
+  );
+  static final RegExp _nthChildPattern = RegExp(
+    r'^([a-zA-Z][\w-]*)?:nth-child\((\d+)\)$',
+  );
+
+  static _TorrentRecordConfig _configFor(Map<String, dynamic> params) =>
+      _configCache[params] ??= _TorrentRecordConfig(params);
 
   static List<Series> parseSeries({
     required String html,
@@ -71,7 +60,7 @@ class TorrentRecordParser {
     String contextUrl = '',
   }) {
     if (html.trim().isEmpty) return const <Series>[];
-    final config = _TorrentRecordConfig(params);
+    final config = _configFor(params);
     final document = html_parser.parse(html);
     final rows = _selectRows(document, config.rowSelectors);
     final records = _recordsFromRows(rows, config: config, baseUrl: baseUrl);
@@ -97,11 +86,15 @@ class TorrentRecordParser {
       final records = entry.value;
       final first = records.first;
       final name = displayNames[entry.key] ?? first.title;
-      final fansubs = records
-          .map((record) => record.fansub)
-          .where((value) => value.isNotEmpty)
-          .toSet()
-          .toList(growable: false);
+      final fansubs = <String>[];
+      final seenFansubs = <String>{};
+      var image = '';
+      for (final record in records) {
+        if (record.fansub.isNotEmpty && seenFansubs.add(record.fansub)) {
+          fansubs.add(record.fansub);
+        }
+        if (image.isEmpty && record.image.isNotEmpty) image = record.image;
+      }
       final variables = _variables(
         record: first,
         baseUrl: baseUrl,
@@ -116,9 +109,6 @@ class TorrentRecordParser {
       final description = config.descriptionTemplate.isEmpty
           ? ''
           : _render(config.descriptionTemplate, variables);
-      final image = records
-          .map((record) => record.image)
-          .firstWhere((value) => value.isNotEmpty, orElse: () => '');
       results.add(
         Series(
           _absolute(id, baseUrl),
@@ -138,11 +128,10 @@ class TorrentRecordParser {
     String contextUrl = '',
   }) {
     if (html.trim().isEmpty) return const <Source>[];
-    final config = _TorrentRecordConfig(params);
+    final config = _configFor(params);
     final document = html_parser.parse(html);
-    final expectedAnimeName = _expectedAnimeName(
-      config,
-      contextUrl: contextUrl,
+    final expectedAnimeKey = _normalizeKey(
+      _expectedAnimeName(config, contextUrl: contextUrl),
     );
 
     final containers = _selectRows(document, config.sourceContainerSelectors);
@@ -163,7 +152,7 @@ class TorrentRecordParser {
         final source = _buildSource(
           records,
           sourceName: label.isEmpty ? config.unknownSourceName : label,
-          expectedAnimeName: expectedAnimeName,
+          expectedAnimeKey: expectedAnimeKey,
           config: config,
           baseUrl: baseUrl,
         );
@@ -190,7 +179,7 @@ class TorrentRecordParser {
       final source = _buildSource(
         entry.value,
         sourceName: displayNames[entry.key] ?? config.unknownSourceName,
-        expectedAnimeName: expectedAnimeName,
+        expectedAnimeKey: expectedAnimeKey,
         config: config,
         baseUrl: baseUrl,
       );
@@ -199,14 +188,13 @@ class TorrentRecordParser {
     return results;
   }
 
-  /// Low-level extraction entry point, useful for rule tracing and tests.
   static List<TorrentReleaseRecord> parseRecords({
     required String html,
     required Map<String, dynamic> params,
     required String baseUrl,
   }) {
     if (html.trim().isEmpty) return const <TorrentReleaseRecord>[];
-    final config = _TorrentRecordConfig(params);
+    final config = _configFor(params);
     final document = html_parser.parse(html);
     return _recordsFromRows(
       _selectRows(document, config.rowSelectors),
@@ -289,7 +277,8 @@ class TorrentRecordParser {
     return records;
   }
 
-  static _ReleaseParts _parseRelease(
+  static ({String animeName, String fansub, double? episode, bool excluded})
+  _parseRelease(
     String title, {
     required String explicitSourceName,
     required _TorrentRecordConfig config,
@@ -297,14 +286,14 @@ class TorrentRecordParser {
     final excluded = config.excludePatterns.any(
       (pattern) => pattern.firstMatch(title) != null,
     );
-    _PatternMatch? episodeMatch;
+    double? episode;
     for (final pattern in config.episodePatterns) {
       final match = pattern.firstMatch(title);
       if (match == null) continue;
       final raw = pattern.group(match);
-      final episode = double.tryParse(raw);
-      if (episode != null) {
-        episodeMatch = _PatternMatch(episode);
+      final parsed = double.tryParse(raw);
+      if (parsed != null) {
+        episode = parsed;
         break;
       }
     }
@@ -327,7 +316,7 @@ class TorrentRecordParser {
       for (final replacement in config.titleStripPatterns) {
         core = replacement.replaceAll(core);
       }
-      if (episodeMatch != null) {
+      if (episode != null) {
         for (final pattern in config.episodePatterns) {
           final match = pattern.firstMatch(core);
           if (match == null) continue;
@@ -338,7 +327,7 @@ class TorrentRecordParser {
       for (final replacement in config.animeCleanupPatterns) {
         core = replacement.replaceAll(core);
       }
-      core = core.replaceAll(RegExp(r'\s+'), ' ').trim();
+      core = core.replaceAll(_whitespacePattern, ' ').trim();
       for (final separator in config.animeNameSeparators) {
         final index = core.indexOf(separator);
         if (index >= 0) {
@@ -349,10 +338,10 @@ class TorrentRecordParser {
       animeName = core;
     }
 
-    return _ReleaseParts(
+    return (
       animeName: animeName,
       fansub: fansub,
-      episode: episodeMatch?.episode,
+      episode: episode,
       excluded: excluded,
     );
   }
@@ -372,39 +361,18 @@ class TorrentRecordParser {
   static Source? _buildSource(
     List<TorrentReleaseRecord> records, {
     required String sourceName,
-    required String expectedAnimeName,
+    required String expectedAnimeKey,
     required _TorrentRecordConfig config,
     required String baseUrl,
   }) {
-    final filtered = records.where((record) {
-      if (record.excluded || record.resourceId.isEmpty) return false;
-      if (config.requireEpisodeNumber && record.episode == null) return false;
-      if (expectedAnimeName.isEmpty) return true;
-      return _normalizeKey(record.animeName) ==
-          _normalizeKey(expectedAnimeName);
-    }).toList();
-    if (filtered.isEmpty) return null;
-
-    filtered.sort((a, b) {
-      final ae = a.episode;
-      final be = b.episode;
-      var result = 0;
-      if (ae != null && be != null) {
-        result = ae.compareTo(be);
-      } else if (ae != null) {
-        result = -1;
-      } else if (be != null) {
-        result = 1;
-      } else {
-        result = a.title.compareTo(b.title);
-      }
-      if (result == 0) result = a.order.compareTo(b.order);
-      return config.sortDescending ? -result : result;
-    });
-
     if (config.episodeIndexMode == 'number') {
       final selected = <int, TorrentReleaseRecord>{};
-      for (final record in filtered) {
+      for (final record in records) {
+        if (record.excluded || record.resourceId.isEmpty) continue;
+        if (expectedAnimeKey.isNotEmpty &&
+            _normalizeKey(record.animeName) != expectedAnimeKey) {
+          continue;
+        }
         final episode = record.episode;
         if (episode == null || episode <= 0) continue;
         if (!config.allowFractionalEpisode && episode != episode.truncate()) {
@@ -413,7 +381,9 @@ class TorrentRecordParser {
         final index = episode.floor() - 1;
         final existing = selected[index];
         if (existing == null ||
-            (config.dedupeByEpisode && record.score > existing.score)) {
+            (config.dedupeByEpisode && record.score > existing.score) ||
+            ((!config.dedupeByEpisode || record.score == existing.score) &&
+                _compareRecords(record, existing, config.sortDescending) < 0)) {
           selected[index] = record;
         }
       }
@@ -432,6 +402,18 @@ class TorrentRecordParser {
       return episodes.isEmpty ? null : Source(episodes, sourceName);
     }
 
+    final filtered = <TorrentReleaseRecord>[];
+    for (final record in records) {
+      if (record.excluded || record.resourceId.isEmpty) continue;
+      if (config.requireEpisodeNumber && record.episode == null) continue;
+      if (expectedAnimeKey.isNotEmpty &&
+          _normalizeKey(record.animeName) != expectedAnimeKey) {
+        continue;
+      }
+      filtered.add(record);
+    }
+    if (filtered.isEmpty) return null;
+    filtered.sort((a, b) => _compareRecords(a, b, config.sortDescending));
     final episodes = <Episode>[];
     for (var i = 0; i < filtered.length; i++) {
       final record = filtered[i];
@@ -440,6 +422,27 @@ class TorrentRecordParser {
       );
     }
     return episodes.isEmpty ? null : Source(episodes, sourceName);
+  }
+
+  static int _compareRecords(
+    TorrentReleaseRecord a,
+    TorrentReleaseRecord b,
+    bool descending,
+  ) {
+    final ae = a.episode;
+    final be = b.episode;
+    int result;
+    if (ae != null && be != null) {
+      result = ae.compareTo(be);
+    } else if (ae != null) {
+      result = -1;
+    } else if (be != null) {
+      result = 1;
+    } else {
+      result = a.title.compareTo(b.title);
+    }
+    if (result == 0) result = a.order.compareTo(b.order);
+    return descending ? -result : result;
   }
 
   static String _episodeName(
@@ -480,9 +483,20 @@ class TorrentRecordParser {
     List<String> attrs,
   ) {
     for (final selector in selectors) {
+      final normalized = selector.trim();
       Element? element;
       try {
-        element = selector.trim().isEmpty ? row : row.querySelector(selector);
+        final nthChild = _nthChildPattern.firstMatch(normalized);
+        if (nthChild == null) {
+          element = normalized.isEmpty ? row : row.querySelector(normalized);
+        } else {
+          final index = int.parse(nthChild.group(2)!) - 1;
+          if (index >= 0 && index < row.children.length) {
+            final candidate = row.children[index];
+            final tag = nthChild.group(1)?.toLowerCase();
+            if (tag == null || candidate.localName == tag) element = candidate;
+          }
+        }
       } catch (_) {
         element = null;
       }
@@ -496,7 +510,7 @@ class TorrentRecordParser {
   static String _elementValue(Element element, List<String> attrs) {
     for (final attr in attrs) {
       final value = attr == 'text'
-          ? element.text.replaceAll(RegExp(r'\s+'), ' ').trim()
+          ? element.text.replaceAll(_whitespacePattern, ' ').trim()
           : (element.attributes[attr]?.trim() ?? '');
       if (value.isNotEmpty) return value;
     }
@@ -524,14 +538,12 @@ class TorrentRecordParser {
       'episodeIndex': episodeIndex?.toString() ?? '',
       'count': count?.toString() ?? '',
       'fansubs': fansubs?.join(', ') ?? '',
-      'baseUrl': baseUrl.replaceFirst(RegExp(r'/+$'), ''),
+      'baseUrl': baseUrl.replaceFirst(_trailingSlashPattern, ''),
     };
   }
 
   static String _render(String template, Map<String, String> variables) {
-    return template.replaceAllMapped(RegExp(r'\{([a-zA-Z0-9_]+)(:raw)?\}'), (
-      match,
-    ) {
+    return template.replaceAllMapped(_templatePattern, (match) {
       final value = variables[match.group(1)] ?? '';
       return match.group(2) == null ? Uri.encodeQueryComponent(value) : value;
     });
@@ -581,10 +593,8 @@ class TorrentRecordParser {
     return '$id${separator}xs=${Uri.encodeQueryComponent(exactUrl)}';
   }
 
-  static String _normalizeKey(String value) => value.toLowerCase().replaceAll(
-    RegExp(r'[^a-z0-9\u3040-\u30ff\u3400-\u9fff]+'),
-    '',
-  );
+  static String _normalizeKey(String value) =>
+      value.toLowerCase().replaceAll(_keyNoisePattern, '');
 
   static String _formatNumber(double value) => value == value.truncate()
       ? value.truncate().toString()
@@ -857,24 +867,4 @@ class _ScoreRule {
     if (pattern == null) return null;
     return _ScoreRule(pattern, _TorrentRecordConfig._integer(value['score']));
   }
-}
-
-class _PatternMatch {
-  const _PatternMatch(this.episode);
-
-  final double episode;
-}
-
-class _ReleaseParts {
-  const _ReleaseParts({
-    required this.animeName,
-    required this.fansub,
-    required this.episode,
-    required this.excluded,
-  });
-
-  final String animeName;
-  final String fansub;
-  final double? episode;
-  final bool excluded;
 }

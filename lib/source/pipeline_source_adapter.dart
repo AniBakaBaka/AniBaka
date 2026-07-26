@@ -23,9 +23,7 @@ import 'package:baka/source/runtime/request_scheduler.dart';
 import 'package:baka/source/runtime/scheduler_interceptor.dart';
 import 'package:baka/services/remote_media_redirect_resolver.dart';
 
-/// Pipeline-based adapter: implements [AdapterBase] for the upper layer
-/// and [PipelineHost] for the pipeline interpreter. No mixins — all
-/// extraction logic delegates to [VideoUrlExtractor] and [HtmlParser].
+/// Connects a source rule to the adapter and pipeline host contracts.
 class PipelineSourceAdapter extends AdapterBase
     implements PipelineHost, PipelineWebviewReadyHost {
   PipelineSourceAdapter(SourceRule rule)
@@ -38,10 +36,10 @@ class PipelineSourceAdapter extends AdapterBase
 
   final SourceRule rule;
   static const PipelineInterpreter _interpreter = PipelineInterpreter();
-  final CookieJar _cookieJar = CookieJar();
-  final WebViewTaskScope _webViewTaskScope = WebViewTaskScope();
+  late final CookieJar _cookieJar = CookieJar();
+  WebViewTaskScope? _webViewTaskScope;
   RemoteMediaRedirectResolver? _mediaRedirectResolver;
-  Future<void> _playCookieBarrier = Future<void>.value();
+  Future<void>? _playCookieBarrier;
   Timer? _playbackKeepAliveTimer;
   int _playbackKeepAliveGeneration = 0;
   int? _playbackKeepAliveInFlightGeneration;
@@ -49,23 +47,11 @@ class PipelineSourceAdapter extends AdapterBase
   StreamSubscription<HttpRequest>? _hlsProxySubscription;
   Map<String, Uri> _hlsProxyTargets = const {};
   Map<String, String> _hlsProxyHeaders = const {};
-  late final bool _usesDynamicPlayMetadata = _containsPlayOp(rule.play, const {
-    'setMediaHeaders',
-    'anime1Play',
-  });
-  late final bool _usesPlayCookies = _containsPlayOp(rule.play, const {
-    'anime1Play',
-  });
-  late final PipelineStep? _playbackKeepAliveStep = _findPlaybackKeepAliveStep(
-    rule.play,
-  );
-  late final bool _materializesHlsManifest =
-      rule.id == 'ani_pekolove' ||
-      _containsPlayFlag(rule.play, 'materializeHls');
-  late final bool _resolvesMediaRedirects = _containsPlayFlag(
-    rule.play,
-    'resolveMediaRedirects',
-  );
+  late final _playFeatures = _inspectPlayFeatures(rule.play);
+  // Rule Hub rev 1 of 4kcz predates this flag. Keep installed copies working
+  // while rev 2 rolls out; new rules opt in explicitly.
+  late final bool _followsEmbeddedPlayer =
+      rule.id == '4kcz' || _playFeatures.followsEmbeddedPlayer;
 
   @override
   String get baseUrl => rule.baseUrl;
@@ -96,15 +82,14 @@ class PipelineSourceAdapter extends AdapterBase
   }
 
   @override
-  bool get validatesOwnUrls =>
-      rule.play.any((step) => step.flag('validateWithCookies'));
+  bool get validatesOwnUrls => _playFeatures.validatesWithCookies;
 
   @override
   bool get validateAutoMatchedUrls => rule.id == 'cycani';
 
   @override
   void dispose() {
-    _webViewTaskScope.cancel();
+    _webViewTaskScope?.cancel();
     _mediaRedirectResolver?.close();
     stopPlaybackKeepAlive();
     super.dispose();
@@ -116,8 +101,6 @@ class PipelineSourceAdapter extends AdapterBase
       ..removeWhere((_, value) => value.isEmpty);
     return headers.isEmpty ? super.mediaValidationHeaders : headers;
   }
-
-  // ── AdapterBase contract ────────────────────────────────────────────
 
   @override
   Future<List<Series>> search(
@@ -137,7 +120,7 @@ class PipelineSourceAdapter extends AdapterBase
 
   @override
   Future<String> getDownloadUrl(String episodeId) {
-    if (!_usesPlayCookies) {
+    if (!_playFeatures.usesCookies) {
       return _interpreter.runPlay(rule, this, episodeId);
     }
     return _withPlayCookieSnapshot(
@@ -150,7 +133,7 @@ class PipelineSourceAdapter extends AdapterBase
     String episodeId, {
     bool skipValidation = false,
   }) async {
-    if (!_usesDynamicPlayMetadata) {
+    if (!_playFeatures.usesDynamicMetadata) {
       return super.resolvePlaybackMedia(
         episodeId,
         skipValidation: skipValidation,
@@ -168,7 +151,7 @@ class PipelineSourceAdapter extends AdapterBase
   @override
   Future<void> startPlaybackKeepAlive(String mediaUrl) async {
     stopPlaybackKeepAlive();
-    final step = _playbackKeepAliveStep;
+    final step = _playFeatures.keepAliveStep;
     final mediaUri = Uri.tryParse(mediaUrl);
     if (step == null || mediaUri == null || !mediaUri.hasScheme) return;
 
@@ -235,7 +218,7 @@ class PipelineSourceAdapter extends AdapterBase
     ({String url, Map<String, String> httpHeaders}) media,
   ) async {
     var prepared = media;
-    if (_resolvesMediaRedirects) {
+    if (_playFeatures.resolvesMediaRedirects) {
       final resolvedUrl =
           await (_mediaRedirectResolver ??= RemoteMediaRedirectResolver())
               .resolve(media.url, headers: media.httpHeaders);
@@ -247,7 +230,7 @@ class PipelineSourceAdapter extends AdapterBase
       }
     }
 
-    if (!_materializesHlsManifest ||
+    if (!(rule.id == 'ani_pekolove' || _playFeatures.materializesHls) ||
         !prepared.url.toLowerCase().contains('.m3u8')) {
       return prepared;
     }
@@ -538,8 +521,8 @@ class PipelineSourceAdapter extends AdapterBase
   }
 
   Future<T> _withPlayCookieSnapshot<T>(Future<T> Function() action) async {
-    if (!_usesPlayCookies) return action();
-    final previous = _playCookieBarrier;
+    if (!_playFeatures.usesCookies) return action();
+    final previous = _playCookieBarrier ?? Future<void>.value();
     final release = Completer<void>();
     _playCookieBarrier = release.future;
     await previous;
@@ -596,38 +579,54 @@ class PipelineSourceAdapter extends AdapterBase
     return headers;
   }
 
-  static bool _containsPlayOp(List<PipelineStep> steps, Set<String> ops) {
-    for (final step in steps) {
-      if (ops.contains(step.op)) return true;
-      for (final branch in step.branches) {
-        if (_containsPlayOp(branch, ops)) return true;
+  static ({
+    bool usesDynamicMetadata,
+    bool usesCookies,
+    bool validatesWithCookies,
+    bool materializesHls,
+    bool resolvesMediaRedirects,
+    bool followsEmbeddedPlayer,
+    PipelineStep? keepAliveStep,
+  })
+  _inspectPlayFeatures(List<PipelineStep> steps) {
+    var usesDynamicMetadata = false;
+    var usesCookies = false;
+    var validatesWithCookies = false;
+    var materializesHls = false;
+    var resolvesMediaRedirects = false;
+    var followsEmbeddedPlayer = false;
+    PipelineStep? keepAliveStep;
+
+    void inspect(List<PipelineStep> current) {
+      for (final step in current) {
+        if (step.op == 'setMediaHeaders' || step.op == 'anime1Play') {
+          usesDynamicMetadata = true;
+        }
+        if (step.op == 'anime1Play') usesCookies = true;
+        validatesWithCookies |= step.flag('validateWithCookies');
+        materializesHls |= step.flag('materializeHls');
+        resolvesMediaRedirects |= step.flag('resolveMediaRedirects');
+        followsEmbeddedPlayer |= step.flag('followEmbeddedPlayer');
+        if (keepAliveStep == null && step.flag('playbackKeepAlive')) {
+          keepAliveStep = step;
+        }
+        for (final branch in step.branches) {
+          inspect(branch);
+        }
       }
     }
-    return false;
-  }
 
-  static bool _containsPlayFlag(List<PipelineStep> steps, String flag) {
-    for (final step in steps) {
-      if (step.flag(flag)) return true;
-      for (final branch in step.branches) {
-        if (_containsPlayFlag(branch, flag)) return true;
-      }
-    }
-    return false;
+    inspect(steps);
+    return (
+      usesDynamicMetadata: usesDynamicMetadata,
+      usesCookies: usesCookies,
+      validatesWithCookies: validatesWithCookies,
+      materializesHls: materializesHls,
+      resolvesMediaRedirects: resolvesMediaRedirects,
+      followsEmbeddedPlayer: followsEmbeddedPlayer,
+      keepAliveStep: keepAliveStep,
+    );
   }
-
-  static PipelineStep? _findPlaybackKeepAliveStep(List<PipelineStep> steps) {
-    for (final step in steps) {
-      if (step.flag('playbackKeepAlive')) return step;
-      for (final branch in step.branches) {
-        final nested = _findPlaybackKeepAliveStep(branch);
-        if (nested != null) return nested;
-      }
-    }
-    return null;
-  }
-
-  // ── PipelineHost ────────────────────────────────────────────────────
 
   @override
   String toAbsolute(String url, String base) =>
@@ -811,8 +810,6 @@ class PipelineSourceAdapter extends AdapterBase
     }
   }
 
-  // ── WebView ─────────────────────────────────────────────────────────
-
   @override
   Future<String> renderWithWebview(String url) => renderWithWebviewReady(url);
 
@@ -831,7 +828,7 @@ class PipelineSourceAdapter extends AdapterBase
         timeout: timeout,
         settleDelay: settleDelay,
         userAgent: requestUserAgent,
-        taskScope: _webViewTaskScope,
+        taskScope: _webViewTaskScope ??= WebViewTaskScope(),
       );
       if (cookies.isNotEmpty) await storeWebViewCookies(url, cookies);
       return html;
@@ -868,7 +865,8 @@ class PipelineSourceAdapter extends AdapterBase
       return await WebViewAdapter.extractVideoUrl(
             url,
             userAgent: requestUserAgent,
-            taskScope: _webViewTaskScope,
+            followEmbeddedPlayer: _followsEmbeddedPlayer,
+            taskScope: _webViewTaskScope ??= WebViewTaskScope(),
           ) ??
           '';
     } catch (e) {

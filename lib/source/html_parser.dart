@@ -4,20 +4,9 @@ import 'package:baka/source/models/series.dart';
 import 'package:baka/source/models/episode.dart';
 import 'package:baka/source/models/source.dart';
 
-/// HTML parsing for search results and episode lists.
-///
-/// Replaces HtmlSearchMixin (245 lines) + EpisodeListMixin (491 lines) with
-/// ~200 lines of stateless functions. Key simplifications:
-/// - 10 search selectors → 5; 15+ title-link selectors → 3
-/// - 3-level parent traversal link finder → querySelector + fallback
-/// - 15 list selectors → 8; 11 tab selectors → 5
-/// - Removed _pruneNestedEpisodeContainers (over-engineered)
-/// - Episode number parsing: 5 patterns + 3 tuple patterns → 2 patterns + 2 tuple patterns
-/// - Removed _groupLinksByPattern fallback (rarely used, covered by container logic)
+/// Stateless HTML parsing for search results and episode lists.
 class HtmlParser {
   HtmlParser._();
-
-  // ── Search ──────────────────────────────────────────────────────────
 
   static const _searchSelectors = [
     '.module-items .module-item',
@@ -33,7 +22,6 @@ class HtmlParser {
     '.module-card-item-title a, .stui-vodlist__title a',
   ];
 
-  /// Parse search results from HTML.
   static List<Series> parseSearchResults(
     String html, {
     required String baseUrl,
@@ -41,17 +29,19 @@ class HtmlParser {
     String? detailPattern,
   }) {
     final doc = parse(html);
-    final allSelectors = [...(selectors ?? const []), ..._searchSelectors];
+    final allSelectors =
+        selectors?.followedBy(_searchSelectors) ?? _searchSelectors;
 
     for (final selector in allSelectors) {
       if (selector.trim().isEmpty) continue;
       try {
         final elements = doc.querySelectorAll(selector);
         if (elements.isEmpty) continue;
-        final results = elements
-            .map((e) => _parseSeriesElement(e, baseUrl, detailPattern))
-            .whereType<Series>()
-            .toList();
+        final results = <Series>[];
+        for (final element in elements) {
+          final series = _parseSeriesElement(element, baseUrl, detailPattern);
+          if (series != null) results.add(series);
+        }
         if (results.isNotEmpty) return results;
       } catch (_) {}
     }
@@ -62,7 +52,11 @@ class HtmlParser {
     return [];
   }
 
-  static Series? _parseSeriesElement(Element element, String baseUrl, String? detailPattern) {
+  static Series? _parseSeriesElement(
+    Element element,
+    String baseUrl,
+    String? detailPattern,
+  ) {
     final link = _findLink(element, detailPattern);
     if (link == null) return null;
 
@@ -106,7 +100,8 @@ class HtmlParser {
     final title = link.attributes['title']?.trim() ?? '';
     if (title.length > 1 && title.length < 100) return title;
 
-    final header = element.querySelector('h1, h2, h3, h4, .title')?.text.trim() ?? '';
+    final header =
+        element.querySelector('h1, h2, h3, h4, .title')?.text.trim() ?? '';
     if (header.length > 1 && header.length < 100) return header;
 
     final alt = element.querySelector('img')?.attributes['alt']?.trim() ?? '';
@@ -119,7 +114,8 @@ class HtmlParser {
 
   static String? _extractImage(Element element, String baseUrl) {
     final img = element.querySelector('img');
-    final src = img?.attributes['data-original'] ??
+    final src =
+        img?.attributes['data-original'] ??
         img?.attributes['data-src'] ??
         img?.attributes['src'] ??
         element.querySelector('[data-original]')?.attributes['data-original'] ??
@@ -130,23 +126,22 @@ class HtmlParser {
     return (src != null && src.isNotEmpty) ? _toAbsolute(src, baseUrl) : null;
   }
 
-  static List<Series> _fallbackByDetailLinks(Document doc, String baseUrl, String pattern) {
+  static List<Series> _fallbackByDetailLinks(
+    Document doc,
+    String baseUrl,
+    String pattern,
+  ) {
     final seen = <String>{};
-    return doc
-        .querySelectorAll('a[href*="$pattern"]')
-        .where((link) => seen.add(link.attributes['href'] ?? ''))
-        .map((link) {
-          final href = (link.attributes['href'] ?? '').trim();
-          if (href.isEmpty) return null;
-          final name = (link.attributes['title'] ?? link.text).trim();
-          if (name.length < 2) return null;
-          return Series(_toAbsolute(href, baseUrl), name);
-        })
-        .whereType<Series>()
-        .toList();
+    final results = <Series>[];
+    for (final link in doc.querySelectorAll('a[href*="$pattern"]')) {
+      final href = (link.attributes['href'] ?? '').trim();
+      if (href.isEmpty || !seen.add(href)) continue;
+      final name = (link.attributes['title'] ?? link.text).trim();
+      if (name.length < 2) continue;
+      results.add(Series(_toAbsolute(href, baseUrl), name));
+    }
+    return results;
   }
-
-  // ── Episodes ────────────────────────────────────────────────────────
 
   static const _tabSelectors = [
     '.play_source_tab a',
@@ -178,8 +173,8 @@ class HtmlParser {
   ];
 
   static final _wsRegex = RegExp(r'\s+');
+  static final _trailingDigitsRegex = RegExp(r'\d+$');
 
-  /// Parse episode sources from a detail page Document.
   static List<Source> parseSources(
     Document doc, {
     required String baseUrl,
@@ -195,7 +190,9 @@ class HtmlParser {
 
       if (containers.length == 1) {
         final episodes = _extractEpisodes(containers[0], baseUrl);
-        if (episodes.isNotEmpty) return [Source(episodes, _sourceName(0, labels))];
+        if (episodes.isNotEmpty) {
+          return [Source(episodes, _sourceName(0, labels))];
+        }
         continue;
       }
 
@@ -237,17 +234,24 @@ class HtmlParser {
       if (!seen.add(episodeId)) continue;
 
       final number = episodeNumbers[i];
-      final index = (number != null && number > 0) ? number - 1 : episodes.length;
+      final index = (number != null && number > 0)
+          ? number - 1
+          : episodes.length;
       final name = validLinks[i].text.trim().replaceAll(_wsRegex, ' ');
-      episodes.add(Episode(episodeId, index, name.isEmpty ? 'Episode ${index + 1}' : name));
+      episodes.add(
+        Episode(episodeId, index, name.isEmpty ? 'Episode ${index + 1}' : name),
+      );
     }
     return episodes;
   }
 
   static List<int?> _resolveEpisodeNumbers(List<String> hrefs) {
     final numbers = List<int?>.filled(hrefs.length, null);
-    final tupleIndices = <int>[];
-    final tuples = <List<int>>[];
+    final tuples = <({int index, int first, int second})>[];
+    int? firstColumn0;
+    int? firstColumn1;
+    var column0Varies = false;
+    var column1Varies = false;
 
     for (var i = 0; i < hrefs.length; i++) {
       final normalized = hrefs[i].replaceAll(r'\/', '/');
@@ -256,7 +260,11 @@ class HtmlParser {
         final match = pattern.firstMatch(normalized);
         if (match != null) {
           final n = int.tryParse(match.group(1) ?? '');
-          if (n != null && n > 0) { numbers[i] = n; found = true; break; }
+          if (n != null && n > 0) {
+            numbers[i] = n;
+            found = true;
+            break;
+          }
         }
       }
       if (found) continue;
@@ -267,8 +275,11 @@ class HtmlParser {
           final a = int.tryParse(match.group(1) ?? '');
           final b = int.tryParse(match.group(2) ?? '');
           if (a != null && b != null) {
-            tupleIndices.add(i);
-            tuples.add([a, b]);
+            firstColumn0 ??= a;
+            firstColumn1 ??= b;
+            column0Varies |= a != firstColumn0;
+            column1Varies |= b != firstColumn1;
+            tuples.add((index: i, first: a, second: b));
             break;
           }
         }
@@ -276,13 +287,11 @@ class HtmlParser {
     }
 
     if (tuples.isNotEmpty) {
-      final col0 = tuples.map((t) => t[0]).toSet();
-      final col1 = tuples.map((t) => t[1]).toSet();
-      final useFirst = col0.length > 1 && col1.length == 1;
-      final useSecond = col1.length > 1 && col0.length == 1;
+      final useFirst = column0Varies && !column1Varies;
+      final useSecond = column1Varies && !column0Varies;
       if (useFirst || useSecond) {
-        for (var j = 0; j < tupleIndices.length; j++) {
-          numbers[tupleIndices[j]] = useFirst ? tuples[j][0] : tuples[j][1];
+        for (final tuple in tuples) {
+          numbers[tuple.index] = useFirst ? tuple.first : tuple.second;
         }
       }
     }
@@ -294,7 +303,12 @@ class HtmlParser {
       try {
         final elements = doc.querySelectorAll(selector);
         if (elements.isNotEmpty) {
-          return elements.map((e) => e.text.trim()).where((s) => s.isNotEmpty).toList();
+          final labels = <String>[];
+          for (final element in elements) {
+            final label = element.text.trim();
+            if (label.isNotEmpty) labels.add(label);
+          }
+          if (labels.isNotEmpty) return labels;
         }
       } catch (_) {}
     }
@@ -305,7 +319,7 @@ class HtmlParser {
     if (index < labels.length) {
       final label = labels[index]
           .trim()
-          .replaceAll(RegExp(r'\d+$'), '')
+          .replaceAll(_trailingDigitsRegex, '')
           .trim();
       if (label.isNotEmpty && label.length < 50) return label;
     }
@@ -313,14 +327,38 @@ class HtmlParser {
   }
 
   static List<Source> _dedupe(List<Source> sources) {
-    final seen = <String>{};
-    return sources.where((source) {
-      final sig = source.episodes.map((e) => e.episodeId).join('\n');
-      return sig.isNotEmpty && seen.add(sig);
-    }).toList();
+    final buckets = <int, List<Source>>{};
+    final unique = <Source>[];
+    for (final source in sources) {
+      if (source.episodes.isEmpty) continue;
+      var hash = 0;
+      for (final episode in source.episodes) {
+        hash = 0x1fffffff & (hash * 31 + episode.episodeId.hashCode);
+      }
+      final bucket = buckets[hash];
+      var duplicate = false;
+      if (bucket != null) {
+        for (final candidate in bucket) {
+          if (_sameEpisodeIds(source, candidate)) {
+            duplicate = true;
+            break;
+          }
+        }
+      }
+      if (duplicate) continue;
+      (buckets[hash] ??= <Source>[]).add(source);
+      unique.add(source);
+    }
+    return unique;
   }
 
-  // ── URL helper ──────────────────────────────────────────────────────
+  static bool _sameEpisodeIds(Source a, Source b) {
+    if (a.episodes.length != b.episodes.length) return false;
+    for (var i = 0; i < a.episodes.length; i++) {
+      if (a.episodes[i].episodeId != b.episodes[i].episodeId) return false;
+    }
+    return true;
+  }
 
   static String _toAbsolute(String url, String baseUrl) {
     if (url.isEmpty) return url;

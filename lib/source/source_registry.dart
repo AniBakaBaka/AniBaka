@@ -1,5 +1,4 @@
 import 'package:baka/source/adapter_base.dart';
-import 'package:baka/source/models/episode.dart';
 import 'package:baka/source/models/series.dart';
 import 'package:baka/source/models/source.dart';
 import 'package:baka/source/pipeline_source_adapter.dart';
@@ -361,35 +360,45 @@ Map<String, dynamic>? _buildPlayerPayload({
 
 List<String> buildAdapterVideoList(List<Source> sources) {
   var maxEpisodeIndex = -1;
-  final episodesBySource = sources
-      .map((source) {
-        final episodes = <int, Episode>{};
-        for (var i = 0; i < source.episodes.length; i++) {
-          final ep = source.episodes[i];
-          final idx = ep.episode >= 0 ? ep.episode : i;
-          episodes[idx] = ep;
-          if (idx > maxEpisodeIndex) maxEpisodeIndex = idx;
-        }
-        return episodes;
-      })
-      .toList(growable: false);
+  final lines = <int, _VideoLine>{};
+  for (var sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
+    final source = sources[sourceIndex];
+    for (var i = 0; i < source.episodes.length; i++) {
+      final episode = source.episodes[i];
+      final index = episode.episode >= 0 ? episode.episode : i;
+      final line = lines[index];
+      if (line == null) {
+        lines[index] = _VideoLine(episode.name, episode.episodeId, sourceIndex);
+      } else if (line.lastSourceIndex == sourceIndex) {
+        line.episodeIds.last = episode.episodeId;
+        if (line.titleSourceIndex == sourceIndex) line.title = episode.name;
+      } else {
+        line.episodeIds.add(episode.episodeId);
+        line.lastSourceIndex = sourceIndex;
+      }
+      if (index > maxEpisodeIndex) maxEpisodeIndex = index;
+    }
+  }
 
   final videoList = <String>[];
   for (var i = 0; i <= maxEpisodeIndex; i++) {
-    String? title;
-    final parts = <String>[];
-    for (final sourceEpisodes in episodesBySource) {
-      final ep = sourceEpisodes[i];
-      if (ep != null) {
-        title ??= ep.name;
-        parts.add(ep.episodeId);
-      }
-    }
-    if (title != null && parts.isNotEmpty) {
-      videoList.add([title, ...parts].join(r'$'));
-    }
+    final line = lines[i];
+    if (line == null) continue;
+    videoList.add([line.title, ...line.episodeIds].join(r'$'));
   }
   return videoList;
+}
+
+class _VideoLine {
+  _VideoLine(this.title, String episodeId, int sourceIndex)
+    : titleSourceIndex = sourceIndex,
+      lastSourceIndex = sourceIndex,
+      episodeIds = <String>[episodeId];
+
+  String title;
+  final int titleSourceIndex;
+  int lastSourceIndex;
+  final List<String> episodeIds;
 }
 
 int _stableHash(String input) {

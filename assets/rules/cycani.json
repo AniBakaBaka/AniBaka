@@ -15,6 +15,17 @@
       "branches": [
         [
           {
+            "op": "maccmsSuggest",
+            "verify": true,
+            "headers": {
+              "Accept": "application/json, text/javascript, */*; q=0.01",
+              "Referer": "https://www.cycani.org/"
+            },
+            "detailUrlTemplate": "/bangumi/{id}.html"
+          }
+        ],
+        [
+          {
             "op": "sniff",
             "goal": "html",
             "url": "/index.php/ajax/suggest?mid=1&wd={keyword}&limit=20",
@@ -38,17 +49,6 @@
             "listPath": "list",
             "detailUrlTemplate": "/bangumi/{id}.html"
           }
-        ],
-        [
-          {
-            "op": "maccmsSuggest",
-            "verify": true,
-            "headers": {
-              "Accept": "application/json, text/javascript, */*; q=0.01",
-              "Referer": "https://www.cycani.org/"
-            },
-            "detailUrlTemplate": "/bangumi/{id}.html"
-          }
         ]
       ]
     }
@@ -59,6 +59,15 @@
       "branches": [
         [
           {
+            "op": "regex",
+            "pattern": "/bangumi/(\\d+)",
+            "group": 1
+          },
+          {
+            "op": "template",
+            "value": "/api.php/provide/vod/?ac=detail&ids={url:raw}"
+          },
+          {
             "op": "follow",
             "headers": {
               "Referer": "https://www.cycani.org/"
@@ -66,6 +75,35 @@
           },
           {
             "op": "maccmsVerify"
+          },
+          {
+            "op": "maccmsApiEpisodes",
+            "listPath": "list"
+          }
+        ],
+        [
+          {
+            "op": "follow",
+            "headers": {
+              "Referer": "https://www.cycani.org/"
+            }
+          },
+          {
+            "op": "maccmsVerify"
+          },
+          {
+            "op": "episodes",
+            "listSelectors": [
+              ".anthology-list .anthology-list-box",
+              ".anthology-list-box",
+              ".anthology-list-play"
+            ],
+            "tabSelectors": [
+              ".anthology-tab .swiper-slide",
+              ".anthology-tab a",
+              ".module-tab-item",
+              ".tab-item"
+            ]
           }
         ],
         [
@@ -81,21 +119,22 @@
             ],
             "timeoutMs": 60000,
             "settleMs": 0
+          },
+          {
+            "op": "episodes",
+            "listSelectors": [
+              ".anthology-list .anthology-list-box",
+              ".anthology-list-box",
+              ".anthology-list-play"
+            ],
+            "tabSelectors": [
+              ".anthology-tab .swiper-slide",
+              ".anthology-tab a",
+              ".module-tab-item",
+              ".tab-item"
+            ]
           }
         ]
-      ]
-    },
-    {
-      "op": "episodes",
-      "listSelectors": [
-        ".anthology-list-box",
-        ".anthology-list-play"
-      ],
-      "tabSelectors": [
-        ".anthology-tab .swiper-slide",
-        ".anthology-tab a",
-        ".module-tab-item",
-        ".tab-item"
       ]
     }
   ],

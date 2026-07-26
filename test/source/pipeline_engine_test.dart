@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:test/test.dart';
@@ -13,6 +14,7 @@ import 'package:baka/source/engine/rule_validator.dart';
 import 'package:baka/source/model/source_rule.dart';
 import 'package:baka/source/pipeline_source_adapter.dart';
 import 'package:baka/source/runtime/request_scheduler.dart';
+import 'package:baka/source/source_registry.dart';
 import 'package:baka/source/store/rule_migrator.dart';
 
 /// 可控的宿主替身：fetch 从预置表返回，解析类方法给出可预测的最小实现。
@@ -1048,6 +1050,59 @@ void main() {
       PipelineSourceAdapter(rule('other')).validateAutoMatchedUrls,
       isFalse,
     );
+  });
+
+  test('Cycani uses HTTP suggest before the WebView fallback', () async {
+    final rule = SourceRule.fromJson(
+      jsonDecode(await File('assets/rules/cycani.json').readAsString())
+          as Map<String, dynamic>,
+    );
+    expect(RuleValidator.validate(rule).errors, isEmpty);
+    final host = FakeHost({
+      'https://example.com/index.php/ajax/suggest?mid=1&wd=x&limit=20':
+          '{"list":[{"id":"3049","name":"HTTP result"}]}',
+    });
+
+    final results = await interp.runSearch(rule, host, 'x');
+
+    expect(results.single.name, 'HTTP result');
+    expect(results.single.seriesId, 'https://example.com/bangumi/3049.html');
+    expect(host.fetched, hasLength(1));
+  });
+
+  test('Cycani detail prefers API episode data over fragile page DOM', () async {
+    final rule = SourceRule.fromJson(
+      jsonDecode(await File('assets/rules/cycani.json').readAsString())
+          as Map<String, dynamic>,
+    );
+    final host = FakeHost({
+      'https://example.com/api.php/provide/vod/?ac=detail&ids=3049': jsonEncode({
+        'list': [
+          {
+            'vod_play_from': r'cycani$$$backup',
+            'vod_play_url':
+                r'第01集$/watch/3049/1/1.html#第02集$/watch/3049/1/2.html$$$第01集$/watch/3049/2/1.html',
+          },
+        ],
+      }),
+    });
+
+    final sources = await interp.runDetail(
+      rule,
+      host,
+      'https://www.cycani.org/bangumi/3049.html',
+    );
+
+    expect(sources, hasLength(2));
+    expect(sources.first.sourceName, 'cycani');
+    expect(sources.first.episodes, hasLength(2));
+    expect(sources.first.episodes.first.name, '第01集');
+    expect(sources.first.episodes.first.episodeId, '/watch/3049/1/1.html');
+    expect(buildAdapterVideoList(sources), [
+      r'第01集$/watch/3049/1/1.html$/watch/3049/2/1.html',
+      r'第02集$/watch/3049/1/2.html',
+    ]);
+    expect(host.fetched, hasLength(1));
   });
 
   test('custom source persistence keeps directConnection', () {

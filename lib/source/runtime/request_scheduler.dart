@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 /// 请求优先级：用户直接触发的播放解析优先于后台探针，探针优先于搜索。
 enum RequestPriority { search, probe, play }
@@ -19,12 +20,13 @@ class RequestCancelToken {
     _listeners.clear();
   }
 
-  void onCancel(void Function() listener) {
+  void Function() onCancel(void Function() listener) {
     if (_cancelled) {
       listener();
-      return;
+      return () {};
     }
     _listeners.add(listener);
+    return () => _listeners.remove(listener);
   }
 
   void throwIfCancelled() {
@@ -74,16 +76,18 @@ class RequestScheduler {
     }
 
     final completer = Completer<void>();
+    void Function()? unregisterCancel;
     final scheduled = _ScheduledTask(
       host: host,
       priority: priority,
       seq: _seq++,
       start: () {
+        unregisterCancel?.call();
         if (!completer.isCompleted) completer.complete();
       },
     );
 
-    cancelToken?.onCancel(() {
+    unregisterCancel = cancelToken?.onCancel(() {
       if (_queue.remove(scheduled) && !completer.isCompleted) {
         completer.completeError(const RequestCancelledException());
       }
@@ -127,7 +131,7 @@ class RequestScheduler {
     while (_queue.isNotEmpty && _active < maxConcurrent) {
       final next = _queue.peekWithHostBudget(_hostActive, maxPerHost);
       if (next == null) break; // 队首都受 host 限流阻塞
-      _queue.removeItem(next);
+      _queue.remove(next);
       _active++;
       _hostActive.update(next.host, (v) => v + 1, ifAbsent: () => 1);
       next.start();
@@ -149,17 +153,17 @@ class _ScheduledTask {
   });
 }
 
-/// 极简优先级队列：按 (priority desc, seq asc) 排序，并支持 host 预算感知出队。
+/// 按 (priority desc, seq asc) 排序，并支持 host 预算感知出队。
 class _PriorityQueue {
-  final List<_ScheduledTask> _items = <_ScheduledTask>[];
+  final SplayTreeSet<_ScheduledTask> _items = SplayTreeSet<_ScheduledTask>(
+    _compare,
+  );
 
   bool get isNotEmpty => _items.isNotEmpty;
 
   void add(_ScheduledTask item) => _items.add(item);
 
   bool remove(_ScheduledTask item) => _items.remove(item);
-
-  void removeItem(_ScheduledTask item) => _items.remove(item);
 
   /// 返回优先级最高、且其 host 未超预算的任务；没有则返回 null。
   _ScheduledTask? peekWithHostBudget(
@@ -169,15 +173,16 @@ class _PriorityQueue {
     _ScheduledTask? best;
     for (final item in _items) {
       if ((hostActive[item.host] ?? 0) >= maxPerHost) continue;
-      if (best == null || _isHigher(item, best)) best = item;
+      best = item;
+      break;
     }
     return best;
   }
 
-  bool _isHigher(_ScheduledTask a, _ScheduledTask b) {
+  static int _compare(_ScheduledTask a, _ScheduledTask b) {
     if (a.priority.index != b.priority.index) {
-      return a.priority.index > b.priority.index;
+      return b.priority.index.compareTo(a.priority.index);
     }
-    return a.seq < b.seq;
+    return a.seq.compareTo(b.seq);
   }
 }

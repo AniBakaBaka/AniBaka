@@ -49,6 +49,7 @@ class SearchService {
   List<String> get sourceLabels => sourceLabelsNotifier.value;
 
   int activeSearchId = 0;
+  bool _disposed = false;
 
   /// Per-page instance so Cookie / request state stays isolated from the
   /// global [SourceAdapterService.instance] used by management UI.
@@ -59,7 +60,9 @@ class SearchService {
 
   Future<void> init({int? initialSource, String? initialKeyword}) async {
     _prefs = await SharedPreferences.getInstance();
+    if (_disposed) return;
     await reloadCustomSources();
+    if (_disposed) return;
 
     if (initialSource != null) selectedSourceIndex = initialSource;
     searchHistory = _loadHistory();
@@ -68,6 +71,7 @@ class SearchService {
 
   Future<void> reloadCustomSources() async {
     await _sourceAdapterService.init();
+    if (_disposed) return;
     customSources = _sourceAdapterService.enabledCustomSources;
     builtinAdapterSources = _sourceAdapterService.enabledBuiltinSources;
 
@@ -98,6 +102,7 @@ class SearchService {
   bool isActiveSearch(int searchId) => searchId == activeSearchId;
 
   Future<List<dynamic>> executeSearch(String searchKey) async {
+    if (_disposed) return const [];
     final query = searchKey.trim();
     if (query.isEmpty) return const [];
 
@@ -148,6 +153,7 @@ class SearchService {
         searchKey,
         customSources[customIndex],
         fallbackDescription: noDescriptionText,
+        skipBgmEnhancement: true,
       );
     } catch (error) {
       debugPrint('Search failed for $selectedSourceLabel: $error');
@@ -168,9 +174,7 @@ class SearchService {
     );
   }
 
-  Future<Map<String, dynamic>?> buildPlayerData(
-    Map<String, dynamic> item,
-  ) =>
+  Future<Map<String, dynamic>?> buildPlayerData(Map<String, dynamic> item) =>
       _sourceAdapterService.buildPlayerData(item);
 
   List<String> _loadHistory() {
@@ -190,11 +194,13 @@ class SearchService {
   }
 
   void _persistHistory(List<String> history) {
+    if (_disposed) return;
     searchHistory = history;
     _prefs?.setString(_searchHistoryKey, jsonEncode(history));
   }
 
   void addSearchHistory(String value) {
+    if (_disposed) return;
     final trimmed = value.trim();
     if (trimmed.isEmpty) return;
 
@@ -207,6 +213,7 @@ class SearchService {
   }
 
   void removeSearchHistory(String value) {
+    if (_disposed) return;
     _persistHistory([
       for (final item in searchHistory)
         if (item != value) item,
@@ -214,11 +221,15 @@ class SearchService {
   }
 
   void clearSearchHistory() {
+    if (_disposed) return;
     _prefs?.remove(_searchHistoryKey);
     searchHistory = const [];
   }
 
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    activeSearchId++;
     _sourceAdapterService.dispose();
     resultsNotifier.dispose();
     selectedSourceIndexNotifier.dispose();
