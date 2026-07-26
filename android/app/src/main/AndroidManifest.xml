@@ -30,7 +30,7 @@
             />
             <meta-data
                 android:name="io.flutter.embedding.android.EnableImpeller"
-                android:value="true" />
+                android:value="@bool/enable_impeller" />
             <!-- Displays an Android View that continues showing the launch screen
                  Drawable until Flutter paints its first frame, then this splash
                  screen fades out. A splash screen is useful to avoid any visual

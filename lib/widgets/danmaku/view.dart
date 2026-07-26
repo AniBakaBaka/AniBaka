@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:math' as math;
 
+import 'package:baka/instance.dart';
+import 'package:baka/utils/app_logger.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -43,6 +45,8 @@ class _DanmakuViewState extends State<DanmakuView>
   double _viewWidth = 0;
   double _viewHeight = 0;
   double _lineHeight = 0;
+  bool? _lastReportedRunning;
+  DateTime? _lastDriftLogAt;
 
   DanmakuController get _controller => widget.controller;
   bool get _hasViewport => _viewWidth > 0 && _viewHeight > 0;
@@ -53,12 +57,14 @@ class _DanmakuViewState extends State<DanmakuView>
     _ticker = createTicker(_onTick);
     widget.controller.attach(this);
     widget.created?.call(true);
+    _log('Danmaku view created: items=${_controller.items.length}');
   }
 
   @override
   void didUpdateWidget(covariant DanmakuView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.controller, widget.controller)) {
+      _log('Danmaku controller replaced');
       oldWidget.controller.detach(this);
       widget.controller.attach(this);
       onDanmakuReset();
@@ -67,6 +73,10 @@ class _DanmakuViewState extends State<DanmakuView>
 
   @override
   void dispose() {
+    _log(
+      'Danmaku view disposed: active=${_active.length} cursor=$_cursor '
+      'clockMs=${_clockMs.round()}',
+    );
     widget.controller.detach(this);
     _stopWork();
     _clearActive();
@@ -93,6 +103,15 @@ class _DanmakuViewState extends State<DanmakuView>
     final positionMs = position.inMilliseconds.toDouble();
     final drift = positionMs - _clockMs;
     if (drift.abs() > _seekThresholdMs) {
+      final now = DateTime.now();
+      if (_lastDriftLogAt == null ||
+          now.difference(_lastDriftLogAt!) >= const Duration(seconds: 5)) {
+        _lastDriftLogAt = now;
+        _log(
+          'Danmaku clock resync: driftMs=${drift.round()} '
+          'active=${_active.length} cursor=$_cursor',
+        );
+      }
       _clockMs = positionMs;
       _clearActive();
       _resetTracks();
@@ -117,6 +136,10 @@ class _DanmakuViewState extends State<DanmakuView>
     _resetTracks();
     _clearRecentTexts();
     _cursor = _lowerBound(_controller.items, _clockMs);
+    _log(
+      'Danmaku items changed: count=${_controller.items.length} '
+      'cursor=$_cursor clockMs=${_clockMs.round()}',
+    );
     _repaint.value++;
     _scheduleWork();
   }
@@ -133,6 +156,11 @@ class _DanmakuViewState extends State<DanmakuView>
 
   @override
   void onDanmakuOptionChanged(DanmakuOption next, DanmakuOption previous) {
+    _log(
+      'Danmaku option changed: fontSize=${next.fontSize} area=${next.area} '
+      'opacity=${next.opacity} hideScroll=${next.hideScroll} '
+      'hideTop=${next.hideTop} hideBottom=${next.hideBottom}',
+    );
     _active.removeWhere((entry) {
       final hidden = switch (entry.item.type) {
         1 => next.hideScroll,
@@ -157,10 +185,22 @@ class _DanmakuViewState extends State<DanmakuView>
   }
 
   @override
-  void onDanmakuPause() => _stopWork();
+  void onDanmakuPause() {
+    if (_lastReportedRunning != false) {
+      _lastReportedRunning = false;
+      _log('Danmaku paused: active=${_active.length} cursor=$_cursor');
+    }
+    _stopWork();
+  }
 
   @override
-  void onDanmakuResume() => _scheduleWork();
+  void onDanmakuResume() {
+    if (_lastReportedRunning != true) {
+      _lastReportedRunning = true;
+      _log('Danmaku resumed: active=${_active.length} cursor=$_cursor');
+    }
+    _scheduleWork();
+  }
 
   @override
   void onDanmakuReset() {
@@ -312,8 +352,15 @@ class _DanmakuViewState extends State<DanmakuView>
     final width = constraints.maxWidth;
     final height = constraints.maxHeight;
     if (width == _viewWidth && height == _viewHeight) return;
+    final previousWidth = _viewWidth;
+    final previousHeight = _viewHeight;
     _viewWidth = width;
     _viewHeight = height;
+    _log(
+      'Danmaku viewport changed: '
+      '${previousWidth.toStringAsFixed(1)}x${previousHeight.toStringAsFixed(1)} '
+      '-> ${width.toStringAsFixed(1)}x${height.toStringAsFixed(1)}',
+    );
     if (!_hasViewport) return;
     _rebuildTracks(_controller.option);
     _relayout(_controller.option, relayoutText: false);
@@ -447,6 +494,11 @@ class _DanmakuViewState extends State<DanmakuView>
     _wakeTimer?.cancel();
     _wakeTimer = null;
     _stopTicker();
+  }
+
+  void _log(String message) {
+    if (!Instances.isTV) return;
+    AppLogger.instance.info(message, tag: 'TvDanmaku');
   }
 
   double _measureLineHeight(DanmakuOption option) {

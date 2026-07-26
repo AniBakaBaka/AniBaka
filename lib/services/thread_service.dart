@@ -1,157 +1,188 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/services/app_storage.dart';
 import 'package:baka/widgets/comment/comment_card.dart';
 
-/// 帖子/讨论区业务逻辑服务
+/// 讨论区频道
+class ThreadChannel {
+  final String name;
+  final int pid;
+  const ThreadChannel(this.name, this.pid);
+}
+
+/// 单频道运行时状态（数据与加载标志合一，避免平行数组）
+class ThreadTab {
+  final ThreadChannel channel;
+  List comments = const [];
+  bool isRefreshing = false;
+  bool isLoadingMore = false;
+  bool hasMore = true;
+  /// 已成功加载的页数；0 表示尚未加载
+  int page = 0;
+  DateTime? lastLoadTime;
+
+  ThreadTab(this.channel);
+
+  int get pid => channel.pid;
+  String get name => channel.name;
+}
+
+/// 帖子/讨论区业务逻辑
 ///
-/// 负责评论加载、分页、缓存读写等。
-/// UI 层（ThreadPage）持有本实例并驱动界面刷新。
+/// 分页：固定 pageSize，按 page 递增拉取并 append，
+/// 避免「每次把 pageSize 加大再整表重拉」的 O(n²) 网络与处理开销。
 class ThreadService {
   static const int pageSize = 20;
-  static const int cacheExpiryHours = 1;
-  static const Duration loadThrottleDuration = Duration(seconds: 2);
+  static const int cacheExpiryMs = 3600 * 1000; // 1h
+  static const Duration loadThrottle = Duration(seconds: 2);
 
-  static const List<List> threads = [
-    ['#茶馆', 6],
-    ['#baka', 8],
-    ['#求番报错', 7],
-    ['#反馈', 9],
-    ['#里世界', 10],
+  static const channels = <ThreadChannel>[
+    ThreadChannel('#茶馆', 6),
+    ThreadChannel('#baka', 8),
+    ThreadChannel('#求番报错', 7),
+    ThreadChannel('#反馈', 9),
+    ThreadChannel('#里世界', 10),
   ];
 
-  // ─── Per-Tab State ───
-
-  final List<List<dynamic>> caches = List.generate(threads.length, (_) => []);
-  final List<bool> isRefreshing = List.generate(threads.length, (_) => false);
-  final List<bool> isLoadingMore = List.generate(threads.length, (_) => false);
-  final List<bool> hasMore = List.generate(threads.length, (_) => true);
-  final List<DateTime?> lastLoadTimes = List.generate(
-    threads.length,
-    (_) => null,
-  );
+  final List<ThreadTab> tabs =
+      List.generate(channels.length, (i) => ThreadTab(channels[i]));
 
   // ─── Cache ───
 
-  Map<String, dynamic>? readCommentsCache(int pid) {
-    final cache = AppStorage.threadCommentsBox.get('comments_$pid');
-    if (cache == null) return null;
-    return Map<String, dynamic>.from(cache);
+  List? _readCache(int pid) {
+    final raw = AppStorage.threadCommentsBox.get('comments_$pid');
+    if (raw is! Map) return null;
+    final ts = raw['timestamp'] as int? ?? 0;
+    if (DateTime.now().millisecondsSinceEpoch - ts >= cacheExpiryMs) {
+      return null;
+    }
+    final data = raw['data'];
+    return data is List ? data : null;
   }
 
-  Future<void> saveCommentsCache(int pid, List comments) async {
+  Future<void> _writeCache(int pid, List comments) async {
     try {
       await AppStorage.threadCommentsBox.put('comments_$pid', {
         'data': comments,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       });
     } catch (e) {
-      debugPrint('保存评论到缓存失败: $e');
+      debugPrint('保存评论缓存失败: $e');
     }
   }
 
-  // ─── Data Loading ───
+  // ─── Fetch ───
 
-  /// 加载缓存的评论，缓存有效则直接返回，否则触发远程刷新。
-  /// 返回 true 表示缓存命中（UI 无需额外加载）。
-  Future<bool> loadCachedComments(int tabIndex) async {
-    final pid = threads[tabIndex][1];
-    try {
-      final cache = readCommentsCache(pid);
-      if (cache != null) {
-        final cacheTime = cache['timestamp'] ?? 0;
-        final now = DateTime.now().millisecondsSinceEpoch;
-        if (now - cacheTime < cacheExpiryHours * 3600000) {
-          caches[tabIndex] = List.from(cache['data']);
-          return true;
-        }
-      }
-    } catch (e) {
-      debugPrint('加载缓存评论出错: $e');
-    }
-    return false;
+  Future<List> _fetchPage(int pid, int page) async {
+    final response = await getComments(pid, pageSize, '', page: page);
+    final decoded = jsonDecode(response.data);
+    final data = decoded is Map ? decoded['data'] : null;
+    return CommentListState.processCommentsList(data is List ? data : null);
   }
 
-  /// 刷新指定标签页的评论。返回处理后的评论列表。
-  Future<List<dynamic>> refreshComments(int tabIndex) async {
-    if (isRefreshing[tabIndex]) return caches[tabIndex];
-
-    final pid = threads[tabIndex][1];
-    isRefreshing[tabIndex] = true;
-    hasMore[tabIndex] = true;
-
+  /// 尝试用本地缓存填充 [tabIndex]；命中返回 true。
+  bool loadCached(int tabIndex) {
+    final tab = tabs[tabIndex];
     try {
-      final response = await getComments(pid, pageSize, '');
-      final commentsData = jsonDecode(response.data)['data'];
-      final processedComments = CommentListState.processCommentsList(
-        commentsData,
-      );
-      await saveCommentsCache(pid, processedComments);
-      caches[tabIndex] = processedComments;
-      lastLoadTimes[tabIndex] = DateTime.now();
-      return processedComments;
+      final cached = _readCache(tab.pid);
+      if (cached == null) return false;
+      tab.comments = List.of(cached);
+      // 缓存只保证首页数据；hasMore 保守为 true，由后续 loadMore 校正
+      tab.page = 1;
+      tab.hasMore = cached.length >= pageSize;
+      return true;
     } catch (e) {
-      debugPrint('刷新评论出错: $e');
+      debugPrint('读取评论缓存失败: $e');
+      return false;
+    }
+  }
+
+  /// 刷新首页。返回最新列表。
+  Future<List> refresh(int tabIndex) async {
+    final tab = tabs[tabIndex];
+    if (tab.isRefreshing) return tab.comments;
+
+    tab.isRefreshing = true;
+    tab.hasMore = true;
+    try {
+      final list = await _fetchPage(tab.pid, 1);
+      tab.comments = list;
+      tab.page = 1;
+      tab.hasMore = list.length >= pageSize;
+      tab.lastLoadTime = DateTime.now();
+      await _writeCache(tab.pid, list);
+      return list;
+    } catch (e) {
+      debugPrint('刷新评论失败: $e');
       rethrow;
     } finally {
-      isRefreshing[tabIndex] = false;
+      tab.isRefreshing = false;
     }
   }
 
   bool canLoadMore(int tabIndex) {
-    if (isRefreshing[tabIndex] ||
-        isLoadingMore[tabIndex] ||
-        !hasMore[tabIndex]) {
-      return false;
-    }
-
-    final lastLoad = lastLoadTimes[tabIndex];
-    return lastLoad == null ||
-        DateTime.now().difference(lastLoad) >= loadThrottleDuration;
+    final tab = tabs[tabIndex];
+    if (tab.isRefreshing || tab.isLoadingMore || !tab.hasMore) return false;
+    final last = tab.lastLoadTime;
+    return last == null || DateTime.now().difference(last) >= loadThrottle;
   }
 
-  /// 加载更多评论。返回处理后的评论列表（如果有新数据）。
-  Future<List<dynamic>?> loadMoreComments(int tabIndex) async {
-    if (!canLoadMore(tabIndex)) {
-      return null;
-    }
+  /// 加载下一页并 append。无新数据时返回 null。
+  Future<List?> loadMore(int tabIndex) async {
+    if (!canLoadMore(tabIndex)) return null;
 
-    final pid = threads[tabIndex][1];
-    final currentLength = caches[tabIndex].length;
-    final nextPageSize = currentLength + pageSize;
-
-    isLoadingMore[tabIndex] = true;
+    final tab = tabs[tabIndex];
+    final nextPage = tab.page + 1;
+    tab.isLoadingMore = true;
     try {
-      final response = await getComments(pid, nextPageSize, '');
-      final commentsData = jsonDecode(response.data)['data'];
-      final processedComments = CommentListState.processCommentsList(
-        commentsData,
-      );
-
-      if (currentLength >= processedComments.length) {
-        hasMore[tabIndex] = false;
+      final page = await _fetchPage(tab.pid, nextPage);
+      if (page.isEmpty) {
+        tab.hasMore = false;
         return null;
       }
 
-      await saveCommentsCache(pid, processedComments);
-      caches[tabIndex] = processedComments;
-      lastLoadTimes[tabIndex] = DateTime.now();
-      return processedComments;
+      // 按 id 去重后 append，防止接口边界重叠
+      final existingIds = <Object?>{
+        for (final c in tab.comments)
+          if (c is Map) c['id'],
+      };
+      final fresh = [
+        for (final c in page)
+          if (c is! Map || !existingIds.contains(c['id'])) c,
+      ];
+
+      if (fresh.isEmpty) {
+        tab.hasMore = false;
+        return null;
+      }
+
+      tab.comments = [...tab.comments, ...fresh];
+      tab.page = nextPage;
+      tab.hasMore = page.length >= pageSize;
+      tab.lastLoadTime = DateTime.now();
+      // 只缓存首页体量，避免 Hive 写入膨胀
+      await _writeCache(
+        tab.pid,
+        tab.comments.length > pageSize
+            ? tab.comments.sublist(0, pageSize)
+            : tab.comments,
+      );
+      return tab.comments;
     } catch (e) {
-      debugPrint('加载更多评论出错: $e');
+      debugPrint('加载更多评论失败: $e');
       return null;
     } finally {
-      isLoadingMore[tabIndex] = false;
+      tab.isLoadingMore = false;
     }
   }
 
-  /// 处理 gv 链接跳转，返回视频详情数据（供 UI 层导航）。
   Future<Map?> resolveGvLink(String gvId) async {
     try {
       final response = await getPostDetail(int.parse(gvId));
-      return jsonDecode(response.data)['data'];
+      final decoded = jsonDecode(response.data);
+      return decoded is Map ? decoded['data'] as Map? : null;
     } catch (e) {
       debugPrint('解析 gv 链接失败: $e');
       return null;

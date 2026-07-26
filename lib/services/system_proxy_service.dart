@@ -8,18 +8,28 @@ import 'package:win32_registry/win32_registry.dart';
 /// direct connection unless an environment proxy is present. Source rules and
 /// torrent metadata downloads share this resolver so browser verification and
 /// in-app execution use the same network route.
+///
+/// Proxy server map and bypass matchers are parsed once at [initialize], so
+/// per-request work is O(bypass rules) with precompiled patterns — not
+/// re-splitting / recompiling RegExp on every request.
 class SystemProxyService {
   SystemProxyService._();
 
   static const String _internetSettings =
       r'Software\Microsoft\Windows\CurrentVersion\Internet Settings';
+  static final RegExp _schemePrefix = RegExp(r'^[a-z][a-z0-9+.-]*://');
 
-  static String? _proxyServer;
-  static List<String> _bypassPatterns = const <String>[];
+  /// Single-server form (`host:port`) or per-scheme map (`http=...;https=...`).
+  static String? _defaultProxy;
+  static Map<String, String> _proxyByScheme = const {};
+  static List<_BypassRule> _bypassRules = const [];
+  static bool _bypassLocal = false;
 
   static void initialize() {
-    _proxyServer = null;
-    _bypassPatterns = const <String>[];
+    _defaultProxy = null;
+    _proxyByScheme = const {};
+    _bypassRules = const [];
+    _bypassLocal = false;
     if (!Platform.isWindows) return;
 
     RegistryKey? key;
@@ -31,15 +41,13 @@ class SystemProxyService {
       if (key.getIntValue('ProxyEnable') != 1) return;
       final server = key.getStringValue('ProxyServer')?.trim();
       if (server == null || server.isEmpty) return;
-      _proxyServer = server;
-      _bypassPatterns = (key.getStringValue('ProxyOverride') ?? '')
-          .split(';')
-          .map((item) => item.trim())
-          .where((item) => item.isNotEmpty)
-          .toList(growable: false);
+      _parseProxyServer(server);
+      _parseBypass(key.getStringValue('ProxyOverride') ?? '');
     } catch (_) {
-      _proxyServer = null;
-      _bypassPatterns = const <String>[];
+      _defaultProxy = null;
+      _proxyByScheme = const {};
+      _bypassRules = const [];
+      _bypassLocal = false;
     } finally {
       key?.close();
     }
@@ -68,28 +76,54 @@ class SystemProxyService {
     return 'PROXY $server; DIRECT';
   }
 
-  static String? _proxyForScheme(String scheme) {
-    final raw = _proxyServer;
-    if (raw == null || raw.isEmpty) return null;
-
-    if (!raw.contains('=')) return _normalizeServer(raw);
+  static void _parseProxyServer(String raw) {
+    if (!raw.contains('=')) {
+      _defaultProxy = _normalizeServer(raw);
+      return;
+    }
     final byScheme = <String, String>{};
     for (final part in raw.split(';')) {
       final eq = part.indexOf('=');
       if (eq <= 0) continue;
-      byScheme[part.substring(0, eq).trim().toLowerCase()] = part
-          .substring(eq + 1)
-          .trim();
+      final host = _normalizeServer(part.substring(eq + 1));
+      if (host == null) continue;
+      byScheme[part.substring(0, eq).trim().toLowerCase()] = host;
     }
-    final selected =
-        byScheme[scheme.toLowerCase()] ?? byScheme['https'] ?? byScheme['http'];
-    return selected == null ? null : _normalizeServer(selected);
+    _proxyByScheme = byScheme;
+  }
+
+  static void _parseBypass(String raw) {
+    if (raw.isEmpty) return;
+    final rules = <_BypassRule>[];
+    var local = false;
+    for (final part in raw.split(';')) {
+      final pattern = part.trim().toLowerCase();
+      if (pattern.isEmpty) continue;
+      if (pattern == '<local>') {
+        local = true;
+        continue;
+      }
+      final hostPattern = pattern.split(':').first;
+      final regexPattern = RegExp.escape(hostPattern).replaceAll(r'\*', '.*');
+      rules.add(_BypassRule(RegExp('^$regexPattern\$')));
+    }
+    _bypassLocal = local;
+    _bypassRules = rules;
+  }
+
+  static String? _proxyForScheme(String scheme) {
+    if (_defaultProxy != null) return _defaultProxy;
+    if (_proxyByScheme.isEmpty) return null;
+    final lower = scheme.toLowerCase();
+    return _proxyByScheme[lower] ??
+        _proxyByScheme['https'] ??
+        _proxyByScheme['http'];
   }
 
   static String? _normalizeServer(String value) {
     var result = value.trim();
     if (result.isEmpty) return null;
-    result = result.replaceFirst(RegExp(r'^[a-z][a-z0-9+.-]*://'), '');
+    result = result.replaceFirst(_schemePrefix, '');
     final slash = result.indexOf('/');
     if (slash >= 0) result = result.substring(0, slash);
     return result.isEmpty ? null : result;
@@ -100,17 +134,16 @@ class SystemProxyService {
     if (lower == 'localhost' || lower == '::1' || lower.startsWith('127.')) {
       return true;
     }
-
-    for (final rawPattern in _bypassPatterns) {
-      final pattern = rawPattern.toLowerCase();
-      if (pattern == '<local>') {
-        if (!lower.contains('.')) return true;
-        continue;
-      }
-      final hostPattern = pattern.split(':').first;
-      final regexPattern = RegExp.escape(hostPattern).replaceAll(r'\*', '.*');
-      if (RegExp('^$regexPattern\$').hasMatch(lower)) return true;
+    if (_bypassLocal && !lower.contains('.')) return true;
+    for (final rule in _bypassRules) {
+      if (rule.matches(lower)) return true;
     }
     return false;
   }
+}
+
+class _BypassRule {
+  const _BypassRule(this._pattern);
+  final RegExp _pattern;
+  bool matches(String host) => _pattern.hasMatch(host);
 }

@@ -12,6 +12,18 @@ import 'package:flutter/foundation.dart';
 class RemoteMediaRedirectResolver {
   static const _maxRedirects = 5;
   static const _requestTimeout = Duration(seconds: 20);
+  static const _hopByHop = {
+    'connection',
+    'content-length',
+    'host',
+    'keep-alive',
+    'proxy-authenticate',
+    'proxy-authorization',
+    'te',
+    'trailer',
+    'transfer-encoding',
+    'upgrade',
+  };
 
   final HttpClient _client = HttpClient()
     ..connectionTimeout = _requestTimeout
@@ -30,7 +42,7 @@ class RemoteMediaRedirectResolver {
 
     var current = original;
     try {
-      for (var redirect = 0; redirect <= _maxRedirects; redirect++) {
+      for (var hop = 0; hop <= _maxRedirects; hop++) {
         final request = await _client.headUrl(current).timeout(_requestTimeout);
         request.followRedirects = false;
         request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
@@ -39,7 +51,7 @@ class RemoteMediaRedirectResolver {
         // across the redirect.
         if (_sameAuthority(current, original)) {
           for (final header in headers.entries) {
-            if (!_isHopByHop(header.key)) {
+            if (!_hopByHop.contains(header.key.toLowerCase())) {
               request.headers.set(header.key, header.value);
             }
           }
@@ -47,30 +59,29 @@ class RemoteMediaRedirectResolver {
 
         final response = await request.close().timeout(_requestTimeout);
         final location = response.headers.value(HttpHeaders.locationHeader);
-        final isRedirect =
-            location != null &&
-            location.isNotEmpty &&
-            _isRedirectStatus(response.statusCode);
+        final status = response.statusCode;
         await response.drain<void>().timeout(_requestTimeout);
 
-        if (!isRedirect) {
-          if (response.statusCode >= 200 && response.statusCode < 400) {
-            if (current != original) {
-              debugPrint(
-                '[RemoteMediaResolver] ${original.host} -> '
-                '${current.host}:${current.port}',
-              );
-            }
-            return current.toString();
-          }
-          debugPrint(
-            '[RemoteMediaResolver] HTTP ${response.statusCode} for '
-            '${current.host}',
-          );
-          return remoteUrl;
+        if (location != null &&
+            location.isNotEmpty &&
+            _isRedirectStatus(status)) {
+          current = current.resolve(location);
+          continue;
         }
 
-        current = current.resolve(location);
+        if (status >= 200 && status < 400) {
+          if (current != original) {
+            debugPrint(
+              '[RemoteMediaResolver] ${original.host} -> '
+              '${current.host}:${current.port}',
+            );
+          }
+          return current.toString();
+        }
+        debugPrint(
+          '[RemoteMediaResolver] HTTP $status for ${current.host}',
+        );
+        return remoteUrl;
       }
       debugPrint(
         '[RemoteMediaResolver] too many redirects for ${original.host}',
@@ -92,24 +103,6 @@ class RemoteMediaRedirectResolver {
       left.scheme.toLowerCase() == right.scheme.toLowerCase() &&
       left.host.toLowerCase() == right.host.toLowerCase() &&
       left.port == right.port;
-
-  static bool _isHopByHop(String name) {
-    switch (name.toLowerCase()) {
-      case 'connection':
-      case 'content-length':
-      case 'host':
-      case 'keep-alive':
-      case 'proxy-authenticate':
-      case 'proxy-authorization':
-      case 'te':
-      case 'trailer':
-      case 'transfer-encoding':
-      case 'upgrade':
-        return true;
-      default:
-        return false;
-    }
-  }
 
   void close() => _client.close(force: true);
 }

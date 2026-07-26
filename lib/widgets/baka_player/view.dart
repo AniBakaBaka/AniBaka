@@ -77,11 +77,9 @@ class _BakaPlayerState extends State<BakaPlayer> {
   late final FocusNode _playerFocusNode;
   late final bool _ownsPlayerFocusNode;
 
-  bool _brightnessIndicator = false;
-  Timer? _brightnessTimer;
-
-  bool _volumeIndicator = false;
-  Timer? _volumeTimer;
+  final ValueNotifier<int> _indicatorRevision = ValueNotifier(0);
+  _VerticalControl _visibleVerticalIndicator = _VerticalControl.none;
+  Timer? _indicatorTimer;
   Timer? _doubleSpeedTimer;
   Timer? _seekTimer;
   bool _fullscreenRouteActive = false;
@@ -133,9 +131,14 @@ class _BakaPlayerState extends State<BakaPlayer> {
     super.initState();
     _ownsPlayerFocusNode = widget.focusNode == null;
     _playerFocusNode = widget.focusNode ?? FocusNode();
-    _initializePlayer();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _playerFocusNode.requestFocus();
+    });
+    if (widget.full) _applyFullScreenMode();
     _initializeControls();
-    _initializeProgress();
+    if (!widget.full && widget.detail != null) {
+      unawaited(widget.controller.initialize());
+    }
     widget.controller.core.addListener(_maybeAutoEnterFullscreen);
     _maybeAutoEnterFullscreen();
   }
@@ -160,17 +163,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
     // 因为 dispose 时无法安全使用 MediaQuery，所以缓存到变量中
     final shortestSide = MediaQuery.of(context).size.shortestSide;
     _isTablet = shortestSide >= 600;
-  }
-
-  void _initializePlayer() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _playerFocusNode.requestFocus();
-    });
-
-    // 如果是全屏实例，在 build 之前应用全屏模式
-    if (widget.full) {
-      _applyFullScreenMode();
-    }
   }
 
   void _requestKeyboardFocus() {
@@ -200,7 +192,9 @@ class _BakaPlayerState extends State<BakaPlayer> {
           (await FlutterVolumeController.getVolume()) ?? 0.0,
         );
         FlutterVolumeController.addListener((double value) {
-          if (mounted && !_volumeIndicator) controller.setVolume(value);
+          if (mounted && _visibleVerticalIndicator != _VerticalControl.volume) {
+            controller.setVolume(value);
+          }
         });
       } catch (_) {}
 
@@ -212,39 +206,40 @@ class _BakaPlayerState extends State<BakaPlayer> {
     });
   }
 
-  void _initializeProgress() {
-    if (widget.full || widget.detail == null) return;
-    unawaited(widget.controller.initialize());
-  }
-
-  Future<void> _setVolume(double value) async {
-    try {
-      FlutterVolumeController.updateShowSystemUI(false);
-      await FlutterVolumeController.setVolume(value);
-    } catch (_) {}
-
-    widget.controller.setVolume(value);
-    setState(() => _volumeIndicator = true);
-
-    _volumeTimer?.cancel();
-    _volumeTimer = Timer(_indicatorDuration, () {
-      if (mounted) setState(() => _volumeIndicator = false);
+  Future<void> _setVerticalLevel(_VerticalControl control, double value) async {
+    if (control == _VerticalControl.brightness && !_canAdjustScreenBrightness) {
+      return;
+    }
+    final normalized = (value.clamp(0.0, 1.0).toDouble() * 100).round() / 100;
+    final current = control == _VerticalControl.volume
+        ? widget.controller.overlay.value.volume
+        : widget.controller.overlay.value.brightness;
+    if (_visibleVerticalIndicator != control) {
+      _visibleVerticalIndicator = control;
+      _indicatorRevision.value++;
+    }
+    _indicatorTimer?.cancel();
+    _indicatorTimer = Timer(_indicatorDuration, () {
+      if (!mounted) return;
+      _visibleVerticalIndicator = _VerticalControl.none;
+      _indicatorRevision.value++;
     });
-  }
+    if (current == normalized) return;
 
-  Future<void> _setBrightness(double value) async {
-    if (!_canAdjustScreenBrightness) return;
+    if (control == _VerticalControl.volume) {
+      widget.controller.setVolume(normalized);
+    } else {
+      widget.controller.setBrightness(normalized);
+    }
 
     try {
-      await ScreenBrightness().setApplicationScreenBrightness(value);
+      if (control == _VerticalControl.volume) {
+        FlutterVolumeController.updateShowSystemUI(false);
+        await FlutterVolumeController.setVolume(normalized);
+      } else {
+        await ScreenBrightness().setApplicationScreenBrightness(normalized);
+      }
     } catch (_) {}
-
-    widget.controller.setBrightness(value);
-    setState(() => _brightnessIndicator = true);
-    _brightnessTimer?.cancel();
-    _brightnessTimer = Timer(_indicatorDuration, () {
-      if (mounted) setState(() => _brightnessIndicator = false);
-    });
   }
 
   @override
@@ -252,10 +247,10 @@ class _BakaPlayerState extends State<BakaPlayer> {
     widget.controller.core.removeListener(_maybeAutoEnterFullscreen);
     if (_ownsPlayerFocusNode) _playerFocusNode.dispose();
     if (!widget.full) FlutterVolumeController.removeListener();
-    _brightnessTimer?.cancel();
-    _volumeTimer?.cancel();
+    _indicatorTimer?.cancel();
     _doubleSpeedTimer?.cancel();
     _seekTimer?.cancel();
+    _indicatorRevision.dispose();
 
     if (widget.full) {
       if (Platform.isWindows) {
@@ -304,10 +299,24 @@ class _BakaPlayerState extends State<BakaPlayer> {
           RepaintBoundary(child: _buildVideoPlayer()),
           PlayerLoadingIndicator(controller: widget.controller),
           PlayerToastIndicators(controller: widget.controller),
-          PlayerVolumeBrightnessIndicators(
-            controller: widget.controller,
-            volumeVisible: _volumeIndicator,
-            brightnessVisible: _brightnessIndicator,
+          Positioned.fill(
+            child: ListenableBuilder(
+              listenable: _indicatorRevision,
+              builder: (context, _) => Stack(
+                fit: StackFit.expand,
+                children: [
+                  PlayerVolumeBrightnessIndicators(
+                    controller: widget.controller,
+                    volumeVisible:
+                        _visibleVerticalIndicator == _VerticalControl.volume,
+                    brightnessVisible:
+                        _visibleVerticalIndicator ==
+                        _VerticalControl.brightness,
+                  ),
+                  PlayerSeekIndicator(seconds: _pendingSeekSeconds),
+                ],
+              ),
+            ),
           ),
           _buildDanmaku(),
           _buildGestureDetector(),
@@ -322,7 +331,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
             detail: widget.detail,
             onSearch: _navigateToSearch,
           ),
-          PlayerSeekIndicator(seconds: _pendingSeekSeconds),
           PlayerPrompts(
             controller: widget.controller,
             isFullScreen: widget.full,
@@ -347,7 +355,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
           controller: widget.controller,
           onSend: (text, color, type) {
             showSnackBar('\u53d1\u5c04\u6210\u529f');
-            widget.controller.addDanmakuItems([
+            widget.controller.danmakuController.addItems([
               DanmakuItem(
                 text,
                 time: widget.controller.timeline.value.position.inMilliseconds,
@@ -375,7 +383,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
     return ValueListenableBuilder<PlaybackPreferences>(
       valueListenable: widget.controller.preferences,
       builder: (context, preferences, _) {
-        // 非全屏实例在全屏状态下显示黑屏占位，避免 VideoController 被重复创建
         if (!widget.full && _fullscreenRouteActive) {
           return const ColoredBox(
             color: Colors.black,
@@ -383,19 +390,18 @@ class _BakaPlayerState extends State<BakaPlayer> {
           );
         }
         final cfg = preferences.subtitleConfig;
-        final isSubVisible = preferences.showSubtitle;
-
+        final height = MediaQuery.sizeOf(context).height * 0.5;
         return Video(
           controller: videoController,
           controls: NoVideoControls,
           pauseUponEnteringBackgroundMode: false,
           resumeUponEnteringForegroundMode: true,
           subtitleViewConfiguration: SubtitleViewConfiguration(
-            visible: isSubVisible,
+            visible: preferences.showSubtitle,
             style: TextStyle(
               height: 1.5,
               fontSize: cfg.fontSize,
-              fontFamily: cfg.fontFamily.isNotEmpty ? cfg.fontFamily : null,
+              fontFamily: cfg.fontFamily.isEmpty ? null : cfg.fontFamily,
               letterSpacing: 0.5,
               color: cfg.fontColor.withValues(alpha: cfg.opacity),
               fontWeight: cfg.bold ? FontWeight.w700 : FontWeight.w500,
@@ -409,21 +415,12 @@ class _BakaPlayerState extends State<BakaPlayer> {
               ],
             ),
             padding: EdgeInsets.fromLTRB(
-              24.0,
-              cfg.position < 50
-                  ? (cfg.position /
-                        100 *
-                        MediaQuery.of(context).size.height *
-                        0.5)
-                  : 0,
-              24.0,
+              24,
+              cfg.position < 50 ? cfg.position / 100 * height : 0,
+              24,
               cfg.position >= 50
-                  ? ((100 - cfg.position) /
-                            100 *
-                            MediaQuery.of(context).size.height *
-                            0.5 +
-                        24)
-                  : 24.0,
+                  ? (100 - cfg.position) / 100 * height + 24
+                  : 24,
             ),
           ),
           fit: preferences.videoFit,
@@ -506,7 +503,8 @@ class _BakaPlayerState extends State<BakaPlayer> {
     final next = current.sign == direction
         ? current + direction * step
         : direction * step;
-    setState(() => _pendingSeekSeconds = next);
+    _pendingSeekSeconds = next;
+    _indicatorRevision.value++;
     _seekTimer?.cancel();
     _seekTimer = Timer(_longPressDelay, () => unawaited(_commitPendingSeek()));
   }
@@ -514,7 +512,10 @@ class _BakaPlayerState extends State<BakaPlayer> {
   Future<void> _commitPendingSeek() async {
     final seconds = _pendingSeekSeconds;
     if (seconds == 0) return;
-    if (mounted) setState(() => _pendingSeekSeconds = 0);
+    if (mounted) {
+      _pendingSeekSeconds = 0;
+      _indicatorRevision.value++;
+    }
     final timeline = widget.controller.timeline.value;
     final target = (timeline.position + Duration(seconds: seconds)).clamp(
       Duration.zero,
@@ -560,7 +561,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
           0.0,
           1.0,
         );
-        _setVolume(newVolume);
+        _setVerticalLevel(_VerticalControl.volume, newVolume);
         return KeyEventResult.handled;
       }
       // 下方向键减少音量
@@ -572,7 +573,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
           0.0,
           1.0,
         );
-        _setVolume(newVolume);
+        _setVerticalLevel(_VerticalControl.volume, newVolume);
         return KeyEventResult.handled;
       }
       // 空格键切换播放/暂停
@@ -653,9 +654,19 @@ class _BakaPlayerState extends State<BakaPlayer> {
     _pendingVerticalDelta = 0;
     final overlay = widget.controller.overlay.value;
     if (_verticalControl == _VerticalControl.brightness) {
-      unawaited(_setBrightness((overlay.brightness - delta).clamp(0.0, 1.0)));
+      unawaited(
+        _setVerticalLevel(
+          _VerticalControl.brightness,
+          (overlay.brightness - delta).clamp(0.0, 1.0),
+        ),
+      );
     } else if (_verticalControl == _VerticalControl.volume) {
-      unawaited(_setVolume((overlay.volume - delta).clamp(0.0, 1.0)));
+      unawaited(
+        _setVerticalLevel(
+          _VerticalControl.volume,
+          (overlay.volume - delta).clamp(0.0, 1.0),
+        ),
+      );
     }
   }
 
@@ -797,8 +808,8 @@ class _BakaPlayerState extends State<BakaPlayer> {
 
             if (core.hasSubtitleTracks) {
               actions.add(
-                _buildHeaderIconBtn(
-                  preferences.showSubtitle
+                _buildHeaderButton(
+                  icon: preferences.showSubtitle
                       ? Icons.closed_caption_rounded
                       : Icons.closed_caption_disabled_rounded,
                   isWide: isWide,
@@ -830,15 +841,15 @@ class _BakaPlayerState extends State<BakaPlayer> {
 
             if (widget.full) {
               actions.add(
-                _buildHeaderTextBtn(
-                  preferences.videoFitDescription,
+                _buildHeaderButton(
+                  text: preferences.videoFitDescription,
                   isWide: isWide,
                   onTap: () => showVideoFitDialog(context, controller),
                 ),
               );
               actions.add(
-                _buildHeaderTextBtn(
-                  '${core.playbackRate}x',
+                _buildHeaderButton(
+                  text: '${core.playbackRate}x',
                   isWide: isWide,
                   onTap: () => showSpeedDialog(context, controller),
                 ),
@@ -863,11 +874,11 @@ class _BakaPlayerState extends State<BakaPlayer> {
     );
   }
 
-  /// 构建头部图标按钮
-  Widget _buildHeaderIconBtn(
-    IconData icon, {
+  Widget _buildHeaderButton({
     required bool isWide,
     required VoidCallback onTap,
+    String? text,
+    IconData? icon,
     VoidCallback? onLongPress,
     bool isActive = false,
   }) {
@@ -877,40 +888,25 @@ class _BakaPlayerState extends State<BakaPlayer> {
       borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: EdgeInsets.symmetric(
-          horizontal: isWide ? 10 : 8,
+          horizontal: text == null ? (isWide ? 10 : 8) : (isWide ? 12 : 10),
           vertical: isWide ? 8 : 6,
         ),
-        child: Icon(
-          icon,
-          size: isWide ? 24 : 20,
-          color: isActive ? Colors.white : Colors.white.withValues(alpha: 0.6),
-        ),
-      ),
-    );
-  }
-
-  /// 构建头部文字按钮
-  Widget _buildHeaderTextBtn(
-    String text, {
-    required bool isWide,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: EdgeInsets.symmetric(
-          horizontal: isWide ? 12 : 10,
-          vertical: isWide ? 8 : 6,
-        ),
-        child: Text(
-          text,
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.9),
-            fontSize: isWide ? 16 : 13,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        child: icon != null
+            ? Icon(
+                icon,
+                size: isWide ? 24 : 20,
+                color: isActive
+                    ? Colors.white
+                    : Colors.white.withValues(alpha: 0.6),
+              )
+            : Text(
+                text!,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.9),
+                  fontSize: isWide ? 16 : 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
       ),
     );
   }

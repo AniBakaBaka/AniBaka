@@ -53,27 +53,31 @@ class _KeepAliveAdapter extends AdapterBase {
 }
 
 void main() {
-  test('player service keeps typed episodes and clamps line selection', () {
-    final data = <String, Object>{
-      'source': 'internal',
-      'videos': '01. 正片\$line-a\n1 正片\$line-b\n02. 下一集\$line-c',
-    };
-    final service = PlayerService(data: data);
-    final episodes = service.resolveInitialVideoList();
+  test(
+    'player service keeps typed episodes and clamps line selection',
+    () async {
+      final data = <String, Object>{
+        'source': 'internal',
+        'videos': '01. 正片\$line-a\n1 正片\$line-b\n02. 下一集\$line-c',
+      };
+      final service = PlayerService(data: data);
+      await service.loadDetail();
+      final episodes = service.videoList;
 
-    expect(episodes, hasLength(2));
-    expect(episodes.first.title, '01. 正片');
-    expect(episodes.first.lines, ['line-a', 'line-b']);
-    service.syncVideoData(
-      episodes,
-      preferredEpisodeIndex: 99,
-      preferredLineIndex: 9,
-    );
-    expect(service.currPlayIndex, 1);
-    expect(service.currUrl, 1);
-    expect(service.currentVideoItem, isA<PlaybackEpisode>());
-    expect(data['videoList'], ['01. 正片\$line-a\$line-b', '02. 下一集\$line-c']);
-  });
+      expect(episodes, hasLength(2));
+      expect(episodes.first.title, '01. 正片');
+      expect(episodes.first.lines, ['line-a', 'line-b']);
+      service.syncVideoData(
+        episodes,
+        preferredEpisodeIndex: 99,
+        preferredLineIndex: 9,
+      );
+      expect(service.currPlayIndex, 1);
+      expect(service.currUrl, 1);
+      expect(service.currentVideoItem, isA<PlaybackEpisode>());
+      expect(data['videoList'], ['01. 正片\$line-a\$line-b', '02. 下一集\$line-c']);
+    },
+  );
 
   test('line switch changes typed selection without reparsing data', () {
     final service = PlayerService(data: <String, Object>{'source': 'internal'});

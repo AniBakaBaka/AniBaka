@@ -50,6 +50,8 @@ class SearchService {
 
   int activeSearchId = 0;
 
+  /// Per-page instance so Cookie / request state stays isolated from the
+  /// global [SourceAdapterService.instance] used by management UI.
   final SourceAdapterService _sourceAdapterService = SourceAdapterService();
   List<CustomSourceConfig> customSources = [];
   List<AdapterDescriptor> builtinAdapterSources = [];
@@ -59,14 +61,9 @@ class SearchService {
     _prefs = await SharedPreferences.getInstance();
     await reloadCustomSources();
 
-    if (initialSource != null) {
-      selectedSourceIndex = initialSource;
-    }
-    searchHistory = _getSearchHistory();
-
-    if (initialKeyword != null) {
-      keyword = initialKeyword;
-    }
+    if (initialSource != null) selectedSourceIndex = initialSource;
+    searchHistory = _loadHistory();
+    if (initialKeyword != null) keyword = initialKeyword;
   }
 
   Future<void> reloadCustomSources() async {
@@ -76,12 +73,11 @@ class SearchService {
 
     sourceLabelsNotifier.value = List<String>.unmodifiable([
       'BGM',
-      ...builtinAdapterSources.map((source) => source.displayName),
-      ...customSources.map((source) => source.name),
+      ...builtinAdapterSources.map((s) => s.displayName),
+      ...customSources.map((s) => s.name),
     ]);
 
-    final maxSourceIndex = sourceLabels.length - 1;
-    if (selectedSourceIndex > maxSourceIndex) {
+    if (selectedSourceIndex >= sourceLabels.length) {
       selectedSourceIndex = 0;
     }
   }
@@ -90,22 +86,6 @@ class SearchService {
       selectedSourceIndex >= 0 && selectedSourceIndex < sourceLabels.length
       ? sourceLabels[selectedSourceIndex]
       : 'BGM';
-
-  AdapterDescriptor? _selectedBuiltinSource() {
-    final index = selectedSourceIndex - 1;
-    if (index < 0 || index >= builtinAdapterSources.length) {
-      return null;
-    }
-    return builtinAdapterSources[index];
-  }
-
-  CustomSourceConfig? _selectedCustomSource() {
-    final index = selectedSourceIndex - builtinAdapterSources.length - 1;
-    if (index < 0 || index >= customSources.length) {
-      return null;
-    }
-    return customSources[index];
-  }
 
   void resetSearch() {
     activeSearchId++;
@@ -119,25 +99,16 @@ class SearchService {
 
   Future<List<dynamic>> executeSearch(String searchKey) async {
     final query = searchKey.trim();
-    if (query.isEmpty) {
-      return const [];
-    }
+    if (query.isEmpty) return const [];
 
     keyword = query;
     final searchResults = await _resolveSearch(query);
-
-    if (!_isGvKey(query)) {
-      addSearchHistory(query);
-    }
-
+    if (!_isGvKey(query)) addSearchHistory(query);
     return searchResults;
   }
 
-  Future<List<dynamic>> _resolveSearch(String query) async {
-    if (_isGvKey(query)) {
-      return _searchByGv(query);
-    }
-
+  Future<List<dynamic>> _resolveSearch(String query) {
+    if (_isGvKey(query)) return _searchByGv(query);
     return _searchSelectedSource(query);
   }
 
@@ -146,9 +117,7 @@ class SearchService {
 
   Future<List<dynamic>> _searchByGv(String query) async {
     final gv = int.tryParse(query.substring(2));
-    if (gv == null) {
-      return const [];
-    }
+    if (gv == null) return const [];
 
     final detail = jsonDecode((await getPostDetail(gv)).data)['data'];
     return detail == null ? const [] : <dynamic>[detail];
@@ -161,23 +130,23 @@ class SearchService {
         return subjects.map(_withReliablePoster).toList(growable: false);
       }
 
-      final builtinSource = _selectedBuiltinSource();
-      if (builtinSource != null) {
+      final builtinIndex = selectedSourceIndex - 1;
+      if (builtinIndex >= 0 && builtinIndex < builtinAdapterSources.length) {
         return _sourceAdapterService.searchBuiltin(
           searchKey,
-          builtinSource,
+          builtinAdapterSources[builtinIndex],
           fallbackDescription: noDescriptionText,
         );
       }
 
-      final customSource = _selectedCustomSource();
-      if (customSource == null) {
+      final customIndex = builtinIndex - builtinAdapterSources.length;
+      if (customIndex < 0 || customIndex >= customSources.length) {
         return const [];
       }
 
       return _sourceAdapterService.searchCustom(
         searchKey,
-        customSource,
+        customSources[customIndex],
         fallbackDescription: noDescriptionText,
       );
     } catch (error) {
@@ -201,55 +170,47 @@ class SearchService {
 
   Future<Map<String, dynamic>?> buildPlayerData(
     Map<String, dynamic> item,
-  ) async {
-    return _sourceAdapterService.buildPlayerData(item);
-  }
+  ) =>
+      _sourceAdapterService.buildPlayerData(item);
 
-  List<String> _getSearchHistory() {
+  List<String> _loadHistory() {
     final historyJson = _prefs?.getString(_searchHistoryKey);
-    if (historyJson == null) {
-      return const [];
-    }
+    if (historyJson == null) return const [];
 
     try {
       final decoded = jsonDecode(historyJson);
-      if (decoded is! List) {
-        return const [];
-      }
-
-      return decoded
-          .map((item) => item.toString())
-          .where((item) => item.isNotEmpty)
-          .toList(growable: false);
+      if (decoded is! List) return const [];
+      return [
+        for (final item in decoded)
+          if (item.toString().isNotEmpty) item.toString(),
+      ];
     } catch (_) {
       return const [];
     }
   }
 
-  void _saveSearchHistory() {
-    _prefs?.setString(_searchHistoryKey, jsonEncode(searchHistory));
+  void _persistHistory(List<String> history) {
+    searchHistory = history;
+    _prefs?.setString(_searchHistoryKey, jsonEncode(history));
   }
 
   void addSearchHistory(String value) {
-    if (value.trim().isEmpty) {
-      return;
-    }
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return;
 
-    searchHistory = <String>[
-      value,
-      ...searchHistory.where((item) => item != value),
-    ];
-    if (searchHistory.length > maxHistoryCount) {
-      searchHistory = searchHistory.sublist(0, maxHistoryCount);
+    final next = <String>[trimmed];
+    for (final item in searchHistory) {
+      if (item != trimmed) next.add(item);
+      if (next.length >= maxHistoryCount) break;
     }
-    _saveSearchHistory();
+    _persistHistory(next);
   }
 
   void removeSearchHistory(String value) {
-    searchHistory = searchHistory
-        .where((item) => item != value)
-        .toList(growable: false);
-    _saveSearchHistory();
+    _persistHistory([
+      for (final item in searchHistory)
+        if (item != value) item,
+    ]);
   }
 
   void clearSearchHistory() {

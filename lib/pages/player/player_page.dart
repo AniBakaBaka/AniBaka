@@ -7,7 +7,6 @@ import 'package:baka/instance.dart';
 import 'package:baka/pages/player/bgm_detail_page.dart';
 import 'package:baka/pages/player/dlna_page.dart';
 import 'package:baka/pages/setting/player_settings_page.dart';
-import 'package:baka/models/playback_state.dart';
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/services/playback_session_coordinator.dart';
 import 'package:baka/services/player_service.dart';
@@ -135,7 +134,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         ? ''
         : (cut != -1 ? raw.substring(cut + 1).trim() : raw);
 
-    _applyMediaInfo(_svc.initialMediaInfo);
+    ctr.setMediaInfo(_svc.initialMediaInfo);
     _followNotifier.value = _svc.isFollow();
     _loadInitialData();
   }
@@ -160,11 +159,14 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
 
   Future<void> _loadInitialData() async {
     try {
-      await Future.wait([
-        getDetail(),
-        if (!_isLocalSource) _svc.ensureBgmInfo(),
-      ]);
+      final bgmFuture = _isLocalSource ? null : _svc.ensureBgmInfo();
+      await _svc.loadDetail();
+      if (videoList.isNotEmpty) {
+        await initVideoController(_session.generation);
+      }
+      _bumpPageData();
       if (!_isLocalSource) {
+        await bgmFuture;
         await _svc.ensureBgmDetail();
         _updateCachedTagsFromBgm();
       }
@@ -172,7 +174,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       debugPrint('加载初始数据失败: $e');
     }
     if (mounted) {
-      _applyMediaInfo(_svc.currentMediaInfo);
+      ctr.setMediaInfo(_svc.currentMediaInfo);
       _bumpPageData();
     }
   }
@@ -206,8 +208,6 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         .take(5)
         .toList();
   }
-
-  void _applyMediaInfo(PlaybackMediaInfo info) => ctr.setMediaInfo(info);
 
   @override
   void dispose() {
@@ -251,160 +251,117 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     );
   }
 
-  Future<void> getDetail() async {
-    await _svc.loadDetail();
-    if (videoList.isNotEmpty) await initVideoController(_session.generation);
-    _bumpPageData();
-  }
-
-  /// 标记播放器表面就绪。仅切换 _initedNotifier，让「加载占位 → 播放器」的局部子树重建。
-  void _markInited() {
-    if (!inited && mounted) _initedNotifier.value = true;
-  }
-
   Future<void> initVideoController(int requestId) async {
     if (_isStale(requestId)) return;
     _resolvedUrl = '';
     try {
-      if (_isLocalSource) {
-        await _initLocalSourcePlayer(requestId);
-      } else if (_isAdapter) {
-        await _initAdapterSourcePlayer(requestId);
+      final localPath = _isLocalSource ? _svc.localFilePath : null;
+      if (_isLocalSource && localPath == null) return;
+      final adapter = _isAdapter ? await _svc.prepareAdapterSource() : null;
+      if (_isStale(requestId)) return;
+
+      ctr.setMediaInfo(_svc.currentMediaInfo);
+      if (!inited) {
+        await _session.start();
+        if (_isStale(requestId)) return;
+
+        if (ctr.preferences.value.rememberLastPosition) {
+          final position = _svc.getSavedProgress();
+          if (position.inSeconds > 10) {
+            unawaited(
+              Future.delayed(const Duration(seconds: 1), () {
+                if (!_isStale(requestId)) {
+                  ctr.showJumpToPositionPrompt(position);
+                }
+              }),
+            );
+          }
+        }
+      }
+
+      if (localPath != null) {
+        await ctr.open(
+          localPath,
+          autoplay: true,
+          httpHeaders: _svc.localHttpHeaders,
+        );
+      } else if (adapter != null) {
+        final episodeId = _svc.currentEpisodeId;
+        _svc.stopAdapterPlaybackKeepAlive();
+        if (adapter.requiresCustomPlayback) {
+          final videoController = ctr.videoController;
+          if (videoController == null) {
+            throw StateError('Video controller is not initialized');
+          }
+          await adapter.play(episodeId, videoController);
+          await ctr.applyPlaybackConfiguration();
+        } else {
+          final media = await _svc.resolveAdapterPlaybackMedia(
+            adapter,
+            episodeId,
+          );
+          if (media.url.isEmpty) throw Exception('Unable to resolve media url');
+          if (_isStale(requestId)) return;
+
+          final keepAliveGeneration = await _svc.startAdapterPlaybackKeepAlive(
+            adapter,
+            media.url,
+          );
+          if (_isStale(requestId)) {
+            _svc.stopAdapterPlaybackKeepAlive(keepAliveGeneration);
+            return;
+          }
+          final playbackMedia = await adapter.preparePlaybackMedia(media);
+          if (_isStale(requestId)) {
+            _svc.stopAdapterPlaybackKeepAlive(keepAliveGeneration);
+            return;
+          }
+          _resolvedUrl = media.url;
+          try {
+            await ctr.open(
+              playbackMedia.url,
+              autoplay: true,
+              httpHeaders: playbackMedia.httpHeaders,
+            );
+          } catch (_) {
+            _svc.stopAdapterPlaybackKeepAlive(keepAliveGeneration);
+            rethrow;
+          }
+        }
       } else {
-        await _initInternalSourcePlayer(requestId);
+        final videoUrl = await _svc.getVideoUrl();
+        if (_isStale(requestId)) return;
+        if (videoUrl == null) {
+          showSnackBar('无法获取视频地址');
+          return;
+        }
+        _resolvedUrl = videoUrl;
+        await ctr.open(videoUrl, autoplay: true);
+      }
+
+      if (_isStale(requestId)) return;
+      await _svc.rememberCurrentEpisode();
+      if (_isStale(requestId)) return;
+      if (!inited) _initedNotifier.value = true;
+
+      if (localPath != null) {
+        final content = await _svc.readLocalDanmakuFile(localPath);
+        if (!_isStale(requestId) && content != null) {
+          await _session.parseAndSetDanmakuItems(
+            BgmUtils.parseJsonList(content),
+          );
+        }
+      } else {
+        final episodeIndex = currPlayIndex;
+        final danmaku = await _svc.fetchDanmakuData(episodeIndex);
+        if (!_isStale(requestId) && episodeIndex == currPlayIndex) {
+          _session.setDanmakuItems(danmaku);
+        }
       }
     } catch (e) {
       if (_isStale(requestId)) return;
       debugPrint('初始化视频控制器失败: $e');
       showSnackBar('初始化播放器失败');
-    }
-  }
-
-  Future<void> _initLocalSourcePlayer(int requestId) async {
-    final filePath = _svc.localFilePath;
-    if (filePath == null) return;
-    _applyMediaInfo(_svc.currentMediaInfo);
-    if (!inited) {
-      await _initializePlayer(skipDataSource: true);
-      if (_isStale(requestId)) return;
-    }
-    await ctr.open(
-      filePath,
-      autoplay: true,
-      httpHeaders: _svc.localHttpHeaders,
-    );
-    if (_isStale(requestId)) return;
-    _markInited();
-    final content = await _svc.readLocalDanmakuFile(filePath);
-    if (!_isStale(requestId) && content != null) {
-      await _session.parseAndSetDanmakuItems(BgmUtils.parseJsonList(content));
-    }
-  }
-
-  Future<void> _initAdapterSourcePlayer(int requestId) async {
-    final adapter = await _svc.prepareAdapterSource();
-    if (_isStale(requestId)) return;
-    _applyMediaInfo(_svc.currentMediaInfo);
-    if (!inited) {
-      await _initializePlayer(skipDataSource: true);
-      if (_isStale(requestId)) return;
-    }
-    final episodeId = _svc.currentEpisodeId;
-    _svc.stopAdapterPlaybackKeepAlive();
-    if (adapter.requiresCustomPlayback) {
-      final videoController = ctr.videoController;
-      if (videoController == null) {
-        throw StateError('Video controller is not initialized');
-      }
-      await adapter.play(episodeId, videoController);
-      await ctr.applyPlaybackConfiguration();
-    } else {
-      final media = await _svc.resolveAdapterPlaybackMedia(adapter, episodeId);
-      if (media.url.isEmpty) throw Exception('Unable to resolve media url');
-      if (_isStale(requestId)) return;
-      final keepAliveGeneration = await _svc.startAdapterPlaybackKeepAlive(
-        adapter,
-        media.url,
-      );
-      if (_isStale(requestId)) {
-        _svc.stopAdapterPlaybackKeepAlive(keepAliveGeneration);
-        return;
-      }
-      final playbackMedia = await adapter.preparePlaybackMedia(media);
-      if (_isStale(requestId)) {
-        _svc.stopAdapterPlaybackKeepAlive(keepAliveGeneration);
-        return;
-      }
-      _resolvedUrl = media.url;
-      try {
-        await ctr.open(
-          playbackMedia.url,
-          autoplay: true,
-          httpHeaders: playbackMedia.httpHeaders,
-        );
-      } catch (_) {
-        _svc.stopAdapterPlaybackKeepAlive(keepAliveGeneration);
-        rethrow;
-      }
-    }
-    if (_isStale(requestId)) return;
-    _markInited();
-    await _loadDanmakuAsync();
-  }
-
-  Future<void> _initInternalSourcePlayer(int requestId) async {
-    _applyMediaInfo(_svc.currentMediaInfo);
-    final videoUrl = await _svc.getVideoUrl();
-    if (_isStale(requestId)) return;
-    if (videoUrl == null) {
-      showSnackBar('无法获取视频地址');
-      return;
-    }
-    _resolvedUrl = videoUrl;
-    if (!inited) {
-      await _initializePlayer();
-    } else {
-      // open 默认自动播放，无需再次调用 play。
-      await ctr.open(_resolvedUrl);
-    }
-    if (_isStale(requestId)) return;
-    _markInited();
-    await _loadDanmakuAsync();
-  }
-
-  Future<void> _loadDanmakuAsync() async {
-    final requestId = _session.generation;
-    final episodeIndex = currPlayIndex;
-    final danmuList = await _svc.fetchDanmakuData(episodeIndex);
-    bool stale() =>
-        !_session.isCurrent(requestId) || episodeIndex != currPlayIndex;
-    if (stale()) return;
-    await _startDanmakuPlay(danmuList, shouldAbort: stale);
-  }
-
-  Future<void> _startDanmakuPlay(
-    List<DanmakuItem> danmuList, {
-    bool Function()? shouldAbort,
-  }) async {
-    if (shouldAbort?.call() ?? false) return;
-    _session.setDanmakuItems(danmuList);
-    if (shouldAbort?.call() ?? false) danmakuController.reset();
-  }
-
-  Future<void> _initializePlayer({bool skipDataSource = false}) async {
-    await _session.start();
-    if (!skipDataSource && _resolvedUrl.isNotEmpty) {
-      await ctr.open(_resolvedUrl, autoplay: true);
-    } else {
-      await ctr.initialize();
-    }
-    if (ctr.preferences.value.rememberLastPosition) {
-      final position = _svc.getSavedProgress();
-      if (position.inSeconds > 10) {
-        Future.delayed(const Duration(milliseconds: 1000), () {
-          if (mounted) ctr.showJumpToPositionPrompt(position);
-        });
-      }
     }
   }
 
@@ -426,7 +383,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     await ctr.stop();
     _svc.stopAdapterPlaybackKeepAlive();
     await initVideoController(currentRequestId);
-    // initVideoController 内部已通过 _markInited 与异步任务驱动局部重建，无需再 setState 整页
+    // 播放器与弹幕在 initVideoController 内完成局部更新，无需重建整页。
   }
 
   Future<void> changePlayIndex(int i) => _switchEpisode(i);
@@ -558,7 +515,11 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
   }
 
   Map<String, dynamic> _buildSourceSeedData() {
-    final seed = Map<String, dynamic>.from(widget.data);
+    final seed = <String, dynamic>{};
+    for (final key in const ['seriesId', 'seriesUrl', 'id', 'url']) {
+      final value = widget.data[key];
+      if (value != null) seed[key] = value;
+    }
     final bgmInfo = _bgmInfo;
     final coverImageUrl = _svc.coverImageUrl;
 
@@ -576,12 +537,14 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
   Future<void> _openSourceSwitchSheet() async {
     if (_isLocalSource) return;
 
+    final seedData = _buildSourceSeedData();
+
     if (VideoSourceSearchController.globalCachedTitle != _svc.title) {
       VideoSourceSearchController.globalCached?.dispose();
       VideoSourceSearchController.globalCached = VideoSourceSearchController(
         title: _svc.title,
         cover: _svc.coverImageUrl ?? '',
-        seedData: _buildSourceSeedData(),
+        seedData: seedData,
       );
       VideoSourceSearchController.globalCachedTitle = _svc.title;
     }
@@ -590,7 +553,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       context,
       title: _svc.title,
       cover: _svc.coverImageUrl ?? '',
-      seedData: _buildSourceSeedData(),
+      seedData: seedData,
       currentEpisodeIndex: currPlayIndex,
       currentLineIndex: currUrl,
       currentSource: widget.data['source']?.toString(),

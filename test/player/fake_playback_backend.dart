@@ -26,6 +26,10 @@ class FakePlaybackBackend implements PlaybackBackend {
   int openCount = 0;
   int pauseCount = 0;
   int stopCount = 0;
+  int rateSetCount = 0;
+  int rateSetInFlight = 0;
+  int maxRateSetInFlight = 0;
+  Duration rateSetDelay = Duration.zero;
   final nativeProperties = <String, String>{};
 
   @override
@@ -102,7 +106,17 @@ class FakePlaybackBackend implements PlaybackBackend {
   }
 
   @override
-  Future<void> setRate(double rate) async => lastRate = rate;
+  Future<void> setRate(double rate) async {
+    rateSetCount++;
+    rateSetInFlight++;
+    if (rateSetInFlight > maxRateSetInFlight) {
+      maxRateSetInFlight = rateSetInFlight;
+    }
+    if (rateSetDelay > Duration.zero) await Future<void>.delayed(rateSetDelay);
+    lastRate = rate;
+    rateSetInFlight--;
+  }
+
   @override
   Future<void> setSubtitleTrack(SubtitleTrack track) async {
     lastSubtitleTrack = track;

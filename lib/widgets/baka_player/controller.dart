@@ -64,6 +64,8 @@ class PlaybackController {
   double _reversePlaybackRate = 0.0;
   bool _playingBeforeLongPress = false;
   bool _reverseSeekInFlight = false;
+  Future<void>? _longPressTask;
+  int _longPressRevision = 0;
   int _lastTimelineBucket = -1;
   bool _listenersBound = false;
   bool _disposed = false;
@@ -157,10 +159,6 @@ class PlaybackController {
     _danmakuController = null;
   }
 
-  void addDanmakuItems(List<DanmakuItem> items) {
-    _danmakuController?.addItems(items);
-  }
-
   void _bindBackend() {
     if (_listenersBound || _disposed) return;
     _listenersBound = true;
@@ -185,19 +183,20 @@ class PlaybackController {
     final buffering = playing ? false : current.buffering;
     final failed = playing ? false : current.failed;
     final errorMessage = playing ? '' : current.errorMessage;
-    if (current.playing != playing ||
+    final changed =
+        current.playing != playing ||
         current.loading != loading ||
         current.buffering != buffering ||
         current.failed != failed ||
-        current.errorMessage != errorMessage) {
-      core.value = current.copyWith(
-        playing: playing,
-        loading: loading,
-        buffering: buffering,
-        failed: failed,
-        errorMessage: errorMessage,
-      );
-    }
+        current.errorMessage != errorMessage;
+    if (!changed) return;
+    core.value = current.copyWith(
+      playing: playing,
+      loading: loading,
+      buffering: buffering,
+      failed: failed,
+      errorMessage: errorMessage,
+    );
     if (playing && !buffering) {
       _danmakuController?.resume();
     } else {
@@ -207,25 +206,22 @@ class PlaybackController {
 
   void _onPositionChanged(Duration position) {
     if (_disposed) return;
-    if (position > Duration.zero) {
+    if (!_hasPlaybackProgress && position > Duration.zero) {
       _hasPlaybackProgress = true;
-      final current = core.value;
-      if (current.loading ||
-          current.buffering ||
-          current.failed ||
-          current.errorMessage.isNotEmpty) {
-        core.value = current.copyWith(
+      final coreState = core.value;
+      if (coreState.loading ||
+          coreState.buffering ||
+          coreState.failed ||
+          coreState.errorMessage.isNotEmpty) {
+        core.value = coreState.copyWith(
           loading: false,
           buffering: false,
           failed: false,
           errorMessage: '',
         );
-        if (current.playing) _danmakuController?.resume();
+        if (coreState.playing) _danmakuController?.resume();
       }
     }
-    _danmakuController?.syncTime(position);
-    _updateSkipState(position);
-
     final milliseconds = position.inMilliseconds;
     final bucket = milliseconds ~/ _timelineIntervalMs;
     if (_lastTimelineBucket == bucket &&
@@ -233,6 +229,12 @@ class PlaybackController {
       return;
     }
     _lastTimelineBucket = bucket;
+
+    // Danmaku owns a frame clock and only needs a bounded media-time anchor.
+    // Keeping this behind the same 250 ms bucket avoids rescheduling its wake
+    // timer for every raw backend position sample.
+    _danmakuController?.syncTime(position);
+    _updateSkipState(position);
     final current = timeline.value;
     timeline.value = current.copyWith(
       position: position,
@@ -445,14 +447,14 @@ class PlaybackController {
         longPressRate: _longPressStartRate,
       );
       _notifyToastChanged();
-      unawaited(_applyLongPressRate(_longPressStartRate));
+      _scheduleLongPressState();
       return;
     }
 
     _stopReversePlayback();
     overlay.value = overlay.value.copyWith(doubleSpeed: false);
     _notifyToastChanged();
-    unawaited(_restorePlaybackAfterLongPress());
+    _scheduleLongPressState();
   }
 
   void updateDoubleSpeedOffset(double horizontalOffset) {
@@ -465,7 +467,30 @@ class PlaybackController {
     if (overlay.value.longPressRate == steppedRate) return;
     overlay.value = overlay.value.copyWith(longPressRate: steppedRate);
     _notifyToastChanged();
-    unawaited(_applyLongPressRate(steppedRate));
+    _scheduleLongPressState();
+  }
+
+  void _scheduleLongPressState() {
+    _longPressRevision++;
+    _longPressTask ??= _drainLongPressState();
+  }
+
+  Future<void> _drainLongPressState() async {
+    while (!_disposed) {
+      final revision = _longPressRevision;
+      final state = overlay.value;
+      try {
+        if (state.doubleSpeed) {
+          await _applyLongPressRate(state.longPressRate);
+        } else {
+          await _restorePlaybackAfterLongPress();
+        }
+      } catch (error) {
+        debugPrint('长按变速失败: $error');
+      }
+      if (revision == _longPressRevision) break;
+    }
+    _longPressTask = null;
   }
 
   Future<void> _applyLongPressRate(double rate) async {
@@ -872,6 +897,8 @@ class PlaybackController {
     _errorDebounceTimer?.cancel();
     _bufferingDebounceTimer?.cancel();
     _reversePlaybackTimer?.cancel();
+    _longPressRevision++;
+    await _longPressTask;
     for (final subscription in _subscriptions) {
       await subscription.cancel();
     }

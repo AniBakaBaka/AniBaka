@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Many Android TV GPUs flicker when Flutter overlays a video texture. -->
+    <bool name="enable_impeller">false</bool>
+</resources>

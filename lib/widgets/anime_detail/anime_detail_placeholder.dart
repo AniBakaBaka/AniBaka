@@ -56,23 +56,11 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   int? get _subjectId => _bgmInfo.subjectId;
 
   int _resolveAutoMatchEpisodeIndex() {
+    final remembered = PlayHistorySyncService.getResumeSelection(widget.data);
+    if (remembered != null) return remembered.episodeIndex;
+
     final watched = _collection?.epWatched;
     if (watched != null && watched > 0) return watched - 1;
-
-    final bgmId = _subjectId;
-    final title = widget.data['title']?.toString() ?? '';
-    final normalizedTitle = BgmUtils.normalizeTitle(title);
-    for (final item in PlayHistorySyncService.getHistoryList()) {
-      final itemBgmId = BgmUtils.toInt(item['bgmId']);
-      if (bgmId != null && itemBgmId == bgmId) {
-        return (BgmUtils.toInt(item['index']) ?? 0).clamp(0, 9999).toInt();
-      }
-      if (normalizedTitle.isNotEmpty &&
-          BgmUtils.normalizeTitle(item['title']?.toString() ?? '') ==
-              normalizedTitle) {
-        return (BgmUtils.toInt(item['index']) ?? 0).clamp(0, 9999).toInt();
-      }
-    }
     return 0;
   }
 
@@ -307,6 +295,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
           seedData: _buildVideoSeedData(),
           heroTag: coverHeroTag(widget.data),
           autoMatchMode: false,
+          targetEpisodeIndex: _resolveAutoMatchEpisodeIndex(),
         ),
       );
     } finally {

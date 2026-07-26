@@ -8,6 +8,7 @@ import 'package:baka/api/collection.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/services/bgm_service.dart';
+import 'package:baka/services/play_history_sync_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/reg_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
@@ -199,6 +200,11 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
         },
         autoMatchMode: PlaybackSettingsService.getAutoMatchSource(),
         headlessMode: false,
+        targetEpisodeIndex:
+            PlayHistorySyncService.getResumeSelection(
+              widget.data,
+            )?.episodeIndex ??
+            0,
         onMatchFailed: () {
           showSnackBar('自动匹配失败，已切换至手动搜索');
         },

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/instance.dart';
+import 'package:baka/utils/app_logger.dart';
 import 'package:baka/widgets/baka_player/index.dart';
 import 'package:baka/widgets/danmaku/view.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
@@ -50,6 +51,7 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
   Timer? _overlayTimer;
   Timer? _clockTimer;
   final FocusNode _playerFocusNode = FocusNode();
+  String? _lastDisplaySignature;
   late final ValueNotifier<String> _clock = ValueNotifier<String>(
     _fmtClock(DateTime.now()),
   );
@@ -59,6 +61,7 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
   @override
   void initState() {
     super.initState();
+    _log('TV player layout created');
     _scheduleClockTick();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _playerFocusNode.requestFocus();
@@ -66,7 +69,25 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final mediaQuery = MediaQuery.of(context);
+    final signature =
+        '${mediaQuery.size.width.toStringAsFixed(1)}x'
+        '${mediaQuery.size.height.toStringAsFixed(1)}@'
+        '${mediaQuery.devicePixelRatio.toStringAsFixed(2)} '
+        'animationsDisabled=${mediaQuery.disableAnimations}';
+    if (_lastDisplaySignature != signature) {
+      _lastDisplaySignature = signature;
+      _log('Flutter viewport changed: $signature');
+    }
+  }
+
+  @override
   void dispose() {
+    _log(
+      'TV player layout disposed: overlay=$_showOverlay panel=${_panel.name}',
+    );
     _overlayTimer?.cancel();
     _clockTimer?.cancel();
     _clock.dispose();
@@ -78,12 +99,16 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
   }
 
   void _showControls() {
-    if (!_showOverlay) setState(() => _showOverlay = true);
+    if (!_showOverlay) {
+      _log('Control overlay shown');
+      setState(() => _showOverlay = true);
+    }
     _resetOverlayTimer();
   }
 
   void _hideControls() {
     if (!_showOverlay && _panel == _Panel.none) return;
+    _log('Control overlay hidden: previousPanel=${_panel.name}');
     _overlayTimer?.cancel();
     setState(() {
       _showOverlay = false;
@@ -120,6 +145,10 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
   static String _fmtClock(DateTime t) =>
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
+  void _log(String message) {
+    AppLogger.instance.info(message, tag: 'TvPlayer');
+  }
+
   void _togglePlayPause() {
     ctr.togglePlayback();
     _showControls();
@@ -135,6 +164,10 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
 
   void _openPanel(_Panel p) {
     if (_panel == p) return;
+    _log(
+      'Panel opened: ${p.name}, playing=${ctr.core.value.playing}, '
+      'buffering=${ctr.core.value.buffering}',
+    );
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _showOverlay = true;
@@ -145,6 +178,7 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
 
   void _closePanel() {
     if (_panel == _Panel.none) return;
+    _log('Panel closed: ${_panel.name}');
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _panel = _Panel.none);
     WidgetsBinding.instance.addPostFrameCallback((_) {

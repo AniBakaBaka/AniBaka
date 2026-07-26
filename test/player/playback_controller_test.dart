@@ -1,11 +1,33 @@
 import 'package:baka/instance.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
+import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'fake_playback_backend.dart';
+
+class _DanmakuSyncCounter implements DanmakuListener {
+  int syncCount = 0;
+
+  @override
+  void onDanmakuTimeSync(Duration position) => syncCount++;
+  @override
+  void onDanmakuInject(List<DanmakuItem> items) {}
+  @override
+  void onDanmakuItemsChanged() {}
+  @override
+  void onDanmakuOptionChanged(DanmakuOption next, DanmakuOption previous) {}
+  @override
+  void onDanmakuPause() {}
+  @override
+  void onDanmakuPlaybackRateChanged(double rate) {}
+  @override
+  void onDanmakuReset() {}
+  @override
+  void onDanmakuResume() {}
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -32,6 +54,28 @@ void main() {
     expect(backend.lastSeek, const Duration(seconds: 100));
     await controller.dispose();
   });
+
+  test(
+    'bounds danmaku time anchors with high-frequency backend events',
+    () async {
+      final backend = FakePlaybackBackend();
+      final controller = PlaybackController(backend: backend);
+      final danmaku = DanmakuController();
+      final counter = _DanmakuSyncCounter();
+      danmaku.attach(counter);
+      await controller.open('https://example.test/video.mp4');
+      controller.attachDanmaku(danmaku);
+      counter.syncCount = 0;
+
+      for (var milliseconds = 1; milliseconds <= 100; milliseconds++) {
+        backend.emitPosition(Duration(milliseconds: milliseconds));
+      }
+
+      expect(counter.syncCount, 1);
+      danmaku.detach(counter);
+      await controller.dispose();
+    },
+  );
 
   test('keeps hidden toast indicators idle during playback progress', () async {
     final backend = FakePlaybackBackend();
@@ -88,6 +132,36 @@ void main() {
       await controller.dispose();
     },
   );
+
+  test('coalesces a burst of long-press rate updates', () async {
+    final backend = FakePlaybackBackend();
+    final controller = PlaybackController(backend: backend);
+    await controller.open('https://example.test/video.mp4');
+    await controller.updatePreferences(
+      controller.preferences.value.copyWith(longPressSpeed: 2.0),
+      persist: false,
+    );
+    backend
+      ..rateSetCount = 0
+      ..maxRateSetInFlight = 0
+      ..rateSetDelay = const Duration(milliseconds: 20);
+
+    controller.setDoubleSpeed(true);
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    for (var step = 1; step <= 30; step++) {
+      controller.updateDoubleSpeedOffset(step * 3.2);
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+
+    expect(controller.overlay.value.longPressRate, 5.0);
+    expect(backend.lastRate, 5.0);
+    expect(backend.rateSetCount, 2);
+    expect(backend.maxRateSetInFlight, 1);
+
+    controller.setDoubleSpeed(false);
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    await controller.dispose();
+  });
 
   test('opening a paused replacement stops the previous media first', () async {
     final backend = FakePlaybackBackend();

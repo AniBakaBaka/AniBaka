@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.os.Build
+import android.util.DisplayMetrics
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -21,9 +23,63 @@ class MainActivity: AudioServiceActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "isTV" -> result.success(isTelevisionDevice())
+                "getDisplayDiagnostics" -> result.success(displayDiagnostics())
                 else -> result.notImplemented()
             }
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun displayDiagnostics(): Map<String, Any?> {
+        val packageManager = packageManager
+        val display = windowManager.defaultDisplay
+        val metrics = DisplayMetrics().also(display::getRealMetrics)
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) display.mode else null
+        val supportedModes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            display.supportedModes.map {
+                mapOf(
+                    "id" to it.modeId,
+                    "width" to it.physicalWidth,
+                    "height" to it.physicalHeight,
+                    "refreshRate" to it.refreshRate,
+                )
+            }
+        } else {
+            emptyList()
+        }
+        val impellerResource = resources.getIdentifier("enable_impeller", "bool", packageName)
+
+        return mapOf(
+            "manufacturer" to Build.MANUFACTURER,
+            "brand" to Build.BRAND,
+            "model" to Build.MODEL,
+            "device" to Build.DEVICE,
+            "sdk" to Build.VERSION.SDK_INT,
+            "isTV" to isTelevisionDevice(),
+            "configurationUiMode" to
+                (resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK),
+            "managerUiMode" to
+                (getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager)?.currentModeType,
+            "hasTouchscreen" to
+                packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN),
+            "hasLeanback" to
+                packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK),
+            "impellerEnabled" to
+                if (impellerResource == 0) null else resources.getBoolean(impellerResource),
+            "displayWidth" to metrics.widthPixels,
+            "displayHeight" to metrics.heightPixels,
+            "displayDensity" to metrics.density,
+            "displayRefreshRate" to display.refreshRate,
+            "displayMode" to mode?.let {
+                mapOf(
+                    "id" to it.modeId,
+                    "width" to it.physicalWidth,
+                    "height" to it.physicalHeight,
+                    "refreshRate" to it.refreshRate,
+                )
+            },
+            "supportedModes" to supportedModes,
+        )
     }
 
     private fun isTelevisionDevice(): Boolean {

@@ -55,9 +55,9 @@ Future getUserById(int? uid) {
   return NetUtils.get('$host/user?uid=$uid');
 }
 
-Future getComments(int? pid, int pageSize, String? runame) {
+Future getComments(int? pid, int pageSize, String? runame, {int page = 1}) {
   return NetUtils.get(
-    '$host/comments?pid=$pid&runame=$runame&page=1&pageSize=$pageSize',
+    '$host/comments?pid=$pid&runame=$runame&page=$page&pageSize=$pageSize',
   );
 }
 

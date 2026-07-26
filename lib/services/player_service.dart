@@ -24,26 +24,23 @@ import 'package:baka/services/danmaku_service.dart';
 import 'package:baka/services/torrent/torrent_service.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
 
-/// Helpers for episode metadata and playback progress.
+/// Episode serialization helpers and local progress I/O.
 class VideoUtils {
-  /// Count playable lines inside a serialized episode item.
+  static Box<Map> get _progressBox => AppStorage.videoProgressBox;
+
+  /// Count playable lines (`$`-separated) in a serialized episode item.
   static int getPathCount(String? videoItem) {
     if (videoItem == null || videoItem.isEmpty) return 0;
-
     var count = 0;
-    var offset = 0;
-    while ((offset = videoItem.indexOf(PlaybackEpisode.separator, offset)) >=
-        0) {
-      count++;
-      offset++;
+    for (var i = 0; i < videoItem.length; i++) {
+      if (videoItem.codeUnitAt(i) == 0x24 /* $ */ ) count++;
     }
     return count;
   }
 
-  /// Read a line value from a serialized episode item. Line indexes start at 1.
+  /// Read a line value (1-based) without allocating a full split list.
   static String? getVideoUrl(String? videoItem, int lineIndex) {
     if (videoItem == null || videoItem.isEmpty || lineIndex <= 0) return null;
-
     var start = -1;
     for (var i = 0; i < lineIndex; i++) {
       start = videoItem.indexOf(PlaybackEpisode.separator, start + 1);
@@ -53,59 +50,60 @@ class VideoUtils {
     return videoItem.substring(start + 1, end < 0 ? videoItem.length : end);
   }
 
-  /// Extract serialized episodes without reparsing or merging them.
+  /// Prefer `videoList`; fall back to newline-split `videos`.
   static List<String> extractVideoList(Map data) {
-    final rawVideoList = data['videoList'];
-    if (rawVideoList is List) {
-      final typed = <String>[];
-      for (final item in rawVideoList) {
-        if (item is String && item.trim().isNotEmpty) typed.add(item);
+    final rawList = data['videoList'];
+    if (rawList is List) {
+      final out = <String>[];
+      for (final item in rawList) {
+        if (item is String && item.trim().isNotEmpty) out.add(item);
       }
-      if (typed.isNotEmpty) return typed;
+      if (out.isNotEmpty) return out;
     }
+    final raw = data['videos'];
+    if (raw is! String || raw.isEmpty) return const [];
 
-    final rawVideos = data['videos'];
-    if (rawVideos is String && rawVideos.trim().isNotEmpty) {
-      final lines = <String>[];
-      for (final item in rawVideos.split('\n')) {
-        if (item.trim().isNotEmpty) lines.add(item);
+    // Scan in place instead of `split` + `trim`, which creates two temporary
+    // strings for every serialized episode (including blank lines).
+    final lines = <String>[];
+    var start = 0;
+    for (var end = 0; end <= raw.length; end++) {
+      if (end != raw.length && raw.codeUnitAt(end) != 0x0A) continue;
+      var hasContent = false;
+      for (var i = start; i < end; i++) {
+        if (raw.codeUnitAt(i) > 0x20) {
+          hasContent = true;
+          break;
+        }
       }
-      return lines;
+      if (hasContent) lines.add(raw.substring(start, end));
+      start = end + 1;
     }
-
-    return const <String>[];
+    return lines;
   }
-
-  static Box<Map> get _progressBox => AppStorage.videoProgressBox;
 
   static bool isEpisodeWatched(
     String videoId,
     int episodeIndex,
     Duration? totalDuration,
   ) {
-    final videoKey = '${videoId}_${episodeIndex}_1';
-    final position = getVideoProgress(videoKey);
+    final position = getVideoProgress('${videoId}_${episodeIndex}_1');
     if (position == Duration.zero) return false;
-    if (totalDuration == null || totalDuration == Duration.zero) {
-      return position.inSeconds > 30;
-    }
-    return position.inSeconds / totalDuration.inSeconds >= 0.9;
+    final total = totalDuration?.inSeconds ?? 0;
+    if (total <= 0) return position.inSeconds > 30;
+    return position.inSeconds / total >= 0.9;
   }
 
-  static Future<void> saveVideoProgress(
-    String videoKey,
-    Duration position,
-  ) async {
-    await _progressBox.put(videoKey, {
-      'positionMs': position.inMilliseconds,
-      'updateTime': DateTime.now().millisecondsSinceEpoch,
-    });
-  }
+  static Future<void> saveVideoProgress(String videoKey, Duration position) =>
+      _progressBox.put(videoKey, {
+        'positionMs': position.inMilliseconds,
+        'updateTime': DateTime.now().millisecondsSinceEpoch,
+      });
 
   static Duration getVideoProgress(String videoKey) {
     final data = _progressBox.get(videoKey);
     if (data == null) return Duration.zero;
-    return Duration(milliseconds: (data['positionMs'] ?? 0) as int);
+    return Duration(milliseconds: (data['positionMs'] as int?) ?? 0);
   }
 }
 
@@ -153,7 +151,11 @@ class PlayerService {
     isAdapter = !isLocalSource && AdapterRegistry.isAdapterSource(source);
 
     sourceNames = _parseSourceNames(data['sourceNames']);
-    if (!isLocalSource) _hydratePrefetchedBgmInfo();
+    if (!isLocalSource) {
+      bgmInfo = BgmUtils.readFromData(data);
+      bgmDetailData = BgmUtils.asMap(data['bgmDetailData']);
+      BgmUtils.normalizeCoverImage(data, bgmInfo: bgmInfo);
+    }
   }
 
   final Map data;
@@ -197,7 +199,10 @@ class PlayerService {
 
       final path = localFilePath;
       if (path != null && path.isNotEmpty) {
-        return path.replaceAll('\\', '/').split('/').last;
+        final slash = path.lastIndexOf('/');
+        final backslash = path.lastIndexOf('\\');
+        final separator = slash > backslash ? slash : backslash;
+        return separator < 0 ? path : path.substring(separator + 1);
       }
     }
 
@@ -241,19 +246,6 @@ class PlayerService {
   String get videoKey => isLocalSource
       ? localFilePath ?? ''
       : "${data['id']}_${currPlayIndex}_$currUrl";
-
-  void _hydratePrefetchedBgmInfo() {
-    bgmInfo = BgmUtils.readFromData(data);
-    bgmDetailData = BgmUtils.asMap(data['bgmDetailData']);
-    BgmUtils.normalizeCoverImage(data, bgmInfo: bgmInfo);
-  }
-
-  List<PlaybackEpisode> resolveInitialVideoList() {
-    return PlaybackEpisodeCatalog.parse(
-      VideoUtils.extractVideoList(data),
-      mergeDuplicateTitles: true,
-    );
-  }
 
   ({int episodeIndex, int lineIndex}) normalizeSelection(
     int episodeIndex, [
@@ -329,13 +321,8 @@ class PlayerService {
       return;
     }
 
-    final initialEpisodeIndex =
-        int.tryParse(
-          (posIndex ?? data['currPlayIndex'] ?? currPlayIndex).toString(),
-        ) ??
-        0;
-    final initialLineIndex =
-        int.tryParse((data['currUrl'] ?? currUrl).toString()) ?? 0;
+    final explicitEpisodeIndex = posIndex ?? data['currPlayIndex'];
+    final explicitLineIndex = data['currUrl'];
 
     if (!isAdapter) {
       final postId = int.tryParse(data['id']?.toString() ?? '');
@@ -357,8 +344,24 @@ class PlayerService {
       }
     }
 
+    final remembered = PlayHistorySyncService.getResumeSelection(data);
+    final initialEpisodeIndex =
+        int.tryParse(
+          (explicitEpisodeIndex ?? remembered?.episodeIndex ?? currPlayIndex)
+              .toString(),
+        ) ??
+        0;
+    final initialLineIndex =
+        int.tryParse(
+          (explicitLineIndex ?? remembered?.lineIndex ?? currUrl).toString(),
+        ) ??
+        1;
+
     syncVideoData(
-      resolveInitialVideoList(),
+      PlaybackEpisodeCatalog.parse(
+        VideoUtils.extractVideoList(data),
+        mergeDuplicateTitles: true,
+      ),
       sourceNames: _parseSourceNames(data['sourceNames']),
       preferredEpisodeIndex: initialEpisodeIndex,
       preferredLineIndex: initialLineIndex,
@@ -490,8 +493,10 @@ class PlayerService {
     String episodeId,
   ) {
     final raw = data[_prefetchedPlaybackKey];
-    if (raw is! Map || raw['episodeId']?.toString() != episodeId) return null;
-    if (raw['episodeIndex'] != currPlayIndex || raw['lineIndex'] != currUrl) {
+    if (raw is! Map ||
+        raw['episodeId']?.toString() != episodeId ||
+        raw['episodeIndex'] != currPlayIndex ||
+        raw['lineIndex'] != currUrl) {
       return null;
     }
 
@@ -501,17 +506,20 @@ class PlayerService {
 
     final url = raw['url']?.toString() ?? '';
     if (url.isEmpty) return null;
+
     final headers = raw['httpHeaders'];
-    return (
-      url: url,
-      httpHeaders: headers is Map<String, String>
-          ? headers
-          : headers is Map
-          ? headers.map(
-              (key, value) => MapEntry(key.toString(), value.toString()),
-            )
-          : const <String, String>{},
-    );
+    if (headers is Map<String, String>) {
+      return (url: url, httpHeaders: headers);
+    }
+    if (headers is Map) {
+      return (
+        url: url,
+        httpHeaders: {
+          for (final e in headers.entries) e.key.toString(): e.value.toString(),
+        },
+      );
+    }
+    return (url: url, httpHeaders: const <String, String>{});
   }
 
   Future<String?> _resolvePlayUrl(String episodeId) async {
@@ -558,53 +566,55 @@ class PlayerService {
   }
 
   Future<BgmInfo> ensureBgmInfo() {
-    if (isLocalSource) return Future.value(bgmInfo);
-    if (bgmInfo.subjectId != null) return Future.value(bgmInfo);
-    return _bgmInfoFuture ??= () async {
-      try {
-        bgmInfo = await BgmService.resolveFromData(data);
-        BgmUtils.normalizeCoverImage(data, bgmInfo: bgmInfo);
-        return bgmInfo;
-      } catch (e) {
-        _bgmInfoFuture = null;
-        return bgmInfo;
-      }
-    }();
+    if (isLocalSource || bgmInfo.subjectId != null) {
+      return Future.value(bgmInfo);
+    }
+    return _bgmInfoFuture ??= _loadBgmInfo();
+  }
+
+  Future<BgmInfo> _loadBgmInfo() async {
+    try {
+      bgmInfo = await BgmService.resolveFromData(data);
+      BgmUtils.normalizeCoverImage(data, bgmInfo: bgmInfo);
+      return bgmInfo;
+    } catch (_) {
+      _bgmInfoFuture = null;
+      return bgmInfo;
+    }
   }
 
   Future<Map<String, dynamic>?> ensureBgmDetail() {
     if (isLocalSource) return Future.value(null);
     if (bgmDetailData != null) return Future.value(bgmDetailData);
+    return _bgmDetailFuture ??= _loadBgmDetail();
+  }
 
-    return _bgmDetailFuture ??= () async {
-      try {
-        final info = await ensureBgmInfo();
-        final subjectId = info.subjectId;
-        if (subjectId == null) return null;
+  Future<Map<String, dynamic>?> _loadBgmDetail() async {
+    try {
+      final subjectId = (await ensureBgmInfo()).subjectId;
+      if (subjectId == null) return null;
 
-        final subject = await BgmService.resolveSubject(
-          bgmId: subjectId.toString(),
-          title: title,
-          withDetail: true,
-        );
+      final subject = await BgmService.resolveSubject(
+        bgmId: subjectId.toString(),
+        title: title,
+        withDetail: true,
+      );
+      if (subject == null) return null;
 
-        if (subject == null) return null;
+      final detail = getCachedBgmAnimeFullDetail(subjectId);
+      if (detail == null) return null;
 
-        final detail = getCachedBgmAnimeFullDetail(subjectId);
-        if (detail != null) {
-          bgmDetailData = detail;
-          data['bgmDetailData'] = detail;
-          final airDate = BgmUtils.formatPlainDate(detail['date']);
-          if (airDate != null) data['airDate'] = airDate;
-          BgmUtils.normalizeCoverImage(data, bgmInfo: bgmInfo);
-        }
-        return detail;
-      } catch (e) {
-        debugPrint('获取 BGM 放映信息失败: $e');
-        _bgmDetailFuture = null;
-        return null;
-      }
-    }();
+      bgmDetailData = detail;
+      data['bgmDetailData'] = detail;
+      final airDate = BgmUtils.formatPlainDate(detail['date']);
+      if (airDate != null) data['airDate'] = airDate;
+      BgmUtils.normalizeCoverImage(data, bgmInfo: bgmInfo);
+      return detail;
+    } catch (e) {
+      debugPrint('获取 BGM 放映信息失败: $e');
+      _bgmDetailFuture = null;
+      return null;
+    }
   }
 
   /// 获取弹幕数据列表（不涉及控制器绑定）。
@@ -631,6 +641,17 @@ class PlayerService {
 
   Duration getSavedProgress() => VideoUtils.getVideoProgress(videoKey);
 
+  Future<void> rememberCurrentEpisode() async {
+    if (isLocalSource || videoList.isEmpty) return;
+    final bgmId = bgmInfo.subjectId;
+    if (bgmId != null) data['bgmId'] ??= bgmId;
+    await PlayHistorySyncService.rememberEpisode(
+      videoData: data,
+      episodeIndex: currPlayIndex,
+      urlIndex: currUrl,
+    );
+  }
+
   /// 读取本地弹幕文件（仅本地源使用）。
   Future<String?> readLocalDanmakuFile(String videoPath) async {
     final explicitPath = danmakuPath;
@@ -651,12 +672,14 @@ class PlayerService {
 
   void saveHistory({required int positionMs, required int durationMs}) {
     if (isLocalSource) return;
+    // Fill missing cover/bgm in place — snapshot filters fields downstream.
+    final cover = coverImageUrl;
+    if (cover != null && cover.isNotEmpty) data['bgmImageUrl'] ??= cover;
+    final bgmId = bgmInfo.subjectId;
+    if (bgmId != null) data['bgmId'] ??= bgmId;
+
     PlayHistorySyncService.saveHistory(
-      videoData: <String, dynamic>{
-        ...Map<String, dynamic>.from(data),
-        if (coverImageUrl?.isNotEmpty == true) 'bgmImageUrl': coverImageUrl,
-        if (bgmInfo.subjectId != null) 'bgmId': bgmInfo.subjectId,
-      },
+      videoData: data,
       episodeIndex: currPlayIndex,
       positionMs: positionMs,
       durationMs: durationMs,
@@ -676,41 +699,41 @@ class PlayerService {
 
   Future<AnimeCollection?> ensureCollectionStatus() {
     if (isLocalSource || !isLoggedIn) return Future.value(collection);
+    return _collectionFuture ??= _loadCollection();
+  }
 
-    return _collectionFuture ??= () async {
-      try {
-        final info = await ensureBgmInfo();
-        final bgmId = info.subjectId;
-        if (bgmId == null) return collection;
-
-        final result = await CollectionApi.getByBgmId(bgmId);
-        if (result != null) {
-          collection = result;
-        }
-        return result ?? collection;
-      } catch (e) {
-        debugPrint('获取追番状态失败: $e');
-        _collectionFuture = null;
-        return collection;
-      }
-    }();
+  Future<AnimeCollection?> _loadCollection() async {
+    try {
+      final bgmId = (await ensureBgmInfo()).subjectId;
+      if (bgmId == null) return collection;
+      final result = await CollectionApi.getByBgmId(bgmId);
+      if (result != null) collection = result;
+      return collection;
+    } catch (e) {
+      debugPrint('获取追番状态失败: $e');
+      _collectionFuture = null;
+      return collection;
+    }
   }
 
   Future<String> toggleFollow() async {
     if (!isLoggedIn) throw Exception('请先登录');
 
-    await ensureBgmInfo();
-    await ensureBgmDetail();
-    await ensureCollectionStatus();
+    await Future.wait([
+      ensureBgmInfo(),
+      ensureBgmDetail(),
+      ensureCollectionStatus(),
+    ]);
 
     if (isFollow()) {
       final current = collection;
       if (current == null) return '操作失败';
       final bgmId = current.bgmId ?? bgmInfo.subjectId;
+      final postId = current.postId ?? validPostId;
       final success = bgmId != null
           ? await CollectionApi.deleteByBgmId(bgmId)
-          : (current.postId ?? validPostId) != null
-          ? await CollectionApi.delete(current.postId ?? validPostId!)
+          : postId != null
+          ? await CollectionApi.delete(postId)
           : false;
       if (!success) throw Exception('取消追番失败');
       collection = null;
@@ -718,22 +741,23 @@ class PlayerService {
     }
 
     final detail = bgmDetailData;
-    final newCollection = AnimeCollection(
-      postId: validPostId,
-      bgmId: bgmInfo.subjectId,
-      status: CollectionStatus.doing.value,
-      epTotal: videoList.isEmpty ? null : videoList.length,
-      epWatched: videoList.isEmpty ? null : currPlayIndex + 1,
-      postTitle: data['title']?.toString() ?? '',
-      postCover: coverImageUrl,
-      bgmImage: bgmInfo.imageUrl,
-      bgmTitle:
-          detail?['name_cn']?.toString() ??
-          detail?['name']?.toString() ??
-          data['title']?.toString() ??
-          '',
+    final epCount = videoList.isEmpty ? null : videoList.length;
+    final result = await CollectionApi.addOrUpdate(
+      AnimeCollection(
+        postId: validPostId,
+        bgmId: bgmInfo.subjectId,
+        status: CollectionStatus.doing.value,
+        epTotal: epCount,
+        epWatched: epCount == null ? null : currPlayIndex + 1,
+        postTitle: title,
+        postCover: coverImageUrl,
+        bgmImage: bgmInfo.imageUrl,
+        bgmTitle:
+            detail?['name_cn']?.toString() ??
+            detail?['name']?.toString() ??
+            title,
+      ),
     );
-    final result = await CollectionApi.addOrUpdate(newCollection);
     if (result == null) throw Exception('追番失败');
     collection = result;
     return '已加入在看';

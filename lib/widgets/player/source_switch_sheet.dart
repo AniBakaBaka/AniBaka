@@ -84,6 +84,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   int _checkingCount = 0;
   int _failedCount = 0;
   bool _hasPending = false;
+  bool _routeRefreshScheduled = false;
 
   bool get _isSelecting => _selectingKey != null;
 
@@ -106,7 +107,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
 
     _controller.resultsNotifier.addListener(_onCandidatesChanged);
     _controller.candidateRevisionNotifier.addListener(_onCandidatesChanged);
-    _controller.progressNotifier.addListener(_onProgressChanged);
+    _controller.progressNotifier.addListener(_onCandidatesChanged);
     _readRoutes();
 
     if (_controller.resultsNotifier.value.isEmpty &&
@@ -121,19 +122,20 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   void dispose() {
     _controller.resultsNotifier.removeListener(_onCandidatesChanged);
     _controller.candidateRevisionNotifier.removeListener(_onCandidatesChanged);
-    _controller.progressNotifier.removeListener(_onProgressChanged);
+    _controller.progressNotifier.removeListener(_onCandidatesChanged);
     if (widget.searchController == null) _controller.dispose();
     super.dispose();
   }
 
-  void _onProgressChanged() {
-    if (mounted) setState(() {});
-  }
-
   void _onCandidatesChanged() {
-    if (!mounted) return;
-    setState(_readRoutes);
-    _continueAutoProbe();
+    if (!mounted || _routeRefreshScheduled) return;
+    _routeRefreshScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _routeRefreshScheduled = false;
+      if (!mounted) return;
+      setState(_readRoutes);
+      _continueAutoProbe();
+    });
   }
 
   void _continueAutoProbe() {
@@ -212,14 +214,14 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
 
   Future<void> _selectBest() async {
     if (_isSelecting) return;
+    DirectSourceGroup? fallback;
     for (final route in _routes) {
       if (route.group.isReady) return _select(route.group);
-    }
-    for (final route in _routes) {
-      if (route.group.status != SourceProbeStatus.failed) {
-        return _select(route.group);
+      if (fallback == null && route.group.status != SourceProbeStatus.failed) {
+        fallback = route.group;
       }
     }
+    if (fallback != null) return _select(fallback);
     _message('暂时没有可用线路');
   }
 

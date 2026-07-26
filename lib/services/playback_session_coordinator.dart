@@ -8,6 +8,7 @@ import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
 
+/// Wires player controller, danmaku, media session, and progress persistence.
 class PlaybackSessionCoordinator {
   PlaybackSessionCoordinator({
     required this.controller,
@@ -19,6 +20,8 @@ class PlaybackSessionCoordinator {
     DateTime Function()? now,
   }) : _mediaSession = mediaSession,
        _now = now ?? DateTime.now;
+
+  static const _progressThrottle = Duration(seconds: 30);
 
   final PlaybackController controller;
   final DanmakuController danmakuController;
@@ -49,12 +52,14 @@ class PlaybackSessionCoordinator {
       DanmakuService.loadSettings(danmakuController),
     ]);
     if (_disposed) return;
+
     _lastProgressSave = _now();
     controller.timeline.addListener(_onTimelineChanged);
     _completedSubscription = controller.completed.listen(
       (_) => onNextEpisode(),
     );
     _seekSubscription = controller.seekEvents.listen((_) => saveProgress());
+
     final mediaSession = _mediaSession ?? Get.find<MediaSessionService>();
     mediaSession.attach(
       controller,
@@ -74,26 +79,27 @@ class PlaybackSessionCoordinator {
 
   void _onTimelineChanged() {
     final now = _now();
-    if (now.difference(_lastProgressSave) < const Duration(seconds: 30)) {
-      return;
-    }
+    if (now.difference(_lastProgressSave) < _progressThrottle) return;
     _lastProgressSave = now;
     unawaited(saveProgress());
   }
 
-  Future<void> saveProgress() {
-    return content.saveProgress(
-      controller.timeline.value.position,
-      controller.preferences.value.rememberLastPosition,
+  Future<void> saveProgress() => content.saveProgress(
+    controller.timeline.value.position,
+    controller.preferences.value.rememberLastPosition,
+  );
+
+  void _saveHistory() {
+    final timeline = controller.timeline.value;
+    content.saveHistory(
+      positionMs: timeline.position.inMilliseconds,
+      durationMs: timeline.duration.inMilliseconds,
     );
   }
 
   Future<void> saveAndResetForSwitch() async {
     await saveProgress();
-    content.saveHistory(
-      positionMs: controller.timeline.value.position.inMilliseconds,
-      durationMs: controller.timeline.value.duration.inMilliseconds,
-    );
+    _saveHistory();
     danmakuController.reset();
   }
 
@@ -104,10 +110,7 @@ class PlaybackSessionCoordinator {
     await _completedSubscription?.cancel();
     await _seekSubscription?.cancel();
     await saveProgress();
-    content.saveHistory(
-      positionMs: controller.timeline.value.position.inMilliseconds,
-      durationMs: controller.timeline.value.duration.inMilliseconds,
-    );
+    _saveHistory();
     _attachedMediaSession?.detach();
     _attachedMediaSession = null;
     controller.detachDanmaku();

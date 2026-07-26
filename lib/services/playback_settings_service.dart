@@ -1,6 +1,7 @@
 import 'package:baka/instance.dart';
-import 'package:baka/models/subtitle_config.dart';
 import 'package:baka/models/playback_state.dart';
+import 'package:baka/models/subtitle_config.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// 播放器设置持久化服务。
 ///
@@ -8,73 +9,55 @@ import 'package:baka/models/playback_state.dart';
 class PlaybackSettingsService {
   PlaybackSettingsService._();
 
-  static const String _defaultDanmakuOffKey = 'player_defaultDanmakuOff';
-  static const String _defaultSubtitleOffKey = 'player_defaultSubtitleOff';
-  static const String _defaultPlaybackSpeedKey = 'player_defaultPlaybackSpeed';
-  static const String _clearCacheOnExitKey = 'app_clearCacheOnExit';
-  static const String _enableBtDownloadKey = 'player_enableBtDownload';
-  static const String _autoMatchSourceKey = 'player_autoMatchSource';
-  static const String _rememberLastPositionKey = 'player_rememberLastPosition';
-  static const String _autoFullscreenKey = 'player_autoFullscreen';
-  static const String _enableSkipOpEdKey = 'player_enableSkipOpEd';
-  static const String _longPressSpeedKey = 'player_longPressSpeed';
-  static const String _showNextEpisodeButtonKey =
-      'player_showNextEpisodeButton';
-  static const String _enableDoubleTapKey = 'player_enableDoubleTap';
-  static const String _doubleTapActionKey = 'player_doubleTapAction';
-  static const String _doubleTapSeekDurationKey =
-      'player_doubleTapSeekDuration';
-  static const String _showSystemTimeKey = 'player_showSystemTime';
-  static const String _skipOpWaitTimeKey = 'player_skipOpWaitTime';
-  static const String _skipOpDurationKey = 'player_skipOpDuration';
-  static const String _enableAnime4KKey = 'player_enableAnime4K';
-  static const String _anime4KLevelKey = 'player_anime4KLevel';
-  static const String _showSubtitleKey = 'player_showSubtitle';
-  static const String _hwdecModeKey = 'player_hwdecMode';
-  static const String _videoRendererKey = 'player_videoRenderer';
+  static const _defaultDanmakuOffKey = 'player_defaultDanmakuOff';
+  static const _defaultSubtitleOffKey = 'player_defaultSubtitleOff';
+  static const _defaultPlaybackSpeedKey = 'player_defaultPlaybackSpeed';
+  static const _clearCacheOnExitKey = 'app_clearCacheOnExit';
+  static const _enableBtDownloadKey = 'player_enableBtDownload';
+  static const _autoMatchSourceKey = 'player_autoMatchSource';
+  static const _rememberLastPositionKey = 'player_rememberLastPosition';
+  static const _autoFullscreenKey = 'player_autoFullscreen';
+  static const _enableSkipOpEdKey = 'player_enableSkipOpEd';
+  static const _longPressSpeedKey = 'player_longPressSpeed';
+  static const _showNextEpisodeButtonKey = 'player_showNextEpisodeButton';
+  static const _enableDoubleTapKey = 'player_enableDoubleTap';
+  static const _doubleTapActionKey = 'player_doubleTapAction';
+  static const _doubleTapSeekDurationKey = 'player_doubleTapSeekDuration';
+  static const _showSystemTimeKey = 'player_showSystemTime';
+  static const _skipOpWaitTimeKey = 'player_skipOpWaitTime';
+  static const _skipOpDurationKey = 'player_skipOpDuration';
+  static const _enableAnime4KKey = 'player_enableAnime4K';
+  static const _anime4KLevelKey = 'player_anime4KLevel';
+  static const _showSubtitleKey = 'player_showSubtitle';
+  static const _hwdecModeKey = 'player_hwdecMode';
+  static const _videoRendererKey = 'player_videoRenderer';
 
-  static const List<String> hwdecModeOptions = <String>[
-    'auto',
-    'auto-safe',
-    'no',
-  ];
-
-  static const Map<String, String> hwdecModeLabels = <String, String>{
+  static const hwdecModeOptions = <String>['auto', 'auto-safe', 'no'];
+  static const hwdecModeLabels = <String, String>{
     'auto': '自动',
     'auto-safe': '安全模式',
     'no': '软件解码',
   };
 
-  static String normalizeHwdecMode(String? mode) {
-    if (mode != null && hwdecModeOptions.contains(mode)) return mode;
-    return Instances.isTV ? 'auto-safe' : 'auto';
-  }
-
-  static const List<String> videoRendererOptions = <String>[
+  static const videoRendererOptions = <String>[
     'auto',
     'compatibility',
     'quality',
   ];
-
-  static const Map<String, String> videoRendererLabels = <String, String>{
+  static const videoRendererLabels = <String, String>{
     'auto': '自动',
     'compatibility': 'GPU 兼容',
     'quality': 'GPU 高质量',
   };
 
-  static String normalizeVideoRenderer(String? renderer) {
-    // Migrate the old vo=gpu/gpu-next values. Embedded media_kit playback must
-    // keep vo=libmpv; these modes now select safe libmpv render profiles.
-    if (renderer == 'gpu') return 'compatibility';
-    if (renderer == 'gpu-next') return 'quality';
-    if (renderer != null && videoRendererOptions.contains(renderer)) {
-      return renderer;
-    }
-    return 'auto';
-  }
+  /// 旧 vo=gpu / gpu-next 迁移到 libmpv 渲染档位。
+  static const _rendererMigrate = <String, String>{
+    'gpu': 'compatibility',
+    'gpu-next': 'quality',
+  };
 
-  static const double defaultPlaybackSpeed = 1.0;
-  static const List<double> playbackSpeedOptions = <double>[
+  static const defaultPlaybackSpeed = 1.0;
+  static const playbackSpeedOptions = <double>[
     0.5,
     0.75,
     1.0,
@@ -86,57 +69,72 @@ class PlaybackSettingsService {
     4.0,
   ];
 
-  static double normalizePlaybackSpeed(double? speed) {
-    if (speed == null) return defaultPlaybackSpeed;
-    if (playbackSpeedOptions.contains(speed)) return speed;
-    return defaultPlaybackSpeed;
+  static final _speedLabelTrim = RegExp(r'\.?0+$');
+
+  static String normalizeHwdecMode(String? mode) {
+    if (mode != null && hwdecModeOptions.contains(mode)) return mode;
+    return Instances.isTV ? 'auto-safe' : 'auto';
   }
 
-  static String formatPlaybackSpeed(double speed) {
-    final label = speed.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
-    return '${label}x';
+  static String normalizeVideoRenderer(String? renderer) {
+    if (renderer == null) return 'auto';
+    return _rendererMigrate[renderer] ??
+        (videoRendererOptions.contains(renderer) ? renderer : 'auto');
   }
+
+  static double normalizePlaybackSpeed(double? speed) =>
+      (speed != null && playbackSpeedOptions.contains(speed))
+      ? speed
+      : defaultPlaybackSpeed;
+
+  static String formatPlaybackSpeed(double speed) =>
+      '${speed.toStringAsFixed(2).replaceFirst(_speedLabelTrim, '')}x';
+
+  static SharedPreferences get _prefs => Instances.sp;
 
   static bool getDefaultDanmakuOff() =>
-      Instances.sp.getBool(_defaultDanmakuOffKey) ?? false;
+      _prefs.getBool(_defaultDanmakuOffKey) ?? false;
 
   static Future<void> setDefaultDanmakuOff(bool value) =>
-      Instances.sp.setBool(_defaultDanmakuOffKey, value);
+      _prefs.setBool(_defaultDanmakuOffKey, value);
 
   static double getDefaultPlaybackSpeed() =>
-      normalizePlaybackSpeed(Instances.sp.getDouble(_defaultPlaybackSpeedKey));
+      normalizePlaybackSpeed(_prefs.getDouble(_defaultPlaybackSpeedKey));
 
-  static Future<void> setDefaultPlaybackSpeed(double speed) => Instances.sp
-      .setDouble(_defaultPlaybackSpeedKey, normalizePlaybackSpeed(speed));
+  static Future<void> setDefaultPlaybackSpeed(double speed) => _prefs.setDouble(
+    _defaultPlaybackSpeedKey,
+    normalizePlaybackSpeed(speed),
+  );
 
   static bool getDefaultSubtitleOff() =>
-      Instances.sp.getBool(_defaultSubtitleOffKey) ?? false;
+      _prefs.getBool(_defaultSubtitleOffKey) ?? false;
 
   static Future<void> setDefaultSubtitleOff(bool value) =>
-      Instances.sp.setBool(_defaultSubtitleOffKey, value);
+      _prefs.setBool(_defaultSubtitleOffKey, value);
 
   static bool getEnableBtDownload() =>
-      Instances.sp.getBool(_enableBtDownloadKey) ?? true;
+      _prefs.getBool(_enableBtDownloadKey) ?? true;
 
   static Future<void> setEnableBtDownload(bool value) =>
-      Instances.sp.setBool(_enableBtDownloadKey, value);
+      _prefs.setBool(_enableBtDownloadKey, value);
 
   static bool getClearCacheOnExit() =>
-      Instances.sp.getBool(_clearCacheOnExitKey) ?? false;
+      _prefs.getBool(_clearCacheOnExitKey) ?? false;
 
   static Future<void> setClearCacheOnExit(bool value) =>
-      Instances.sp.setBool(_clearCacheOnExitKey, value);
+      _prefs.setBool(_clearCacheOnExitKey, value);
 
   static bool getAutoMatchSource() =>
-      Instances.sp.getBool(_autoMatchSourceKey) ?? true;
+      _prefs.getBool(_autoMatchSourceKey) ?? true;
 
   static Future<void> setAutoMatchSource(bool value) =>
-      Instances.sp.setBool(_autoMatchSourceKey, value);
+      _prefs.setBool(_autoMatchSourceKey, value);
+
+  static Future<void> setShowSubtitle(bool value) =>
+      _prefs.setBool(_showSubtitleKey, value);
 
   static Future<PlaybackPreferences> loadAll() async {
-    final sp = Instances.sp;
-    final subtitleConfig = await SubtitleConfig.load();
-
+    final sp = _prefs;
     return PlaybackPreferences(
       rememberLastPosition: sp.getBool(_rememberLastPositionKey) ?? true,
       autoFullscreen: sp.getBool(_autoFullscreenKey) ?? false,
@@ -156,86 +154,95 @@ class PlaybackSettingsService {
       enableAnime4K: sp.getBool(_enableAnime4KKey) ?? false,
       anime4KLevel: sp.getString(_anime4KLevelKey) ?? 'medium',
       showSubtitle: sp.getBool(_showSubtitleKey) ?? true,
-      subtitleConfig: subtitleConfig,
+      subtitleConfig: await SubtitleConfig.load(),
       hwdecMode: normalizeHwdecMode(sp.getString(_hwdecModeKey)),
       videoRenderer: normalizeVideoRenderer(sp.getString(_videoRendererKey)),
     );
   }
 
+  /// 仅持久化 [previous] 与 [next] 之间有差异的字段。
   static Future<void> saveChanges(
     PlaybackPreferences previous,
     PlaybackPreferences next,
   ) {
-    final sp = Instances.sp;
-    final writes = <Future<dynamic>>[];
-    if (previous.rememberLastPosition != next.rememberLastPosition) {
-      writes.add(
-        sp.setBool(_rememberLastPositionKey, next.rememberLastPosition),
-      );
+    if (identical(previous, next) || previous == next) {
+      return Future.value();
     }
-    if (previous.autoFullscreen != next.autoFullscreen) {
-      writes.add(sp.setBool(_autoFullscreenKey, next.autoFullscreen));
+
+    final sp = _prefs;
+    final writes = <Future<void>>[];
+
+    void writeBool(String key, bool before, bool after) {
+      if (before != after) writes.add(sp.setBool(key, after));
     }
-    if (previous.enableSkipOpEd != next.enableSkipOpEd) {
-      writes.add(sp.setBool(_enableSkipOpEdKey, next.enableSkipOpEd));
+
+    void writeInt(String key, int before, int after) {
+      if (before != after) writes.add(sp.setInt(key, after));
     }
-    if (previous.defaultDanmakuOff != next.defaultDanmakuOff) {
-      writes.add(sp.setBool(_defaultDanmakuOffKey, next.defaultDanmakuOff));
+
+    void writeDouble(String key, double before, double after) {
+      if (before != after) writes.add(sp.setDouble(key, after));
     }
-    if (previous.defaultPlaybackSpeed != next.defaultPlaybackSpeed) {
-      writes.add(
-        sp.setDouble(_defaultPlaybackSpeedKey, next.defaultPlaybackSpeed),
-      );
+
+    void writeString(String key, String before, String after) {
+      if (before != after) writes.add(sp.setString(key, after));
     }
-    if (previous.longPressSpeed != next.longPressSpeed) {
-      writes.add(sp.setDouble(_longPressSpeedKey, next.longPressSpeed));
-    }
-    if (previous.showNextEpisodeButton != next.showNextEpisodeButton) {
-      writes.add(
-        sp.setBool(_showNextEpisodeButtonKey, next.showNextEpisodeButton),
-      );
-    }
-    if (previous.enableDoubleTap != next.enableDoubleTap) {
-      writes.add(sp.setBool(_enableDoubleTapKey, next.enableDoubleTap));
-    }
-    if (previous.doubleTapAction != next.doubleTapAction) {
-      writes.add(sp.setString(_doubleTapActionKey, next.doubleTapAction));
-    }
-    if (previous.doubleTapSeekDuration != next.doubleTapSeekDuration) {
-      writes.add(
-        sp.setInt(_doubleTapSeekDurationKey, next.doubleTapSeekDuration),
-      );
-    }
-    if (previous.showSystemTime != next.showSystemTime) {
-      writes.add(sp.setBool(_showSystemTimeKey, next.showSystemTime));
-    }
-    if (previous.skipOpWaitTime != next.skipOpWaitTime) {
-      writes.add(sp.setInt(_skipOpWaitTimeKey, next.skipOpWaitTime));
-    }
-    if (previous.skipOpDuration != next.skipOpDuration) {
-      writes.add(sp.setInt(_skipOpDurationKey, next.skipOpDuration));
-    }
-    if (previous.enableAnime4K != next.enableAnime4K) {
-      writes.add(sp.setBool(_enableAnime4KKey, next.enableAnime4K));
-    }
-    if (previous.anime4KLevel != next.anime4KLevel) {
-      writes.add(sp.setString(_anime4KLevelKey, next.anime4KLevel));
-    }
-    if (previous.showSubtitle != next.showSubtitle) {
-      writes.add(sp.setBool(_showSubtitleKey, next.showSubtitle));
-    }
+
+    writeBool(
+      _rememberLastPositionKey,
+      previous.rememberLastPosition,
+      next.rememberLastPosition,
+    );
+    writeBool(_autoFullscreenKey, previous.autoFullscreen, next.autoFullscreen);
+    writeBool(_enableSkipOpEdKey, previous.enableSkipOpEd, next.enableSkipOpEd);
+    writeBool(
+      _defaultDanmakuOffKey,
+      previous.defaultDanmakuOff,
+      next.defaultDanmakuOff,
+    );
+    writeDouble(
+      _defaultPlaybackSpeedKey,
+      previous.defaultPlaybackSpeed,
+      next.defaultPlaybackSpeed,
+    );
+    writeDouble(
+      _longPressSpeedKey,
+      previous.longPressSpeed,
+      next.longPressSpeed,
+    );
+    writeBool(
+      _showNextEpisodeButtonKey,
+      previous.showNextEpisodeButton,
+      next.showNextEpisodeButton,
+    );
+    writeBool(
+      _enableDoubleTapKey,
+      previous.enableDoubleTap,
+      next.enableDoubleTap,
+    );
+    writeString(
+      _doubleTapActionKey,
+      previous.doubleTapAction,
+      next.doubleTapAction,
+    );
+    writeInt(
+      _doubleTapSeekDurationKey,
+      previous.doubleTapSeekDuration,
+      next.doubleTapSeekDuration,
+    );
+    writeBool(_showSystemTimeKey, previous.showSystemTime, next.showSystemTime);
+    writeInt(_skipOpWaitTimeKey, previous.skipOpWaitTime, next.skipOpWaitTime);
+    writeInt(_skipOpDurationKey, previous.skipOpDuration, next.skipOpDuration);
+    writeBool(_enableAnime4KKey, previous.enableAnime4K, next.enableAnime4K);
+    writeString(_anime4KLevelKey, previous.anime4KLevel, next.anime4KLevel);
+    writeBool(_showSubtitleKey, previous.showSubtitle, next.showSubtitle);
+    writeString(_hwdecModeKey, previous.hwdecMode, next.hwdecMode);
+    writeString(_videoRendererKey, previous.videoRenderer, next.videoRenderer);
+
     if (previous.subtitleConfig != next.subtitleConfig) {
       writes.add(next.subtitleConfig.save());
     }
-    if (previous.hwdecMode != next.hwdecMode) {
-      writes.add(sp.setString(_hwdecModeKey, next.hwdecMode));
-    }
-    if (previous.videoRenderer != next.videoRenderer) {
-      writes.add(sp.setString(_videoRendererKey, next.videoRenderer));
-    }
-    return Future.wait(writes);
-  }
 
-  static Future<void> setShowSubtitle(bool value) =>
-      Instances.sp.setBool(_showSubtitleKey, value);
+    return writes.isEmpty ? Future.value() : Future.wait(writes);
+  }
 }
