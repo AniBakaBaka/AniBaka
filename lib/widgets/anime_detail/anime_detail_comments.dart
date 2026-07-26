@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'package:baka/api/bgm.dart';
 import 'package:baka/utils/bgm_utils.dart';
+import 'package:baka/utils/date_util.dart';
 import 'package:baka/widgets/common/shimmer.dart';
 
 /// 评论 Tab — 独立管理评论加载状态
@@ -232,7 +233,9 @@ class _CommentItem extends StatelessWidget {
     final content = comment['comment']?.toString() ?? '';
     final rate = comment['rate'] as int? ?? 0;
     final updatedAt = comment['updatedAt'] as int? ?? 0;
-    final timeStr = updatedAt > 0 ? BgmUtils.formatRelativeTime(updatedAt) : '';
+    final timeStr = updatedAt > 0
+        ? DateTime.fromMillisecondsSinceEpoch(updatedAt * 1000).toRelativeTime()
+        : '';
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

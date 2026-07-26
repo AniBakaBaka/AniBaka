@@ -3,14 +3,23 @@ import 'package:flutter/services.dart';
 import 'package:baka/models/collection.dart';
 
 const _statusData = <CollectionStatus, (Color, IconData, String)>{
-  CollectionStatus.doing: (Color(0xFF007AFF), Icons.play_arrow_rounded, '正在追番中'),
+  CollectionStatus.doing: (
+    Color(0xFF007AFF),
+    Icons.play_arrow_rounded,
+    '正在追番中',
+  ),
   CollectionStatus.wish: (Color(0xFF34C759), Icons.bookmark_rounded, '标记为想看'),
-  CollectionStatus.collect: (Color(0xFFAF52DE), Icons.done_all_rounded, '已经看完了'),
+  CollectionStatus.collect: (
+    Color(0xFFAF52DE),
+    Icons.done_all_rounded,
+    '已经看完了',
+  ),
   CollectionStatus.onHold: (Color(0xFFFF9500), Icons.pause_rounded, '暂时搁置中'),
   CollectionStatus.dropped: (Color(0xFFFF3B30), Icons.close_rounded, '不再追了'),
 };
 
-(Color, IconData, String) statusVisual(CollectionStatus status) => _statusData[status]!;
+(Color, IconData, String) statusVisual(CollectionStatus status) =>
+    _statusData[status]!;
 
 class CollectionStatusSheet extends StatelessWidget {
   final CollectionStatus? currentStatus;
@@ -54,7 +63,8 @@ class CollectionStatusSheet extends StatelessWidget {
                       ),
                     ),
                     const Spacer(),
-                    if (currentStatus != null) _CurrentBadge(status: currentStatus!),
+                    if (currentStatus != null)
+                      _CurrentBadge(status: currentStatus!),
                   ],
                 ),
               ),
@@ -104,7 +114,9 @@ class _DragHandle extends StatelessWidget {
         width: 36,
         height: 5,
         decoration: BoxDecoration(
-          color: isDark ? Colors.white.withValues(alpha: 0.15) : Colors.black.withValues(alpha: 0.1),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.15)
+              : Colors.black.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(2.5),
         ),
       ),
@@ -128,9 +140,20 @@ class _CurrentBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
           const SizedBox(width: 6),
-          Text(status.label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
+          Text(
+            status.label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
         ],
       ),
     );
@@ -142,7 +165,11 @@ class _StatusChip extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
 
-  const _StatusChip({required this.status, required this.isSelected, required this.onTap});
+  const _StatusChip({
+    required this.status,
+    required this.isSelected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -160,7 +187,9 @@ class _StatusChip extends StatelessWidget {
               : (isDark ? const Color(0xFF2C2C2E) : Colors.white),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: isSelected ? color.withValues(alpha: 0.6) : Colors.transparent,
+            color: isSelected
+                ? color.withValues(alpha: 0.6)
+                : Colors.transparent,
             width: 1.5,
           ),
         ),
@@ -173,7 +202,11 @@ class _StatusChip extends StatelessWidget {
                 color: isSelected ? color : color.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Icon(icon, size: 18, color: isSelected ? Colors.white : color),
+              child: Icon(
+                icon,
+                size: 18,
+                color: isSelected ? Colors.white : color,
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -233,9 +266,20 @@ class _RemoveButton extends StatelessWidget {
         child: const Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFFF3B30)),
+            Icon(
+              Icons.delete_outline_rounded,
+              size: 18,
+              color: Color(0xFFFF3B30),
+            ),
             SizedBox(width: 8),
-            Text('取消收藏', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFFFF3B30))),
+            Text(
+              '取消收藏',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFFFF3B30),
+              ),
+            ),
           ],
         ),
       ),

@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:baka/source/source_registry.dart';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/services/navigation_service.dart';
+import 'package:baka/services/source_adapter_service.dart';
 import 'package:baka/widgets/anime_detail/controller/video_source_search_controller.dart';
 import 'package:baka/widgets/common/shimmer.dart';
 
@@ -81,21 +81,16 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     super.initState();
     _controller = VideoSourceSearchController(
       title: widget.title,
-      cover: widget.cover,
       seedData: widget.seedData,
       autoMatchMode: widget.autoMatchMode,
       targetEpisodeIndex: widget.targetEpisodeIndex,
       onMatchFound: _navigateToPlayer,
       onMatchFailed: () {
-        if (widget.headlessMode) {
-          widget.onMatchFailed?.call();
-        } else {
-          if (widget.onMatchFailed != null) {
-            widget.onMatchFailed!.call();
-          } else {
-            // 保留原有默认行为以防破坏其他地方的逻辑
-            Navigator.of(context).pop('failed');
-          }
+        final cb = widget.onMatchFailed;
+        if (cb != null) {
+          cb();
+        } else if (!widget.headlessMode) {
+          Navigator.of(context).pop('failed');
         }
       },
     );
@@ -104,29 +99,24 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
       _currentSourceRegistry(),
     );
 
-    // 监听搜索进度变化，动态更新自定义源的配置信息
-    _controller.progressNotifier.addListener(_updateSourceRegistryOnProgress);
+    // 适配器初始化完成后刷新源注册表（此时自定义源列表已加载）
+    _controller.ensureAdapterReady().then((_) {
+      if (!mounted) return;
+      final next = _currentSourceRegistry();
+      if (!mapEquals(_sourceConfigsNotifier.value, next)) {
+        _sourceConfigsNotifier.value = next;
+      }
+    });
     _controller.startSearch();
   }
 
   Map<String, _SourceMeta> _currentSourceRegistry() => _buildSourceRegistry(
-    quickSources: _controller.sourceAdapterService.enabledQuickSearchSources,
-    customSources: _controller.sourceAdapterService.enabledCustomSources,
+    quickSources: SourceCatalog.instance.quickSearchSources,
+    customSources: SourceCatalog.instance.enabledCustomSources,
   );
-
-  void _updateSourceRegistryOnProgress() {
-    if (!mounted) return;
-    final next = _currentSourceRegistry();
-    if (!mapEquals(_sourceConfigsNotifier.value, next)) {
-      _sourceConfigsNotifier.value = next;
-    }
-  }
 
   @override
   void dispose() {
-    _controller.progressNotifier.removeListener(
-      _updateSourceRegistryOnProgress,
-    );
     if (!VideoSourceSearchController.isGlobalCached(_controller)) {
       _controller.dispose();
     }
@@ -424,37 +414,14 @@ class _HeadlessLoadingWidget extends StatelessWidget {
   }
 }
 
-/// 普通自动匹配模式下的加载状态组件（带呼吸动效的精美卡片替代原有黑屏）
-class _FullscreenLoadingWidget extends StatefulWidget {
+/// 普通自动匹配模式下的加载状态。
+class _FullscreenLoadingWidget extends StatelessWidget {
   const _FullscreenLoadingWidget();
 
   @override
-  State<_FullscreenLoadingWidget> createState() =>
-      _FullscreenLoadingWidgetState();
-}
-
-class _FullscreenLoadingWidgetState extends State<_FullscreenLoadingWidget>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _animController;
-
-  @override
-  void initState() {
-    super.initState();
-    _animController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _animController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Container(
       height: 320,
@@ -468,36 +435,23 @@ class _FullscreenLoadingWidgetState extends State<_FullscreenLoadingWidget>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ShimmerCircle(
-              size: 48,
-              baseColor: Theme.of(
-                context,
-              ).colorScheme.primary.withValues(alpha: 0.18),
-              highlightColor: Theme.of(
-                context,
-              ).colorScheme.primary.withValues(alpha: 0.5),
+            SizedBox(
+              width: 48,
+              height: 48,
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                color: theme.colorScheme.primary,
+              ),
             ),
             const SizedBox(height: 28),
-            AnimatedBuilder(
-              animation: _animController,
-              builder: (context, child) {
-                return Opacity(
-                  opacity: 0.4 + (_animController.value * 0.6),
-                  child: Transform.translate(
-                    offset: Offset(0, 2 - (_animController.value * 4)),
-                    child: child,
-                  ),
-                );
-              },
-              child: Text(
-                '智能匹配中...',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 2.0,
-                  color: isDark ? Colors.white : Colors.black87,
-                  decoration: TextDecoration.none,
-                ),
+            Text(
+              '智能匹配中...',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 2.0,
+                color: isDark ? Colors.white : Colors.black87,
+                decoration: TextDecoration.none,
               ),
             ),
           ],
@@ -563,25 +517,7 @@ class _SearchHeaderCard extends StatelessWidget {
                     )
                   : Hero(
                       tag: 'sheet_${heroTag ?? cover}',
-                      child: Container(
-                        width: 60,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: CachedNetworkImage(
-                            imageUrl: cover,
-                            fit: BoxFit.cover,
-                            useOldImageOnUrlChange: true,
-                            fadeInDuration: Duration.zero,
-                            fadeOutDuration: Duration.zero,
-                            width: 60,
-                            height: 80,
-                          ),
-                        ),
-                      ),
+                      child: _CoverThumb(imageUrl: cover),
                     ),
               const SizedBox(width: 12),
               Expanded(
@@ -875,10 +811,13 @@ class _SearchErrorBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
-    return ValueListenableBuilder<ProgressState>(
-      valueListenable: controller.progressNotifier,
-      builder: (context, progressState, _) {
-        final errors = progressState.searchErrors;
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        controller.progressNotifier,
+        controller.isSearchingNotifier,
+      ]),
+      builder: (context, _) {
+        final errors = controller.progressNotifier.value.searchErrors;
         if (errors.isEmpty) return const SizedBox.shrink();
 
         return Padding(
@@ -923,7 +862,7 @@ class _SearchErrorBanner extends StatelessWidget {
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton.icon(
-                    onPressed: progressState.isSearching
+                    onPressed: controller.isSearchingNotifier.value
                         ? null
                         : controller.startSearch,
                     icon: const Icon(Icons.refresh_rounded, size: 16),
@@ -953,10 +892,11 @@ class _SearchProgressIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
-    // 合并三个 Notifier 为单层监听，消除嵌套 rebuild
+    // 合并多个 Notifier 为单层监听，消除嵌套 rebuild
     return ListenableBuilder(
       listenable: Listenable.merge([
         controller.progressNotifier,
+        controller.isSearchingNotifier,
         controller.resultsNotifier,
         sourceConfigsNotifier,
       ]),
@@ -964,7 +904,7 @@ class _SearchProgressIndicator extends StatelessWidget {
         final progressState = controller.progressNotifier.value;
         final results = controller.resultsNotifier.value;
         final sourceConfigs = sourceConfigsNotifier.value;
-        final isSearching = progressState.isSearching;
+        final isSearching = controller.isSearchingNotifier.value;
         final completed = progressState.finishedSources;
         final inProgress = progressState.progressingSources;
 
@@ -1189,22 +1129,18 @@ class _VideoSearchResultList extends StatelessWidget {
           );
         }
 
-        // 过滤 + 按源分组（typed 记录，避免 dynamic 派发）
-        final grouped = <String, List<SearchResultItem>>{};
+        // 每个源只追加一批结果；一次扫描直接生成标题/卡片流。
+        final entries = <Object>[];
+        String? lastSource;
         for (final item in results) {
           if (selectedFilter != 'all' && item.sourceType != selectedFilter) {
             continue;
           }
-          (grouped[item.sourceType] ??= []).add(item);
-        }
-
-        // 扁平渲染流：(sourceKey, null) = header，(null, item) = card
-        final entries = <(String?, SearchResultItem?)>[];
-        for (final entry in grouped.entries) {
-          entries.add((entry.key, null));
-          for (final item in entry.value) {
-            entries.add((null, item));
+          if (lastSource != item.sourceType) {
+            lastSource = item.sourceType;
+            entries.add(lastSource);
           }
+          entries.add(item);
         }
 
         if (entries.isEmpty) {
@@ -1222,14 +1158,11 @@ class _VideoSearchResultList extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
           itemCount: entries.length,
           itemBuilder: (context, index) {
-            final (sourceKey, item) = entries[index];
-            if (sourceKey != null) {
-              return _buildGroupHeader(
-                _meta(sourceConfigs, sourceKey),
-                isDarkMode,
-              );
+            final entry = entries[index];
+            if (entry is String) {
+              return _buildGroupHeader(_meta(sourceConfigs, entry), isDarkMode);
             }
-            final result = item!;
+            final result = entry as SearchResultItem;
             return RepaintBoundary(
               child: _VideoSearchResultCard(
                 item: result,
@@ -1428,57 +1361,24 @@ class _VideoSearchResultCard extends StatelessWidget {
 
   Widget _buildCoverPreview(bool isDarkMode) {
     final baseColor = meta.color;
-    final borderRadius = BorderRadius.circular(10);
 
     if (imageUrl.isNotEmpty) {
-      return Container(
-        width: 60,
-        height: 80,
-        decoration: BoxDecoration(borderRadius: borderRadius),
-        child: Stack(
-          children: [
-            ClipRRect(
-              borderRadius: borderRadius,
-              child: CachedNetworkImage(
-                imageUrl: imageUrl,
-                fit: BoxFit.cover,
-                useOldImageOnUrlChange: true,
-                fadeInDuration: Duration.zero,
-                fadeOutDuration: Duration.zero,
-                width: 60,
-                height: 80,
-                placeholder: (context, url) => ShimmerBox(
-                  width: 60,
-                  height: 80,
-                  borderRadius: borderRadius,
-                ),
-                errorWidget: (context, url, error) => Container(
-                  color: isDarkMode ? Colors.grey[800] : Colors.grey[200],
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.broken_image,
-                    color: isDarkMode ? Colors.grey[600] : Colors.grey[400],
-                    size: 20,
-                  ),
-                ),
-              ),
-            ),
-            Positioned.fill(
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: borderRadius,
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.transparent,
-                      baseColor.withValues(alpha: 0.15),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
+      return _CoverThumb(
+        imageUrl: imageUrl,
+        overlayColor: baseColor.withValues(alpha: 0.15),
+        placeholder: (context, url) => ShimmerBox(
+          width: 60,
+          height: 80,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        errorWidget: (context, url, error) => Container(
+          color: isDarkMode ? Colors.grey[800] : Colors.grey[200],
+          alignment: Alignment.center,
+          child: Icon(
+            Icons.broken_image,
+            color: isDarkMode ? Colors.grey[600] : Colors.grey[400],
+            size: 20,
+          ),
         ),
       );
     }
@@ -1487,7 +1387,7 @@ class _VideoSearchResultCard extends StatelessWidget {
       width: 60,
       height: 80,
       decoration: BoxDecoration(
-        borderRadius: borderRadius,
+        borderRadius: BorderRadius.circular(10),
         color: baseColor.withValues(alpha: isDarkMode ? 0.25 : 0.15),
         border: Border.all(color: baseColor.withValues(alpha: 0.3), width: 1),
       ),
@@ -1666,6 +1566,68 @@ class _VideoSearchResultCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 60×80 圆角封面缩略图（头部卡片与结果卡片共用）
+class _CoverThumb extends StatelessWidget {
+  final String imageUrl;
+  final Widget Function(BuildContext, String)? placeholder;
+  final Widget Function(BuildContext, String, Object)? errorWidget;
+
+  /// 底部渐变叠加色（结果卡片用）
+  final Color? overlayColor;
+
+  const _CoverThumb({
+    required this.imageUrl,
+    this.placeholder,
+    this.errorWidget,
+    this.overlayColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final borderRadius = BorderRadius.circular(10);
+    final overlay = overlayColor;
+    final image = ClipRRect(
+      borderRadius: borderRadius,
+      child: CachedNetworkImage(
+        imageUrl: imageUrl,
+        fit: BoxFit.cover,
+        useOldImageOnUrlChange: true,
+        fadeInDuration: Duration.zero,
+        fadeOutDuration: Duration.zero,
+        width: 60,
+        height: 80,
+        placeholder: placeholder,
+        errorWidget: errorWidget,
+      ),
+    );
+
+    return Container(
+      width: 60,
+      height: 80,
+      decoration: BoxDecoration(borderRadius: borderRadius),
+      child: overlay == null
+          ? image
+          : Stack(
+              children: [
+                image,
+                Positioned.fill(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: borderRadius,
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.transparent, overlay],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
     );
   }
 }

@@ -7,6 +7,7 @@ import 'package:baka/source/video_url_extractor.dart';
 import 'package:baka/source/source_registry.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/models/custom_source_config.dart';
+import 'package:baka/models/playback_episode.dart';
 import 'package:baka/services/alias_storage_service.dart';
 import 'package:baka/services/matching/match_memory_service.dart';
 import 'package:baka/services/matching/source_match_engine.dart';
@@ -21,15 +22,13 @@ final _reBrackets = RegExp(r'[（(].*?[）)]');
 
 String _norm(String value) => value.toLowerCase().replaceAll(_reWhitespace, '');
 
-/// 响应式搜索与进度状态
+/// 响应式搜索与进度状态（是否搜索中以 isSearchingNotifier 为唯一真源）
 class ProgressState {
-  final bool isSearching;
   final Set<String> progressingSources;
   final Set<String> finishedSources;
   final List<String> searchErrors;
 
   const ProgressState({
-    required this.isSearching,
     required this.progressingSources,
     required this.finishedSources,
     required this.searchErrors,
@@ -39,14 +38,12 @@ class ProgressState {
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is ProgressState &&
-          isSearching == other.isSearching &&
           setEquals(progressingSources, other.progressingSources) &&
           setEquals(finishedSources, other.finishedSources) &&
           listEquals(searchErrors, other.searchErrors);
 
   @override
   int get hashCode => Object.hash(
-    isSearching,
     Object.hashAllUnordered(progressingSources),
     Object.hashAllUnordered(finishedSources),
     Object.hashAll(searchErrors),
@@ -121,20 +118,12 @@ class _Policy {
 
 enum SourceProbeStatus { pending, resolving, playable, direct, failed }
 
-class SourceLineChoice {
-  final int index;
-  final String name;
-  const SourceLineChoice({required this.index, required this.name});
-}
-
 class SourceProbeState {
   final SearchResultItem item;
   final int episodeIndex;
   final int preferredLine;
   SourceProbeStatus status = SourceProbeStatus.pending;
   Map<String, dynamic>? data;
-  List<SourceLineChoice> lines = const [];
-  String? directUrl;
   String? routeKey;
   int? resolvedLineIndex;
   String? error;
@@ -163,9 +152,6 @@ class SourceCandidateState {
   });
 
   SourceProbeStatus get status => probe.status;
-  Map<String, dynamic>? get data => probe.data;
-  List<SourceLineChoice> get lines => probe.lines;
-  String? get error => probe.error;
   bool get isReady => probe.isReady;
 }
 
@@ -266,8 +252,23 @@ class VideoSourceSearchController {
   static bool isGlobalCached(VideoSourceSearchController controller) =>
       identical(globalCached, controller);
 
+  /// 按标题复用全局缓存控制器；标题不同则重建（沿用旧 seedData 的语义与此前一致）
+  static VideoSourceSearchController sharedFor({
+    required String title,
+    Map<String, dynamic>? seedData,
+  }) {
+    if (globalCachedTitle != title || globalCached == null) {
+      globalCached?.dispose();
+      globalCached = VideoSourceSearchController(
+        title: title,
+        seedData: seedData,
+      );
+      globalCachedTitle = title;
+    }
+    return globalCached!;
+  }
+
   final String title;
-  final String cover;
   final Map<String, dynamic>? seedData;
   final bool autoMatchMode;
   final int targetEpisodeIndex;
@@ -278,7 +279,6 @@ class VideoSourceSearchController {
   final resultsNotifier = ValueNotifier<List<SearchResultItem>>(const []);
   final progressNotifier = ValueNotifier(
     const ProgressState(
-      isSearching: false,
       progressingSources: {},
       finishedSources: {},
       searchErrors: [],
@@ -290,7 +290,11 @@ class VideoSourceSearchController {
   final candidateRevisionNotifier = ValueNotifier(0);
 
   final _adapter = SourceAdapterService();
-  SourceAdapterService get sourceAdapterService => _adapter;
+
+  Future<void>? _adapterInitFuture;
+
+  /// 适配器初始化（含自定义源加载）；结果记忆化，失败保持粘滞
+  Future<void> ensureAdapterReady() => _adapterInitFuture ??= _adapter.init();
 
   final _results = <String, SearchResultItem>{};
   final _sourceCounts = <String, int>{};
@@ -301,6 +305,7 @@ class VideoSourceSearchController {
   final _resolveFutures = <String, Future<Map<String, dynamic>>>{};
   final _probes = <String, SourceProbeState>{};
   final _scoreCache = <String, Map<String, int>>{};
+  final _rankCache = <String, SourceMatchScore>{};
   final _triedProbes = <String>{};
   final _engine = const SourceMatchEngine();
 
@@ -317,7 +322,6 @@ class VideoSourceSearchController {
 
   VideoSourceSearchController({
     required this.title,
-    required this.cover,
     this.seedData,
     this.autoMatchMode = false,
     this.targetEpisodeIndex = 0,
@@ -332,11 +336,6 @@ class VideoSourceSearchController {
 
   bool get isDisposed => _disposed;
   bool get hasMatched => _autoMatched;
-  Set<String> get triedKeys => Set.unmodifiable(_triedProbes);
-  List<SearchResultItem> get currentResults =>
-      List.unmodifiable(_results.values);
-  Set<String> get progressingSources => _progressing;
-  List<String> get searchErrors => _errors;
 
   void dispose() {
     if (_disposed) return;
@@ -393,10 +392,8 @@ class VideoSourceSearchController {
     return out.items;
   }
 
-  Future<void> _saveManualAliases() => AliasStorageService.saveAliases(
-    _aliasKey,
-    manualAliasesNotifier.value,
-  );
+  Future<void> _saveManualAliases() =>
+      AliasStorageService.saveAliases(_aliasKey, manualAliasesNotifier.value);
 
   Future<void> toggleAutoAlias(String alias) async {
     if (isSearchingNotifier.value) return;
@@ -497,16 +494,16 @@ class VideoSourceSearchController {
     _autoMatchFuture = null;
     _resetState();
     isSearchingNotifier.value = true;
-    _emitProgress(true);
+    _emitProgress();
 
-    await _adapter.init();
+    await ensureAdapterReady();
     if (!_alive(runId)) return;
 
     // 记忆命中与全量搜索并行；命中则先回调，搜索继续填列表。
     final memoryFuture = autoMatchMode ? _tryMemory(runId) : null;
 
-    final quick = _adapter.enabledQuickSearchSources;
-    final custom = _adapter.enabledCustomSources;
+    final quick = SourceCatalog.instance.quickSearchSources;
+    final custom = SourceCatalog.instance.enabledCustomSources;
     final keywords = _keywordPlan();
 
     _progressing
@@ -532,8 +529,7 @@ class VideoSourceSearchController {
           keywords: keywords,
           sourceKey: s.key,
           version: '',
-          load: (kw) =>
-              _adapter.searchBuiltin(kw, s, skipBgmEnhancement: true),
+          load: (kw) => _adapter.searchBuiltin(kw, s, skipBgmEnhancement: true),
           errorMsg: '${s.displayName} 搜索失败',
         ),
       for (final s in custom)
@@ -542,8 +538,7 @@ class VideoSourceSearchController {
           keywords: keywords,
           sourceKey: AdapterRegistry.customSourceKey(s.id),
           version: s.updatedAt.millisecondsSinceEpoch.toString(),
-          load: (kw) =>
-              _adapter.searchCustom(kw, s, skipBgmEnhancement: true),
+          load: (kw) => _adapter.searchCustom(kw, s, skipBgmEnhancement: true),
           errorMsg: '${s.name} 搜索失败',
         ),
     ];
@@ -567,7 +562,7 @@ class VideoSourceSearchController {
     if (!_alive(runId)) return;
 
     isSearchingNotifier.value = false;
-    _emitProgress(false);
+    _emitProgress();
 
     if (autoMatchMode && !_autoMatched && !_userSelected) {
       onMatchFailed?.call();
@@ -598,6 +593,7 @@ class VideoSourceSearchController {
     _resolveFutures.clear();
     _probes.clear();
     _scoreCache.clear();
+    _rankCache.clear();
     _triedProbes.clear();
     _matchContextFuture = null;
     _results.clear();
@@ -608,9 +604,8 @@ class VideoSourceSearchController {
     resultsNotifier.value = const [];
   }
 
-  void _emitProgress(bool searching) {
+  void _emitProgress() {
     final next = ProgressState(
-      isSearching: searching,
       progressingSources: Set.unmodifiable(_progressing),
       finishedSources: Set.unmodifiable(_finished),
       searchErrors: List.unmodifiable(_errors),
@@ -684,7 +679,9 @@ class VideoSourceSearchController {
 
   List<String> _keywordPlan() {
     final kw = _Keywords()..add(_primary);
-    for (final a in manualAliasesNotifier.value.take(_Policy.maxManualAliases)) {
+    for (final a in manualAliasesNotifier.value.take(
+      _Policy.maxManualAliases,
+    )) {
       kw.add(a);
     }
     var auto = 0;
@@ -724,7 +721,6 @@ class VideoSourceSearchController {
     }
     if (accepted == 0) return;
 
-    _scoreCache.clear();
     resultsNotifier.value = List.unmodifiable(_results.values);
     if (autoMatchMode && !_userSelected && !_autoMatched) {
       unawaited(_scheduleAutoMatch(runId));
@@ -736,7 +732,7 @@ class VideoSourceSearchController {
     if (error != null) _errors.add(error);
     _progressing.remove(sourceKey);
     _finished.add(sourceKey);
-    _emitProgress(true);
+    _emitProgress();
   }
 
   // ── auto match ──
@@ -745,8 +741,10 @@ class VideoSourceSearchController {
     if (!_alive(runId) || _userSelected || _autoMatched) {
       return Future.value();
     }
-    return _autoMatchFuture ??= _runAutoMatch(runId, finalPass: false)
-        .whenComplete(() => _autoMatchFuture = null);
+    return _autoMatchFuture ??= _runAutoMatch(
+      runId,
+      finalPass: false,
+    ).whenComplete(() => _autoMatchFuture = null);
   }
 
   Future<void> _runAutoMatch(int runId, {required bool finalPass}) async {
@@ -755,10 +753,13 @@ class VideoSourceSearchController {
     final context = await _matchContext();
     if (!_alive(runId) || _userSelected || _autoMatched) return;
 
-    final ranked = _engine.rank([
+    // 每批结果只为新增候选打分：分数是纯函数且 context 在一轮搜索内不变，
+    // 全量重排改为增量记忆化，避免 O(源数²) 的重复 bigram 相似度计算。
+    final ranked = [
       for (final item in _results.values)
-        if (item.sourceType != 'internal') item.matchCandidate,
-    ], context);
+        if (item.sourceType != 'internal')
+          _rankCache[item.key] ??= _engine.score(item.matchCandidate, context),
+    ]..sort(SourceMatchEngine.compareScores);
 
     // 每源最多 2 个，轮询取样，避免单源占满探测预算。
     final bySource = <String, List<SearchResultItem>>{};
@@ -826,9 +827,7 @@ class VideoSourceSearchController {
       final episodes = detail?['episodes'];
       final loaded = episodes is List
           ? episodes
-                .where(
-                  (e) => e is Map && (BgmUtils.toInt(e['type']) ?? 0) == 0,
-                )
+                .where((e) => e is Map && (BgmUtils.toInt(e['type']) ?? 0) == 0)
                 .length
           : 0;
       return SourceMatchContext(
@@ -851,10 +850,7 @@ class VideoSourceSearchController {
 
   Future<bool> _tryMemory(int runId) async {
     final bgmId = BgmUtils.toInt(seedData?['bgmId']);
-    final memory = MatchMemoryService.read(
-      bgmId: bgmId,
-      title: _primary,
-    );
+    final memory = MatchMemoryService.read(bgmId: bgmId, title: _primary);
     if (memory == null) return false;
 
     final data = <String, dynamic>{
@@ -896,10 +892,7 @@ class VideoSourceSearchController {
     Map<String, dynamic> data,
   ) => _remember(item, data);
 
-  Future<void> _remember(
-    SearchResultItem item,
-    Map<String, dynamic> data,
-  ) {
+  Future<void> _remember(SearchResultItem item, Map<String, dynamic> data) {
     return MatchMemoryService.writeSuccess(
       bgmId: BgmUtils.toInt(seedData?['bgmId'] ?? data['bgmId']),
       title: _primary,
@@ -918,7 +911,7 @@ class VideoSourceSearchController {
 
   // ── switch / probe ──
 
-  List<SourceCandidateState> getSwitchCandidates({
+  List<DirectSourceGroup> getDirectSourceGroups({
     required int episodeIndex,
     required int preferredLine,
     String? currentSource,
@@ -938,18 +931,33 @@ class VideoSourceSearchController {
           .score,
     );
 
-    final scored = [
-      for (final item in _results.values)
-        SourceCandidateState(
-          item: item,
-          score: scoreOf(item),
-          probe: _probeFor(item, episodeIndex, preferredLine),
+    final scored =
+        [
+          for (final item in _results.values)
+            SourceCandidateState(
+              item: item,
+              score: scoreOf(item),
+              probe: _probeFor(item, episodeIndex, preferredLine),
+            ),
+        ]..sort((a, b) {
+          final byStatus = _statusRank(
+            a.status,
+          ).compareTo(_statusRank(b.status));
+          return byStatus != 0 ? byStatus : b.score.compareTo(a.score);
+        });
+    final grouped = <String, List<SourceCandidateState>>{};
+    for (final c in scored) {
+      final key = c.probe.routeKey ?? 'candidate:${c.item.key}';
+      (grouped[key] ??= []).add(c);
+    }
+    return [
+      for (final e in grouped.entries)
+        DirectSourceGroup(
+          key: e.key,
+          origins: e.value,
+          status: e.value.first.status,
         ),
-    ]..sort((a, b) {
-      final byStatus = _statusRank(a.status).compareTo(_statusRank(b.status));
-      return byStatus != 0 ? byStatus : b.score.compareTo(a.score);
-    });
-    return scored;
+    ];
   }
 
   void startSwitchProbes(Iterable<SourceCandidateState> candidates) {
@@ -973,38 +981,13 @@ class VideoSourceSearchController {
   Future<SourceProbeState> resolveSwitchCandidate(
     SourceCandidateState candidate,
   ) {
-    final p = candidate.probe;
-    if (p.isReady) return Future.value(p);
+    final probe = candidate.probe;
+    if (probe.isReady) return Future.value(probe);
     return ensureCandidatePlayable(
       candidate.item,
-      episodeIndex: p.episodeIndex,
-      preferredLine: p.preferredLine,
+      episodeIndex: probe.episodeIndex,
+      preferredLine: probe.preferredLine,
     );
-  }
-
-  List<DirectSourceGroup> getDirectSourceGroups({
-    required int episodeIndex,
-    required int preferredLine,
-    String? currentSource,
-  }) {
-    final candidates = getSwitchCandidates(
-      episodeIndex: episodeIndex,
-      preferredLine: preferredLine,
-      currentSource: currentSource,
-    );
-    final grouped = <String, List<SourceCandidateState>>{};
-    for (final c in candidates) {
-      final key = c.probe.routeKey ?? 'candidate:${c.item.key}';
-      (grouped[key] ??= []).add(c);
-    }
-    return [
-      for (final e in grouped.entries)
-        DirectSourceGroup(
-          key: e.key,
-          origins: e.value,
-          status: e.value.first.status,
-        ),
-    ];
   }
 
   int _statusRank(SourceProbeStatus s) => switch (s) {
@@ -1067,29 +1050,21 @@ class VideoSourceSearchController {
         probe.item,
       ).timeout(_Policy.resolveTimeout);
 
-      final hasContent =
-          (data['videos'] is String &&
-              (data['videos'] as String).trim().isNotEmpty) ||
-          (data['videoList'] is List &&
-              (data['videoList'] as List).isNotEmpty);
-      if (!hasContent) {
+      if (PlaybackEpisodeCatalog.countFrom(data) == 0) {
         probe
           ..status = SourceProbeStatus.failed
           ..error = '没有可播放剧集';
         return probe;
       }
 
-      final lines = _lineChoices(data, probe.episodeIndex);
-      if (lines.isEmpty) {
+      if (_lineCountFor(data, probe.episodeIndex) <= 0) {
         probe
           ..status = SourceProbeStatus.failed
           ..error = '当前集没有可用线路';
         return probe;
       }
 
-      probe
-        ..data = data
-        ..lines = lines;
+      probe.data = data;
 
       final source = data['source']?.toString();
       if (!probeDirect ||
@@ -1106,7 +1081,6 @@ class VideoSourceSearchController {
       } else {
         probe
           ..status = SourceProbeStatus.direct
-          ..directUrl = direct.url
           ..routeKey = 'direct:${_canonicalUrl(direct.url)}'
           ..resolvedLineIndex = direct.lineIndex;
         PlayerService.storePrefetchedPlaybackMedia(
@@ -1139,14 +1113,14 @@ class VideoSourceSearchController {
   >
   _probeDirect(Map<String, dynamic> data, SourceProbeState probe) async {
     final adapter = _adapterFor(data);
-    if (adapter == null || adapter.requiresCustomPlayback) return null;
+    if (adapter == null) return null;
 
-    final videoList = VideoUtils.extractVideoList(data);
-    if (videoList.isEmpty) return null;
+    final total = PlaybackEpisodeCatalog.countFrom(data);
+    if (total == 0) return null;
 
-    final ep = probe.episodeIndex.clamp(0, videoList.length - 1).toInt();
-    final episode = videoList[ep];
-    final lineCount = VideoUtils.getPathCount(episode);
+    final ep = probe.episodeIndex.clamp(0, total - 1).toInt();
+    final episode = PlaybackEpisodeCatalog.episodeAt(data, ep);
+    final lineCount = episode?.lineCount ?? 0;
     if (lineCount <= 0) return null;
 
     final preferred = probe.preferredLine.clamp(1, lineCount).toInt();
@@ -1157,7 +1131,7 @@ class VideoSourceSearchController {
     ];
 
     for (final line in order.take(2)) {
-      final episodeId = VideoUtils.getVideoUrl(episode, line);
+      final episodeId = episode!.lineAt(line);
       if (episodeId == null || episodeId.isEmpty) continue;
       final media = await _resolveDirect(adapter, episodeId);
       if (media != null) {
@@ -1203,37 +1177,19 @@ class VideoSourceSearchController {
         config = raw;
       } else {
         final id = source.substring(AdapterRegistry.customSourcePrefix.length);
-        config = _adapter.customSourceById(id);
+        config = SourceCatalog.instance.customSourceById(id);
       }
       return config == null ? null : _adapter.getCustomAdapter(config);
     }
     return _adapter.getBuiltinAdapter(source);
   }
 
-  List<SourceLineChoice> _lineChoices(
-    Map<String, dynamic> data,
-    int requestedEp,
-  ) {
-    final videoList = VideoUtils.extractVideoList(data);
-    if (videoList.isEmpty) return const [];
-    final ep = requestedEp.clamp(0, videoList.length - 1).toInt();
-    final lineCount = VideoUtils.getPathCount(videoList[ep]);
-    if (lineCount <= 0) return const [];
-
-    final rawNames = data['sourceNames'];
-    final names = rawNames is List
-        ? rawNames.map((e) => e.toString()).toList(growable: false)
-        : const <String>[];
-
-    return [
-      for (var i = 1; i <= lineCount; i++)
-        SourceLineChoice(
-          index: i,
-          name: (i - 1 < names.length && names[i - 1].isNotEmpty)
-              ? names[i - 1]
-              : '线路$i',
-        ),
-    ];
+  /// 请求集数对应的可用线路数
+  int _lineCountFor(Map<String, dynamic> data, int requestedEp) {
+    final total = PlaybackEpisodeCatalog.countFrom(data);
+    if (total == 0) return 0;
+    final ep = requestedEp.clamp(0, total - 1).toInt();
+    return PlaybackEpisodeCatalog.episodeAt(data, ep)?.lineCount ?? 0;
   }
 
   String _canonicalUrl(String value) {
@@ -1304,7 +1260,9 @@ class VideoSourceSearchController {
       data['bgmDetailData'] = seed['bgmDetailData'];
     }
     final img = seed['bgmImageUrl']?.toString().trim();
-    if (img != null && img.isNotEmpty) data['bgmImageUrl'] = seed['bgmImageUrl'];
+    if (img != null && img.isNotEmpty) {
+      data['bgmImageUrl'] = seed['bgmImageUrl'];
+    }
     return data;
   }
 }

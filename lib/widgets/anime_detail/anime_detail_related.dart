@@ -22,40 +22,57 @@ class AnimeDetailRelatedSection extends StatefulWidget {
 }
 
 class _AnimeDetailRelatedSectionState extends State<AnimeDetailRelatedSection> {
+  static const _cacheLimit = 32;
   static final Map<int, Future<List<Map<String, dynamic>>>> _cache = {};
-  late final Future<List<Map<String, dynamic>>> _items =
-      _cache[widget.subjectId] ??= _load(widget.subjectId);
+  late final Future<List<Map<String, dynamic>>> _items = _loadCached(
+    widget.subjectId,
+  );
+
+  static Future<List<Map<String, dynamic>>> _loadCached(int subjectId) {
+    final cached = _cache.remove(subjectId);
+    if (cached != null) {
+      _cache[subjectId] = cached;
+      return cached;
+    }
+    if (_cache.length >= _cacheLimit) _cache.remove(_cache.keys.first);
+    return _cache[subjectId] = _load(subjectId);
+  }
 
   static Future<List<Map<String, dynamic>>> _load(int subjectId) async {
-    final response = await getBgmRelatedSubjects(subjectId);
-    final items = <Map<String, dynamic>>[];
-    final ids = <int>{};
+    try {
+      final response = await getBgmRelatedSubjects(subjectId);
+      final items = <Map<String, dynamic>>[];
+      final ids = <int>{};
 
-    for (final raw in BgmUtils.parseJsonList(response.data)) {
-      if (raw is! Map || BgmUtils.toInt(raw['type']) != 2) continue;
-      final id = BgmUtils.toInt(raw['id']);
-      final title =
-          BgmUtils.trimmed(raw['name_cn']) ?? BgmUtils.trimmed(raw['name']);
-      if (id == null || title == null || !ids.add(id)) continue;
+      for (final raw in BgmUtils.parseJsonList(response.data)) {
+        if (raw is! Map || BgmUtils.toInt(raw['type']) != 2) continue;
+        final id = BgmUtils.toInt(raw['id']);
+        final title =
+            BgmUtils.trimmed(raw['name_cn']) ?? BgmUtils.trimmed(raw['name']);
+        if (id == null || title == null || !ids.add(id)) continue;
 
-      final image =
-          BgmUtils.pickImageUrl(raw['images']) ??
-          BgmUtils.trimmed(raw['image']) ??
-          '';
-      final relation = BgmUtils.trimmed(raw['relation']) ?? '相关';
-      items.add({
-        'id': id,
-        'bgmId': id,
-        'title': title,
-        'content': image.isEmpty ? '' : '<img src="$image">',
-        if (image.isNotEmpty) 'bgmImageUrl': image,
-        'sort': '番剧',
-        'tag': relation,
-        'info': relation,
-        'source': 'bgm',
-      });
+        final image =
+            BgmUtils.pickImageUrl(raw['images']) ??
+            BgmUtils.trimmed(raw['image']) ??
+            '';
+        final relation = BgmUtils.trimmed(raw['relation']) ?? '相关';
+        items.add({
+          'id': id,
+          'bgmId': id,
+          'title': title,
+          'content': image.isEmpty ? '' : '<img src="$image">',
+          if (image.isNotEmpty) 'bgmImageUrl': image,
+          'sort': '番剧',
+          'tag': relation,
+          'info': relation,
+          'source': 'bgm',
+        });
+      }
+      return items;
+    } catch (_) {
+      _cache.remove(subjectId);
+      rethrow;
     }
-    return items;
   }
 
   @override
