@@ -102,12 +102,11 @@ class DownloadTask {
     filePath: json['filePath'],
   );
 
-  static DownloadTaskKind inferKind(String url) {
-    final lower = url.toLowerCase();
-    return lower.contains('.m3u8') || lower.contains('m3u8')
-        ? DownloadTaskKind.hls
-        : DownloadTaskKind.file;
-  }
+  /// `.m3u8` 是 `m3u8` 的子串，两次扫描里第一次恒被第二次覆盖。
+  static DownloadTaskKind inferKind(String url) =>
+      url.toLowerCase().contains('m3u8')
+      ? DownloadTaskKind.hls
+      : DownloadTaskKind.file;
 
   static DownloadTaskKind _kindFromJson(Map<String, dynamic> json) {
     final raw = json['kind'];

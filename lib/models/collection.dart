@@ -1,34 +1,27 @@
 /// 追番收藏数据模型
 library;
 
+import 'package:baka/utils/bgm_utils.dart';
+
 /// 收藏状态枚举
 enum CollectionStatus {
-  wish(1, '想看', 'wish'),
-  collect(2, '看过', 'collect'),
-  doing(3, '在看', 'do'),
-  onHold(4, '搁置', 'on_hold'),
-  dropped(5, '抛弃', 'dropped');
+  wish(1, '想看'),
+  collect(2, '看过'),
+  doing(3, '在看'),
+  onHold(4, '搁置'),
+  dropped(5, '抛弃');
 
   final int value;
   final String label;
-  final String key;
 
-  const CollectionStatus(this.value, this.label, this.key);
+  const CollectionStatus(this.value, this.label);
 
+  /// value 与声明顺序一一对应（1..5），直接下标定位后再核对一次，
+  /// 既是 O(1) 也不会因日后调整枚举顺序而失准。
   static CollectionStatus? fromValue(int? value) {
-    if (value == null) return null;
-    return CollectionStatus.values.cast<CollectionStatus?>().firstWhere(
-      (s) => s?.value == value,
-      orElse: () => null,
-    );
-  }
-
-  static CollectionStatus? fromKey(String? key) {
-    if (key == null) return null;
-    return CollectionStatus.values.cast<CollectionStatus?>().firstWhere(
-      (s) => s?.key == key,
-      orElse: () => null,
-    );
+    if (value == null || value < 1 || value > values.length) return null;
+    final status = values[value - 1];
+    return status.value == value ? status : null;
   }
 }
 
@@ -46,8 +39,6 @@ class AnimeCollection {
   final int? epWatched;
   final String? tags;
   final bool isPrivate;
-  final DateTime? createdAt;
-  final DateTime? updatedAt;
   final String? postTitle;
   final String? postCover;
   final double? bgmRating;
@@ -67,16 +58,12 @@ class AnimeCollection {
     this.epWatched,
     this.tags,
     this.isPrivate = false,
-    this.createdAt,
-    this.updatedAt,
     this.postTitle,
     this.postCover,
     this.bgmRating,
     this.bgmImage,
     this.bgmTitle,
   });
-
-  CollectionStatus? get collectionStatus => CollectionStatus.fromValue(status);
 
   String get displayTitle {
     if (postTitle != null && postTitle!.isNotEmpty) return postTitle!;
@@ -88,23 +75,21 @@ class AnimeCollection {
 
   factory AnimeCollection.fromJson(Map<String, dynamic> json) {
     return AnimeCollection(
-      id: _parseInt(json['id']),
-      userId: _parseInt(json['user_id']),
-      postId: _parseInt(json['post_id']),
-      bgmId: _parseInt(json['bgm_id']),
-      status: _parseInt(json['status']) ?? 1,
+      id: BgmUtils.toInt(json['id']),
+      userId: BgmUtils.toInt(json['user_id']),
+      postId: BgmUtils.toInt(json['post_id']),
+      bgmId: BgmUtils.toInt(json['bgm_id']),
+      status: BgmUtils.toInt(json['status']) ?? 1,
       statusText: json['status_text']?.toString(),
-      rating: _parseInt(json['rating']) ?? 0,
+      rating: BgmUtils.toInt(json['rating']) ?? 0,
       comment: json['comment']?.toString(),
-      epTotal: _parseInt(json['ep_total']),
-      epWatched: _parseInt(json['ep_watched']),
+      epTotal: BgmUtils.toInt(json['ep_total']),
+      epWatched: BgmUtils.toInt(json['ep_watched']),
       tags: json['tags']?.toString(),
-      isPrivate: _parseBool(json['is_private']),
-      createdAt: _parseDateTime(json['created_at']),
-      updatedAt: _parseDateTime(json['updated_at']),
+      isPrivate: BgmUtils.toBool(json['is_private']),
       postTitle: json['post_title']?.toString(),
       postCover: json['post_cover']?.toString(),
-      bgmRating: _parseDouble(json['bgm_rating']),
+      bgmRating: BgmUtils.toDouble(json['bgm_rating']),
       bgmImage: json['bgm_image']?.toString(),
       bgmTitle: json['bgm_title']?.toString(),
     );
@@ -127,82 +112,6 @@ class AnimeCollection {
       if (bgmTitle != null && bgmTitle!.isNotEmpty) 'bgm_title': bgmTitle,
     };
   }
-
-  AnimeCollection copyWith({
-    int? id,
-    int? userId,
-    int? postId,
-    int? bgmId,
-    int? status,
-    String? statusText,
-    int? rating,
-    String? comment,
-    int? epTotal,
-    int? epWatched,
-    String? tags,
-    bool? isPrivate,
-    DateTime? createdAt,
-    DateTime? updatedAt,
-    String? postTitle,
-    String? postCover,
-    double? bgmRating,
-    String? bgmImage,
-    String? bgmTitle,
-  }) {
-    return AnimeCollection(
-      id: id ?? this.id,
-      userId: userId ?? this.userId,
-      postId: postId ?? this.postId,
-      bgmId: bgmId ?? this.bgmId,
-      status: status ?? this.status,
-      statusText: statusText ?? this.statusText,
-      rating: rating ?? this.rating,
-      comment: comment ?? this.comment,
-      epTotal: epTotal ?? this.epTotal,
-      epWatched: epWatched ?? this.epWatched,
-      tags: tags ?? this.tags,
-      isPrivate: isPrivate ?? this.isPrivate,
-      createdAt: createdAt ?? this.createdAt,
-      updatedAt: updatedAt ?? this.updatedAt,
-      postTitle: postTitle ?? this.postTitle,
-      postCover: postCover ?? this.postCover,
-      bgmRating: bgmRating ?? this.bgmRating,
-      bgmImage: bgmImage ?? this.bgmImage,
-      bgmTitle: bgmTitle ?? this.bgmTitle,
-    );
-  }
-
-  static int? _parseInt(dynamic value) {
-    if (value == null) return null;
-    if (value is int) return value;
-    if (value is double) return value.toInt();
-    if (value is String) return int.tryParse(value);
-    return null;
-  }
-
-  static double? _parseDouble(dynamic value) {
-    if (value == null) return null;
-    if (value is double) return value;
-    if (value is int) return value.toDouble();
-    if (value is String) return double.tryParse(value);
-    return null;
-  }
-
-  static DateTime? _parseDateTime(dynamic value) {
-    if (value == null) return null;
-    if (value is DateTime) return value;
-    if (value is String && value.isNotEmpty) return DateTime.tryParse(value);
-    if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
-    return null;
-  }
-
-  static bool _parseBool(dynamic value) {
-    if (value == null) return false;
-    if (value is bool) return value;
-    if (value is int) return value != 0;
-    if (value is String) return value.toLowerCase() == 'true' || value == '1';
-    return false;
-  }
 }
 
 /// 追番收藏列表响应
@@ -220,14 +129,11 @@ class CollectionListResponse {
   });
 
   factory CollectionListResponse.fromJson(Map<String, dynamic> json) {
-    final rawList = json['list'];
     return CollectionListResponse(
-      list: rawList is List
-          ? rawList.map((item) => AnimeCollection.fromJson(item)).toList()
-          : const [],
-      total: json['total'] ?? 0,
-      page: json['page'] ?? 1,
-      pageSize: json['page_size'] ?? 20,
+      list: BgmUtils.mapList(json['list'], AnimeCollection.fromJson),
+      total: BgmUtils.toInt(json['total']) ?? 0,
+      page: BgmUtils.toInt(json['page']) ?? 1,
+      pageSize: BgmUtils.toInt(json['page_size']) ?? 20,
     );
   }
 }
@@ -252,27 +158,20 @@ class CollectionStats {
 
   factory CollectionStats.fromJson(Map<String, dynamic> json) {
     return CollectionStats(
-      wish: json['wish'] ?? 0,
-      collect: json['collect'] ?? 0,
-      doing: json['do'] ?? 0,
-      onHold: json['on_hold'] ?? 0,
-      dropped: json['dropped'] ?? 0,
-      total: json['total'] ?? 0,
+      wish: BgmUtils.toInt(json['wish']) ?? 0,
+      collect: BgmUtils.toInt(json['collect']) ?? 0,
+      doing: BgmUtils.toInt(json['do']) ?? 0,
+      onHold: BgmUtils.toInt(json['on_hold']) ?? 0,
+      dropped: BgmUtils.toInt(json['dropped']) ?? 0,
+      total: BgmUtils.toInt(json['total']) ?? 0,
     );
   }
 
-  int countForStatus(CollectionStatus status) {
-    switch (status) {
-      case CollectionStatus.wish:
-        return wish;
-      case CollectionStatus.collect:
-        return collect;
-      case CollectionStatus.doing:
-        return doing;
-      case CollectionStatus.onHold:
-        return onHold;
-      case CollectionStatus.dropped:
-        return dropped;
-    }
-  }
+  int countForStatus(CollectionStatus status) => switch (status) {
+    CollectionStatus.wish => wish,
+    CollectionStatus.collect => collect,
+    CollectionStatus.doing => doing,
+    CollectionStatus.onHold => onHold,
+    CollectionStatus.dropped => dropped,
+  };
 }

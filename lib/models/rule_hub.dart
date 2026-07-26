@@ -29,30 +29,13 @@
 library;
 
 class RuleHubIndex {
-  static const String currentSchema = 'anx-rulehub/1';
-
-  final String schema;
-  final String name;
-  final String? description;
-  final DateTime? updatedAt;
-
   /// 该索引的来源订阅 URL。
   final String sourceUrl;
   final List<RuleHubItem> rules;
 
-  const RuleHubIndex({
-    required this.schema,
-    required this.name,
-    required this.sourceUrl,
-    required this.rules,
-    this.description,
-    this.updatedAt,
-  });
+  const RuleHubIndex({required this.sourceUrl, required this.rules});
 
-  factory RuleHubIndex.fromJson(
-    Map<String, dynamic> json, {
-    required String sourceUrl,
-  }) {
+  factory RuleHubIndex.fromJson(Map json, {required String sourceUrl}) {
     final rawEntries = _firstValue(json, const [
       'entries',
       'rules',
@@ -63,34 +46,13 @@ class RuleHubIndex {
     if (rawEntries is List) {
       for (final item in rawEntries.whereType<Map>()) {
         try {
-          rules.add(RuleHubItem.fromJson(Map<String, dynamic>.from(item)));
+          rules.add(RuleHubItem.fromJson(item));
         } catch (_) {
           // 跳过无效条目
         }
       }
     }
-    return RuleHubIndex(
-      schema: _stringValue(json, const ['format', 'schema']) ?? currentSchema,
-      name: _stringValue(json, const ['title', 'name']) ?? '未命名规则库',
-      description: _stringValue(json, const ['intro', 'description']),
-      updatedAt: _parseDate(
-        _firstValue(json, const [
-          'synced',
-          'updatedAt',
-          'updated',
-          'updateTime',
-        ]),
-      ),
-      sourceUrl: sourceUrl,
-      rules: rules,
-    );
-  }
-
-  static DateTime? _parseDate(Object? value) {
-    if (value is String && value.isNotEmpty) {
-      return DateTime.tryParse(value);
-    }
-    return null;
+    return RuleHubIndex(sourceUrl: sourceUrl, rules: rules);
   }
 }
 
@@ -145,7 +107,7 @@ class RuleHubItem {
     return displayVersion;
   }
 
-  factory RuleHubItem.fromJson(Map<String, dynamic> json) {
+  factory RuleHubItem.fromJson(Map json) {
     final rawVersion = _firstValue(json, const ['rev', 'version', 'ver']);
     final rawConfig = _firstValue(json, const ['raw', 'config']);
     final configString =
@@ -188,17 +150,22 @@ class RuleHubItem {
       final direct = int.tryParse(text);
       if (direct != null) return direct;
 
-      final parts = RegExp(r'\d+')
-          .allMatches(text)
-          .map((m) => int.tryParse(m.group(0) ?? '') ?? 0)
-          .take(4)
-          .toList(growable: false);
-      if (parts.isEmpty) return 1;
-
+      // 单趟 code-unit 扫描：取前 4 段数字，每段截断到 999 后按千进制拼合。
       var code = 0;
-      for (final part in parts) {
-        code = code * 1000 + part.clamp(0, 999);
+      var parts = 0;
+      var current = -1;
+      for (var i = 0; i <= text.length && parts < 4; i++) {
+        final u = i == text.length ? -1 : text.codeUnitAt(i);
+        if (u >= 0x30 && u <= 0x39) {
+          current = (current < 0 ? 0 : current * 10 + (u - 0x30));
+          if (current > 999) current = 999;
+        } else if (current >= 0) {
+          code = code * 1000 + current;
+          parts++;
+          current = -1;
+        }
       }
+      if (parts == 0) return 1;
       return code == 0 ? 1 : code;
     }
     return 1;
@@ -210,14 +177,14 @@ class RuleHubItem {
   }
 }
 
-Object? _firstValue(Map<String, dynamic> json, List<String> keys) {
+Object? _firstValue(Map json, List<String> keys) {
   for (final key in keys) {
     if (json.containsKey(key)) return json[key];
   }
   return null;
 }
 
-String? _stringValue(Map<String, dynamic> json, List<String> keys) {
+String? _stringValue(Map json, List<String> keys) {
   final value = _firstValue(json, keys);
   final text = value?.toString().trim();
   return text == null || text.isEmpty ? null : text;

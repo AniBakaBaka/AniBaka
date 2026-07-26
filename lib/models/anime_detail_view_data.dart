@@ -1,6 +1,8 @@
 import 'package:baka/utils/bgm_utils.dart';
 
 class AnimeDetailViewData {
+  static final _whitespaceRe = RegExp(r'\s+');
+
   const AnimeDetailViewData({
     required this.title,
     required this.alias,
@@ -67,12 +69,20 @@ class AnimeDetailViewData {
               .whereType<String>()
               .toList(growable: false)
         : const <String>[];
-    final bgmTags = BgmUtils.asMapList(bgm?['tags']);
-    final tags = _unique([
-      ...genres,
-      ...bgmTags.map((tag) => BgmUtils.trimmed(tag['name'])),
-      ...(source['tag']?.toString().split(RegExp(r'\s+')) ?? const <String>[]),
-    ]).take(4).toList(growable: false);
+    // 惰性串联：_unique 是 sync*，take(4) 一命中就停，不再为了取前 4 个
+    // 而把 genres + 整张 bgm 标签表 + 拆分后的 source tag 全量展开进一个临时 List。
+    final tags = _unique(
+      genres
+          .cast<String?>()
+          .followedBy(
+            BgmUtils.asMapList(
+              bgm?['tags'],
+            ).map((tag) => BgmUtils.trimmed(tag['name'])),
+          )
+          .followedBy(
+            source['tag']?.toString().split(_whitespaceRe) ?? const <String>[],
+          ),
+    ).take(4).toList(growable: false);
 
     final ratings = BgmUtils.asMap(anibaka?['ratings']);
     final anibakaRating = BgmUtils.asMap(ratings?['bgm']);

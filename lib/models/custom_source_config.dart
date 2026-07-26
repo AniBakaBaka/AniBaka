@@ -14,9 +14,6 @@ class CustomSourceConfig {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  /// 是否使用 v2 管线引擎。
-  bool get isPipeline => pipeline != null && pipeline!.isNotEmpty;
-
   CustomSourceConfig({
     required this.id,
     required this.name,

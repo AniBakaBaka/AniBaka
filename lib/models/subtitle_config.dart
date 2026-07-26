@@ -161,27 +161,13 @@ class SubtitleConfig {
 }
 
 extension SubtitleColorHex on Color {
+  /// ARGB 八位十六进制。四个通道先拼成一个 32 位整数再一次成串，
+  /// 取代每通道 `toRadixString + padLeft` 各产一对临时串的四段同构写法。
   String toSubtitleHex() {
-    final a = (this.a * 255.0)
-        .round()
-        .clamp(0, 255)
-        .toRadixString(16)
-        .padLeft(2, '0');
-    final r = (this.r * 255.0)
-        .round()
-        .clamp(0, 255)
-        .toRadixString(16)
-        .padLeft(2, '0');
-    final g = (this.g * 255.0)
-        .round()
-        .clamp(0, 255)
-        .toRadixString(16)
-        .padLeft(2, '0');
-    final b = (this.b * 255.0)
-        .round()
-        .clamp(0, 255)
-        .toRadixString(16)
-        .padLeft(2, '0');
-    return '$a$r$g$b';
+    var packed = 0;
+    for (final channel in [a, r, g, b]) {
+      packed = (packed << 8) | (channel * 255.0).round().clamp(0, 255);
+    }
+    return packed.toRadixString(16).padLeft(8, '0');
   }
 }
