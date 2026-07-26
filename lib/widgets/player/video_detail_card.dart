@@ -41,7 +41,8 @@ class VideoDetailCard extends StatelessWidget {
     );
     final airDate = BgmUtils.formatAirDate(detail);
     final time =
-        airDate ?? dateFormatter((detail['time'] ?? '20231113').toString());
+        airDate ??
+        DateTime.parse((detail['time'] ?? '20231113').toString()).toEnDate();
     final mutedStyle = TextStyle(
       color: mutedColor,
       fontSize: 12,

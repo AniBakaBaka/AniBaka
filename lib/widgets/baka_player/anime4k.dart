@@ -33,9 +33,24 @@ class Anime4K {
       case 'low':
         return [clamp, restoreSoftM, upscaleM];
       case 'high':
-        return [clamp, restoreSoftVL, upscaleVL, downX2, restoreSoftM, upscaleM];
+        return [
+          clamp,
+          restoreSoftVL,
+          upscaleVL,
+          downX2,
+          restoreSoftM,
+          upscaleM,
+        ];
       case 'ultra':
-        return [clamp, restoreVL, upscaleVL, downX2, downX4, restoreM, upscaleM];
+        return [
+          clamp,
+          restoreVL,
+          upscaleVL,
+          downX2,
+          downX4,
+          restoreM,
+          upscaleM,
+        ];
       case 'medium':
       default:
         return [clamp, restoreM, upscaleM];

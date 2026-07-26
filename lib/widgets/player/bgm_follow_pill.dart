@@ -20,6 +20,7 @@ class BgmFollowPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final score = bgmInfo.score;
     final followColor = isFollowed
         ? const Color(0xFF34C759)
         : theme.colorScheme.primary;
@@ -35,8 +36,49 @@ class BgmFollowPill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (bgmInfo.score != null) ...[
-            _ScoreSegment(title: title, bgmInfo: bgmInfo),
+          if (score != null) ...[
+            Tooltip(
+              message: bgmInfo.subjectId == null
+                  ? 'Bangumi 评分'
+                  : '查看 Bangumi 详情',
+              child: InkWell(
+                onTap: bgmInfo.subjectId == null
+                    ? null
+                    : () => NavigationService.showBgmDetail(
+                        context,
+                        subjectId: bgmInfo.subjectId!,
+                        title: title,
+                        imageUrl: bgmInfo.imageUrl ?? '',
+                        initialScore: score,
+                      ),
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 5,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.star_rounded,
+                        size: 15,
+                        color: Colors.orange,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        score.toStringAsFixed(1),
+                        style: const TextStyle(
+                          color: Colors.orange,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
             Container(
               width: 1,
               height: 16,
@@ -76,55 +118,6 @@ class BgmFollowPill extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ScoreSegment extends StatelessWidget {
-  static const _scoreColor = Colors.orange;
-
-  final String title;
-  final BgmInfo bgmInfo;
-
-  const _ScoreSegment({required this.title, required this.bgmInfo});
-
-  @override
-  Widget build(BuildContext context) {
-    final score = bgmInfo.score;
-    if (score == null) return const SizedBox.shrink();
-
-    return Tooltip(
-      message: bgmInfo.subjectId == null ? 'Bangumi 评分' : '查看 Bangumi 详情',
-      child: InkWell(
-        onTap: bgmInfo.subjectId == null
-            ? null
-            : () => NavigationService.showBgmDetail(
-                context,
-                subjectId: bgmInfo.subjectId!,
-                title: title,
-                imageUrl: bgmInfo.imageUrl ?? '',
-                initialScore: score,
-              ),
-        borderRadius: BorderRadius.circular(6),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 5),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.star_rounded, size: 15, color: _scoreColor),
-              const SizedBox(width: 4),
-              Text(
-                score.toStringAsFixed(1),
-                style: const TextStyle(
-                  color: _scoreColor,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

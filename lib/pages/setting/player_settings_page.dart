@@ -97,9 +97,23 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                               current.copyWith(showNextEpisodeButton: value),
                         ),
                       ),
-                      _buildHwdecSelectTile(preferences.hwdecMode),
+                      PanelSelectTile(
+                        title: '硬件解码',
+                        value: preferences.hwdecMode,
+                        options: PlaybackSettingsService.hwdecModeLabels,
+                        onChanged: (value) => _update(
+                          (current) => current.copyWith(hwdecMode: value),
+                        ),
+                      ),
                       const PanelDivider(),
-                      _buildVideoRendererSelectTile(preferences.videoRenderer),
+                      PanelSelectTile(
+                        title: '视频渲染器',
+                        value: preferences.videoRenderer,
+                        options: PlaybackSettingsService.videoRendererLabels,
+                        onChanged: (value) => _update(
+                          (current) => current.copyWith(videoRenderer: value),
+                        ),
+                      ),
                     ],
                   ),
 
@@ -202,9 +216,11 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                         Column(
                           children: [
                             const PanelDivider(),
-                            _buildActionSelectTile(
+                            PanelSelectTile(
                               title: '双击动作',
                               value: preferences.doubleTapAction,
+                              options:
+                                  PlaybackSettingsService.doubleTapActionLabels,
                               onChanged: (value) => _update(
                                 (current) =>
                                     current.copyWith(doubleTapAction: value),
@@ -246,171 +262,6 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildActionSelectTile({
-    required String title,
-    required String value,
-    required ValueChanged<String> onChanged,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 15,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          Container(
-            height: 28,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: value,
-                dropdownColor: const Color(0xFF2C2C2E),
-                icon: const Icon(
-                  Icons.unfold_more,
-                  color: Colors.white60,
-                  size: 16,
-                ),
-                style: const TextStyle(color: Colors.white, fontSize: 13),
-                isDense: true,
-                items: const [
-                  DropdownMenuItem(value: 'seek', child: Text('快进快退')),
-                  DropdownMenuItem(value: 'play_pause', child: Text('播放暂停')),
-                ],
-                onChanged: (v) {
-                  if (v != null) {
-                    onChanged(v);
-                  }
-                },
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHwdecSelectTile(String currentMode) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          const Text(
-            '硬件解码',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 15,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          Container(
-            height: 28,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: currentMode,
-                dropdownColor: const Color(0xFF2C2C2E),
-                icon: const Icon(
-                  Icons.unfold_more,
-                  color: Colors.white60,
-                  size: 16,
-                ),
-                style: const TextStyle(color: Colors.white, fontSize: 13),
-                isDense: true,
-                items: [
-                  for (final mode in PlaybackSettingsService.hwdecModeOptions)
-                    DropdownMenuItem(
-                      value: mode,
-                      child: Text(
-                        PlaybackSettingsService.hwdecModeLabels[mode] ?? mode,
-                      ),
-                    ),
-                ],
-                onChanged: (v) {
-                  if (v != null) {
-                    _update((current) => current.copyWith(hwdecMode: v));
-                  }
-                },
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildVideoRendererSelectTile(String currentRenderer) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          const Text(
-            '视频渲染器',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 15,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          Container(
-            height: 28,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: currentRenderer,
-                dropdownColor: const Color(0xFF2C2C2E),
-                icon: const Icon(
-                  Icons.unfold_more,
-                  color: Colors.white60,
-                  size: 16,
-                ),
-                style: const TextStyle(color: Colors.white, fontSize: 13),
-                isDense: true,
-                items: [
-                  for (final renderer
-                      in PlaybackSettingsService.videoRendererOptions)
-                    DropdownMenuItem(
-                      value: renderer,
-                      child: Text(
-                        PlaybackSettingsService.videoRendererLabels[renderer] ??
-                            renderer,
-                      ),
-                    ),
-                ],
-                onChanged: (value) {
-                  if (value != null) {
-                    _update(
-                      (current) => current.copyWith(videoRenderer: value),
-                    );
-                  }
-                },
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

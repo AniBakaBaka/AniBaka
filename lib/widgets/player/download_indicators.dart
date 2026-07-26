@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:baka/utils/format_utils.dart';
 
 import 'package:baka/models/download_task.dart';
 import 'package:baka/services/download_service.dart';
@@ -291,7 +292,7 @@ class MobileBtProgressIndicator extends StatelessWidget {
                   ),
                   const SizedBox(width: 2),
                   Text(
-                    _formatSpeed(speed),
+                    formatBytesPerSecond(speed),
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
@@ -306,7 +307,7 @@ class MobileBtProgressIndicator extends StatelessWidget {
                   ),
                   const SizedBox(width: 2),
                   Text(
-                    _formatSpeed(uploadSpeed),
+                    formatBytesPerSecond(uploadSpeed),
                     style: const TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
@@ -350,7 +351,7 @@ class MobileBtProgressIndicator extends StatelessWidget {
                 if (uploadedBytes > 0) ...[
                   const SizedBox(width: 8),
                   Text(
-                    '↑${_formatBytes(uploadedBytes)}',
+                    '↑${formatBytes(uploadedBytes)}',
                     style: TextStyle(
                       fontSize: 10,
                       color: Colors.orange.withValues(alpha: 0.6),
@@ -375,8 +376,8 @@ class MobileBtProgressIndicator extends StatelessWidget {
               children: [
                 Text(
                   readyToPlay
-                      ? '缓冲 ${_formatBytes(contiguous)}/${_formatBytes(required)}'
-                      : '待缓冲 ${_formatBytes(remaining)}',
+                      ? '缓冲 ${formatBytes(contiguous)}/${formatBytes(required)}'
+                      : '待缓冲 ${formatBytes(remaining)}',
                   style: TextStyle(
                     fontSize: 10,
                     color: bodyColor?.withValues(alpha: 0.45),
@@ -384,7 +385,7 @@ class MobileBtProgressIndicator extends StatelessWidget {
                 ),
                 if (total > 0)
                   Text(
-                    '${_formatBytes(stats.downloadedBytes)} / ${_formatBytes(total)}',
+                    '${formatBytes(stats.downloadedBytes)} / ${formatBytes(total)}',
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w500,
@@ -397,20 +398,5 @@ class MobileBtProgressIndicator extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  static String _formatBytes(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1048576) return '${(bytes / 1024).toStringAsFixed(0)} KB';
-    if (bytes < 1073741824) return '${(bytes / 1048576).toStringAsFixed(1)} MB';
-    return '${(bytes / 1073741824).toStringAsFixed(2)} GB';
-  }
-
-  static String _formatSpeed(double bytesPerSec) {
-    if (bytesPerSec < 1024) return '${bytesPerSec.toStringAsFixed(0)} B/s';
-    if (bytesPerSec < 1048576) {
-      return '${(bytesPerSec / 1024).toStringAsFixed(1)} KB/s';
-    }
-    return '${(bytesPerSec / 1048576).toStringAsFixed(1)} MB/s';
   }
 }

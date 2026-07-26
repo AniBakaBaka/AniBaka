@@ -1,4 +1,3 @@
-import 'package:baka/instance.dart';
 import 'package:baka/services/playback_settings_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -19,93 +18,75 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
   bool _autoMatchSource = PlaybackSettingsService.getAutoMatchSource();
   double _defaultPlaybackSpeed =
       PlaybackSettingsService.getDefaultPlaybackSpeed();
-  String _hwdecMode = PlaybackSettingsService.normalizeHwdecMode(
-    Instances.sp.getString('player_hwdecMode'),
-  );
-  String _videoRenderer = PlaybackSettingsService.normalizeVideoRenderer(
-    Instances.sp.getString('player_videoRenderer'),
-  );
+  String _hwdecMode = PlaybackSettingsService.getHwdecMode();
+  String _videoRenderer = PlaybackSettingsService.getVideoRenderer();
 
-  Future<void> _setDefaultDanmakuOff(bool value) async {
-    setState(() => _defaultDanmakuOff = value);
-    await PlaybackSettingsService.setDefaultDanmakuOff(value);
+  static const _hwdecDescriptions = <String, String>{
+    'auto': '自动选择最佳硬件解码器',
+    'auto-safe': '仅使用经验证可靠的解码器',
+    'no': '使用CPU解码，兼容性最好',
+  };
+
+  static const _rendererDescriptions = <String, String>{
+    'auto': '使用稳定、低开销的默认渲染参数',
+    'compatibility': '关闭高质量缩放，适合黑屏、花屏或性能不足的设备',
+    'quality': '启用高质量缩放，GPU 占用更高',
+  };
+
+  /// 就地改字段 + 落盘，取代每个开关各写一个四行的 `_setXxx` 方法。
+  Future<void> _apply(VoidCallback assign, Future<void> Function() persist) {
+    setState(assign);
+    return persist();
   }
 
-  Future<void> _setDefaultSubtitleOff(bool value) async {
-    setState(() => _defaultSubtitleOff = value);
-    await PlaybackSettingsService.setDefaultSubtitleOff(value);
-  }
-
-  Future<void> _setClearCacheOnExit(bool value) async {
-    setState(() => _clearCacheOnExit = value);
-    await PlaybackSettingsService.setClearCacheOnExit(value);
-  }
-
-  Future<void> _setEnableBtDownload(bool value) async {
-    setState(() => _enableBtDownload = value);
-    await PlaybackSettingsService.setEnableBtDownload(value);
-  }
-
-  Future<void> _setAutoMatchSource(bool value) async {
-    setState(() => _autoMatchSource = value);
-    await PlaybackSettingsService.setAutoMatchSource(value);
-  }
-
-  Future<void> _setDefaultPlaybackSpeed(double speed) async {
-    final normalized = PlaybackSettingsService.normalizePlaybackSpeed(speed);
-    setState(() => _defaultPlaybackSpeed = normalized);
-    await PlaybackSettingsService.setDefaultPlaybackSpeed(normalized);
-  }
-
-  Future<void> _setHwdecMode(String mode) async {
-    final normalized = PlaybackSettingsService.normalizeHwdecMode(mode);
-    setState(() => _hwdecMode = normalized);
-    await Instances.sp.setString('player_hwdecMode', normalized);
-  }
-
-  Future<void> _setVideoRenderer(String renderer) async {
-    final normalized = PlaybackSettingsService.normalizeVideoRenderer(renderer);
-    setState(() => _videoRenderer = normalized);
-    await Instances.sp.setString('player_videoRenderer', normalized);
-  }
-
-  Future<void> _showVideoRendererSheet() async {
+  /// 通用单选底部弹窗：三份逐行同构的 `_showXxxSheet` 收敛成一个。
+  Future<void> _pickOption<T>({
+    required String title,
+    required T current,
+    required List<T> options,
+    required String Function(T option) labelOf,
+    required Future<void> Function(T selected) onSelected,
+    String? intro,
+    String Function(T option)? descriptionOf,
+  }) async {
     HapticFeedback.selectionClick();
-    final selected = await showModalBottomSheet<String>(
+    final selected = await showModalBottomSheet<T>(
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
         child: ListView(
           shrinkWrap: true,
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(24, 8, 24, 12),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
               child: Text(
-                '视频渲染器',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                title,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(24, 0, 24, 16),
-              child: Text(
-                '渲染器始终使用嵌入式 libmpv 输出，以下选项只调整安全的 GPU 渲染配置',
-                style: TextStyle(fontSize: 13, color: Colors.grey),
+            if (intro != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+                child: Text(
+                  intro,
+                  style: const TextStyle(fontSize: 13, color: Colors.grey),
+                ),
               ),
-            ),
-            RadioGroup<String>(
-              groupValue: _videoRenderer,
+            RadioGroup<T>(
+              groupValue: current,
               onChanged: (value) => Navigator.pop(context, value),
               child: Column(
                 children: [
-                  for (final renderer
-                      in PlaybackSettingsService.videoRendererOptions)
-                    RadioListTile<String>(
-                      value: renderer,
-                      title: Text(
-                        PlaybackSettingsService.videoRendererLabels[renderer] ??
-                            renderer,
-                      ),
-                      subtitle: Text(_videoRendererDescription(renderer)),
+                  for (final option in options)
+                    RadioListTile<T>(
+                      value: option,
+                      title: Text(labelOf(option)),
+                      subtitle: descriptionOf == null
+                          ? null
+                          : Text(descriptionOf(option)),
                     ),
                 ],
               ),
@@ -115,117 +96,7 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
         ),
       ),
     );
-    if (selected != null) await _setVideoRenderer(selected);
-  }
-
-  String _videoRendererDescription(String renderer) => switch (renderer) {
-    'auto' => '使用稳定、低开销的默认渲染参数',
-    'compatibility' => '关闭高质量缩放，适合黑屏、花屏或性能不足的设备',
-    'quality' => '启用高质量缩放，GPU 占用更高',
-    _ => '',
-  };
-
-  Future<void> _showHwdecModeSheet() async {
-    HapticFeedback.selectionClick();
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) {
-        return SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(24, 8, 24, 12),
-                child: Text(
-                  '硬件解码模式',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(24, 0, 24, 16),
-                child: Text(
-                  '如果遇到视频黑屏、花屏或卡顿，可尝试切换解码模式',
-                  style: TextStyle(fontSize: 13, color: Colors.grey),
-                ),
-              ),
-              RadioGroup<String>(
-                groupValue: _hwdecMode,
-                onChanged: (value) => Navigator.pop(context, value),
-                child: Column(
-                  children: [
-                    for (final mode in PlaybackSettingsService.hwdecModeOptions)
-                      RadioListTile<String>(
-                        value: mode,
-                        title: Text(
-                          PlaybackSettingsService.hwdecModeLabels[mode] ?? mode,
-                        ),
-                        subtitle: Text(_hwdecModeDescription(mode)),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
-    );
-    if (selected != null) {
-      await _setHwdecMode(selected);
-    }
-  }
-
-  String _hwdecModeDescription(String mode) => switch (mode) {
-    'auto' => '自动选择最佳硬件解码器',
-    'auto-safe' => '仅使用经验证可靠的解码器',
-    'no' => '使用CPU解码，兼容性最好',
-    _ => '',
-  };
-
-  Future<void> _showDefaultPlaybackSpeedSheet() async {
-    HapticFeedback.selectionClick();
-    final selected = await showModalBottomSheet<double>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) {
-        final current = _defaultPlaybackSpeed;
-        return SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(24, 8, 24, 12),
-                child: Text(
-                  '默认播放速度',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                ),
-              ),
-              RadioGroup<double>(
-                groupValue: current,
-                onChanged: (value) => Navigator.pop(context, value),
-                child: Column(
-                  children: [
-                    for (final speed
-                        in PlaybackSettingsService.playbackSpeedOptions)
-                      RadioListTile<double>(
-                        value: speed,
-                        title: Text(
-                          PlaybackSettingsService.formatPlaybackSpeed(speed),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
-    );
-    if (selected != null) {
-      await _setDefaultPlaybackSpeed(selected);
-    }
+    if (selected != null) await onSelected(selected);
   }
 
   @override
@@ -251,19 +122,46 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                         _defaultPlaybackSpeed,
                       ),
                       icon: Icons.speed_rounded,
-                      onTap: _showDefaultPlaybackSpeedSheet,
+                      onTap: () => _pickOption<double>(
+                        title: '默认播放速度',
+                        current: _defaultPlaybackSpeed,
+                        options: PlaybackSettingsService.playbackSpeedOptions,
+                        labelOf: PlaybackSettingsService.formatPlaybackSpeed,
+                        onSelected: (speed) {
+                          final value =
+                              PlaybackSettingsService.normalizePlaybackSpeed(
+                                speed,
+                              );
+                          return _apply(
+                            () => _defaultPlaybackSpeed = value,
+                            () =>
+                                PlaybackSettingsService.setDefaultPlaybackSpeed(
+                                  value,
+                                ),
+                          );
+                        },
+                      ),
                     ),
                     SettingsSwitchTile(
                       title: '默认关闭弹幕',
                       value: _defaultDanmakuOff,
                       icon: Icons.subtitles_off_rounded,
-                      onChanged: _setDefaultDanmakuOff,
+                      onChanged: (value) => _apply(
+                        () => _defaultDanmakuOff = value,
+                        () =>
+                            PlaybackSettingsService.setDefaultDanmakuOff(value),
+                      ),
                     ),
                     SettingsSwitchTile(
                       title: '默认关闭内嵌字幕',
                       value: _defaultSubtitleOff,
                       icon: Icons.closed_caption_off_rounded,
-                      onChanged: _setDefaultSubtitleOff,
+                      onChanged: (value) => _apply(
+                        () => _defaultSubtitleOff = value,
+                        () => PlaybackSettingsService.setDefaultSubtitleOff(
+                          value,
+                        ),
+                      ),
                     ),
                     SettingsTile(
                       title: '硬件解码',
@@ -271,7 +169,24 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                           PlaybackSettingsService.hwdecModeLabels[_hwdecMode] ??
                           '自动',
                       icon: Icons.memory_rounded,
-                      onTap: _showHwdecModeSheet,
+                      onTap: () => _pickOption<String>(
+                        title: '硬件解码模式',
+                        intro: '如果遇到视频黑屏、花屏或卡顿，可尝试切换解码模式',
+                        current: _hwdecMode,
+                        options: PlaybackSettingsService.hwdecModeOptions,
+                        labelOf: (mode) =>
+                            PlaybackSettingsService.hwdecModeLabels[mode] ??
+                            mode,
+                        descriptionOf: (mode) => _hwdecDescriptions[mode] ?? '',
+                        onSelected: (mode) {
+                          final value =
+                              PlaybackSettingsService.normalizeHwdecMode(mode);
+                          return _apply(
+                            () => _hwdecMode = value,
+                            () => PlaybackSettingsService.setHwdecMode(value),
+                          );
+                        },
+                      ),
                     ),
                     SettingsTile(
                       title: '视频渲染器',
@@ -280,7 +195,29 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                               .videoRendererLabels[_videoRenderer] ??
                           '自动',
                       icon: Icons.monitor_rounded,
-                      onTap: _showVideoRendererSheet,
+                      onTap: () => _pickOption<String>(
+                        title: '视频渲染器',
+                        intro: '渲染器始终使用嵌入式 libmpv 输出，以下选项只调整安全的 GPU 渲染配置',
+                        current: _videoRenderer,
+                        options: PlaybackSettingsService.videoRendererOptions,
+                        labelOf: (renderer) =>
+                            PlaybackSettingsService
+                                .videoRendererLabels[renderer] ??
+                            renderer,
+                        descriptionOf: (renderer) =>
+                            _rendererDescriptions[renderer] ?? '',
+                        onSelected: (renderer) {
+                          final value =
+                              PlaybackSettingsService.normalizeVideoRenderer(
+                                renderer,
+                              );
+                          return _apply(
+                            () => _videoRenderer = value,
+                            () =>
+                                PlaybackSettingsService.setVideoRenderer(value),
+                          );
+                        },
+                      ),
                     ),
                   ],
                 ),
@@ -292,7 +229,10 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                       title: '自动匹配播放源',
                       value: _autoMatchSource,
                       icon: Icons.auto_awesome_rounded,
-                      onChanged: _setAutoMatchSource,
+                      onChanged: (value) => _apply(
+                        () => _autoMatchSource = value,
+                        () => PlaybackSettingsService.setAutoMatchSource(value),
+                      ),
                       showDivider: false,
                     ),
                   ],
@@ -305,7 +245,11 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                       title: '启用BT种子下载',
                       value: _enableBtDownload,
                       icon: Icons.download_rounded,
-                      onChanged: _setEnableBtDownload,
+                      onChanged: (value) => _apply(
+                        () => _enableBtDownload = value,
+                        () =>
+                            PlaybackSettingsService.setEnableBtDownload(value),
+                      ),
                       showDivider: false,
                     ),
                   ],
@@ -318,7 +262,11 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                       title: '退出自动清理缓存',
                       value: _clearCacheOnExit,
                       icon: Icons.auto_delete_rounded,
-                      onChanged: _setClearCacheOnExit,
+                      onChanged: (value) => _apply(
+                        () => _clearCacheOnExit = value,
+                        () =>
+                            PlaybackSettingsService.setClearCacheOnExit(value),
+                      ),
                       showDivider: false,
                     ),
                   ],

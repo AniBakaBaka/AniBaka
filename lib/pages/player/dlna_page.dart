@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:baka/utils/date_util.dart';
 import 'package:baka/widgets/common/shimmer.dart';
 import 'package:dlna_dart/dlna.dart';
 import 'package:flutter/material.dart';
@@ -568,7 +569,9 @@ class DlnaCastPanel extends StatelessWidget {
               );
             },
             onChangeEnd: (v) {
-              c.seekTo(Duration(milliseconds: (v * dur.inMilliseconds).round()));
+              c.seekTo(
+                Duration(milliseconds: (v * dur.inMilliseconds).round()),
+              );
             },
           ),
           Padding(
@@ -576,23 +579,13 @@ class DlnaCastPanel extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(_formatDuration(pos), style: timeStyle),
-                Text(_formatDuration(dur), style: timeStyle),
+                Text(pos.toTimeString(), style: timeStyle),
+                Text(dur.toTimeString(), style: timeStyle),
               ],
             ),
           ),
         ],
       );
     });
-  }
-
-  static String _formatDuration(Duration d) {
-    final h = d.inHours;
-    final m = d.inMinutes % 60;
-    final s = d.inSeconds % 60;
-    if (h > 0) {
-      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
-    }
-    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 }

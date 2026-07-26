@@ -33,16 +33,10 @@ import 'package:baka/widgets/player/video_detail_card.dart';
 import 'package:baka/widgets/anime_detail/controller/video_source_search_controller.dart';
 
 class PlayerPage extends StatefulWidget {
-  const PlayerPage({
-    required this.data,
-    super.key,
-    this.posIndex,
-    this.autoMatchMode = false,
-  });
+  const PlayerPage({required this.data, super.key, this.posIndex});
 
   final Map data;
   final int? posIndex;
-  final bool autoMatchMode;
 
   @override
   State<StatefulWidget> createState() => _PlayerPageState();
@@ -288,48 +282,39 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       } else if (adapter != null) {
         final episodeId = _svc.currentEpisodeId;
         _svc.stopAdapterPlaybackKeepAlive();
-        if (adapter.requiresCustomPlayback) {
-          final videoController = ctr.videoController;
-          if (videoController == null) {
-            throw StateError('Video controller is not initialized');
-          }
-          await adapter.play(episodeId, videoController);
-          await ctr.applyPlaybackConfiguration();
-        } else {
-          final media = await _svc.resolveAdapterPlaybackMedia(
-            adapter,
-            episodeId,
-          );
-          if (media.url.isEmpty) throw Exception('Unable to resolve media url');
-          if (_isStale(requestId)) return;
+        final media = await _svc.resolveAdapterPlaybackMedia(
+          adapter,
+          episodeId,
+        );
+        if (media.url.isEmpty) throw Exception('Unable to resolve media url');
+        if (_isStale(requestId)) return;
 
-          final keepAliveGeneration = await _svc.startAdapterPlaybackKeepAlive(
-            adapter,
-            media.url,
+        final keepAliveGeneration = await _svc.startAdapterPlaybackKeepAlive(
+          adapter,
+          media.url,
+        );
+        if (_isStale(requestId)) {
+          _svc.stopAdapterPlaybackKeepAlive(keepAliveGeneration);
+          return;
+        }
+        final playbackMedia = await adapter.preparePlaybackMedia(media);
+        if (_isStale(requestId)) {
+          _svc.stopAdapterPlaybackKeepAlive(keepAliveGeneration);
+          return;
+        }
+        _resolvedUrl = media.url;
+        try {
+          await ctr.open(
+            playbackMedia.url,
+            autoplay: true,
+            httpHeaders: playbackMedia.httpHeaders,
           );
-          if (_isStale(requestId)) {
-            _svc.stopAdapterPlaybackKeepAlive(keepAliveGeneration);
-            return;
-          }
-          final playbackMedia = await adapter.preparePlaybackMedia(media);
-          if (_isStale(requestId)) {
-            _svc.stopAdapterPlaybackKeepAlive(keepAliveGeneration);
-            return;
-          }
-          _resolvedUrl = media.url;
-          try {
-            await ctr.open(
-              playbackMedia.url,
-              autoplay: true,
-              httpHeaders: playbackMedia.httpHeaders,
-            );
-          } catch (_) {
-            _svc.stopAdapterPlaybackKeepAlive(keepAliveGeneration);
-            rethrow;
-          }
+        } catch (_) {
+          _svc.stopAdapterPlaybackKeepAlive(keepAliveGeneration);
+          rethrow;
         }
       } else {
-        final videoUrl = await _svc.getVideoUrl();
+        final videoUrl = await _svc.resolveEpisodeUrl(currPlayIndex);
         if (_isStale(requestId)) return;
         if (videoUrl == null) {
           showSnackBar('无法获取视频地址');
@@ -377,7 +362,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     final currentRequestId = _session.nextGeneration();
     await _session.saveAndResetForSwitch();
     if (_isStale(currentRequestId)) return;
-    if (!_svc.prepareSwitchEpisode(episodeIndex, lineIndex: lineIndex)) return;
+    // 期间状态只可能被并发切换改变，而并发切换已被上面的 stale 检查拦截
+    _svc.applySelection(selection);
     // currPlayIndex/currUrl 变化 → 仅触发依赖剧集数据的子树刷新
     _bumpPageData();
     await ctr.stop();
@@ -463,7 +449,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
             commentKey: commentKey,
             onEpisodeChanged: changePlayIndex,
             onCastPressed: () => showCast(context),
-            onPickEpisode: () => _pickAndPlayEpisode(context),
+            onPickEpisode: () => _showEpisodePicker(),
             onFullScreenChanged: (value) {
               _playerFullscreen.value = value;
             },
@@ -477,7 +463,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
               videoList: videoList,
               onChangePlayIndex: changePlayIndex,
             ),
-            onDownloadPressed: () => _pickAndDownloadEpisode(context),
+            onDownloadPressed: () => _showEpisodePicker(downloadMode: true),
             onFollowPressed: toggleFollow,
           );
         },
@@ -539,15 +525,10 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
 
     final seedData = _buildSourceSeedData();
 
-    if (VideoSourceSearchController.globalCachedTitle != _svc.title) {
-      VideoSourceSearchController.globalCached?.dispose();
-      VideoSourceSearchController.globalCached = VideoSourceSearchController(
-        title: _svc.title,
-        cover: _svc.coverImageUrl ?? '',
-        seedData: seedData,
-      );
-      VideoSourceSearchController.globalCachedTitle = _svc.title;
-    }
+    final searchController = VideoSourceSearchController.sharedFor(
+      title: _svc.title,
+      seedData: seedData,
+    );
 
     final selection = await SourceSwitchSheet.show(
       context,
@@ -558,7 +539,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       currentLineIndex: currUrl,
       currentSource: widget.data['source']?.toString(),
       currentSourceName: _currentSourceSummary,
-      searchController: VideoSourceSearchController.globalCached,
+      searchController: searchController,
     );
     if (!mounted || selection == null) return;
 
@@ -572,9 +553,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     final isSameLine = currUrl == selection.lineIndex;
 
     if (isSameSource) {
-      if (nextData['_prefetchedPlayback'] != null) {
-        _svc.data['_prefetchedPlayback'] = nextData['_prefetchedPlayback'];
-      }
+      _svc.adoptPrefetchedPlayback(nextData);
       if (!isSameLine) {
         changeUrl(selection.lineIndex);
       }
@@ -681,7 +660,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
                               created: (e) async => await ctr.play(),
                             ),
                             headerControl: _buildImmersiveHeader(context),
-                            onPickEpisode: () => _pickAndPlayEpisode(context),
+                            onPickEpisode: () => _showEpisodePicker(),
                             hasNextEpisode:
                                 currPlayIndex + 1 < videoList.length,
                             onNextEpisode: _playNextEpisode,
@@ -806,7 +785,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
           ),
           const SizedBox(width: 8),
           IconButton(
-            onPressed: () => _pickAndDownloadEpisode(context),
+            onPressed: () => _showEpisodePicker(downloadMode: true),
             icon: const Icon(Icons.download_rounded, size: 20),
             visualDensity: VisualDensity.compact,
             color: Theme.of(context).colorScheme.primary,
@@ -871,36 +850,24 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     );
   }
 
-  Future<void> _pickAndPlayEpisode(BuildContext context) async {
-    final useFullscreenPanel = _playerFullscreen.value && !isWindows;
-    final i = await showEpisodeListDialog(
+  /// 选集与缓存共用同一个面板；差别只有初始模式和是否提供线路切换。
+  Future<void> _showEpisodePicker({bool downloadMode = false}) async {
+    final index = await showEpisodeListDialog(
       context: context,
       videoList: videoList,
       currentIndex: currPlayIndex,
       videoId: widget.data['id'].toString(),
-      isFullScreen: useFullscreenPanel,
+      isFullScreen: downloadMode
+          ? _playerFullscreen.value
+          : _playerFullscreen.value && !isWindows,
       postDetail: widget.data,
-      urlResolver: (idx) => _svc.resolveEpisodeUrl(idx),
-      onEpisodeChanged: changePlayIndex,
-      currentLineIndex: currUrl,
-      sourceNames: _sourceNames,
-      onLineChanged: changeUrl,
+      urlResolver: _svc.resolveEpisodeUrl,
+      startInDownloadMode: downloadMode,
+      currentLineIndex: downloadMode ? null : currUrl,
+      sourceNames: downloadMode ? null : _sourceNames,
+      onLineChanged: downloadMode ? null : changeUrl,
     );
-    if (i != null) changePlayIndex(i);
-  }
-
-  Future<void> _pickAndDownloadEpisode(BuildContext context) async {
-    await showEpisodeListDialog(
-      context: context,
-      videoList: videoList,
-      currentIndex: currPlayIndex,
-      videoId: widget.data['id'].toString(),
-      isFullScreen: _playerFullscreen.value,
-      postDetail: widget.data,
-      urlResolver: (idx) => _svc.resolveEpisodeUrl(idx),
-      onEpisodeChanged: changePlayIndex,
-      startInDownloadMode: true,
-    );
+    if (index != null) changePlayIndex(index);
   }
 
   Future<void> toggleFollow() async {
@@ -971,7 +938,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
                           sortAscending: sortAscending,
                           onSortDirectionChanged: () =>
                               _sortAscendingNotifier.value = !sortAscending,
-                          onShowVideoList: () => _pickAndPlayEpisode(context),
+                          onShowVideoList: () => _showEpisodePicker(),
                           videoList: videoList,
                           updateTime: widget.data['time'],
                           content: widget.data['content'],

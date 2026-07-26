@@ -3,6 +3,7 @@ import 'package:baka/models/playback_state.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:baka/widgets/baka_player/utils.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class BottomControl extends StatelessWidget {
   const BottomControl({
@@ -26,6 +27,9 @@ class BottomControl extends StatelessWidget {
   final Widget? extraButtons;
   final Widget? episodeTitle;
 
+  /// 按钮交互后让控制栏重新计时，避免连续操作到一半被自动隐藏。
+  void _keepControlsAwake() => controller.setControlsVisible(true);
+
   @override
   Widget build(BuildContext context) {
     final colorTheme = Theme.of(context).colorScheme.primary;
@@ -37,67 +41,64 @@ class BottomControl extends StatelessWidget {
         right: isWideScreen ? 32 : 8,
         bottom: isWideScreen ? 16 : 8,
       ),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: double.infinity),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (danmakuBar != null ||
-                extraButtons != null ||
-                episodeTitle != null)
-              Padding(
-                padding: EdgeInsets.only(
-                  bottom: isWideScreen ? 12 : 8,
-                  left: 4,
-                  right: 4,
-                ),
-                child: Row(
-                  children: [
-                    ?episodeTitle,
-                    const Spacer(),
-                    ?danmakuBar,
-                    if (danmakuBar != null && extraButtons != null)
-                      const SizedBox(width: 8),
-                    ?extraButtons,
-                  ],
-                ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (danmakuBar != null ||
+              extraButtons != null ||
+              episodeTitle != null)
+            Padding(
+              padding: EdgeInsets.only(
+                bottom: isWideScreen ? 12 : 8,
+                left: 4,
+                right: 4,
               ),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(isWideScreen ? 14 : 8),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(isWideScreen ? 14 : 8),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.05),
-                    width: 0.5,
-                  ),
-                ),
-                padding: EdgeInsets.symmetric(
-                  horizontal: isWideScreen ? 16 : 8,
-                  vertical: isWideScreen ? 12 : 8,
-                ),
-                child: Row(
-                  children: [
-                    _buildPlaybackButton(isWideScreen),
-                    SizedBox(width: isWideScreen ? 12 : 8),
-                    Expanded(child: _buildTimeline(colorTheme, isWideScreen)),
-                    SizedBox(width: isWideScreen ? 12 : 8),
-                    if (danmakuBar != null) _buildDanmakuButton(isWideScreen),
-                    if (!isFullScreen)
-                      _buildIconBtn(
-                        Icons.fullscreen_rounded,
-                        triggerFullScreen,
-                        isWide: isWideScreen,
-                        size: 26,
-                      ),
-                  ],
-                ),
+              child: Row(
+                children: [
+                  ?episodeTitle,
+                  const Spacer(),
+                  ?danmakuBar,
+                  if (danmakuBar != null && extraButtons != null)
+                    const SizedBox(width: 8),
+                  ?extraButtons,
+                ],
               ),
             ),
-          ],
-        ),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(isWideScreen ? 16 : 12),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.45),
+                borderRadius: BorderRadius.circular(isWideScreen ? 16 : 12),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.08),
+                  width: 0.5,
+                ),
+              ),
+              padding: EdgeInsets.symmetric(
+                horizontal: isWideScreen ? 16 : 10,
+                vertical: isWideScreen ? 10 : 6,
+              ),
+              child: Row(
+                children: [
+                  _buildPlaybackButton(isWideScreen),
+                  SizedBox(width: isWideScreen ? 12 : 8),
+                  Expanded(child: _buildTimeline(colorTheme, isWideScreen)),
+                  SizedBox(width: isWideScreen ? 12 : 8),
+                  if (danmakuBar != null) _buildDanmakuButton(isWideScreen),
+                  if (!isFullScreen)
+                    _buildIconBtn(
+                      Icons.fullscreen_rounded,
+                      triggerFullScreen,
+                      isWide: isWideScreen,
+                      size: 26,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -143,15 +144,26 @@ class BottomControl extends StatelessWidget {
 
   Widget _buildPlayPauseBtn(bool isPlaying, bool isWide) {
     return SizedBox(
-      width: isWide ? 40 : 32,
-      height: isWide ? 40 : 32,
+      width: isWide ? 42 : 36,
+      height: isWide ? 42 : 36,
       child: IconButton(
         style: ButtonStyle(padding: WidgetStateProperty.all(EdgeInsets.zero)),
-        onPressed: controller.togglePlayback,
-        icon: Icon(
-          isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-          color: Colors.white,
-          size: isWide ? 28 : 22,
+        tooltip: isPlaying ? '暂停' : '播放',
+        onPressed: () {
+          HapticFeedback.lightImpact();
+          controller.togglePlayback();
+          _keepControlsAwake();
+        },
+        icon: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 150),
+          transitionBuilder: (child, animation) =>
+              ScaleTransition(scale: animation, child: child),
+          child: Icon(
+            isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            key: ValueKey(isPlaying),
+            color: Colors.white,
+            size: isWide ? 28 : 24,
+          ),
         ),
       ),
     );
@@ -159,11 +171,16 @@ class BottomControl extends StatelessWidget {
 
   Widget _buildDanmakuToggle(bool show, bool isWide) {
     return SizedBox(
-      width: isWide ? 40 : 32,
-      height: isWide ? 40 : 32,
+      width: isWide ? 42 : 36,
+      height: isWide ? 42 : 36,
       child: IconButton(
         style: ButtonStyle(padding: WidgetStateProperty.all(EdgeInsets.zero)),
-        onPressed: () => controller.setDanmakuVisible(!show),
+        tooltip: show ? '关闭弹幕' : '开启弹幕',
+        onPressed: () {
+          HapticFeedback.lightImpact();
+          controller.setDanmakuVisible(!show);
+          _keepControlsAwake();
+        },
         icon: Icon(
           show ? Icons.subtitles_rounded : Icons.subtitles_off_rounded,
           color: show ? Colors.white : Colors.white.withValues(alpha: 0.5),
@@ -180,11 +197,14 @@ class BottomControl extends StatelessWidget {
     double size = 22,
   }) {
     return SizedBox(
-      width: isWide ? 40 : 32,
-      height: isWide ? 40 : 32,
+      width: isWide ? 42 : 36,
+      height: isWide ? 42 : 36,
       child: IconButton(
         style: ButtonStyle(padding: WidgetStateProperty.all(EdgeInsets.zero)),
-        onPressed: onTap,
+        onPressed: () {
+          HapticFeedback.lightImpact();
+          onTap();
+        },
         icon: Icon(
           icon,
           color: Colors.white,
@@ -217,34 +237,16 @@ class _TimelineControl extends StatelessWidget {
           total,
         );
     final buffered = timeline.buffered.clamp(Duration.zero, total);
+    final fontSize = isWideScreen ? 14.0 : 12.0;
 
     return Row(
       children: [
+        // 拖动进度时直接在标签上预览目标时间，并用主题色提示。
         Text(
-          timeline.position.label(reference: timeline.duration),
+          progress.label(reference: total),
           style: TextStyle(
-            color: Colors.white,
-            fontSize: isWideScreen ? 15 : 12,
-            fontWeight: FontWeight.w600,
-            fontFeatures: const [FontFeature.tabularFigures()],
-          ),
-        ),
-        Padding(
-          padding: EdgeInsets.symmetric(horizontal: isWideScreen ? 6 : 4),
-          child: Text(
-            '·',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.4),
-              fontSize: isWideScreen ? 15 : 12,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-        Text(
-          timeline.duration.label(),
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.6),
-            fontSize: isWideScreen ? 15 : 12,
+            color: timeline.seeking ? colorTheme : Colors.white,
+            fontSize: fontSize,
             fontWeight: FontWeight.w600,
             fontFeatures: const [FontFeature.tabularFigures()],
           ),
@@ -257,13 +259,13 @@ class _TimelineControl extends StatelessWidget {
                   buffered: buffered,
                   total: total,
                   progressBarColor: colorTheme,
-                  baseBarColor: Colors.white.withValues(alpha: 0.2),
+                  baseBarColor: Colors.white.withValues(alpha: 0.25),
                   bufferedBarColor: colorTheme.withValues(alpha: 0.4),
                   timeLabelLocation: TimeLabelLocation.none,
                   thumbColor: colorTheme,
                   barHeight: isWideScreen ? 8 : 6,
                   thumbRadius: isWideScreen ? 9 : 7,
-                  thumbGlowRadius: isWideScreen ? 24 : 18,
+                  thumbGlowRadius: isWideScreen ? 20 : 16,
                   onDragStart: (_) => controller.beginSeekPreview(),
                   onDragUpdate: (details) =>
                       controller.updateSeekPreview(details.timeStamp),
@@ -280,6 +282,16 @@ class _TimelineControl extends StatelessWidget {
                     borderRadius: BorderRadius.circular(isWideScreen ? 4 : 3),
                   ),
                 ),
+        ),
+        SizedBox(width: isWideScreen ? 12 : 8),
+        Text(
+          total.label(),
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.6),
+            fontSize: fontSize,
+            fontWeight: FontWeight.w600,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
         ),
       ],
     );

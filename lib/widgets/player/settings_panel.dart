@@ -244,6 +244,75 @@ class PanelSliderTile extends StatelessWidget {
   }
 }
 
+/// 面板里的下拉选择行。
+///
+/// [options] 为候选值到显示文案的有序映射（Dart 的 Map 保持插入序）。
+class PanelSelectTile extends StatelessWidget {
+  final String title;
+  final String value;
+  final Map<String, String> options;
+  final ValueChanged<String> onChanged;
+
+  const PanelSelectTile({
+    required this.title,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          Container(
+            height: 28,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: value,
+                dropdownColor: const Color(0xFF2C2C2E),
+                icon: const Icon(
+                  Icons.unfold_more,
+                  color: Colors.white60,
+                  size: 16,
+                ),
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                isDense: true,
+                items: [
+                  for (final option in options.entries)
+                    DropdownMenuItem(
+                      value: option.key,
+                      child: Text(option.value),
+                    ),
+                ],
+                onChanged: (next) {
+                  if (next != null) onChanged(next);
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class PanelSwitchTile extends StatelessWidget {
   final String title;
   final bool value;

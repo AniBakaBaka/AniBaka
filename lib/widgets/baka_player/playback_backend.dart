@@ -96,10 +96,7 @@ class MediaKitPlaybackBackend implements PlaybackBackend {
     Map<String, String>? httpHeaders,
   }) {
     return _requiredPlayer.open(
-      Media(
-        uri,
-        httpHeaders: httpHeaders ?? const <String, String>{},
-      ),
+      Media(uri, httpHeaders: httpHeaders ?? const <String, String>{}),
       play: autoplay,
     );
   }

@@ -116,14 +116,8 @@ class PlaybackController {
     _lastOpenAutoplay = autoplay;
     _hasPlaybackProgress = false;
     _openRetryCount = 0;
-    _resetPlaybackState();
     try {
-      await initialize();
-      if (_backend.currentMediaUri != null) await _backend.stop();
-      await _configurePlayer(preferences.value.defaultPlaybackSpeed);
-      await _backend.open(uri, autoplay: autoplay, httpHeaders: httpHeaders);
-      if (_disposed) return;
-      core.value = core.value.copyWith(loading: false);
+      await _openCurrent();
     } catch (error) {
       final safeError = sanitizePlaybackError(error);
       if (!_disposed) {
@@ -138,6 +132,21 @@ class PlaybackController {
     }
   }
 
+  /// open 与错误自动重试共用的打开序列（initialize 已记忆化，重复调用无害）。
+  Future<void> _openCurrent() async {
+    _resetPlaybackState();
+    await initialize();
+    if (_backend.currentMediaUri != null) await _backend.stop();
+    await _configurePlayer(preferences.value.defaultPlaybackSpeed);
+    await _backend.open(
+      _lastOpenUri!,
+      autoplay: _lastOpenAutoplay,
+      httpHeaders: _lastOpenHeaders,
+    );
+    if (_disposed) return;
+    core.value = core.value.copyWith(loading: false);
+  }
+
   Future<void> applyPlaybackConfiguration() async {
     await initialize();
     await _configurePlayer(preferences.value.defaultPlaybackSpeed);
@@ -147,7 +156,17 @@ class PlaybackController {
     _danmakuController = controller;
     controller.playbackRate = core.value.playbackRate;
     controller.syncTime(timeline.value.position);
-    if (core.value.playing && !core.value.buffering) {
+    _syncDanmakuActivity();
+  }
+
+  /// 弹幕滚动与播放状态的唯一同步点：仅「播放中、未缓冲、未失败」时滚动。
+  /// 各状态回调更新 core.value 后统一调用，替代散落各处、条件各写各的
+  /// pause/resume。
+  void _syncDanmakuActivity() {
+    final controller = _danmakuController;
+    if (controller == null) return;
+    final state = core.value;
+    if (state.playing && !state.buffering && !state.failed) {
       controller.resume();
     } else {
       controller.pause();
@@ -197,11 +216,7 @@ class PlaybackController {
       failed: failed,
       errorMessage: errorMessage,
     );
-    if (playing && !buffering) {
-      _danmakuController?.resume();
-    } else {
-      _danmakuController?.pause();
-    }
+    _syncDanmakuActivity();
   }
 
   void _onPositionChanged(Duration position) {
@@ -219,7 +234,7 @@ class PlaybackController {
           failed: false,
           errorMessage: '',
         );
-        if (coreState.playing) _danmakuController?.resume();
+        _syncDanmakuActivity();
       }
     }
     final milliseconds = position.inMilliseconds;
@@ -274,17 +289,18 @@ class PlaybackController {
       if (core.value.buffering) {
         core.value = core.value.copyWith(buffering: false);
       }
-      if (core.value.playing) _danmakuController?.resume();
+      _syncDanmakuActivity();
       return;
     }
     if (!core.value.playing) {
       if (!core.value.buffering) {
         core.value = core.value.copyWith(buffering: true);
       }
-      _danmakuController?.pause();
+      _syncDanmakuActivity();
       return;
     }
 
+    // 疑似卡顿：core.buffering 尚未置位，先停弹幕，600ms 确认后再同步。
     _danmakuController?.pause();
     final position = _backend.currentPosition;
     _bufferingDebounceTimer = Timer(const Duration(milliseconds: 600), () {
@@ -293,7 +309,7 @@ class PlaybackController {
       if (core.value.buffering != stalled) {
         core.value = core.value.copyWith(buffering: stalled);
       }
-      if (!stalled && core.value.playing) _danmakuController?.resume();
+      _syncDanmakuActivity();
     });
   }
 
@@ -333,20 +349,8 @@ class PlaybackController {
           openGeneration != _openGeneration) {
         return;
       }
-      final uri = _lastOpenUri;
-      if (uri == null) return;
-
-      _resetPlaybackState();
-      if (_backend.currentMediaUri != null) await _backend.stop();
-      await _configurePlayer(preferences.value.defaultPlaybackSpeed);
-      await _backend.open(
-        uri,
-        autoplay: _lastOpenAutoplay,
-        httpHeaders: _lastOpenHeaders,
-      );
-      if (!_disposed) {
-        core.value = core.value.copyWith(loading: false);
-      }
+      if (_lastOpenUri == null) return;
+      await _openCurrent();
     } catch (error) {
       if (!_disposed && openGeneration == _openGeneration) {
         _setPlaybackFailed(sanitizePlaybackError(error));
@@ -363,13 +367,11 @@ class PlaybackController {
       errorMessage: error,
     );
     unawaited(_backend.pause());
-    _danmakuController?.pause();
+    _syncDanmakuActivity();
   }
 
-  Future<void> play({bool repeat = false, bool hideControls = true}) async {
+  Future<void> play() async {
     if (_disposed) return;
-    if (!hideControls) setControlsVisible(true);
-    if (repeat) await seek(Duration.zero);
     await _backend.play();
   }
 
@@ -638,7 +640,7 @@ class PlaybackController {
     overlay.value = overlay.value.copyWith(
       showJumpPrompt: true,
       jumpPosition: position,
-      jumpPromptText: '继续播放${formatDuration(position)}？',
+      jumpPromptText: '继续播放${position.toTimeString()}？',
     );
     _jumpPromptTimer?.cancel();
     _jumpPromptTimer = Timer(const Duration(seconds: 15), hideJumpPrompt);

@@ -129,8 +129,8 @@ Future<void> handleCommentLinkTap({
   controller.seek(targetTime);
   showSnackBar(
     changingEpisode
-        ? '已跳转到第${targetEpisode + 1}集 ${formatDuration(targetTime)}'
-        : '已跳转到 ${formatDuration(targetTime)}',
+        ? '已跳转到第${targetEpisode + 1}集 ${targetTime.toTimeString()}'
+        : '已跳转到 ${targetTime.toTimeString()}',
   );
 }
 
@@ -700,7 +700,9 @@ class _CIslandCommentWidgetState extends State<CIslandCommentWidget> {
                     const SizedBox(width: 8),
                     if (comment.createdAt > 0)
                       Text(
-                        relativeTime(comment.createdAt),
+                        DateTime.fromMillisecondsSinceEpoch(
+                          comment.createdAt * 1000,
+                        ).toRelativeTime(),
                         style: TextStyle(fontSize: 11, color: mutedColor),
                       ),
                   ],

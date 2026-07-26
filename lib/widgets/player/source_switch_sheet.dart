@@ -101,13 +101,14 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
         widget.searchController ??
         VideoSourceSearchController(
           title: widget.title,
-          cover: widget.cover,
           seedData: widget.seedData,
         );
 
     _controller.resultsNotifier.addListener(_onCandidatesChanged);
     _controller.candidateRevisionNotifier.addListener(_onCandidatesChanged);
     _controller.progressNotifier.addListener(_onCandidatesChanged);
+    // 搜索结束时集合可能未变而不触发 progressNotifier，需靠该通知隐藏进度条
+    _controller.isSearchingNotifier.addListener(_onCandidatesChanged);
     _readRoutes();
 
     if (_controller.resultsNotifier.value.isEmpty &&
@@ -123,6 +124,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     _controller.resultsNotifier.removeListener(_onCandidatesChanged);
     _controller.candidateRevisionNotifier.removeListener(_onCandidatesChanged);
     _controller.progressNotifier.removeListener(_onCandidatesChanged);
+    _controller.isSearchingNotifier.removeListener(_onCandidatesChanged);
     if (widget.searchController == null) _controller.dispose();
     super.dispose();
   }
@@ -287,7 +289,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isSearching = _controller.progressNotifier.value.isSearching;
+    final isSearching = _controller.isSearchingNotifier.value;
     final initialSize = MediaQuery.sizeOf(context).height < 700 ? 0.88 : 0.76;
 
     return DraggableScrollableSheet(

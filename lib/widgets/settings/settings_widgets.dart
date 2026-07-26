@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:baka/instance.dart';
 import 'package:flutter/services.dart';
 
 class SettingsSliverAppBar extends StatelessWidget {
@@ -89,8 +90,7 @@ class SettingsGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final reduceVisualEffects =
-        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final reduceVisualEffects = context.reduceMotion;
     return Container(
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1C1C1E) : Colors.white,

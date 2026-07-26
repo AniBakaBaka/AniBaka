@@ -332,7 +332,7 @@ class CommentListState extends State<CommentList> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      dateFormatter(comment['time']),
+                      DateTime.parse(comment['time']).toEnDate(),
                       style: TextStyle(
                         fontSize: 12,
                         letterSpacing: 0.2,

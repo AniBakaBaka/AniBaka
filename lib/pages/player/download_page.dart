@@ -1,4 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:baka/utils/format_utils.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -52,21 +53,14 @@ class DownloadManagerController extends GetxController {
   void clearCompleted() => service.clearCompleted();
 }
 
-String _formatBytes(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  if (bytes < 1048576) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-  if (bytes < 1073741824) return '${(bytes / 1048576).toStringAsFixed(1)} MB';
-  return '${(bytes / 1073741824).toStringAsFixed(2)} GB';
-}
-
 class DownloadManagerPage extends StatelessWidget {
   const DownloadManagerPage({super.key});
 
   static void show(BuildContext context) {
     DownloadService.instance.init();
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const DownloadManagerPage()),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const DownloadManagerPage()));
   }
 
   @override
@@ -308,7 +302,7 @@ class _TaskCard extends StatelessWidget {
                           if (status == DownloadStatus.completed) ...[
                             const SizedBox(height: 4),
                             Text(
-                              _formatBytes(task.totalBytes),
+                              formatBytes(task.totalBytes),
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: theme.colorScheme.onSurfaceVariant,
                               ),
@@ -333,7 +327,7 @@ class _TaskCard extends StatelessWidget {
                               valueListenable: task.downloadedBytesNotifier,
                               builder: (context, bytes, _) => Text(
                                 task.totalBytes > 0
-                                    ? '$statusText · ${_formatBytes(bytes)} / ${_formatBytes(task.totalBytes)}'
+                                    ? '$statusText · ${formatBytes(bytes)} / ${formatBytes(task.totalBytes)}'
                                     : '$statusText · ${(task.progress * 100).toStringAsFixed(0)}%',
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: statusColor,
@@ -436,7 +430,7 @@ class _AnimeGroupCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '共 ${tasks.length} 集 · ${_formatBytes(totalBytes)}',
+                        '共 ${tasks.length} 集 · ${formatBytes(totalBytes)}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(

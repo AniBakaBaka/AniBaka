@@ -4,6 +4,7 @@ import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:get/get.dart';
 import 'package:baka/services/cache_manager.dart';
+import 'package:baka/services/theme_service.dart';
 import 'package:baka/utils/app_logger.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
@@ -28,19 +29,18 @@ class AppSettingsPage extends StatefulWidget {
 class _AppSettingsPageState extends State<AppSettingsPage> {
   final _appState = Get.find<AppState>();
 
-  Map<String, dynamic>? _userInfo;
   String _cacheSize = '计算中...';
   bool _isClearing = false;
   bool _isExportingLogs = false;
   bool _isSharingLogs = false;
 
+  /// 会话数据只有 [AppState] 一份，页面不再自己 jsonDecode 一遍 `userinfo`。
+  Map<String, dynamic>? get _userInfo =>
+      _appState.isLoggedIn ? _appState.userInfo.value : null;
+
   @override
   void initState() {
     super.initState();
-    final storedUser = Instances.sp.getString('userinfo');
-    if (storedUser != null) {
-      _userInfo = Map<String, dynamic>.from(jsonDecode(storedUser));
-    }
     _loadCacheSize();
   }
 
@@ -79,77 +79,72 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
     }
   }
 
-  Future<void> _exportLogs() async {
-    if (_isExportingLogs) return;
+  /// 导出/分享日志共用的外壳：忙碌位守卫 → 震动 → 记日志 → 执行 → 失败上报。
+  /// 两个入口原先各抄了一份完全相同的 30 行样板。
+  Future<void> _runLogAction({
+    required String name,
+    required bool busy,
+    required ValueChanged<bool> setBusy,
+    required Future<void> Function() action,
+  }) async {
+    if (busy) return;
 
     HapticFeedback.mediumImpact();
-    setState(() => _isExportingLogs = true);
+    setState(() => setBusy(true));
     try {
-      AppLogger.instance.info('Export logs requested', tag: 'Settings');
+      AppLogger.instance.info('$name logs requested', tag: 'Settings');
+      await action();
+    } catch (error, stackTrace) {
+      AppLogger.instance.error(
+        '$name logs failed',
+        tag: 'Settings',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (mounted) {
+        showSnackBar(
+          '${name == 'Export' ? '导出' : '分享'}日志失败：$error',
+          isError: true,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => setBusy(false));
+    }
+  }
+
+  Future<void> _exportLogs() => _runLogAction(
+    name: 'Export',
+    busy: _isExportingLogs,
+    setBusy: (value) => _isExportingLogs = value,
+    action: () async {
       final archive = await AppLogger.instance.exportLogs();
       if (!mounted) return;
-
       if (archive == null) {
         showSnackBar('已取消导出日志');
         return;
       }
-
       showActionSnackBar(
         '日志已导出：${archive.fileName}',
         actionLabel: '打开',
         onAction: () => OpenFilex.open(archive.file.path),
       );
-    } catch (error, stackTrace) {
-      AppLogger.instance.error(
-        'Export logs failed',
-        tag: 'Settings',
-        error: error,
-        stackTrace: stackTrace,
-      );
-      if (mounted) {
-        showSnackBar('导出日志失败：$error', isError: true);
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isExportingLogs = false);
-      }
-    }
-  }
+    },
+  );
 
-  Future<void> _shareLogs() async {
-    if (_isSharingLogs) return;
-
-    HapticFeedback.mediumImpact();
-    setState(() => _isSharingLogs = true);
-    try {
-      AppLogger.instance.info('Share logs requested', tag: 'Settings');
+  Future<void> _shareLogs() => _runLogAction(
+    name: 'Share',
+    busy: _isSharingLogs,
+    setBusy: (value) => _isSharingLogs = value,
+    action: () async {
       final result = await AppLogger.instance.shareLogs();
       if (!mounted) return;
-
-      switch (result.status) {
-        case ShareResultStatus.success:
-          showSnackBar('日志已分享');
-        case ShareResultStatus.dismissed:
-          showSnackBar('已取消分享日志');
-        case ShareResultStatus.unavailable:
-          showSnackBar('已打开系统分享');
-      }
-    } catch (error, stackTrace) {
-      AppLogger.instance.error(
-        'Share logs failed',
-        tag: 'Settings',
-        error: error,
-        stackTrace: stackTrace,
-      );
-      if (mounted) {
-        showSnackBar('分享日志失败：$error', isError: true);
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isSharingLogs = false);
-      }
-    }
-  }
+      showSnackBar(switch (result.status) {
+        ShareResultStatus.success => '日志已分享',
+        ShareResultStatus.dismissed => '已取消分享日志',
+        ShareResultStatus.unavailable => '已打开系统分享',
+      });
+    },
+  );
 
   Future<void> _showUpdateDialog(String title, String key) async {
     HapticFeedback.selectionClick();
@@ -169,10 +164,11 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
       final res = jsonDecode((await register(data)).data);
       showSnackBar(res['msg']);
       if (res['code'] == 200) {
-        _userInfo![key] = value;
-        Instances.sp.setString('userinfo', jsonEncode(_userInfo));
-        setState(() {});
+        final updated = Map<String, dynamic>.from(_userInfo!)..[key] = value;
+        await Instances.sp.setString('userinfo', jsonEncode(updated));
+        // triggerLoginRefresh 会从 SP 重新加载并广播，页面随之重建。
         _appState.triggerLoginRefresh();
+        if (mounted) setState(() {});
         HapticFeedback.mediumImpact();
       }
     } catch (e) {
@@ -202,14 +198,14 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
       builder: (dialogContext) => SimpleDialog(
         title: const Text('选择主题模式'),
         children: [
-          for (final option in const [(0, '跟随系统'), (1, '浅色模式'), (2, '深色模式')])
+          for (var mode = 0; mode < ThemeService.themeModeLabels.length; mode++)
             SimpleDialogOption(
-              onPressed: () => Navigator.pop(dialogContext, option.$1),
+              onPressed: () => Navigator.pop(dialogContext, mode),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(option.$2),
-                  if (_appState.themeMode == option.$1)
+                  Text(ThemeService.themeModeLabels[mode]),
+                  if (_appState.themeMode == mode)
                     Icon(
                       Icons.check_rounded,
                       color: Theme.of(context).colorScheme.primary,
@@ -224,7 +220,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
   }
 
   String get _themeModeLabel =>
-      const ['跟随系统', '浅色模式', '深色模式'][_appState.themeMode];
+      ThemeService.themeModeLabel(_appState.themeMode);
 
   @override
   Widget build(BuildContext context) {
