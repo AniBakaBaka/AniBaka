@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:baka/instance.dart';
 
 import 'package:baka/services/navigation_service.dart';
 import 'package:baka/services/swiper_settings_service.dart';
@@ -59,8 +60,7 @@ class _SwiperBannerState extends State<SwiperBanner> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final reduceVisualEffects =
-        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final reduceVisualEffects = context.reduceMotion;
     final tickerEnabled = TickerMode.of(context);
     if (_reduceVisualEffects == reduceVisualEffects &&
         _tickerEnabled == tickerEnabled) {

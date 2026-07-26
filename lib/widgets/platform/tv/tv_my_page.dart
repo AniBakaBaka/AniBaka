@@ -27,12 +27,8 @@ class _TvMyPageState extends State<TvMyPage> {
   @override
   void initState() {
     super.initState();
-    _svc.initUser();
     _loginWorker = ever(Get.find<AppState>().loginTrigger, (_) {
-      if (mounted) {
-        _svc.initUser();
-        setState(() {});
-      }
+      if (mounted) setState(() {});
     });
   }
 

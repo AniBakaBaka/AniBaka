@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:baka/instance.dart';
 import 'package:flutter/material.dart';
 
 class AppShimmer extends StatefulWidget {
@@ -73,12 +74,10 @@ class _AppShimmerState extends State<AppShimmer> with WidgetsBindingObserver {
   }
 
   void _syncAnimation() {
-    final mediaQuery = MediaQuery.maybeOf(context);
-    final animationsDisabled = mediaQuery?.disableAnimations ?? false;
     final lifecycleState = WidgetsBinding.instance.lifecycleState;
     final shouldAnimate =
         widget.enabled &&
-        !animationsDisabled &&
+        !context.reduceMotion &&
         TickerMode.of(context) &&
         (lifecycleState == null || lifecycleState == AppLifecycleState.resumed);
 
@@ -233,47 +232,6 @@ class ShimmerTextLine extends StatelessWidget {
 
     if (margin == null) return child;
     return Padding(padding: margin!, child: child);
-  }
-}
-
-class ShimmerListTile extends StatelessWidget {
-  final bool leading;
-  final bool subtitle;
-  final EdgeInsetsGeometry padding;
-
-  const ShimmerListTile({
-    this.leading = true,
-    this.subtitle = true,
-    this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    super.key,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: padding,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (leading) ...[
-            const ShimmerCircle(size: 36),
-            const SizedBox(width: 12),
-          ],
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const ShimmerTextLine(height: 14),
-                if (subtitle) ...[
-                  const SizedBox(height: 8),
-                  const ShimmerTextLine(height: 12, widthFactor: 0.68),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 

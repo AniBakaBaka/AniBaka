@@ -163,7 +163,7 @@ String? _episodeInfo(int count, String? delayInfo, String? updateTime) {
   if (delayInfo != null) return '$count | $delayInfo';
   if (updateTime == null) return null;
   if (updateTime.isEmpty) return '$count';
-  final formatted = dateFormatter2(updateTime);
+  final formatted = DateTime.tryParse(updateTime)?.toZhWeekTime() ?? updateTime;
   final parts = formatted.split(', ');
   return parts.length == 2
       ? '$count | ${parts[0]}${parts[1]}更'
@@ -242,7 +242,7 @@ Widget buildHorizontalEpisodeList({
             index: index,
             rawTitle: videoList[index].title,
             isSelected: index == currPlayIndex,
-            isWatched: VideoUtils.isEpisodeWatched(videoId, index, null),
+            isWatched: VideoUtils.isEpisodeWatched(videoId, index),
             onTap: () => onEpisodeChanged(index),
           ),
         );

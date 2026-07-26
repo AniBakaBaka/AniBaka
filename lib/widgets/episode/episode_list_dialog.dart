@@ -17,7 +17,6 @@ Future<int?> showEpisodeListDialog({
   required List<PlaybackEpisode> videoList,
   required int currentIndex,
   required String videoId,
-  required Function(int) onEpisodeChanged,
   bool isFullScreen = false,
   Map? postDetail,
   Future<String?> Function(int episodeIndex)? urlResolver,
@@ -31,7 +30,6 @@ Future<int?> showEpisodeListDialog({
     currentIndex: currentIndex,
     videoId: videoId,
     isFullScreen: isFullScreen,
-    onEpisodeChanged: onEpisodeChanged,
     postDetail: postDetail,
     urlResolver: urlResolver,
     startInDownloadMode: startInDownloadMode,
@@ -70,7 +68,6 @@ class EpisodeListDialog extends StatefulWidget {
   final int currentIndex;
   final String videoId;
   final bool isFullScreen;
-  final Function(int) onEpisodeChanged;
   final Map? postDetail;
   final Future<String?> Function(int episodeIndex)? urlResolver;
   final bool startInDownloadMode;
@@ -85,7 +82,6 @@ class EpisodeListDialog extends StatefulWidget {
     required this.currentIndex,
     required this.videoId,
     required this.isFullScreen,
-    required this.onEpisodeChanged,
     super.key,
     this.postDetail,
     this.urlResolver,
@@ -508,12 +504,11 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
       index: index,
       rawTitle: rawTitle,
       isSelected: index == widget.currentIndex,
-      isWatched: VideoUtils.isEpisodeWatched(widget.videoId, index, null),
+      isWatched: VideoUtils.isEpisodeWatched(widget.videoId, index),
       textColor: textColor,
-      onTap: () {
-        widget.onEpisodeChanged(index);
-        Navigator.pop(context, index);
-      },
+      // 只走返回值一条通道。以前同时调 onEpisodeChanged 又 pop(index)，
+      // 调用方两边都接，导致点一集把整条换集流水线跑两遍。
+      onTap: () => Navigator.pop(context, index),
     );
   }
 }

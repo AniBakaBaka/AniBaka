@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-
 /// 对话框返回结果枚举
 enum DialogAction { confirm, cancel }
 
@@ -27,7 +26,6 @@ class SelectionOption<T> {
   });
 }
 
-
 class _DialogConstants {
   static const double borderRadius = 24.0;
   static const double actionBorderRadius = 12.0;
@@ -44,7 +42,6 @@ class _DialogConstants {
     borderRadius: BorderRadius.circular(actionBorderRadius),
   );
 }
-
 
 /// App对话框基础组件
 /// 使用Theme系统，响应式布局，正确处理滚动
@@ -248,7 +245,6 @@ class _AppInputDialogState extends State<AppInputDialog> {
   }
 }
 
-
 Widget _buildDialogActionRow(
   BuildContext context, {
   required String cancelText,
@@ -356,7 +352,6 @@ class AppInfoDialog extends StatelessWidget {
   }
 }
 
-
 /// 显示App输入对话框
 ///
 /// 返回 [InputDialogResult]，可通过 `isConfirmed` 判断是否确认
@@ -426,7 +421,6 @@ Future<void> showAppInfoDialog(
         AppInfoDialog(title: title, content: content, buttonText: buttonText),
   );
 }
-
 
 /// App选择对话框
 class AppSelectionDialog<T> extends StatelessWidget {
