@@ -14,6 +14,7 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
   bool _defaultDanmakuOff = PlaybackSettingsService.getDefaultDanmakuOff();
   bool _defaultSubtitleOff = PlaybackSettingsService.getDefaultSubtitleOff();
   bool _clearCacheOnExit = PlaybackSettingsService.getClearCacheOnExit();
+  bool _lowMemoryMode = PlaybackSettingsService.getLowMemoryMode();
   bool _enableBtDownload = PlaybackSettingsService.getEnableBtDownload();
   bool _autoMatchSource = PlaybackSettingsService.getAutoMatchSource();
   double _defaultPlaybackSpeed =
@@ -258,6 +259,16 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                 const SettingsSectionHeader('缓存管理'),
                 SettingsGroup(
                   children: [
+                    SettingsSwitchTile(
+                      title: '低内存模式',
+                      subtitle: '减少图片与播放器缓冲占用，网络较慢时可能更频繁地重新加载',
+                      value: _lowMemoryMode,
+                      icon: Icons.memory_outlined,
+                      onChanged: (value) => _apply(
+                        () => _lowMemoryMode = value,
+                        () => PlaybackSettingsService.setLowMemoryMode(value),
+                      ),
+                    ),
                     SettingsSwitchTile(
                       title: '退出自动清理缓存',
                       value: _clearCacheOnExit,

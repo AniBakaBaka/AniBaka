@@ -838,6 +838,7 @@ class PlaybackController {
       buildPlayerProperties(
         hwdecMode: preferences.value.hwdecMode,
         videoRenderer: preferences.value.videoRenderer,
+        lowMemoryMode: PlaybackSettingsService.getLowMemoryMode(),
       ),
       debugLabel: 'player',
     );

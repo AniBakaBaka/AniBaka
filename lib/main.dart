@@ -14,6 +14,7 @@ import 'package:baka/services/app_storage.dart';
 import 'package:baka/services/cache_manager.dart';
 import 'package:baka/services/dau_tracker.dart';
 import 'package:baka/services/media_session_service.dart';
+import 'package:baka/services/low_memory_mode_service.dart';
 import 'package:baka/services/playback_settings_service.dart';
 import 'package:baka/services/source_adapter_service.dart';
 import 'package:baka/services/system_proxy_service.dart';
@@ -42,6 +43,7 @@ Future<void> _bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemProxyService.initialize();
   await Instances.init();
+  LowMemoryModeService.apply(PlaybackSettingsService.getLowMemoryMode());
   await AppLogger.instance.init();
   AppLogger.instance.info('Application bootstrap started', tag: 'Bootstrap');
 

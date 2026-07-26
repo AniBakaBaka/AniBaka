@@ -16,4 +16,15 @@ void main() {
     expect(properties['correct-downscaling'], 'yes');
     expect(properties, isNot(contains('vo')));
   });
+
+  test('low memory mode reduces the bounded demuxer cache', () {
+    final normal = buildPlayerProperties();
+    final lowMemory = buildPlayerProperties(lowMemoryMode: true);
+
+    expect(normal['demuxer-max-bytes'], '16777216');
+    expect(normal['demuxer-max-back-bytes'], '4194304');
+    expect(lowMemory['demuxer-max-bytes'], '8388608');
+    expect(lowMemory['demuxer-max-back-bytes'], '2097152');
+    expect(lowMemory['cache-secs'], '5');
+  });
 }

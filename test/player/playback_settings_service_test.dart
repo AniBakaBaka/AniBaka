@@ -31,6 +31,15 @@ void main() {
     expect(Instances.sp.getKeys(), isEmpty);
   });
 
+  test('low memory mode is off by default and persists changes', () async {
+    expect(PlaybackSettingsService.getLowMemoryMode(), isFalse);
+
+    await PlaybackSettingsService.setLowMemoryMode(true);
+
+    expect(PlaybackSettingsService.getLowMemoryMode(), isTrue);
+    expect(Instances.sp.getBool('app_lowMemoryMode'), isTrue);
+  });
+
   test('persists and migrates the video renderer selection', () async {
     const previous = PlaybackPreferences();
     final next = previous.copyWith(videoRenderer: 'quality');

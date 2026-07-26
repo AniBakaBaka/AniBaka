@@ -24,6 +24,13 @@ const playerProperties = <String, String>{
       'reconnect=1,multiple_requests=1,retry_open=3,hls_wrap=0,hls_allow_cache=1,fflags=+igndts+ignidx,tls_verify=0',
 };
 
+const lowMemoryPlayerProperties = <String, String>{
+  'cache-secs': '5',
+  'demuxer-max-bytes': '8388608',
+  'demuxer-max-back-bytes': '2097152',
+  'demuxer-hysteresis-secs': '2',
+};
+
 /// Build player properties with configurable decode and render profiles.
 ///
 /// [hwdecMode] accepts 'auto', 'auto-safe', or 'no'.
@@ -32,9 +39,11 @@ const playerProperties = <String, String>{
 Map<String, String> buildPlayerProperties({
   String hwdecMode = 'auto',
   String videoRenderer = 'auto',
+  bool lowMemoryMode = false,
 }) {
   return <String, String>{
     ...playerProperties,
+    if (lowMemoryMode) ...lowMemoryPlayerProperties,
     'hwdec': hwdecMode,
     ...buildVideoRendererProperties(videoRenderer),
   };

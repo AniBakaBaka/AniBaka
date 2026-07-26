@@ -1,6 +1,7 @@
 import 'package:baka/instance.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/models/subtitle_config.dart';
+import 'package:baka/services/low_memory_mode_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 播放器设置持久化服务。
@@ -13,6 +14,7 @@ class PlaybackSettingsService {
   static const _defaultSubtitleOffKey = 'player_defaultSubtitleOff';
   static const _defaultPlaybackSpeedKey = 'player_defaultPlaybackSpeed';
   static const _clearCacheOnExitKey = 'app_clearCacheOnExit';
+  static const _lowMemoryModeKey = 'app_lowMemoryMode';
   static const _enableBtDownloadKey = 'player_enableBtDownload';
   static const _autoMatchSourceKey = 'player_autoMatchSource';
   static const _rememberLastPositionKey = 'player_rememberLastPosition';
@@ -127,6 +129,13 @@ class PlaybackSettingsService {
 
   static Future<void> setClearCacheOnExit(bool value) =>
       _prefs.setBool(_clearCacheOnExitKey, value);
+
+  static bool getLowMemoryMode() => _prefs.getBool(_lowMemoryModeKey) ?? false;
+
+  static Future<void> setLowMemoryMode(bool value) async {
+    await _prefs.setBool(_lowMemoryModeKey, value);
+    LowMemoryModeService.apply(value);
+  }
 
   static bool getAutoMatchSource() =>
       _prefs.getBool(_autoMatchSourceKey) ?? true;
