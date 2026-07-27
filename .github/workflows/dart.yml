@@ -184,9 +184,14 @@ jobs:
           set -euo pipefail
           flutter build macos --release --no-pub
 
-          app_path="build/macos/Build/Products/Release/AniBaka.app"
-          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_path/Contents/Info.plist")
-          actual_archs=$(lipo -archs "$app_path/Contents/MacOS/$executable")
+          product_name=$(sed -n 's/^[[:space:]]*PRODUCT_NAME[[:space:]]*=[[:space:]]*//p' macos/Runner/Configs/AppInfo.xcconfig | head -n 1 | tr -d '\r')
+          app_path="build/macos/Build/Products/Release/${product_name}.app"
+          executable_path="$app_path/Contents/MacOS/$product_name"
+          if [ ! -x "$executable_path" ]; then
+            echo "::error::macOS executable was not found at $executable_path."
+            exit 1
+          fi
+          actual_archs=$(lipo -archs "$executable_path")
           if [ "$actual_archs" != "$ARCHS" ]; then
             echo "::error::Expected macOS architecture $ARCHS, got $actual_archs."
             exit 1
@@ -210,7 +215,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "release-stage/baka-${version}-macos-${ASSET_ARCH}.zip"
 
           dmg_root=$(mktemp -d "$RUNNER_TEMP/baka-dmg.XXXXXX")
-          ditto "$app_path" "$dmg_root/AniBaka.app"
+          ditto "$app_path" "$dmg_root/${product_name}.app"
           ln -s /Applications "$dmg_root/Applications"
           dmg_path="release-stage/baka-${version}-macos-${ASSET_ARCH}.dmg"
           hdiutil create -quiet -volname baka -srcfolder "$dmg_root" -format UDZO -ov "$dmg_path"
