@@ -192,7 +192,7 @@ jobs:
           if [ "${{ steps.macos_signing.outputs.timestamp }}" = "true" ]; then
             options+=("--timestamp")
           fi
-          dart pub global run fastforge build "${options[@]}"
+          dart pub global run fastforge:main build "${options[@]}"
 
           app_path="build/macos/Build/Products/Release/AniBaka.app"
           find "$app_path/Contents/Frameworks" "$app_path/Contents/PlugIns" -mindepth 1 -maxdepth 1 2>/dev/null | while read -r item; do
@@ -206,7 +206,7 @@ jobs:
         run: |
           dart pub global activate fastforge "$FASTFORGE_VERSION"
           export FASTFORGE_MACOS_SKIP_BUILD=true
-          dart pub global run fastforge build -p macos -t dmg,zip
+          dart pub global run fastforge:main build -p macos -t dmg,zip
 
       - name: Sign macOS DMG
         shell: bash
@@ -300,7 +300,7 @@ jobs:
         shell: pwsh
         run: |
           dart pub global activate fastforge "$env:FASTFORGE_VERSION"
-          dart pub global run fastforge build -p windows -t exe,msix,zip --no-sign
+          dart pub global run fastforge:main build -p windows -t exe,msix,zip --no-sign
 
       - name: Sign Windows binaries
         shell: pwsh
@@ -370,7 +370,7 @@ jobs:
       - name: Build Linux packages
         run: |
           dart pub global activate fastforge "$FASTFORGE_VERSION"
-          dart pub global run fastforge build -p linux -t appimage,deb,zip
+          dart pub global run fastforge:main build -p linux -t appimage,deb,zip
 
       - name: Stage Linux artifacts
         run: |
