@@ -226,17 +226,17 @@ jobs:
             exit 1
           fi
 
-          timestamp_args=()
+          timestamp_option=
           if [ "$USE_TIMESTAMP" = "true" ]; then
-            timestamp_args+=(--timestamp)
+            timestamp_option=--timestamp
           fi
           for directory in "$app_path/Contents/Frameworks" "$app_path/Contents/PlugIns"; do
             [ -d "$directory" ] || continue
             while IFS= read -r -d '' item; do
-              codesign --force --deep --verbose --options runtime "${timestamp_args[@]}" --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$item"
+              codesign --force --deep --verbose --options runtime ${timestamp_option:+"$timestamp_option"} --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$item"
             done < <(find "$directory" -mindepth 1 -maxdepth 1 -print0)
           done
-          codesign --force --deep --verbose --options runtime "${timestamp_args[@]}" --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$app_path"
+          codesign --force --deep --verbose --options runtime ${timestamp_option:+"$timestamp_option"} --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$app_path"
           codesign --verify --deep --strict --verbose "$app_path"
 
           version=$(sed -n 's/^[[:space:]]*version:[[:space:]]*//p' pubspec.yaml | head -n 1 | tr -d '\r')
@@ -248,7 +248,7 @@ jobs:
           ln -s /Applications "$dmg_root/Applications"
           dmg_path="release-stage/baka-${version}-macos-${ASSET_ARCH}.dmg"
           hdiutil create -quiet -volname baka -srcfolder "$dmg_root" -format UDZO -ov "$dmg_path"
-          codesign --force --verbose "${timestamp_args[@]}" --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$dmg_path"
+          codesign --force --verbose ${timestamp_option:+"$timestamp_option"} --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$dmg_path"
           codesign --verify --verbose "$dmg_path"
 
       - name: Upload macOS artifacts
