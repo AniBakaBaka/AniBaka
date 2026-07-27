@@ -3,6 +3,31 @@ name: Build and Release
 on:
   workflow_dispatch:
     inputs:
+      build_android:
+        description: "Build Android packages"
+        required: true
+        type: boolean
+        default: true
+      build_ios:
+        description: "Build iOS package"
+        required: true
+        type: boolean
+        default: true
+      build_macos:
+        description: "Build macOS packages"
+        required: true
+        type: boolean
+        default: true
+      build_windows:
+        description: "Build Windows packages"
+        required: true
+        type: boolean
+        default: true
+      build_linux:
+        description: "Build Linux packages"
+        required: true
+        type: boolean
+        default: true
       release_type:
         description: "创建预发布或正式 GitHub Release"
         required: true
@@ -39,6 +64,7 @@ env:
 jobs:
   build-android:
     name: Android packages
+    if: ${{ inputs.build_android }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -101,6 +127,7 @@ jobs:
 
   build-ios:
     name: iOS package
+    if: ${{ inputs.build_ios }}
     runs-on: macos-15
     steps:
       - name: Checkout repository
@@ -137,6 +164,7 @@ jobs:
 
   build-macos:
     name: macOS ${{ matrix.asset_arch }} packages
+    if: ${{ inputs.build_macos }}
     strategy:
       fail-fast: false
       matrix:
@@ -172,10 +200,11 @@ jobs:
 
       - name: Build, sign, and package macOS app
         env:
-          ARCHS: ${{ matrix.xcode_arch }}
-          ONLY_ACTIVE_ARCH: "YES"
-          CODE_SIGNING_ALLOWED: "NO"
-          CODE_SIGNING_REQUIRED: "NO"
+          TARGET_ARCH: ${{ matrix.xcode_arch }}
+          FLUTTER_XCODE_ARCHS: ${{ matrix.xcode_arch }}
+          FLUTTER_XCODE_ONLY_ACTIVE_ARCH: "YES"
+          FLUTTER_XCODE_CODE_SIGNING_ALLOWED: "NO"
+          FLUTTER_XCODE_CODE_SIGNING_REQUIRED: "NO"
           SIGNING_IDENTITY: ${{ steps.macos_signing.outputs.identity }}
           SIGNING_KEYCHAIN: ${{ steps.macos_signing.outputs.keychain }}
           USE_TIMESTAMP: ${{ steps.macos_signing.outputs.timestamp }}
@@ -192,8 +221,8 @@ jobs:
             exit 1
           fi
           actual_archs=$(lipo -archs "$executable_path")
-          if [ "$actual_archs" != "$ARCHS" ]; then
-            echo "::error::Expected macOS architecture $ARCHS, got $actual_archs."
+          if [ "$actual_archs" != "$TARGET_ARCH" ]; then
+            echo "::error::Expected macOS architecture $TARGET_ARCH, got $actual_archs."
             exit 1
           fi
 
@@ -240,6 +269,7 @@ jobs:
 
   build-windows:
     name: Windows x64 packages
+    if: ${{ inputs.build_windows }}
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -331,6 +361,7 @@ jobs:
 
   build-linux:
     name: Linux x64 packages
+    if: ${{ inputs.build_linux }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -403,7 +434,16 @@ jobs:
       - build-macos
       - build-windows
       - build-linux
-    if: always() && !cancelled()
+    if: >-
+      ${{
+        !cancelled() &&
+        (inputs.build_android || inputs.build_ios || inputs.build_macos || inputs.build_windows || inputs.build_linux) &&
+        (!inputs.build_android || needs.build-android.result == 'success') &&
+        (!inputs.build_ios || needs.build-ios.result == 'success') &&
+        (!inputs.build_macos || needs.build-macos.result == 'success') &&
+        (!inputs.build_windows || needs.build-windows.result == 'success') &&
+        (!inputs.build_linux || needs.build-linux.result == 'success')
+      }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -435,7 +475,8 @@ jobs:
         run: bash .github/scripts/gpg-sign-artifacts.sh
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        if: ${{ inputs.build_android && inputs.build_ios && inputs.build_macos && inputs.build_windows && inputs.build_linux }}
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.release_meta.outputs.version }}
           name: ${{ inputs.release_name || steps.release_meta.outputs.version }}
@@ -443,5 +484,13 @@ jobs:
           generate_release_notes: ${{ inputs.release_notes == '' }}
           draft: ${{ inputs.draft_release }}
           prerelease: ${{ steps.release_meta.outputs.prerelease }}
+          fail_on_unmatched_files: true
+          files: release-assets/*
+
+      - name: Add selected assets to existing release
+        if: ${{ !(inputs.build_android && inputs.build_ios && inputs.build_macos && inputs.build_windows && inputs.build_linux) }}
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.release_meta.outputs.version }}
           fail_on_unmatched_files: true
           files: release-assets/*
