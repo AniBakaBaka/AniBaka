@@ -41,6 +41,13 @@ certificate_password: '$certificatePassword'
 Set-Content -Encoding utf8 -NoNewline -LiteralPath $configPath -Value $config
 
 $fingerprint = $certificate.GetCertHashString('SHA256')
+$publicCertificatePath = Join-Path $env:RUNNER_TEMP 'anibaka-windows-signing.cer'
+[IO.File]::WriteAllBytes(
+  $publicCertificatePath,
+  $certificate.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+)
+
 "certificate_path=$certificatePath" >> $env:GITHUB_OUTPUT
+"public_certificate_path=$publicCertificatePath" >> $env:GITHUB_OUTPUT
 "fingerprint=$fingerprint" >> $env:GITHUB_OUTPUT
 "Windows fixed signing: enabled (`$fingerprint`, `$($certificate.Subject)`)." >> $env:GITHUB_STEP_SUMMARY

@@ -72,7 +72,8 @@ dependencies:
   flutter_volume_controller: ^1.3.2
   dlna_dart: ^0.1.0
   saver_gallery: ^4.1.2
-  device_info_plus: ^12.4.0
+  # 12.4.0 calls an iOS 26 SDK selector that Xcode 16 cannot compile.
+  device_info_plus: 12.3.0
   back_button_interceptor: ^8.0.4
   intl: ^0.20.3
   file_picker: ^11.0.2

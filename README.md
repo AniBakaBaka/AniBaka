@@ -57,6 +57,10 @@ Baka 是使用 Flutter 开发的多端媒体客户端，通过规则驱动的视
 
 iOS 构建产物未签名，需要自行签名后安装。不同系统的发行包和签名状态以具体 Release 说明为准。
 
+Windows 发行产物使用 [SignPath.io](https://signpath.io/) 完成代码签名，证书由 [SignPath Foundation](https://signpath.org/) 提供。
+
+Free code signing on Windows is provided by [SignPath.io](https://signpath.io/), with a certificate issued by the [SignPath Foundation](https://signpath.org/).
+
 ## 从源码运行
 
 ### 环境要求

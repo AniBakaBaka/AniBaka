@@ -49,11 +49,7 @@ case "$identity_name" in
   "Developer ID Application:"*) use_timestamp=true ;;
 esac
 
-sed -i.bak \
-  "s/CODE_SIGN_IDENTITY = \"-\";/CODE_SIGN_IDENTITY = \"$identity_hash\";/g" \
-  macos/Runner.xcodeproj/project.pbxproj
-
 echo "identity=$identity_hash" >> "$GITHUB_OUTPUT"
 echo "keychain=$keychain_path" >> "$GITHUB_OUTPUT"
 echo "timestamp=$use_timestamp" >> "$GITHUB_OUTPUT"
-echo "macOS fixed signing: enabled (\`$identity_hash\`, \`$identity_name\`)." >> "$GITHUB_STEP_SUMMARY"
+echo "macOS signing identity imported (\`$identity_hash\`, \`$identity_name\`)." >> "$GITHUB_STEP_SUMMARY"
