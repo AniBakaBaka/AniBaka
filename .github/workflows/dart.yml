@@ -370,7 +370,7 @@ jobs:
       - name: Build Linux packages
         run: |
           dart pub global activate fastforge "$FASTFORGE_VERSION"
-          dart pub global run fastforge:main build -p linux -t appimage,deb,zip
+          dart pub global run fastforge:main package --platform=linux --targets=appimage,deb,zip
 
       - name: Stage Linux artifacts
         run: |
