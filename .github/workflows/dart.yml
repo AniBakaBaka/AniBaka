@@ -12,15 +12,15 @@ on:
           - prerelease
           - release
       release_name:
-        description: "可选的 GitHub Release 标题；留空时使用标签名"
+        description: "可选的 Release 标题，留空时使用完整版本号"
         required: false
         type: string
       release_notes:
-        description: "可选的 GitHub Release 正文；留空时自动生成更新记录"
+        description: "可选的 Release 正文，留空时自动生成"
         required: false
         type: string
       draft_release:
-        description: "先创建草稿，以便在 GitHub 中继续编辑后再发布"
+        description: "创建草稿 Release"
         required: true
         type: boolean
         default: false
@@ -37,9 +37,6 @@ env:
   ANDROID_SIGNING_CERT_SHA256: FF6D2DCA832EA3D9B20C20F21B33D124D8C239B2EDFAC382DB77740D23935B11
 
 jobs:
-  # ==========================================
-  # Android Platform Build
-  # ==========================================
   build-android:
     name: Android packages
     runs-on: ubuntu-latest
@@ -47,19 +44,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Flutter Environment
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
           flutter-version-file: .fvmrc
+          channel: stable
           cache: true
           pub-cache: true
-
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
-          sudo apt-get clean
-          df -h /
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -72,13 +63,10 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android SDK packages
-        run: |
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager "platforms;android-36" "build-tools;34.0.0"
+        run: sdkmanager "platforms;android-36" "build-tools;34.0.0"
 
-      - name: Configure Android signing key
+      - name: Configure Android signing
         id: android_signing
-        shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
@@ -86,21 +74,23 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: bash .github/scripts/setup-android-signing.sh
 
-      - name: Prepare project
+      - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Build Android packages
+      - name: Build APKs
         run: |
-          flutter build apk --release --target-platform android-arm64 --split-per-abi
-          flutter build apk --release
+          flutter build apk --release --no-pub --split-per-abi --target-platform android-arm,android-arm64
+          flutter build apk --release --no-pub --target-platform android-arm,android-arm64
 
       - name: Stage Android artifacts
         run: |
-          version=$(sed -n 's/^\s*version:\s*\([^+]*\)+.*/\1/p' pubspec.yaml)
+          set -euo pipefail
+          version=$(sed -n 's/^[[:space:]]*version:[[:space:]]*//p' pubspec.yaml | head -n 1 | tr -d '\r')
           mkdir -p release-stage
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "release-stage/AniBaka-v${version}-android-arm64-v8a.apk"
-          cp build/app/outputs/flutter-apk/app-release.apk "release-stage/AniBaka-v${version}-android-universal.apk"
-          echo "sha256=${{ steps.android_signing.outputs.fingerprint }}" > release-stage/signing-metadata.txt
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "release-stage/baka-${version}-android-armv7.apk"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "release-stage/baka-${version}-android-arm64-v8a.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "release-stage/baka-${version}-android-universal.apk"
+          echo "sha256=${{ steps.android_signing.outputs.fingerprint }}" > "release-stage/baka-${version}-android-signing-metadata.txt"
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
@@ -109,175 +99,157 @@ jobs:
           path: release-stage/*
           retention-days: 1
 
-  # ==========================================
-  # iOS Platform Build
-  # ==========================================
   build-ios:
-    name: iOS packages
-    runs-on: macos-latest
+    name: iOS package
+    runs-on: macos-15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Flutter Environment
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
           flutter-version-file: .fvmrc
+          channel: stable
           cache: true
           pub-cache: true
 
-      - name: Prepare project
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Build unsigned iOS app
+        run: flutter build ios --release --no-codesign --no-pub
+
+      - name: Package unsigned IPA
         run: |
-          flutter pub get
-          if [ -f ios/Podfile ]; then
-            cd ios && pod install --repo-update && cd ..
-          fi
+          set -euo pipefail
+          version=$(sed -n 's/^[[:space:]]*version:[[:space:]]*//p' pubspec.yaml | head -n 1 | tr -d '\r')
+          mkdir -p build/ios/unsigned-ipa/Payload release-stage
+          ditto build/ios/iphoneos/Runner.app build/ios/unsigned-ipa/Payload/Runner.app
+          ditto -c -k --sequesterRsrc --keepParent build/ios/unsigned-ipa/Payload "release-stage/baka-${version}-ios-unsigned.ipa"
 
-      - name: Build iOS unsigned bundle
-        run: flutter build ios --release --no-codesign
-
-      - name: Stage iOS artifacts
-        run: |
-          version=$(sed -n 's/^\s*version:\s*\([^+]*\)+.*/\1/p' pubspec.yaml)
-          mkdir -p release-stage
-          tar -czf "release-stage/AniBaka-v${version}-ios-unsigned.tar.gz" -C build/ios/iphoneos Runner.app
-
-      - name: Upload iOS artifacts
+      - name: Upload iOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-ios
           path: release-stage/*
           retention-days: 1
 
-  # ==========================================
-  # macOS Platform Build
-  # ==========================================
   build-macos:
-    name: macOS packages
-    runs-on: macos-14
+    name: macOS ${{ matrix.asset_arch }} packages
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            xcode_arch: x86_64
+            asset_arch: x86_64
+          - runner: macos-15
+            xcode_arch: arm64
+            asset_arch: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Flutter Environment
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
           flutter-version-file: .fvmrc
+          channel: stable
           cache: true
           pub-cache: true
 
-      - name: Prepare project
-        run: |
-          flutter config --enable-macos-desktop
-          flutter pub get
+      - name: Resolve dependencies
+        run: flutter pub get
 
-      - name: Setup macOS signing identity
+      - name: Configure macOS signing
         id: macos_signing
-        shell: bash
         env:
           MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
         run: bash .github/scripts/setup-macos-signing.sh
 
-      - name: Build and sign macOS app
-        shell: bash
+      - name: Build, sign, and package macOS app
         env:
+          ARCHS: ${{ matrix.xcode_arch }}
+          ONLY_ACTIVE_ARCH: "YES"
           SIGNING_IDENTITY: ${{ steps.macos_signing.outputs.identity }}
           SIGNING_KEYCHAIN: ${{ steps.macos_signing.outputs.keychain }}
+          USE_TIMESTAMP: ${{ steps.macos_signing.outputs.timestamp }}
+          ASSET_ARCH: ${{ matrix.asset_arch }}
         run: |
-          dart pub global activate fastforge "$FASTFORGE_VERSION"
-          options=("-p" "macos" "-t" "app" "-i" "$SIGNING_IDENTITY")
-          if [ "${{ steps.macos_signing.outputs.timestamp }}" = "true" ]; then
-            options+=("--timestamp")
-          fi
-          dart pub global run fastforge:main build "${options[@]}"
+          set -euo pipefail
+          flutter build macos --release --no-pub
 
           app_path="build/macos/Build/Products/Release/AniBaka.app"
-          find "$app_path/Contents/Frameworks" "$app_path/Contents/PlugIns" -mindepth 1 -maxdepth 1 2>/dev/null | while read -r item; do
-            codesign --force --verbose --deep --options runtime --timestamp --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$item"
-          done
-          codesign --force --verbose --deep --options runtime --timestamp --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$app_path"
-          codesign --verify --verbose --deep --strict "$app_path"
-
-      - name: Build macOS packages (DMG, ZIP)
-        shell: bash
-        run: |
-          dart pub global activate fastforge "$FASTFORGE_VERSION"
-          export FASTFORGE_MACOS_SKIP_BUILD=true
-          dart pub global run fastforge:main build -p macos -t dmg,zip
-
-      - name: Sign macOS DMG
-        shell: bash
-        env:
-          SIGNING_IDENTITY: ${{ steps.macos_signing.outputs.identity }}
-          SIGNING_KEYCHAIN: ${{ steps.macos_signing.outputs.keychain }}
-        run: |
-          for dmg_file in build/fastforge/macos/*.dmg; do
-            [ -f "$dmg_file" ] || continue
-            codesign --force --verbose --options runtime --timestamp --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$dmg_file"
-            codesign --verify --verbose "$dmg_file"
-          done
-
-      - name: Clean up disposable keychain
-        if: always()
-        shell: bash
-        run: |
-          keychain_path="${{ steps.macos_signing.outputs.keychain }}"
-          if [ -n "$keychain_path" ] && [ -f "$keychain_path" ]; then
-            security delete-keychain "$keychain_path" || true
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_path/Contents/Info.plist")
+          actual_archs=$(lipo -archs "$app_path/Contents/MacOS/$executable")
+          if [ "$actual_archs" != "$ARCHS" ]; then
+            echo "::error::Expected macOS architecture $ARCHS, got $actual_archs."
+            exit 1
           fi
 
-      - name: Stage macOS artifacts
-        shell: bash
-        run: |
-          version=$(sed -n 's/^\s*version:\s*\([^+]*\)+.*/\1/p' pubspec.yaml)
-          mkdir -p release-stage
-          for artifact in build/fastforge/macos/*; do
-            [ -f "$artifact" ] || continue
-            ext="${artifact##*.}"
-            cp "$artifact" "release-stage/AniBaka-v${version}-macos-universal.${ext}"
+          timestamp_args=()
+          if [ "$USE_TIMESTAMP" = "true" ]; then
+            timestamp_args+=(--timestamp)
+          fi
+          for directory in "$app_path/Contents/Frameworks" "$app_path/Contents/PlugIns"; do
+            [ -d "$directory" ] || continue
+            while IFS= read -r -d '' item; do
+              codesign --force --deep --verbose --options runtime "${timestamp_args[@]}" --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$item"
+            done < <(find "$directory" -mindepth 1 -maxdepth 1 -print0)
           done
+          codesign --force --deep --verbose --options runtime "${timestamp_args[@]}" --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$app_path"
+          codesign --verify --deep --strict --verbose "$app_path"
+
+          version=$(sed -n 's/^[[:space:]]*version:[[:space:]]*//p' pubspec.yaml | head -n 1 | tr -d '\r')
+          mkdir -p release-stage
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" "release-stage/baka-${version}-macos-${ASSET_ARCH}.zip"
+
+          dmg_root=$(mktemp -d "$RUNNER_TEMP/baka-dmg.XXXXXX")
+          ditto "$app_path" "$dmg_root/AniBaka.app"
+          ln -s /Applications "$dmg_root/Applications"
+          dmg_path="release-stage/baka-${version}-macos-${ASSET_ARCH}.dmg"
+          hdiutil create -quiet -volname baka -srcfolder "$dmg_root" -format UDZO -ov "$dmg_path"
+          codesign --force --verbose "${timestamp_args[@]}" --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$dmg_path"
+          codesign --verify --verbose "$dmg_path"
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-macos
+          name: release-macos-${{ matrix.asset_arch }}
           path: release-stage/*
           retention-days: 1
 
-  # ==========================================
-  # Windows Platform Build
-  # ==========================================
+      - name: Clean up signing keychain
+        if: always()
+        env:
+          SIGNING_KEYCHAIN: ${{ steps.macos_signing.outputs.keychain }}
+        run: |
+          if [ -n "$SIGNING_KEYCHAIN" ] && [ -f "$SIGNING_KEYCHAIN" ]; then
+            security delete-keychain "$SIGNING_KEYCHAIN" || true
+          fi
+
   build-windows:
-    name: Windows packages
+    name: Windows x64 packages
     runs-on: windows-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Flutter Environment
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
           flutter-version-file: .fvmrc
+          channel: stable
           cache: true
           pub-cache: true
 
-      - name: Free disk space
-        shell: pwsh
-        run: |
-          Remove-Item -Recurse -Force 'C:\Program Files\dotnet' -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force 'C:\hostedtoolcache\windows\CodeQL' -ErrorAction SilentlyContinue
+      - name: Resolve dependencies
+        run: flutter pub get
 
-      - name: Prepare project
-        shell: pwsh
-        run: |
-          flutter config --enable-windows-desktop
-          flutter pub get
-
-      - name: Configure Windows signing certificate
+      - name: Configure Windows signing
         id: windows_signing
         shell: pwsh
         env:
@@ -285,52 +257,66 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: pwsh .github/scripts/setup-windows-signing.ps1
 
-      - name: Sync MSIX version from pubspec
+      - name: Sync MSIX version
         shell: pwsh
         run: |
           $versionLine = Select-String -Path pubspec.yaml -Pattern '^\s*version:\s*(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?\s*$' | Select-Object -First 1
           if ($null -eq $versionLine) { throw 'pubspec.yaml version format error' }
-          $parts = @([int]$versionLine.Matches[0].Groups[1].Value, [int]$versionLine.Matches[0].Groups[2].Value, [int]$versionLine.Matches[0].Groups[3].Value, if ($versionLine.Matches[0].Groups[4].Success) { [int]$versionLine.Matches[0].Groups[4].Value } else { [int]$env:GITHUB_RUN_NUMBER })
-          $msixVersion = $parts -join '.'
+          $match = $versionLine.Matches[0]
+          $buildNumber = if ($match.Groups[4].Success) { [int]$match.Groups[4].Value } else { [int]$env:GITHUB_RUN_NUMBER }
+          $parts = @(
+            [int]$match.Groups[1].Value
+            [int]$match.Groups[2].Value
+            [int]$match.Groups[3].Value
+            $buildNumber
+          )
+          foreach ($part in $parts) {
+            if ($part -lt 0 -or $part -gt 65535) { throw "MSIX version segment out of range: $part" }
+          }
           $configPath = 'windows/packaging/msix/make_config.yaml'
-          $config = (Get-Content -Raw -Encoding utf8 -LiteralPath $configPath) -replace '(?m)^msix_version:\s*\S+\s*$', "msix_version: $msixVersion"
+          $config = (Get-Content -Raw -Encoding utf8 -LiteralPath $configPath) -replace '(?m)^msix_version:\s*\S+\s*$', "msix_version: $($parts -join '.')"
           Set-Content -Encoding utf8 -NoNewline -LiteralPath $configPath -Value $config
 
-      - name: Build Windows packages
+      - name: Build Windows packages once
         shell: pwsh
         run: |
           dart pub global activate fastforge "$env:FASTFORGE_VERSION"
-          dart pub global run fastforge:main build -p windows -t exe,msix,zip --no-sign
+          dart pub global run fastforge:main package --platform=windows --targets=exe,msix --skip-clean --flutter-build-args=no-pub
 
-      - name: Sign Windows binaries
+      - name: Sign and stage Windows artifacts
         shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
           $certPath = '${{ steps.windows_signing.outputs.certificate_path }}'
-          $certPassword = $env:WINDOWS_CERTIFICATE_PASSWORD
-          $signtool = Get-ChildItem -Path 'C:\Program Files (x86)\Windows Kits\10\bin' -Filter 'signtool.exe' -Recurse | Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1 -ExpandProperty FullName
-          
-          $filesToSign = @(
-            'build/windows/x64/runner/Release/anibaka.exe'
-            'build/windows/x64/runner/Release/*.dll'
-            'build/fastforge/windows/*.exe'
-          ) | ForEach-Object { Get-ChildItem $_ -ErrorAction SilentlyContinue } | Select-Object -ExpandProperty FullName -Unique
+          $signtool = Get-ChildItem -Path 'C:\Program Files (x86)\Windows Kits\10\bin' -Filter signtool.exe -Recurse |
+            Where-Object { $_.FullName -match '\\x64\\' } |
+            Select-Object -First 1 -ExpandProperty FullName
+          if ([string]::IsNullOrWhiteSpace($signtool)) { throw 'signtool.exe was not found' }
 
-          foreach ($file in $filesToSign) {
-            & $signtool sign /f $certPath /p $certPassword /tr http://timestamp.digicert.com /td sha256 /fd sha256 $file
+          $buildFiles = Get-ChildItem 'build/windows/x64/runner/Release' -Recurse -File |
+            Where-Object { $_.Extension -in '.exe', '.dll' }
+          $packageFiles = Get-ChildItem dist -Recurse -File |
+            Where-Object { $_.Extension -in '.exe', '.msix' }
+          foreach ($file in @($buildFiles) + @($packageFiles)) {
+            & $signtool sign /f $certPath /p $env:WINDOWS_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td sha256 /fd sha256 $file.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Failed to sign $($file.FullName)" }
           }
 
-      - name: Stage Windows artifacts
-        shell: pwsh
-        run: |
-          $version = (Select-String -Path pubspec.yaml -Pattern '^\s*version:\s*([^+]+)').Matches.Groups[1].Value
-          mkdir release-stage -ErrorAction SilentlyContinue
-          Get-ChildItem 'build/fastforge/windows/*' | ForEach-Object {
-            $ext = $_.Extension
-            Copy-Item $_.FullName "release-stage/AniBaka-v${version}-windows-x64${ext}"
+          $version = (Select-String -Path pubspec.yaml -Pattern '^\s*version:\s*(\S+)\s*$').Matches.Groups[1].Value
+          New-Item -ItemType Directory -Path release-stage -Force | Out-Null
+          foreach ($file in $packageFiles) {
+            $target = "release-stage/baka-${version}-windows-x64$($file.Extension.ToLowerInvariant())"
+            if (Test-Path -LiteralPath $target) { throw "Duplicate Windows package extension: $($file.Extension)" }
+            Copy-Item -LiteralPath $file.FullName -Destination $target
           }
-          $certPath = '${{ steps.windows_signing.outputs.certificate_path }}'
+          Compress-Archive -Path 'build/windows/x64/runner/Release/*' -DestinationPath "release-stage/baka-${version}-windows-x64.zip" -CompressionLevel Optimal
+
           $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($certPath, $env:WINDOWS_CERTIFICATE_PASSWORD)
-          [IO.File]::WriteAllBytes("release-stage/AniBaka-v${version}-windows-certificate.cer", $cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+          [IO.File]::WriteAllBytes(
+            "release-stage/baka-${version}-windows-certificate.cer",
+            $cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+          )
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -339,54 +325,61 @@ jobs:
           path: release-stage/*
           retention-days: 1
 
-  # ==========================================
-  # Linux Platform Build
-  # ==========================================
   build-linux:
-    name: Linux packages
+    name: Linux x64 packages
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Flutter Environment
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
           flutter-version-file: .fvmrc
+          channel: stable
           cache: true
           pub-cache: true
 
-      - name: Install Linux build dependencies
+      - name: Install Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libmpv-dev appstream
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libasound2-dev libmpv-dev mpv appstream
+          curl --fail --location --retry 3 \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage \
+            --output "$RUNNER_TEMP/appimagetool"
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          sudo install "$RUNNER_TEMP/appimagetool" /usr/local/bin/appimagetool
 
-      - name: Prepare project
-        run: |
-          flutter config --enable-linux-desktop
-          flutter pub get
+      - name: Resolve dependencies
+        run: flutter pub get
 
-      - name: Build Linux packages
+      - name: Build Linux packages once
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
           dart pub global activate fastforge "$FASTFORGE_VERSION"
-          dart pub global run fastforge:main package --platform=linux --targets=appimage,deb,zip
+          dart pub global run fastforge:main package --platform=linux --targets=appimage,deb,zip --skip-clean --flutter-build-args=no-pub
 
       - name: Stage Linux artifacts
         run: |
-          version=$(sed -n 's/^\s*version:\s*\([^+]*\)+.*/\1/p' pubspec.yaml)
+          set -euo pipefail
+          version=$(sed -n 's/^[[:space:]]*version:[[:space:]]*//p' pubspec.yaml | head -n 1 | tr -d '\r')
           mkdir -p release-stage
-          for artifact in build/fastforge/linux/*; do
-            [ -f "$artifact" ] || continue
-            filename=$(basename "$artifact")
-            case "$filename" in
-              *.AppImage) target="release-stage/AniBaka-v${version}-linux-x64.AppImage" ;;
-              *.deb) target="release-stage/AniBaka-v${version}-linux-amd64.deb" ;;
-              *.zip) target="release-stage/AniBaka-v${version}-linux-x64.zip" ;;
-              *) target="release-stage/AniBaka-v${version}-linux-${filename}" ;;
+          count=0
+          while IFS= read -r -d '' artifact; do
+            case "$artifact" in
+              *.AppImage) target="release-stage/baka-${version}-linux-x64.AppImage" ;;
+              *.deb) target="release-stage/baka-${version}-linux-amd64.deb" ;;
+              *.zip) target="release-stage/baka-${version}-linux-x64.zip" ;;
+              *) continue ;;
             esac
             cp "$artifact" "$target"
-          done
+            count=$((count + 1))
+          done < <(find dist -type f -print0)
+          if [ "$count" -ne 3 ]; then
+            echo "::error::Expected 3 Linux packages, staged $count."
+            exit 1
+          fi
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
@@ -395,12 +388,11 @@ jobs:
           path: release-stage/*
           retention-days: 1
 
-  # ==========================================
-  # GitHub Release & GPG Signing
-  # ==========================================
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs:
       - build-android
       - build-ios
@@ -415,45 +407,25 @@ jobs:
       - name: Determine release metadata
         id: release_meta
         run: |
-          version=$(sed -n 's/^\s*version:\s*\([^+]*\)+.*/\1/p' pubspec.yaml)
-          tag="v${version}"
-          is_prerelease=false
+          version=$(sed -n 's/^[[:space:]]*version:[[:space:]]*//p' pubspec.yaml | head -n 1 | tr -d '\r')
+          prerelease=false
           if [ "${{ inputs.release_type }}" = "prerelease" ]; then
-            is_prerelease=true
+            prerelease=true
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$is_prerelease" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
-      - name: Download successful package artifacts
+      - name: Download package artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: release-*
-          path: downloaded-artifacts
-
-      - name: Prepare unique release asset names
-        run: |
-          mkdir -p release-assets
-          count=0
-          for artifact_dir in downloaded-artifacts/release-*; do
-            [ -d "$artifact_dir" ] || continue
-            artifact_name=$(basename "$artifact_dir")
-            artifact_name=${artifact_name#release-}
-            while IFS= read -r -d '' file; do
-              cp "$file" "release-assets/${artifact_name}-$(basename "$file")"
-              count=$((count + 1))
-            done < <(find "$artifact_dir" -type f -print0)
-          done
-          if [ "$count" -eq 0 ]; then
-            echo "No package was built successfully; GitHub Release was not created."
-            exit 1
-          fi
-          ls -lah release-assets
+          path: release-assets
+          merge-multiple: true
 
       - name: Sign release artifacts with GPG
         id: release_signing
-        shell: bash
         env:
+          RELEASE_BASENAME: baka-${{ steps.release_meta.outputs.version }}-release
           RELEASE_GPG_PRIVATE_KEY_BASE64: ${{ secrets.RELEASE_GPG_PRIVATE_KEY_BASE64 }}
           RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
         run: bash .github/scripts/gpg-sign-artifacts.sh
@@ -461,8 +433,8 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.release_meta.outputs.tag }}
-          name: ${{ inputs.release_name || steps.release_meta.outputs.tag }}
+          tag_name: ${{ steps.release_meta.outputs.version }}
+          name: ${{ inputs.release_name || steps.release_meta.outputs.version }}
           body: ${{ inputs.release_notes }}
           generate_release_notes: ${{ inputs.release_notes == '' }}
           draft: ${{ inputs.draft_release }}

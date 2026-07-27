@@ -37,23 +37,6 @@ if (flutterVersionName == null) {
     flutterVersionName = '1.0'
 }
 
-// Keep packaged native libraries aligned with Flutter's --target-platform.
-// CI builds one v7 APK, one v8 APK, and one APK containing both ARM ABIs.
-def flutterAbiByTargetPlatform = [
-    'android-arm'  : 'armeabi-v7a',
-    'android-arm64': 'arm64-v8a',
-]
-def requestedFlutterPlatforms = (
-    project.findProperty('target-platform') ?: 'android-arm,android-arm64'
-).toString().split(',')
-def requestedFlutterAbis = requestedFlutterPlatforms
-    .collect { flutterAbiByTargetPlatform[it.trim()] }
-    .findAll { it != null }
-    .unique()
-if (requestedFlutterAbis.isEmpty()) {
-    requestedFlutterAbis = ['armeabi-v7a', 'arm64-v8a']
-}
-
 android {
     namespace "ani.baka"
     compileSdkVersion 36
@@ -94,20 +77,12 @@ android {
 
     buildTypes {
         release {
-            ndk {
-                abiFilters.clear()
-                abiFilters.addAll(requestedFlutterAbis)
-            }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             // Keep CI buildable without secrets, but use the same release key
             // whenever android/key.properties has been restored.
             signingConfig releaseSigningConfigured ? signingConfigs.release : signingConfigs.debug
         }
         debug {
-            ndk {
-                abiFilters.clear()
-                abiFilters.addAll(requestedFlutterAbis)
-            }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             signingConfig signingConfigs.debug
         }

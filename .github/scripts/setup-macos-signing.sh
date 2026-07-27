@@ -24,7 +24,8 @@ security set-key-partition-list \
   -S apple-tool:,apple: \
   -s \
   -k "$keychain_password" \
-  "$keychain_path"
+  "$keychain_path" \
+  >/dev/null
 
 existing_keychains=()
 while IFS= read -r existing_keychain; do
@@ -33,16 +34,7 @@ while IFS= read -r existing_keychain; do
 done < <(security list-keychains -d user)
 security list-keychains -d user -s "$keychain_path" "${existing_keychains[@]}"
 
-identity_line=$(security find-identity -v -p codesigning "$keychain_path" | awk '/"/ { print; exit }')
-if [ -z "$identity_line" ]; then
-  public_certificate_path="$RUNNER_TEMP/anibaka-macos-signing.pem"
-  security find-certificate -a -p "$keychain_path" > "$public_certificate_path"
-  security add-trusted-cert \
-    -r trustRoot \
-    -k "$keychain_path" \
-    "$public_certificate_path"
-  identity_line=$(security find-identity -v -p codesigning "$keychain_path" | awk '/"/ { print; exit }')
-fi
+identity_line=$(security find-identity -p codesigning "$keychain_path" | awk '/"/ { print; exit }')
 
 identity_hash=$(printf '%s\n' "$identity_line" | awk '{ print $2 }')
 identity_name=$(printf '%s\n' "$identity_line" | sed -E 's/^[^"]*"([^"]+)".*/\1/')

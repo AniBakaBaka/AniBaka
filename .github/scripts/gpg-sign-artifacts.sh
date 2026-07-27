@@ -21,17 +21,19 @@ if [ -z "$signing_fingerprint" ]; then
   exit 1
 fi
 
+release_basename=${RELEASE_BASENAME:-baka-release}
+
 gpg \
   --batch \
   --armor \
   --local-user "$signing_fingerprint" \
   --export "$signing_fingerprint" \
-  > release-assets/AniBaka-Release-Public-Key.asc
+  > "release-assets/${release_basename}-public-key.asc"
 
 signed_count=0
 while IFS= read -r -d '' file; do
   case "$(basename "$file")" in
-    ios-*) continue ;;
+    *-ios-*) continue ;;
   esac
   gpg \
     --batch \
