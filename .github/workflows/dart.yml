@@ -44,8 +44,16 @@ jobs:
     name: Android packages
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Set up Flutter Environment
-        uses: ./.github/actions/setup-flutter-env
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: .fvmrc
+          cache: true
+          pub-cache: true
 
       - name: Free disk space
         run: |
@@ -108,8 +116,16 @@ jobs:
     name: iOS packages
     runs-on: macos-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Set up Flutter Environment
-        uses: ./.github/actions/setup-flutter-env
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: .fvmrc
+          cache: true
+          pub-cache: true
 
       - name: Prepare project
         run: |
@@ -141,8 +157,16 @@ jobs:
     name: macOS packages
     runs-on: macos-14
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Set up Flutter Environment
-        uses: ./.github/actions/setup-flutter-env
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: .fvmrc
+          cache: true
+          pub-cache: true
 
       - name: Prepare project
         run: |
@@ -230,8 +254,16 @@ jobs:
     name: Windows packages
     runs-on: windows-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Set up Flutter Environment
-        uses: ./.github/actions/setup-flutter-env
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: .fvmrc
+          cache: true
+          pub-cache: true
 
       - name: Free disk space
         shell: pwsh
@@ -314,8 +346,16 @@ jobs:
     name: Linux packages
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Set up Flutter Environment
-        uses: ./.github/actions/setup-flutter-env
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: .fvmrc
+          cache: true
+          pub-cache: true
 
       - name: Install Linux build dependencies
         run: |
@@ -369,8 +409,8 @@ jobs:
       - build-linux
     if: always() && !cancelled()
     steps:
-      - name: Set up Flutter Environment
-        uses: ./.github/actions/setup-flutter-env
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Determine release metadata
         id: release_meta
