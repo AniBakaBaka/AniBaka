@@ -205,40 +205,81 @@ void main() {
     },
   );
 
-  test('reduces commands, tracks, rate, subtitle and Anime4K state', () async {
-    final backend = FakePlaybackBackend();
+  test(
+    'reduces commands, tracks, rate, subtitle and enhancement state',
+    () async {
+      final backend = FakePlaybackBackend();
+      final controller = PlaybackController(backend: backend);
+      await controller.initialize();
+
+      await controller.play();
+      expect(backend.isPlaying, isTrue);
+      controller.togglePlayback();
+      await Future<void>.delayed(Duration.zero);
+      expect(backend.isPlaying, isFalse);
+
+      await controller.setRate(2.5);
+      expect(controller.core.value.playbackRate, 2.5);
+      expect(backend.lastRate, 2.5);
+      await controller.setRate(0);
+      expect(backend.lastRate, 1.0);
+
+      const subtitle = SubtitleTrack('zh', '简体中文', 'zh');
+      backend.emitTracks(const Tracks(subtitle: [subtitle]));
+      expect(controller.core.value.hasSubtitleTracks, isTrue);
+      await controller.setSubtitleTrack(subtitle);
+      expect(backend.lastSubtitleTrack, subtitle);
+
+      await controller.updatePreferences(
+        controller.preferences.value.copyWith(
+          lastVideoEnhancementMode: VideoEnhancementMode.medium,
+        ),
+        persist: false,
+      );
+      expect(backend.nativeProperties['glsl-shaders'], isNull);
+      await controller.toggleSubtitle();
+      expect(backend.nativeProperties['sub-visibility'], 'no');
+
+      final completion = expectLater(controller.completed, emits(null));
+      backend.emitCompleted();
+      await completion;
+      await controller.dispose();
+    },
+  );
+
+  test('combines current media details with playback configuration', () async {
+    final backend = FakePlaybackBackend()
+      ..technicalInfo = const PlaybackTechnicalInfo(
+        width: 1920,
+        height: 1080,
+        framesPerSecond: 23.976,
+        videoCodec: 'h264',
+        videoOutput: 'libmpv',
+        hardwareDecoder: 'd3d11va',
+      );
     final controller = PlaybackController(backend: backend);
     await controller.initialize();
-
-    await controller.play();
-    expect(backend.isPlaying, isTrue);
-    controller.togglePlayback();
-    await Future<void>.delayed(Duration.zero);
-    expect(backend.isPlaying, isFalse);
-
-    await controller.setRate(2.5);
-    expect(controller.core.value.playbackRate, 2.5);
-    expect(backend.lastRate, 2.5);
-    await controller.setRate(0);
-    expect(backend.lastRate, 1.0);
-
-    const subtitle = SubtitleTrack('zh', '简体中文', 'zh');
-    backend.emitTracks(const Tracks(subtitle: [subtitle]));
-    expect(controller.core.value.hasSubtitleTracks, isTrue);
-    await controller.setSubtitleTrack(subtitle);
-    expect(backend.lastSubtitleTrack, subtitle);
-
-    await controller.updatePreferences(
-      controller.preferences.value.copyWith(anime4KLevel: 'high'),
-      persist: false,
+    controller.preferences.value = controller.preferences.value.copyWith(
+      videoRenderer: 'quality',
+      hwdecMode: 'auto-safe',
+      videoEnhancementMode: VideoEnhancementMode.medium,
     );
-    expect(backend.nativeProperties['glsl-shaders'], '');
-    await controller.toggleSubtitle();
-    expect(backend.nativeProperties['sub-visibility'], 'no');
+    controller.enhancement.value = const VideoEnhancementState(
+      requestedMode: VideoEnhancementMode.medium,
+      appliedPipeline: VideoEnhancementPipeline.medium,
+    );
 
-    final completion = expectLater(controller.completed, emits(null));
-    backend.emitCompleted();
-    await completion;
+    final info = await controller.loadTechnicalInfo();
+
+    expect(info.qualityLabel, '1080p');
+    expect(info.resolution, '1920 × 1080');
+    expect(info.videoOutput, 'libmpv');
+    expect(info.rendererProfile, 'quality');
+    expect(info.hardwareDecoder, 'd3d11va');
+    expect(info.hardwareDecodeMode, 'auto-safe');
+    expect(info.requestedEnhancementMode, VideoEnhancementMode.medium);
+    expect(info.appliedEnhancementPipeline, VideoEnhancementPipeline.medium);
+    expect(info.outputResolution, isNull);
     await controller.dispose();
   });
 

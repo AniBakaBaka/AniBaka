@@ -7,7 +7,6 @@ import 'package:baka/widgets/platform/windows/windows_episode_list.dart';
 import 'package:baka/widgets/baka_player/index.dart';
 import 'package:baka/widgets/danmaku/view.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
-import 'package:baka/widgets/comment/comment_card.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:baka/services/navigation_service.dart';
@@ -35,7 +34,7 @@ class WindowsPlayerLayout extends StatelessWidget {
   final String? lineName;
   final VoidCallback onShowDetail;
   final VoidCallback onSourceTap;
-  final GlobalKey<CommentListState> commentKey;
+  final GlobalKey<CIslandCommentWidgetState> commentKey;
   final void Function(int) onEpisodeChanged;
   final VoidCallback onCastPressed;
   final VoidCallback onPickEpisode;
@@ -149,7 +148,7 @@ class WindowsPlayerLayout extends StatelessWidget {
         heroTag: 'comment_fab',
         onPressed: () => CommentInputWidget.show(context).then((result) {
           if (result is String && result.isNotEmpty) {
-            commentKey.currentState?.sendComment(result, 0, '');
+            commentKey.currentState?.sendComment(result);
           }
         }),
         backgroundColor: theme.colorScheme.secondary,
@@ -299,7 +298,7 @@ class _PlayerSidebar extends StatelessWidget {
   final int currUrl;
   final List<String>? sourceNames;
   final BgmInfo bgmInfo;
-  final GlobalKey<CommentListState> commentKey;
+  final GlobalKey<CIslandCommentWidgetState> commentKey;
   final void Function(int) onEpisodeChanged;
   final VoidCallback onDownloadPressed;
   final void Function(int) onUrlChanged;

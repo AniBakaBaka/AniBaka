@@ -1,0 +1,222 @@
+{
+  "format": "anx-rule/2",
+  "id": "aniwatch",
+  "name": "AniWatch 动漫",
+  "baseUrl": "https://www.aniwatch.top",
+  "iconUrl": "https://www.aniwatch.top/favicon.ico",
+  "description": "AniWatch 动漫视频源，提供高清在线动漫观看。",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Referer": "https://www.aniwatch.top/"
+  },
+  "useWebview": true,
+  "search": [
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "fetch",
+            "url": "/api/animes?q={keyword}"
+          },
+          {
+            "op": "jsonSeries",
+            "listPath": "",
+            "idKey": "id",
+            "nameKey": "title",
+            "imageKey": "cover_url",
+            "detailUrlTemplate": "/anime/{id}",
+            "keywordMatch": true
+          }
+        ],
+        [
+          {
+            "op": "fetch",
+            "url": "/?q={keyword}"
+          },
+          {
+            "op": "searchList",
+            "selectors": [
+              ".anime-card",
+              "a[href*=\"/anime/\"]",
+              ".grid a"
+            ],
+            "detailPattern": "/anime/",
+            "keywordMatch": true
+          }
+        ],
+        [
+          {
+            "op": "sniff",
+            "goal": "html",
+            "url": "/api/animes?q={keyword}",
+            "readyContains": [
+              "title"
+            ],
+            "timeoutMs": 8000
+          },
+          {
+            "op": "select",
+            "css": "body",
+            "attr": "text"
+          },
+          {
+            "op": "jsonSeries",
+            "listPath": "",
+            "idKey": "id",
+            "nameKey": "title",
+            "imageKey": "cover_url",
+            "detailUrlTemplate": "/anime/{id}",
+            "keywordMatch": true
+          }
+        ],
+        [
+          {
+            "op": "sniff",
+            "goal": "html",
+            "url": "/?q={keyword}",
+            "readyContains": [
+              "anime"
+            ],
+            "timeoutMs": 8000
+          },
+          {
+            "op": "searchList",
+            "selectors": [
+              ".anime-card",
+              "a[href*=\"/anime/\"]"
+            ],
+            "detailPattern": "/anime/"
+          }
+        ]
+      ]
+    }
+  ],
+  "detail": [
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "regex",
+            "pattern": "(\\d+)",
+            "group": 1
+          },
+          {
+            "op": "fetch",
+            "url": "/api/animes/{url:raw}"
+          },
+          {
+            "op": "first",
+            "branches": [
+              [
+                {
+                  "op": "jsonEpisodes",
+                  "episodesPath": "data.episodes",
+                  "idKey": "id",
+                  "nameKey": "title",
+                  "detailUrlTemplate": "/play/{id}"
+                }
+              ],
+              [
+                {
+                  "op": "jsonEpisodes",
+                  "episodesPath": "episodes",
+                  "idKey": "id",
+                  "nameKey": "title",
+                  "detailUrlTemplate": "/play/{id}"
+                }
+              ]
+            ]
+          }
+        ],
+        [
+          {
+            "op": "regex",
+            "pattern": "(\\d+)",
+            "group": 1
+          },
+          {
+            "op": "sniff",
+            "goal": "html",
+            "url": "/api/animes/{url:raw}",
+            "readyContains": [
+              "episodes"
+            ],
+            "timeoutMs": 8000
+          },
+          {
+            "op": "select",
+            "css": "body",
+            "attr": "text"
+          },
+          {
+            "op": "jsonEpisodes",
+            "episodesPath": "data.episodes",
+            "idKey": "id",
+            "nameKey": "title",
+            "detailUrlTemplate": "/play/{id}"
+          }
+        ]
+      ]
+    }
+  ],
+  "play": [
+    {
+      "op": "setMediaHeaders",
+      "headers": {
+        "Referer": "https://www.aniwatch.top/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+      }
+    },
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "regex",
+            "pattern": "(\\d+)",
+            "group": 1
+          },
+          {
+            "op": "fetch",
+            "url": "/api/episodes/{url:raw}"
+          },
+          {
+            "op": "json",
+            "path": "data.video_url"
+          },
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "regex",
+            "pattern": "(\\d+)",
+            "group": 1
+          },
+          {
+            "op": "fetch",
+            "url": "/api/episodes/{url:raw}"
+          },
+          {
+            "op": "json",
+            "path": "video_url"
+          },
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "sniff",
+            "goal": "video",
+            "url": "{episodeId:raw}",
+            "timeoutMs": 10000
+          }
+        ]
+      ]
+    }
+  ]
+}

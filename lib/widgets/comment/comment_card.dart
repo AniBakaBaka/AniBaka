@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:baka/api/post.dart';
 import 'package:baka/instance.dart';
+import 'package:baka/services/bangumi_sync_service.dart';
 import 'package:baka/services/network_service.dart';
 import 'package:baka/utils/date_util.dart';
 import 'package:baka/utils/image_utils.dart';
@@ -627,7 +628,11 @@ class CommentListState extends State<CommentList> {
       return;
     }
     if ((userInfo['id'] as num? ?? 0) == 0) {
-      showSnackBar('登录后才能评论~');
+      showSnackBar(
+        BangumiSyncService.instance.isConnected
+            ? 'Bangumi 登录不能回复 AniBaka 评论，请先登录 AniBaka'
+            : '登录后才能评论~',
+      );
       return;
     }
 

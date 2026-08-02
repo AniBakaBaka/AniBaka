@@ -182,7 +182,9 @@ Future<Response> searchBgmByTag(
   if (airDate != null && airDate.isNotEmpty) filter['air_date'] = airDate;
 
   return _post('$_bgmApiBase/v0/search/subjects?limit=$limit&offset=$offset', {
-    'keyword': '',
+    // Bangumi now rejects an empty keyword. `*` keeps this as a filter-only
+    // search, so the home "最新" feed and category filters still return data.
+    'keyword': '*',
     'sort': sort,
     'filter': filter,
   });

@@ -1,8 +1,8 @@
-import 'package:baka/api/collection.dart';
 import 'package:baka/api/play_history.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/pages/player/player_page.dart';
+import 'package:baka/services/collection_service.dart';
 import 'package:baka/services/play_history_sync_service.dart';
 import 'package:baka/widgets/anime/post_card.dart';
 import 'package:baka/widgets/common/shimmer.dart';
@@ -39,7 +39,7 @@ class _LibraryPageState extends State<LibraryPage> {
     super.initState();
     _historyList = PlayHistorySyncService.getHistoryList();
     _scrollController.addListener(_onScroll);
-    if (_isLoggedIn) _loadInitialData();
+    _loadInitialData();
   }
 
   @override
@@ -63,10 +63,10 @@ class _LibraryPageState extends State<LibraryPage> {
     setState(() => _isCollectionLoading = true);
     try {
       await Future.wait([
-        CollectionApi.getStats().then((res) {
+        CollectionService.getStats().then((res) {
           if (res != null) _stats = res;
         }),
-        CollectionApi.getList(
+        CollectionService.getList(
           page: 1,
           pageSize: 20,
           status: _collectionStatusFilter,
@@ -76,9 +76,10 @@ class _LibraryPageState extends State<LibraryPage> {
             _hasMoreCollection = _collectionList.length < res.total;
           }
         }),
-        PlayHistorySyncService.syncRemoteToLocal().then((_) {
-          _historyList = PlayHistorySyncService.getHistoryList();
-        }),
+        if (_isLoggedIn)
+          PlayHistorySyncService.syncRemoteToLocal().then((_) {
+            _historyList = PlayHistorySyncService.getHistoryList();
+          }),
       ]);
     } finally {
       if (mounted) setState(() => _isCollectionLoading = false);
@@ -86,7 +87,7 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   Future<void> _fetchStats() async {
-    final newStats = await CollectionApi.getStats();
+    final newStats = await CollectionService.getStats();
     if (newStats != null && mounted) setState(() => _stats = newStats);
   }
 
@@ -95,7 +96,7 @@ class _LibraryPageState extends State<LibraryPage> {
     setState(() => _isCollectionLoading = true);
     try {
       final page = reset ? 1 : _collectionPage + 1;
-      final response = await CollectionApi.getList(
+      final response = await CollectionService.getList(
         page: page,
         pageSize: 20,
         status: _collectionStatusFilter,
@@ -250,7 +251,7 @@ class _LibraryPageState extends State<LibraryPage> {
                 if (_selectedIndex == 1) return;
                 HapticFeedback.selectionClick();
                 setState(() => _selectedIndex = 1);
-                if (_collectionList.isEmpty && _isLoggedIn) {
+                if (_collectionList.isEmpty) {
                   _fetchCollectionData();
                   if (_stats == null) _fetchStats();
                 }
@@ -279,8 +280,8 @@ class _LibraryPageState extends State<LibraryPage> {
         decoration: BoxDecoration(
           color: isSelected
               ? (isDark
-                  ? theme.colorScheme.primaryContainer
-                  : theme.colorScheme.primary)
+                    ? theme.colorScheme.primaryContainer
+                    : theme.colorScheme.primary)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(9),
         ),
@@ -292,8 +293,8 @@ class _LibraryPageState extends State<LibraryPage> {
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
             color: isSelected
                 ? (isDark
-                    ? theme.colorScheme.onPrimaryContainer
-                    : theme.colorScheme.onPrimary)
+                      ? theme.colorScheme.onPrimaryContainer
+                      : theme.colorScheme.onPrimary)
                 : (isDark ? Colors.white60 : Colors.black54),
           ),
         ),
@@ -332,8 +333,8 @@ class _LibraryPageState extends State<LibraryPage> {
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                 color: isSelected
                     ? (isDark
-                        ? theme.colorScheme.onPrimaryContainer
-                        : theme.colorScheme.onPrimary)
+                          ? theme.colorScheme.onPrimaryContainer
+                          : theme.colorScheme.onPrimary)
                     : (isDark ? Colors.white70 : Colors.black87),
               ),
             ),
@@ -580,8 +581,9 @@ class _HistoryCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(2),
           child: LinearProgressIndicator(
             value: progressInfo.progress,
-            backgroundColor:
-                isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.08),
+            backgroundColor: isDark
+                ? Colors.white12
+                : Colors.black.withValues(alpha: 0.08),
             valueColor: AlwaysStoppedAnimation<Color>(
               theme.colorScheme.primary,
             ),

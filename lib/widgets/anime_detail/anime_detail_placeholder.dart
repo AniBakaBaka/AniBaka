@@ -3,12 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:baka/api/bgm.dart';
-import 'package:baka/api/collection.dart';
 import 'package:baka/api/post.dart';
-import 'package:baka/instance.dart';
 import 'package:baka/models/anime_detail_view_data.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/services/bgm_service.dart';
+import 'package:baka/services/collection_service.dart';
 import 'package:baka/services/play_history_sync_service.dart';
 import 'package:baka/services/playback_settings_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
@@ -69,8 +68,6 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     return (postId != null && postId > 0) ? postId : null;
   }
 
-  bool get _isLoggedIn => Instances.userToken.isNotEmpty;
-
   void _rebuildDetail() {
     _bgmInfo = BgmUtils.readFromData(widget.data);
     _detailData = BgmUtils.asMap(widget.data['bgmDetailData']);
@@ -92,7 +89,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
         _initialComments.length;
     _rebuildDetail();
     _isDetailLoading = _detailData == null;
-    _isCollectionLoading = _isLoggedIn;
+    _isCollectionLoading = _subjectId != null;
     _initialDataFuture = _loadInitialData();
     _scheduleInitialSearchSheet();
   }
@@ -145,8 +142,8 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
           getBgmAnimePageDetail(bgmId)
         else
           Future<Object?>.value(_detailData),
-        if (_isLoggedIn && bgmId != null)
-          CollectionApi.getByBgmId(bgmId)
+        if (bgmId != null)
+          CollectionService.getByBgmId(bgmId)
         else
           Future<Object?>.value(null),
       ]);
@@ -183,10 +180,6 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   }
 
   Future<void> _updateCollectionStatus(CollectionStatus status) async {
-    if (!_isLoggedIn) {
-      showSnackBar('请先登录');
-      return;
-    }
     if (_isStatusUpdating) return;
     setState(() => _isStatusUpdating = true);
 
@@ -197,7 +190,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
       }
 
       HapticFeedback.mediumImpact();
-      final result = await CollectionApi.addOrUpdate(
+      final result = await CollectionService.addOrUpdate(
         _buildCollection(status.value),
       );
       if (result != null && mounted) {
@@ -217,28 +210,27 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   Future<void> _deleteCollection() async {
     if (_collection == null) return;
     HapticFeedback.mediumImpact();
-
-    final bgmId = _collection!.bgmId ?? _subjectId;
-    bool success = false;
-    if (bgmId != null) {
-      success = await CollectionApi.deleteByBgmId(bgmId);
-    } else {
-      final postId = _validPostId;
-      if (postId != null) {
-        success = await CollectionApi.delete(postId);
+    try {
+      final bgmId = _collection!.bgmId ?? _subjectId;
+      bool success = false;
+      if (bgmId != null) {
+        success = await CollectionService.deleteByBgmId(bgmId);
+      } else {
+        final postId = _validPostId;
+        if (postId != null) {
+          success = await CollectionService.delete(postId);
+        }
       }
-    }
-    if (success && mounted) {
-      setState(() => _collection = null);
-      showSnackBar('已取消收藏');
+      if (success && mounted) {
+        setState(() => _collection = null);
+        showSnackBar('已取消收藏');
+      }
+    } catch (e) {
+      if (mounted) showSnackBar(e.toString(), isError: true);
     }
   }
 
   void _handleCollectionTap() {
-    if (!_isLoggedIn) {
-      showSnackBar('请先登录');
-      return;
-    }
     if (_collection != null &&
         CollectionStatus.fromValue(_collection!.status) ==
             CollectionStatus.doing) {
@@ -249,11 +241,6 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   }
 
   void _showCollectionSheet() {
-    if (!_isLoggedIn) {
-      showSnackBar('请先登录');
-      return;
-    }
-
     HapticFeedback.selectionClick();
     showModalBottomSheet(
       context: context,

@@ -5,7 +5,6 @@ import 'package:baka/instance.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/utils/platform_page_route.dart';
-import 'package:baka/widgets/baka_player/anime4k.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_volume_controller/flutter_volume_controller.dart';
@@ -391,39 +390,45 @@ class _BakaPlayerState extends State<BakaPlayer> {
         }
         final cfg = preferences.subtitleConfig;
         final height = MediaQuery.sizeOf(context).height * 0.5;
-        return Video(
-          controller: videoController,
-          controls: NoVideoControls,
-          pauseUponEnteringBackgroundMode: false,
-          resumeUponEnteringForegroundMode: true,
-          subtitleViewConfiguration: SubtitleViewConfiguration(
-            visible: preferences.showSubtitle,
-            style: TextStyle(
-              height: 1.5,
-              fontSize: cfg.fontSize,
-              fontFamily: cfg.fontFamily.isEmpty ? null : cfg.fontFamily,
-              letterSpacing: 0.5,
-              color: cfg.fontColor.withValues(alpha: cfg.opacity),
-              fontWeight: cfg.bold ? FontWeight.w700 : FontWeight.w500,
-              backgroundColor: cfg.backgroundColor,
-              shadows: [
-                Shadow(
-                  blurRadius: cfg.borderWidth * 2,
-                  color: cfg.borderColor,
-                  offset: const Offset(0, 1),
-                ),
-              ],
+        return ValueListenableBuilder<VideoEnhancementState>(
+          valueListenable: widget.controller.enhancement,
+          builder: (context, enhancement, _) => Video(
+            controller: videoController,
+            controls: NoVideoControls,
+            pauseUponEnteringBackgroundMode: false,
+            resumeUponEnteringForegroundMode: true,
+            filterQuality: Platform.isAndroid && enhancement.enabled
+                ? FilterQuality.medium
+                : FilterQuality.low,
+            subtitleViewConfiguration: SubtitleViewConfiguration(
+              visible: preferences.showSubtitle,
+              style: TextStyle(
+                height: 1.5,
+                fontSize: cfg.fontSize,
+                fontFamily: cfg.fontFamily.isEmpty ? null : cfg.fontFamily,
+                letterSpacing: 0.5,
+                color: cfg.fontColor.withValues(alpha: cfg.opacity),
+                fontWeight: cfg.bold ? FontWeight.w700 : FontWeight.w500,
+                backgroundColor: cfg.backgroundColor,
+                shadows: [
+                  Shadow(
+                    blurRadius: cfg.borderWidth * 2,
+                    color: cfg.borderColor,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+              padding: EdgeInsets.fromLTRB(
+                24,
+                cfg.position < 50 ? cfg.position / 100 * height : 0,
+                24,
+                cfg.position >= 50
+                    ? (100 - cfg.position) / 100 * height + 24
+                    : 24,
+              ),
             ),
-            padding: EdgeInsets.fromLTRB(
-              24,
-              cfg.position < 50 ? cfg.position / 100 * height : 0,
-              24,
-              cfg.position >= 50
-                  ? (100 - cfg.position) / 100 * height + 24
-                  : 24,
-            ),
+            fit: preferences.videoFit,
           ),
-          fit: preferences.videoFit,
         );
       },
     );
@@ -860,6 +865,18 @@ class _BakaPlayerState extends State<BakaPlayer> {
               actions.add(widget.headerControl!);
             }
 
+            actions.add(
+              Tooltip(
+                message: '播放器详情',
+                child: _buildHeaderButton(
+                  icon: Icons.info_outline_rounded,
+                  isWide: isWide,
+                  isActive: true,
+                  onTap: () => showPlaybackDetailsSheet(context, controller),
+                ),
+              ),
+            );
+
             if (actions.isEmpty) return const SizedBox.shrink();
 
             return _buildCapsule(
@@ -1039,26 +1056,20 @@ class _BakaPlayerState extends State<BakaPlayer> {
     );
   }
 
-  /// 构建底部额外按钮（Anime4K等）
+  /// 构建底部视频增强按钮。
   Widget? _buildExtraBottomButtons(bool isWide) {
     final controller = widget.controller;
     if (!widget.full) return null;
 
-    return ValueListenableBuilder<PlaybackPreferences>(
-      valueListenable: controller.preferences,
-      builder: (context, preferences, _) {
-        final isActive = preferences.enableAnime4K;
-        final anime4KLabel =
-            const {
-              'low': 'L',
-              'medium': 'M',
-              'high': 'H',
-              'ultra': 'U',
-            }[preferences.anime4KLevel] ??
-            'M';
+    return ValueListenableBuilder<VideoEnhancementState>(
+      valueListenable: controller.enhancement,
+      builder: (context, enhancement, _) {
+        final isActive = enhancement.enabled;
+        final label = isActive ? enhancement.appliedPipeline.label : '增强';
         return GestureDetector(
-          onTap: _toggleAnime4K,
-          onLongPress: () => showAnime4KLevelDialog(context, widget.controller),
+          onTap: _toggleVideoEnhancement,
+          onLongPress: () =>
+              showVideoEnhancementModeDialog(context, widget.controller),
           child: _buildCapsule(
             radius: isWide ? 22 : 18,
             child: SizedBox(
@@ -1077,7 +1088,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
                     ),
                     SizedBox(width: isWide ? 6 : 4),
                     Text(
-                      isActive ? '4K $anime4KLabel' : '4K',
+                      label,
                       style: TextStyle(
                         color: isActive
                             ? Theme.of(context).colorScheme.primary
@@ -1096,16 +1107,16 @@ class _BakaPlayerState extends State<BakaPlayer> {
     );
   }
 
-  Future<void> _toggleAnime4K() async {
+  Future<void> _toggleVideoEnhancement() async {
     try {
-      final enabled = await widget.controller.toggleAnime4K();
+      final enabled = await widget.controller.toggleVideoEnhancement();
       showSnackBar(
         enabled
-            ? 'Anime4K enabled (${Anime4K.levelNames[widget.controller.preferences.value.anime4KLevel]})'
-            : 'Anime4K disabled',
+            ? '视频增强：${widget.controller.enhancement.value.appliedPipeline.label}'
+            : '视频增强已关闭',
       );
     } catch (error) {
-      showSnackBar('Anime4K operation failed: $error');
+      showSnackBar('视频增强切换失败：$error');
     }
   }
 

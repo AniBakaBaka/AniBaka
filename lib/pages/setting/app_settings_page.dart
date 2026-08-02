@@ -14,6 +14,7 @@ import 'package:baka/pages/source/source_management_page.dart';
 import 'package:baka/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:baka/widgets/settings/settings_widgets.dart';
+import 'package:baka/widgets/platform/tv/tv_log_export_dialog.dart';
 import 'package:flutter/services.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
@@ -181,8 +182,9 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
     HapticFeedback.mediumImpact();
     final action = await showAppConfirmDialog(
       context,
-      title: '确认退出',
-      content: '退出登录后，您将无法同步观看历史和收藏内容。',
+      title: '退出 AniBaka',
+      content:
+          '退出后，播放历史将不再保存到 AniBaka 云端，也不能回复 AniBaka 评论。已连接的 Bangumi 账号不会被退出，其收藏与集数同步仍可继续使用。',
       confirmText: '退出',
       isDestructive: true,
     );
@@ -396,17 +398,25 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                   children: [
                     SettingsTile(
                       title: '导出日志',
-                      value: _isExportingLogs ? '导出中...' : 'ZIP',
-                      icon: Icons.file_download_outlined,
-                      onTap: _isExportingLogs ? null : _exportLogs,
+                      value: Instances.isTV
+                          ? '手机扫码下载'
+                          : (_isExportingLogs ? '导出中...' : 'ZIP'),
+                      icon: Instances.isTV
+                          ? Icons.qr_code_2_rounded
+                          : Icons.file_download_outlined,
+                      onTap: Instances.isTV
+                          ? () => showTvLogExportDialog(context)
+                          : (_isExportingLogs ? null : _exportLogs),
+                      showDivider: !Instances.isTV,
                     ),
-                    SettingsTile(
-                      title: '分享日志',
-                      value: _isSharingLogs ? '准备中...' : '系统分享',
-                      icon: Icons.ios_share_rounded,
-                      onTap: _isSharingLogs ? null : _shareLogs,
-                      showDivider: false,
-                    ),
+                    if (!Instances.isTV)
+                      SettingsTile(
+                        title: '分享日志',
+                        value: _isSharingLogs ? '准备中...' : '系统分享',
+                        icon: Icons.ios_share_rounded,
+                        onTap: _isSharingLogs ? null : _shareLogs,
+                        showDivider: false,
+                      ),
                   ],
                 ),
                 const SizedBox(height: 24),

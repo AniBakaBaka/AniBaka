@@ -13,14 +13,8 @@ class CacheManagerService {
     int totalSize = 0;
 
     try {
-      // 获取临时目录缓存
-      final tempDir = await getTemporaryDirectory();
-      totalSize += await _getDirectorySize(tempDir);
-
-      // 获取应用缓存目录
-      final cacheDir = await getApplicationCacheDirectory();
-      if (cacheDir.path != tempDir.path) {
-        totalSize += await _getDirectorySize(cacheDir);
+      for (final directory in await _getCacheDirectories()) {
+        totalSize += await _getDirectorySize(directory);
       }
     } catch (e) {
       debugPrint('获取缓存大小失败: $e');
@@ -57,14 +51,8 @@ class CacheManagerService {
       // 清理 cached_network_image 缓存
       await DefaultCacheManager().emptyCache();
 
-      // 清理临时目录
-      final tempDir = await getTemporaryDirectory();
-      await _clearDirectory(tempDir);
-
-      // 清理应用缓存目录
-      final cacheDir = await getApplicationCacheDirectory();
-      if (cacheDir.path != tempDir.path) {
-        await _clearDirectory(cacheDir);
+      for (final directory in await _getCacheDirectories()) {
+        await _clearDirectory(directory);
       }
 
       return true;
@@ -72,6 +60,34 @@ class CacheManagerService {
       debugPrint('清理缓存失败: $e');
       return false;
     }
+  }
+
+  Future<List<Directory>> _getCacheDirectories() async {
+    final tempDir = await getTemporaryDirectory();
+    final imageCacheDir = Directory(
+      '${tempDir.path}${Platform.pathSeparator}${DefaultCacheManager.key}',
+    );
+    final appCacheDir = await getApplicationCacheDirectory();
+    final directories = <Directory>[imageCacheDir];
+
+    // Windows 的临时目录属于系统共享区域，不能整目录遍历或删除。
+    if (!_samePath(appCacheDir.path, tempDir.path) &&
+        !_samePath(appCacheDir.path, imageCacheDir.path)) {
+      directories.add(appCacheDir);
+    }
+    return directories;
+  }
+
+  bool _samePath(String left, String right) {
+    final normalizedLeft = left
+        .replaceAll('\\', '/')
+        .replaceAll(RegExp(r'/+$'), '');
+    final normalizedRight = right
+        .replaceAll('\\', '/')
+        .replaceAll(RegExp(r'/+$'), '');
+    return Platform.isWindows
+        ? normalizedLeft.toLowerCase() == normalizedRight.toLowerCase()
+        : normalizedLeft == normalizedRight;
   }
 
   /// 清理目录内容（保留目录本身）

@@ -114,6 +114,7 @@ class SettingsTile extends StatelessWidget {
   final String title;
   final String value;
   final IconData icon;
+  final Widget? iconWidget;
   final VoidCallback? onTap;
   final bool showDivider;
 
@@ -122,6 +123,7 @@ class SettingsTile extends StatelessWidget {
     required this.value,
     required this.icon,
     super.key,
+    this.iconWidget,
     this.onTap,
     this.showDivider = true,
   });
@@ -158,7 +160,7 @@ class SettingsTile extends StatelessWidget {
                         : Colors.black.withValues(alpha: 0.03),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Icon(icon, size: 18, color: iconColor),
+                  child: iconWidget ?? Icon(icon, size: 18, color: iconColor),
                 ),
                 const SizedBox(width: 16),
                 Expanded(

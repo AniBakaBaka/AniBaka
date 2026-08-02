@@ -4,10 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:baka/api/bgm.dart';
-import 'package:baka/api/collection.dart';
-import 'package:baka/instance.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/services/bgm_service.dart';
+import 'package:baka/services/collection_service.dart';
 import 'package:baka/services/play_history_sync_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/reg_utils.dart';
@@ -45,8 +44,6 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
     final postId = BgmUtils.toInt(widget.data['id']);
     return (postId != null && postId > 0) ? postId : null;
   }
-
-  bool get _isLoggedIn => Instances.userToken.isNotEmpty;
 
   double? get _displayScore =>
       BgmUtils.extractScore(_detailData?['rating']) ?? _bgmInfo.score;
@@ -104,18 +101,17 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   }
 
   Future<void> _fetchCollectionStatus() async {
-    if (!_isLoggedIn) return;
     setState(() => _isCollectionLoading = true);
     AnimeCollection? collection;
     try {
       final bgmId = _subjectId;
       if (bgmId != null) {
-        collection = await CollectionApi.getByBgmId(bgmId);
+        collection = await CollectionService.getByBgmId(bgmId);
       }
       if (collection == null) {
         final postId = _validPostId;
         if (postId != null) {
-          collection = await CollectionApi.getByPostId(postId);
+          collection = await CollectionService.getByPostId(postId);
         }
       }
     } catch (e) {
@@ -131,10 +127,6 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   }
 
   Future<void> _updateCollectionStatus(CollectionStatus status) async {
-    if (!_isLoggedIn) {
-      showSnackBar('请先登录');
-      return;
-    }
     try {
       if (_collection != null && _collection!.status == status.value) {
         await _deleteCollection();
@@ -153,31 +145,36 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
             widget.data['title']?.toString() ??
             '',
       );
-      final result = await CollectionApi.addOrUpdate(col);
+      final result = await CollectionService.addOrUpdate(col);
       if (result != null && mounted) {
         setState(() => _collection = result);
         showSnackBar('已标记为「${status.label}」');
       }
     } catch (e) {
       debugPrint('更新收藏失败: $e');
+      if (mounted) showSnackBar(e.toString(), isError: true);
     }
   }
 
   Future<void> _deleteCollection() async {
     if (_collection == null) return;
-    final bgmId = _collection!.bgmId ?? _subjectId;
-    bool success = false;
-    if (bgmId != null) {
-      success = await CollectionApi.deleteByBgmId(bgmId);
-    } else {
-      final postId = _validPostId;
-      if (postId != null) {
-        success = await CollectionApi.delete(postId);
+    try {
+      final bgmId = _collection!.bgmId ?? _subjectId;
+      bool success = false;
+      if (bgmId != null) {
+        success = await CollectionService.deleteByBgmId(bgmId);
+      } else {
+        final postId = _validPostId;
+        if (postId != null) {
+          success = await CollectionService.delete(postId);
+        }
       }
-    }
-    if (success && mounted) {
-      setState(() => _collection = null);
-      showSnackBar('已取消收藏');
+      if (success && mounted) {
+        setState(() => _collection = null);
+        showSnackBar('已取消收藏');
+      }
+    } catch (e) {
+      if (mounted) showSnackBar(e.toString(), isError: true);
     }
   }
 

@@ -192,9 +192,10 @@ class HomeDataService {
     }
 
     if (page > 1 || selectedTag == pureTag) return fetch();
-    return _listOf(
-      await _cached('home_feed_$selectedTag', fetch, force: force),
-    );
+    final cacheKey = selectedTag == recommendTag
+        ? 'home_feed_$selectedTag'
+        : 'home_feed_filter_v2_$selectedTag';
+    return _listOf(await _cached(cacheKey, fetch, force: force));
   }
 
   /// 年份和年代从标签中转为 Bangumi 的放送日期范围。

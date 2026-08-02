@@ -6,12 +6,11 @@ import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
 
 import 'package:baka/api/bgm.dart';
-import 'package:baka/api/collection.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/source/adapter_base.dart';
 import 'package:baka/source/source_registry.dart';
-import 'package:baka/instance.dart';
 import 'package:baka/models/collection.dart';
+import 'package:baka/services/collection_service.dart';
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/services/app_storage.dart';
@@ -594,8 +593,6 @@ class PlayerService {
     );
   }
 
-  bool get isLoggedIn => (Instances.sp.getString('usertoken') ?? '').isNotEmpty;
-
   int? get validPostId {
     final postId = BgmUtils.toInt(data['id']);
     return postId != null && postId > 0 ? postId : null;
@@ -605,7 +602,7 @@ class PlayerService {
       CollectionStatus.fromValue(collection?.status) == CollectionStatus.doing;
 
   Future<AnimeCollection?> ensureCollectionStatus() {
-    if (isLocalSource || !isLoggedIn) return Future.value(collection);
+    if (isLocalSource) return Future.value(collection);
     return _collectionFuture ??= _loadCollection();
   }
 
@@ -613,7 +610,7 @@ class PlayerService {
     try {
       final bgmId = (await ensureBgmInfo()).subjectId;
       if (bgmId == null) return collection;
-      final result = await CollectionApi.getByBgmId(bgmId);
+      final result = await CollectionService.getByBgmId(bgmId);
       if (result != null) collection = result;
       return collection;
     } catch (e) {
@@ -624,8 +621,6 @@ class PlayerService {
   }
 
   Future<String> toggleFollow() async {
-    if (!isLoggedIn) throw Exception('请先登录');
-
     await Future.wait([
       ensureBgmInfo(),
       ensureBgmDetail(),
@@ -638,9 +633,9 @@ class PlayerService {
       final bgmId = current.bgmId ?? bgmInfo.subjectId;
       final postId = current.postId ?? validPostId;
       final success = bgmId != null
-          ? await CollectionApi.deleteByBgmId(bgmId)
+          ? await CollectionService.deleteByBgmId(bgmId)
           : postId != null
-          ? await CollectionApi.delete(postId)
+          ? await CollectionService.delete(postId)
           : false;
       if (!success) throw Exception('取消追番失败');
       collection = null;
@@ -649,7 +644,7 @@ class PlayerService {
 
     final detail = bgmDetailData;
     final epCount = videoList.isEmpty ? null : videoList.length;
-    final result = await CollectionApi.addOrUpdate(
+    final result = await CollectionService.addOrUpdate(
       AnimeCollection(
         postId: validPostId,
         bgmId: bgmInfo.subjectId,

@@ -30,6 +30,8 @@ class PlaybackSettingsService {
   static const _skipOpDurationKey = 'player_skipOpDuration';
   static const _enableAnime4KKey = 'player_enableAnime4K';
   static const _anime4KLevelKey = 'player_anime4KLevel';
+  static const _videoEnhancementModeKey = 'player_videoEnhancementMode';
+  static const _lastVideoEnhancementModeKey = 'player_lastVideoEnhancementMode';
   static const _showSubtitleKey = 'player_showSubtitle';
   static const _hwdecModeKey = 'player_hwdecMode';
   static const _videoRendererKey = 'player_videoRenderer';
@@ -157,6 +159,18 @@ class PlaybackSettingsService {
 
   static Future<PlaybackPreferences> loadAll() async {
     final sp = _prefs;
+    final enhancementMode = _loadEnhancementMode(sp);
+    final storedLastMode = VideoEnhancementMode.fromStorage(
+      sp.getString(_lastVideoEnhancementModeKey),
+    );
+    final lastEnhancementMode = storedLastMode == VideoEnhancementMode.off
+        ? (enhancementMode == VideoEnhancementMode.off
+              ? _migrateLegacyEnhancementMode(
+                  sp.getString(_anime4KLevelKey),
+                  enabled: true,
+                )
+              : enhancementMode)
+        : storedLastMode;
     return PlaybackPreferences(
       rememberLastPosition: sp.getBool(_rememberLastPositionKey) ?? true,
       autoFullscreen: sp.getBool(_autoFullscreenKey) ?? false,
@@ -173,8 +187,8 @@ class PlaybackSettingsService {
       showSystemTime: sp.getBool(_showSystemTimeKey) ?? false,
       skipOpWaitTime: (sp.getInt(_skipOpWaitTimeKey) ?? 105).clamp(30, 300),
       skipOpDuration: (sp.getInt(_skipOpDurationKey) ?? 85).clamp(30, 300),
-      enableAnime4K: sp.getBool(_enableAnime4KKey) ?? false,
-      anime4KLevel: sp.getString(_anime4KLevelKey) ?? 'medium',
+      videoEnhancementMode: enhancementMode,
+      lastVideoEnhancementMode: lastEnhancementMode,
       showSubtitle: sp.getBool(_showSubtitleKey) ?? true,
       subtitleConfig: await SubtitleConfig.load(),
       hwdecMode: normalizeHwdecMode(sp.getString(_hwdecModeKey)),
@@ -239,8 +253,16 @@ class PlaybackSettingsService {
     write(_showSystemTimeKey, previous.showSystemTime, next.showSystemTime);
     write(_skipOpWaitTimeKey, previous.skipOpWaitTime, next.skipOpWaitTime);
     write(_skipOpDurationKey, previous.skipOpDuration, next.skipOpDuration);
-    write(_enableAnime4KKey, previous.enableAnime4K, next.enableAnime4K);
-    write(_anime4KLevelKey, previous.anime4KLevel, next.anime4KLevel);
+    write(
+      _videoEnhancementModeKey,
+      previous.videoEnhancementMode.storageValue,
+      next.videoEnhancementMode.storageValue,
+    );
+    write(
+      _lastVideoEnhancementModeKey,
+      previous.lastVideoEnhancementMode.storageValue,
+      next.lastVideoEnhancementMode.storageValue,
+    );
     write(_showSubtitleKey, previous.showSubtitle, next.showSubtitle);
     write(_hwdecModeKey, previous.hwdecMode, next.hwdecMode);
     write(_videoRendererKey, previous.videoRenderer, next.videoRenderer);
@@ -250,5 +272,31 @@ class PlaybackSettingsService {
     }
 
     return writes.isEmpty ? Future.value() : Future.wait(writes);
+  }
+
+  static VideoEnhancementMode _loadEnhancementMode(SharedPreferences sp) {
+    if (sp.containsKey(_videoEnhancementModeKey)) {
+      return VideoEnhancementMode.fromStorage(
+        sp.getString(_videoEnhancementModeKey),
+      );
+    }
+    return _migrateLegacyEnhancementMode(
+      sp.getString(_anime4KLevelKey),
+      enabled: sp.getBool(_enableAnime4KKey) ?? false,
+    );
+  }
+
+  static VideoEnhancementMode _migrateLegacyEnhancementMode(
+    String? level, {
+    required bool enabled,
+  }) {
+    if (!enabled) return VideoEnhancementMode.off;
+    return switch (level) {
+      'low' => VideoEnhancementMode.low,
+      'medium' => VideoEnhancementMode.medium,
+      'high' => VideoEnhancementMode.high,
+      'ultra' => VideoEnhancementMode.ultra,
+      _ => VideoEnhancementMode.medium,
+    };
   }
 }

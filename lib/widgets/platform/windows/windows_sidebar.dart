@@ -1,18 +1,16 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:baka/instance.dart';
+import 'package:baka/services/mine_service.dart';
 import 'package:baka/services/navigation_service.dart';
 import 'package:baka/services/theme_service.dart';
-import 'package:baka/utils/reg_utils.dart';
 import 'package:flutter/material.dart';
 
 class WindowsSidebar extends StatefulWidget {
   final int currentPageIndex;
-  final Map userInfo;
   final Function(int) onPageChange;
 
   const WindowsSidebar({
     required this.currentPageIndex,
-    required this.userInfo,
     required this.onPageChange,
     super.key,
   });
@@ -22,6 +20,7 @@ class WindowsSidebar extends StatefulWidget {
 }
 
 class _WindowsSidebarState extends State<WindowsSidebar> {
+  late final MineService _mine = MineService();
   late bool _isSidebarCollapsed = ThemeService.getSidebarCollapsed();
   int? _hoveredIndex;
 
@@ -96,61 +95,107 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
   }
 
   Widget _buildAvatar(double size) {
+    final avatarUrl = _mine.avatarUrl;
     return Hero(
       tag: 'sidebar_avatar',
       child: ClipOval(
-        child: CachedNetworkImage(
-          memCacheWidth: (size * 2).toInt(),
-          imageUrl: getAvatar(avatar: widget.userInfo['qq'] ?? ''),
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-          errorWidget: (_, _, _) => Container(color: Colors.grey[300]),
-        ),
+        child: avatarUrl.isEmpty
+            ? _buildAvatarFallback(size)
+            : CachedNetworkImage(
+                memCacheWidth: (size * 2).toInt(),
+                imageUrl: avatarUrl,
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                errorWidget: (_, _, _) => _buildAvatarFallback(size),
+              ),
+      ),
+    );
+  }
+
+  Widget _buildAvatarFallback(double size) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      width: size,
+      height: size,
+      color: colors.surfaceContainerHighest,
+      alignment: Alignment.center,
+      child: Icon(
+        Icons.person_outline_rounded,
+        size: size * 0.56,
+        color: colors.onSurfaceVariant,
+      ),
+    );
+  }
+
+  void _openLoginPage() {
+    Navigator.pushNamed(context, 'Baka://login');
+  }
+
+  Widget _buildUserButton(Widget child) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _openLoginPage,
+        child: child,
       ),
     );
   }
 
   Widget _buildUserInfo(ThemeData theme) {
     if (_isSidebarCollapsed) {
-      return Center(child: _buildAvatar(40));
+      return _buildUserButton(
+        Center(
+          child: Tooltip(
+            message: _mine.isLogin ? '账号与 Bangumi' : '登录',
+            child: SizedBox(width: 40, height: 40, child: _buildAvatar(40)),
+          ),
+        ),
+      );
     }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Row(
-        children: [
-          _buildAvatar(48),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  widget.userInfo['name'] ?? '点击登录',
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.2,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '欢迎回来',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: theme.textTheme.bodyMedium?.color?.withValues(
-                      alpha: 0.5,
+    return _buildUserButton(
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Row(
+          children: [
+            SizedBox(width: 48, height: 48, child: _buildAvatar(48)),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _mine.hasIdentity ? _mine.displayName : '点击登录',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.2,
                     ),
-                    fontWeight: FontWeight.w500,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-              ],
+                  const SizedBox(height: 2),
+                  Text(
+                    _mine.isBangumiLogin && !_mine.isLogin
+                        ? 'Bangumi 登录 · 历史仅本机'
+                        : _mine.isLogin
+                        ? '欢迎回来'
+                        : '打开登录页面',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: theme.textTheme.bodyMedium?.color?.withValues(
+                        alpha: 0.5,
+                      ),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -40,11 +40,15 @@ class VideoUrlExtractor {
   );
 
   static final _cdnSignedRegex = RegExp(
-    r'(?:/video/tos/|/tos-cn-v-|sign\.bytetos|sign\.byteimg|bytefcdn|bot-workflow-sign\.byteimg\.com|xhscdn\.com|douyinvod\.com|bytedance|byteimg\.com/(?:tos-|x-signature)|r\d+\.31dm\.com/.*[?&]verify=|x-amz-signature=|x-amz-algorithm=|x-amz-credential=|groupvideo\.photo\.qq\.com|photo\.qq\.com|dis_k=|dis_t=)',
+    r'(?:/video/tos/|/tos-cn-v-|sign\.bytetos|sign\.byteimg|bytefcdn|bot-workflow-sign\.byteimg\.com|xhscdn\.com|douyinvod\.com|bytedance|byteimg\.com/(?:tos-|x-signature)|[?&]verify=\d{9,}|x-amz-signature=|x-amz-algorithm=|x-amz-credential=|groupvideo\.photo\.qq\.com|photo\.qq\.com|dis_k=|dis_t=)',
     caseSensitive: false,
   );
 
+  /// `sign=<签名>:<时间戳>` 形式。
   static final _expiringSignRegex = RegExp(r'^.+:\d{9,}$');
+
+  /// `verify=<unix 时间戳>-<签名>` 形式（31dm / Cycani 等 CDN）。
+  static final _verifyParamRegex = RegExp(r'^\d{9,}');
 
   static final _trailingJunkPattern = RegExp(r'[,;.\s]+$');
 
@@ -79,14 +83,19 @@ class VideoUrlExtractor {
     return _cdnSignedRegex.hasMatch(lower) || _hasExpiringSign(url, lower);
   }
 
-  /// query 中是否带过期型 sign 参数（`sign=xxx:时间戳`）。
+  /// query 中是否带过期型签名参数：
+  /// - `sign=<签名>:<时间戳>`（如 huazidm）
+  /// - `verify=<时间戳>-<签名>`（如 31dm / Cycani）
   static bool _hasExpiringSign(String url, String lower) {
-    if (!lower.contains('sign=')) return false;
+    if (!lower.contains('sign=') && !lower.contains('verify=')) return false;
     try {
       final uri = Uri.parse(url);
       for (final entry in uri.queryParameters.entries) {
-        if (entry.key.toLowerCase() == 'sign' &&
-            _expiringSignRegex.hasMatch(entry.value)) {
+        final key = entry.key.toLowerCase();
+        if (key == 'sign' && _expiringSignRegex.hasMatch(entry.value)) {
+          return true;
+        }
+        if (key == 'verify' && _verifyParamRegex.hasMatch(entry.value)) {
           return true;
         }
       }

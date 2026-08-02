@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,7 +15,6 @@ import 'package:baka/pages/setting/app_settings_page.dart';
 import 'package:baka/pages/source/source_management_page.dart';
 import 'package:baka/services/mine_service.dart';
 import 'package:baka/services/version_service.dart';
-import 'package:baka/utils/reg_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/common/scale_button.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
@@ -25,7 +26,8 @@ class MinePage extends StatefulWidget {
   State<StatefulWidget> createState() => _MinePageState();
 }
 
-class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin {
+class _MinePageState extends State<MinePage>
+    with SingleTickerProviderStateMixin {
   late final MineService _svc = MineService();
   late final AnimationController _controller;
   late final Animation<double> _fadeAnimation;
@@ -38,7 +40,10 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
       vsync: this,
       duration: const Duration(milliseconds: 600),
     );
-    _fadeAnimation = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _fadeAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOut,
+    );
     _loginWorker = ever(Get.find<AppState>().loginTrigger, (_) {
       if (mounted) setState(() {});
     });
@@ -70,7 +75,9 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
         child: FadeTransition(
           opacity: _fadeAnimation,
           child: CustomScrollView(
-            physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+            physics: const BouncingScrollPhysics(
+              parent: AlwaysScrollableScrollPhysics(),
+            ),
             slivers: [
               _buildHeader(context, isDark),
               SliverPadding(
@@ -101,7 +108,11 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
                         title: '支持开发',
                         icon: Icons.favorite_border,
                         onTap: _showSponsorDialog,
-                        trailing: _buildTag('推荐', isDark, color: Colors.pinkAccent),
+                        trailing: _buildTag(
+                          '推荐',
+                          isDark,
+                          color: Colors.pinkAccent,
+                        ),
                       ),
                       _MenuItem(
                         title: '版本更新',
@@ -148,6 +159,8 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
 
   Widget _buildHeader(BuildContext context, bool isDark) {
     final bool isLogin = _svc.isLogin;
+    final bool hasIdentity = _svc.hasIdentity;
+    final avatarUrl = _svc.avatarUrl;
 
     return SliverToBoxAdapter(
       child: SafeArea(
@@ -157,15 +170,21 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
           child: Row(
             children: [
               ScaleButton(
-                onTap: () {
-                  if (!isLogin) Navigator.pushNamed(context, 'Baka://login');
-                },
+                onTap: () => Navigator.pushNamed(context, 'Baka://login'),
                 child: CircleAvatar(
                   radius: 30,
-                  backgroundColor: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
-                  backgroundImage: isLogin ? CachedNetworkImageProvider(getAvatar(avatar: _svc.avatarQq)) : null,
-                  child: !isLogin
-                      ? Icon(Icons.person_outline, size: 30, color: isDark ? Colors.white70 : Colors.black54)
+                  backgroundColor: isDark
+                      ? Colors.white10
+                      : Colors.black.withValues(alpha: 0.05),
+                  backgroundImage: hasIdentity && avatarUrl.isNotEmpty
+                      ? CachedNetworkImageProvider(avatarUrl)
+                      : null,
+                  child: !hasIdentity || avatarUrl.isEmpty
+                      ? Icon(
+                          Icons.person_outline,
+                          size: 30,
+                          color: isDark ? Colors.white70 : Colors.black54,
+                        )
                       : null,
                 ),
               ),
@@ -185,6 +204,29 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    if (_svc.isBangumiLogin && !isLogin) ...[
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(
+                            0xFFF09199,
+                          ).withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: const Text(
+                          'Bangumi 登录',
+                          style: TextStyle(
+                            color: Color(0xFFF09199),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 2),
                     Text(
                       _svc.displaySubtitle,
@@ -215,13 +257,14 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (isLogin)
+                  // mobile_scanner 不支持 Windows，扫码登录 TV 仅限手机端。
+                  if (isLogin && !Platform.isWindows)
                     _buildHeaderBtn(
                       icon: Icons.qr_code_scanner,
                       onTap: () => _navTo(const QrScannerPage()),
                       isDark: isDark,
                     ),
-                  if (isLogin) const SizedBox(width: 6),
+                  if (isLogin && !Platform.isWindows) const SizedBox(width: 6),
                   _buildHeaderBtn(
                     icon: Icons.settings_outlined,
                     onTap: () => _navTo(const AppSettingsPage()),
@@ -246,10 +289,16 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
       child: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.04),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.04),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Icon(icon, size: 20, color: isDark ? Colors.white70 : Colors.black87),
+        child: Icon(
+          icon,
+          size: 20,
+          color: isDark ? Colors.white70 : Colors.black87,
+        ),
       ),
     );
   }
@@ -271,16 +320,38 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
 
   Widget _buildDashboard(BuildContext context, bool isDark) {
     final buttons = [
-      _DashItem('历史', Icons.history, Colors.blueAccent, () => _navTo(const LibraryPage(initialIndex: 0))),
-      _DashItem('追番', Icons.favorite_border, Colors.pinkAccent, () => _navTo(const LibraryPage(initialIndex: 1))),
-      _DashItem('下载', Icons.download_outlined, Colors.greenAccent, () => DownloadManagerPage.show(context)),
-      _DashItem('社区', Icons.groups_outlined, Colors.cyanAccent.shade400, _joinQqGroup),
+      _DashItem(
+        '历史',
+        Icons.history,
+        Colors.blueAccent,
+        () => _navTo(const LibraryPage(initialIndex: 0)),
+      ),
+      _DashItem(
+        '追番',
+        Icons.favorite_border,
+        Colors.pinkAccent,
+        () => _navTo(const LibraryPage(initialIndex: 1)),
+      ),
+      _DashItem(
+        '下载',
+        Icons.download_outlined,
+        Colors.greenAccent,
+        () => DownloadManagerPage.show(context),
+      ),
+      _DashItem(
+        '社区',
+        Icons.groups_outlined,
+        Colors.cyanAccent.shade400,
+        _joinQqGroup,
+      ),
     ];
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: BoxDecoration(
-        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.05)
+            : Colors.black.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
@@ -310,13 +381,19 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
     );
   }
 
-  Widget _buildMenuGroup(BuildContext context, bool isDark, List<_MenuItem> items) {
+  Widget _buildMenuGroup(
+    BuildContext context,
+    bool isDark,
+    List<_MenuItem> items,
+  ) {
     return Container(
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.05)
+              : Colors.black.withValues(alpha: 0.04),
         ),
       ),
       child: Column(
@@ -330,10 +407,17 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
               ScaleButton(
                 onTap: item.onTap,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   child: Row(
                     children: [
-                      Icon(item.icon, size: 20, color: isDark ? Colors.white70 : Colors.black87),
+                      Icon(
+                        item.icon,
+                        size: 20,
+                        color: isDark ? Colors.white70 : Colors.black87,
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
@@ -361,7 +445,9 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
                   height: 1,
                   thickness: 0.5,
                   indent: 48,
-                  color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+                  color: isDark
+                      ? Colors.white10
+                      : Colors.black.withValues(alpha: 0.05),
                 ),
             ],
           );
@@ -374,7 +460,9 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: (color ?? (isDark ? Colors.white : Colors.black)).withValues(alpha: color != null ? 0.12 : 0.06),
+        color: (color ?? (isDark ? Colors.white : Colors.black)).withValues(
+          alpha: color != null ? 0.12 : 0.06,
+        ),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
@@ -420,7 +508,11 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
         children: [
           Text(title),
           if (_svc.themeMode == mode)
-            Icon(Icons.check, color: Theme.of(context).colorScheme.primary, size: 18),
+            Icon(
+              Icons.check,
+              color: Theme.of(context).colorScheme.primary,
+              size: 18,
+            ),
         ],
       ),
     );
@@ -452,7 +544,10 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
             const SizedBox(height: 12),
             Text(
               '可通过 USDT（TRC20）转账赞助开发者。',
-              style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant),
+              style: TextStyle(
+                fontSize: 13,
+                color: colorScheme.onSurfaceVariant,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
@@ -464,7 +559,11 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
               ),
               child: SelectableText(
                 MineService.tronUsdtAddress,
-                style: TextStyle(fontFamily: 'monospace', fontSize: 11, color: colorScheme.onSurface),
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  color: colorScheme.onSurface,
+                ),
               ),
             ),
           ],
@@ -533,7 +632,8 @@ class _MinePageState extends State<MinePage> with SingleTickerProviderStateMixin
     showAppInfoDialog(
       context,
       title: '免责声明',
-      content: '本软件仅供学习与交流使用，所有资源均来源于互联网。\n\n'
+      content:
+          '本软件仅供学习与交流使用，所有资源均来源于互联网。\n\n'
           '1. 本软件不提供任何视频内容的存储或上传服务。\n'
           '2. 视频版权均归原作者所有，如有侵权请联系我们删除。\n'
           '3. 请勿将本软件用于任何商业目的。',

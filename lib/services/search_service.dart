@@ -17,6 +17,8 @@ class SearchService {
   static const String _searchHistoryKey = 'search_history';
   static const String noDescriptionText = '暂无描述';
 
+  static const String _isVerticalLayoutKey = 'search_is_vertical_layout';
+
   final ValueNotifier<List<dynamic>> resultsNotifier =
       ValueNotifier<List<dynamic>>(const []);
   final ValueNotifier<int> selectedSourceIndexNotifier = ValueNotifier<int>(0);
@@ -27,6 +29,7 @@ class SearchService {
   final ValueNotifier<bool> isLoadingNotifier = ValueNotifier<bool>(false);
   final ValueNotifier<List<String>> sourceLabelsNotifier =
       ValueNotifier<List<String>>(const ['BGM']);
+  final ValueNotifier<bool> isVerticalLayoutNotifier = ValueNotifier<bool>(false);
 
   List<dynamic> get results => resultsNotifier.value;
   set results(List<dynamic> v) => resultsNotifier.value = v;
@@ -48,6 +51,12 @@ class SearchService {
 
   List<String> get sourceLabels => sourceLabelsNotifier.value;
 
+  bool get isVerticalLayout => isVerticalLayoutNotifier.value;
+  set isVerticalLayout(bool v) {
+    isVerticalLayoutNotifier.value = v;
+    _prefs?.setBool(_isVerticalLayoutKey, v);
+  }
+
   int activeSearchId = 0;
   bool _disposed = false;
 
@@ -61,6 +70,8 @@ class SearchService {
   Future<void> init({int? initialSource, String? initialKeyword}) async {
     _prefs = await SharedPreferences.getInstance();
     if (_disposed) return;
+    isVerticalLayoutNotifier.value =
+        _prefs?.getBool(_isVerticalLayoutKey) ?? false;
     await reloadCustomSources();
     if (_disposed) return;
 

@@ -125,14 +125,13 @@ class _QrScannerPageState extends State<QrScannerPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('扫码登录 TV'),
-        iconTheme: IconThemeData(color: Theme.of(context).colorScheme.primary),
-      ),
-      body: Stack(
-        children: [
-          MobileScanner(
+    // mobile_scanner 没有 Windows 实现，直接渲染会抛出 MissingPluginException；
+    // 该页面仅手机端可用（手机扫描 TV 端二维码）。
+    final scanner = Platform.isWindows
+        ? const Center(
+            child: Text('当前平台不支持扫码，请在手机端使用此功能'),
+          )
+        : MobileScanner(
             controller: _controller,
             onDetect: _onDetect,
             onDetectError: (error, stackTrace) {
@@ -140,7 +139,15 @@ class _QrScannerPageState extends State<QrScannerPage> {
                 showSnackBar('扫码异常: $error');
               }
             },
-          ),
+          );
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('扫码登录 TV'),
+        iconTheme: IconThemeData(color: Theme.of(context).colorScheme.primary),
+      ),
+      body: Stack(
+        children: [
+          scanner,
 
           Center(
             child: Container(

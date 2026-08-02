@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:baka/widgets/baka_player/controller.dart';
+import 'package:baka/widgets/baka_player/widgets/player_dialogs.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:baka/services/danmaku_service.dart';
 import 'package:baka/services/playback_settings_service.dart';
@@ -311,6 +312,14 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
                   ),
                   const SizedBox(height: 8),
 
+                  _buildActionItem(
+                    icon: Icons.info_outline_rounded,
+                    title: '播放器详情',
+                    subtitle: '清晰度、解码与渲染信息',
+                    onPressed: () => showPlaybackDetailsSheet(context, _ctrl),
+                  ),
+                  const SizedBox(height: 8),
+
                   const SizedBox(height: 32),
                 ],
               ),
@@ -387,6 +396,59 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
                   ),
                 ),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionItem({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onPressed,
+  }) {
+    return TvFocusable(
+      onPressed: onPressed,
+      borderRadius: BorderRadius.circular(12),
+      enableScale: false,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: context.tvHighlightColor(0.06),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: context.tvTextSecondaryColor, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: context.tvTextColor,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: context.tvTextSecondaryColor,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: context.tvTextSecondaryColor,
             ),
           ],
         ),

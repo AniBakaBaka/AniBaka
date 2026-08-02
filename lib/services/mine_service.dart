@@ -4,13 +4,15 @@ import 'package:url_launcher/url_launcher_string.dart';
 
 import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
+import 'package:baka/services/bangumi_sync_service.dart';
 import 'package:baka/services/theme_service.dart';
+import 'package:baka/utils/bgm_utils.dart';
+import 'package:baka/utils/reg_utils.dart';
 import 'package:get/get.dart';
 
 /// 「我的」页面业务逻辑服务
 ///
 /// 会话与主题模式的唯一真源是 [AppState]，这里只做页面级的取值与动作，
-/// 不再自己重新 jsonDecode 一份 userinfo、也不再维护第二份 themeMode 与主题文案表。
 class MineService {
   static const String tronUsdtAddress = 'TB26auGFvm6DWkHm166a3zTtTDJuX7LZpH';
   static const String qqGroupNumber = 'anibakabaka';
@@ -27,12 +29,36 @@ class MineService {
 
   bool get isLogin => _appState.isLoggedIn;
 
-  String get displayName => isLogin ? (userInfo['name'] ?? 'Baka 用户') : '游客，你好';
+  bool get isBangumiLogin => BangumiSyncService.instance.isConnected;
 
-  String get displaySubtitle =>
-      isLogin ? (userInfo['sign'] ?? '这个人很懒，还没有签名') : '你还未登录哦〒▽〒';
+  bool get hasIdentity => isLogin || isBangumiLogin;
+
+  BangumiAccount? get bangumiAccount => BangumiSyncService.instance.account;
+
+  String get displayName {
+    if (isLogin) return userInfo['name'] ?? 'Baka 用户';
+    if (isBangumiLogin) {
+      final account = bangumiAccount;
+      return account?.nickname.isNotEmpty == true
+          ? account!.nickname
+          : (account?.username ?? 'Bangumi 用户');
+    }
+    return '游客，你好';
+  }
+
+  String get displaySubtitle {
+    if (isLogin) return userInfo['sign'] ?? '这个人很懒，还没有签名';
+    if (isBangumiLogin) return 'Bangumi 登录 · 播放历史仅保存在本机';
+    return '你还未登录哦〒▽〒';
+  }
 
   String get avatarQq => userInfo['qq'] ?? '';
+
+  String get avatarUrl {
+    if (isLogin) return getAvatar(avatar: avatarQq);
+    final source = bangumiAccount?.avatarUrl ?? '';
+    return BgmUtils.bgmImageProxyUrl(source, width: 240);
+  }
 
   int get uid => userInfo['id'] ?? 0;
 

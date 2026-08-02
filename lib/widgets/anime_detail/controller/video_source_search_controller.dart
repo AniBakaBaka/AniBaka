@@ -543,7 +543,11 @@ class VideoSourceSearchController {
         ),
     ];
 
-    final searchFuture = _runPool(tasks, _Policy.searchConcurrency);
+    final searchFuture = _runPool(
+      tasks,
+      _Policy.searchConcurrency,
+      shouldStop: () => _autoMatched || !_alive(runId),
+    );
 
     if (memoryFuture != null && await memoryFuture) {
       unawaited(_finishSearch(runId, searchFuture));
@@ -561,21 +565,34 @@ class VideoSourceSearchController {
     }
     if (!_alive(runId)) return;
 
-    isSearchingNotifier.value = false;
-    _emitProgress();
+    if (!_disposed) {
+      isSearchingNotifier.value = false;
+      _emitProgress();
+    }
 
     if (autoMatchMode && !_autoMatched && !_userSelected) {
       onMatchFailed?.call();
     }
   }
 
+  /// 停止当前搜索轮次；已发出的网络请求无法取消，但后续任务不再启动。
+  void cancelSearch() {
+    _runId++;
+    if (!_disposed) {
+      isSearchingNotifier.value = false;
+      _emitProgress();
+    }
+  }
+
   Future<void> _runPool(
     List<Future<void> Function()> tasks,
-    int concurrency,
-  ) async {
+    int concurrency, {
+    bool Function()? shouldStop,
+  }) async {
     var next = 0;
     Future<void> worker() async {
       while (next < tasks.length) {
+        if (shouldStop?.call() ?? false) return;
         final i = next++;
         await tasks[i]();
       }
@@ -631,7 +648,7 @@ class VideoSourceSearchController {
     var found = false;
 
     for (var i = 0; i < keywords.length; i++) {
-      if (!_alive(runId)) return;
+      if (!_alive(runId) || _autoMatched) return;
       if (i > 0 && _results.length >= _Policy.minResultsBeforeAlias) break;
 
       attempted++;
@@ -644,7 +661,7 @@ class VideoSourceSearchController {
       } catch (_) {
         raw = null;
       }
-      if (!_alive(runId)) return;
+      if (!_alive(runId) || _autoMatched) return;
 
       if (raw == null) {
         failed++;

@@ -16,7 +16,6 @@ import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/utils/platform_page_route.dart';
 import 'package:baka/widgets/anime_detail/anime_detail_placeholder.dart';
 import 'package:baka/widgets/baka_player/index.dart';
-import 'package:baka/widgets/comment/comment_card.dart';
 import 'package:baka/widgets/comment/comment_widget.dart';
 import 'package:baka/widgets/common/tab_indicator.dart';
 import 'package:baka/widgets/common/scale_button.dart';
@@ -71,7 +70,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
   late final String _fixedSummary;
   late final String _taskIdPrefix;
   String _resolvedUrl = '';
-  final GlobalKey<CommentListState> commentKey = GlobalKey();
+  final GlobalKey<CIslandCommentWidgetState> commentKey = GlobalKey();
   final PlaybackController ctr = PlaybackController();
   final DanmakuController danmakuController = DanmakuController();
   final ValueNotifier<bool> _followNotifier = ValueNotifier<bool>(false);
@@ -876,7 +875,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       _followNotifier.value = _svc.isFollow();
     } catch (e) {
       debugPrint('追番操作失败: $e');
-      showSnackBar('登录失效，请重新登录');
+      showSnackBar(e.toString(), isError: true);
     }
   }
 

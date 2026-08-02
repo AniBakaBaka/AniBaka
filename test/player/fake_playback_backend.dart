@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:baka/models/playback_state.dart';
 import 'package:baka/widgets/baka_player/playback_backend.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -31,6 +32,8 @@ class FakePlaybackBackend implements PlaybackBackend {
   int maxRateSetInFlight = 0;
   Duration rateSetDelay = Duration.zero;
   final nativeProperties = <String, String>{};
+  PlaybackTechnicalInfo technicalInfo = const PlaybackTechnicalInfo();
+  int technicalInfoReadCount = 0;
 
   @override
   VideoController? get videoController => null;
@@ -125,6 +128,12 @@ class FakePlaybackBackend implements PlaybackBackend {
   @override
   Future<void> setNativeProperty(String name, String value) async {
     nativeProperties[name] = value;
+  }
+
+  @override
+  Future<PlaybackTechnicalInfo> getTechnicalInfo() async {
+    technicalInfoReadCount++;
+    return technicalInfo;
   }
 
   void emitPosition(Duration value) {

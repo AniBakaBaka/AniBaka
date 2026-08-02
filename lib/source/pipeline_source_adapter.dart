@@ -52,6 +52,11 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
       rule.id == '4kcz' || _playFeatures.followsEmbeddedPlayer;
   late final bool _materializesHls =
       rule.id == 'ani_pekolove' || _playFeatures.materializesHls;
+  // xifanacg 早期已安装副本（Rule Hub rev < 2）缺失 resolveMediaRedirects flag；
+  // 该源的 apn.moedot.net 媒体链会 302 到 wo.cn 下载域，后者拒绝携带
+  // xifanacg Referer 的请求（400），必须经 RemoteMediaRedirectResolver 预解析。
+  late final bool _resolvesMediaRedirects =
+      rule.id == 'xifanacg' || _playFeatures.resolvesMediaRedirects;
   // 同一页面 HTML 常被连续多个 select/searchList/episodes 步骤解析；
   // 按 identity 缓存最近一次的 DOM，避免重复全量解析（消费方均只读）。
   String? _lastParsedHtml;
@@ -292,7 +297,7 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
     ({String url, Map<String, String> httpHeaders}) media,
   ) async {
     var prepared = media;
-    if (_playFeatures.resolvesMediaRedirects) {
+    if (_resolvesMediaRedirects) {
       final resolvedUrl =
           await (_mediaRedirectResolver ??= RemoteMediaRedirectResolver())
               .resolve(media.url, headers: media.httpHeaders);

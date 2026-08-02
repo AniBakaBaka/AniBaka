@@ -74,12 +74,11 @@ class AppDialog extends StatelessWidget {
     final contentArea =
         contentWidget ??
         (content != null
-            ? Text(
+            ? _buildFormattedContent(
                 content!,
-                style: textTheme.bodyMedium?.copyWith(
-                  height: 1.6,
-                  color: colorScheme.onSurfaceVariant,
-                ),
+                textTheme.bodyMedium,
+                colorScheme.onSurfaceVariant,
+                colorScheme.onSurface,
               )
             : null);
 
@@ -149,6 +148,7 @@ class AppInputDialog extends StatefulWidget {
   final String confirmText;
   final String cancelText;
   final TextInputType? keyboardType;
+  final bool obscureText;
 
   const AppInputDialog({
     required this.title,
@@ -159,6 +159,7 @@ class AppInputDialog extends StatefulWidget {
     this.confirmText = '确定',
     this.cancelText = '取消',
     this.keyboardType,
+    this.obscureText = false,
   });
 
   @override
@@ -207,6 +208,9 @@ class _AppInputDialogState extends State<AppInputDialog> {
         controller: _controller,
         focusNode: _focusNode,
         keyboardType: widget.keyboardType,
+        obscureText: widget.obscureText,
+        autocorrect: !widget.obscureText,
+        enableSuggestions: !widget.obscureText,
         maxLines: widget.maxLines,
         decoration: InputDecoration(
           hintText: widget.hintText,
@@ -364,6 +368,7 @@ Future<InputDialogResult?> showAppInputDialog(
   String confirmText = '确定',
   String cancelText = '取消',
   TextInputType? keyboardType,
+  bool obscureText = false,
   bool barrierDismissible = true,
 }) {
   return showDialog<InputDialogResult>(
@@ -377,6 +382,7 @@ Future<InputDialogResult?> showAppInputDialog(
       confirmText: confirmText,
       cancelText: cancelText,
       keyboardType: keyboardType,
+      obscureText: obscureText,
     ),
   );
 }
@@ -542,5 +548,60 @@ Future<T?> showAppSelectionDialog<T>(
       currentValue: currentValue,
       cancelText: cancelText,
     ),
+  );
+}
+
+Widget _buildFormattedContent(
+  String content,
+  TextStyle? baseStyle,
+  Color defaultColor,
+  Color boldColor,
+) {
+  final style = (baseStyle ?? const TextStyle(fontSize: 14)).copyWith(
+    height: 1.6,
+    color: defaultColor,
+  );
+  final boldStyle = style.copyWith(
+    fontWeight: FontWeight.bold,
+    color: boldColor,
+  );
+
+  final regex = RegExp(r'\*\*(.*?)\*\*');
+  final matches = regex.allMatches(content);
+
+  if (matches.isEmpty) {
+    return Text(content, style: style);
+  }
+
+  final spans = <InlineSpan>[];
+  int lastMatchEnd = 0;
+
+  for (final match in matches) {
+    if (match.start > lastMatchEnd) {
+      spans.add(TextSpan(
+        text: content.substring(lastMatchEnd, match.start),
+        style: style,
+      ));
+    }
+    final boldText = match.group(1);
+    if (boldText != null && boldText.isNotEmpty) {
+      spans.add(TextSpan(
+        text: boldText,
+        style: boldStyle,
+      ));
+    }
+    lastMatchEnd = match.end;
+  }
+
+  if (lastMatchEnd < content.length) {
+    spans.add(TextSpan(
+      text: content.substring(lastMatchEnd),
+      style: style,
+    ));
+  }
+
+  return Text.rich(
+    TextSpan(children: spans),
+    style: style,
   );
 }

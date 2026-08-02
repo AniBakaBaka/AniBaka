@@ -8,9 +8,9 @@ import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/services/mine_service.dart';
 import 'package:baka/services/navigation_service.dart';
-import 'package:baka/utils/reg_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/platform/tv/tv_focusable.dart';
+import 'package:baka/widgets/platform/tv/tv_log_export_dialog.dart';
 import 'package:baka/widgets/platform/tv/tv_qr_login_page.dart';
 
 class TvMyPage extends StatefulWidget {
@@ -175,6 +175,13 @@ class _TvMyPageState extends State<TvMyPage> {
                                 onPressed: () =>
                                     NavigationService.toAppSettings(context),
                               ),
+                              _buildMenuItem(
+                                icon: Icons.qr_code_2_rounded,
+                                title: '导出日志',
+                                subtitle: '手机扫码下载',
+                                color: Colors.indigoAccent,
+                                onPressed: () => showTvLogExportDialog(context),
+                              ),
                               if (!_svc.isLogin)
                                 _buildMenuItem(
                                   icon: Icons.login,
@@ -220,9 +227,9 @@ class _TvMyPageState extends State<TvMyPage> {
             border: Border.all(color: context.tvTextHintColor, width: 2),
           ),
           child: ClipOval(
-            child: _svc.isLogin
+            child: _svc.hasIdentity && _svc.avatarUrl.isNotEmpty
                 ? CachedNetworkImage(
-                    imageUrl: getAvatar(avatar: _svc.avatarQq),
+                    imageUrl: _svc.avatarUrl,
                     fit: BoxFit.cover,
                   )
                 : Container(
@@ -237,11 +244,11 @@ class _TvMyPageState extends State<TvMyPage> {
         ),
         const SizedBox(height: 20),
         Text(
-          _svc.isLogin ? _svc.displayName : '点击登录',
+          _svc.hasIdentity ? _svc.displayName : '点击登录',
           style: TextStyle(
             fontSize: 28,
             fontWeight: FontWeight.w800,
-            color: _svc.isLogin
+            color: _svc.hasIdentity
                 ? context.tvTextColor
                 : Theme.of(context).colorScheme.primary,
             letterSpacing: -0.5,

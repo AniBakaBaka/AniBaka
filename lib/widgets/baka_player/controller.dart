@@ -42,6 +42,9 @@ class PlaybackController {
     const PlaybackPreferences(),
   );
   final mediaInfo = ValueNotifier<PlaybackMediaInfo>(const PlaybackMediaInfo());
+  final enhancement = ValueNotifier<VideoEnhancementState>(
+    const VideoEnhancementState(),
+  );
 
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   final StreamController<void> _completed = StreamController<void>.broadcast();
@@ -753,9 +756,8 @@ class PlaybackController {
       _notifyToastChanged();
     }
 
-    if (previous.enableAnime4K != next.enableAnime4K ||
-        previous.anime4KLevel != next.anime4KLevel) {
-      await _syncAnime4KShaders();
+    if (previous.videoEnhancementMode != next.videoEnhancementMode) {
+      await _syncVideoEnhancement();
     }
     if (previous.subtitleConfig != next.subtitleConfig) {
       await _syncSubtitleConfig();
@@ -796,15 +798,34 @@ class PlaybackController {
     );
   }
 
-  Future<bool> toggleAnime4K() async {
-    final enabled = !preferences.value.enableAnime4K;
-    await updatePreferences(preferences.value.copyWith(enableAnime4K: enabled));
-    return enabled;
+  Future<bool> toggleVideoEnhancement() async {
+    final current = preferences.value;
+    final enabling = current.videoEnhancementMode == VideoEnhancementMode.off;
+    final mode = enabling
+        ? current.lastVideoEnhancementMode
+        : VideoEnhancementMode.off;
+    await updatePreferences(
+      current.copyWith(
+        videoEnhancementMode: mode,
+        lastVideoEnhancementMode: enabling
+            ? mode
+            : current.videoEnhancementMode,
+      ),
+    );
+    return enabling;
   }
 
-  Future<void> switchAnime4KLevel(String level) async {
-    if (preferences.value.anime4KLevel == level) return;
-    await updatePreferences(preferences.value.copyWith(anime4KLevel: level));
+  Future<void> setVideoEnhancementMode(VideoEnhancementMode mode) async {
+    final current = preferences.value;
+    if (current.videoEnhancementMode == mode) return;
+    await updatePreferences(
+      current.copyWith(
+        videoEnhancementMode: mode,
+        lastVideoEnhancementMode: mode == VideoEnhancementMode.off
+            ? current.lastVideoEnhancementMode
+            : mode,
+      ),
+    );
   }
 
   Future<void> updateSubtitleConfig(
@@ -826,6 +847,20 @@ class PlaybackController {
   Future<void> setSubtitleTrack(SubtitleTrack track) =>
       _backend.setSubtitleTrack(track);
 
+  Future<PlaybackTechnicalInfo> loadTechnicalInfo() async {
+    await initialize();
+    final info = await _backend.getTechnicalInfo();
+    final settings = preferences.value;
+    final actual = enhancement.value;
+    return info.copyWith(
+      rendererProfile: settings.videoRenderer,
+      hardwareDecodeMode: settings.hwdecMode,
+      requestedEnhancementMode: actual.requestedMode,
+      appliedEnhancementPipeline: actual.appliedPipeline,
+      enhancementFallbackReason: actual.fallbackReason,
+    );
+  }
+
   Future<void> resetPreferences() {
     const defaults = PlaybackPreferences();
     overlay.value = overlay.value.copyWith(showDanmaku: true);
@@ -842,7 +877,7 @@ class PlaybackController {
       ),
       debugLabel: 'player',
     );
-    await _syncAnime4KShaders();
+    await _syncVideoEnhancement();
     await _syncSubtitleConfig();
     await _backend.setNativeProperty(
       'sub-visibility',
@@ -851,12 +886,17 @@ class PlaybackController {
     await setRate(rate);
   }
 
-  Future<void> _syncAnime4KShaders() async {
-    final settings = preferences.value;
-    final path = settings.enableAnime4K
-        ? await Anime4K.shaderPath(settings.anime4KLevel)
-        : '';
-    await _backend.setNativeProperty('glsl-shaders', path);
+  Future<void> _syncVideoEnhancement() async {
+    final mode = preferences.value.videoEnhancementMode;
+    final pipeline = selectEnhancementPipeline(mode);
+    final shaderPath = await Anime4K.shaderPath(pipeline);
+    await _backend.setNativeProperty('glsl-shaders', shaderPath);
+    if (_disposed) return;
+    enhancement.value = enhancement.value.copyWith(
+      requestedMode: mode,
+      appliedPipeline: pipeline,
+      clearFallbackReason: true,
+    );
   }
 
   Future<void> _syncSubtitleConfig() {
@@ -873,6 +913,9 @@ class PlaybackController {
     _jumpPromptTimer?.cancel();
     _errorDebounceTimer?.cancel();
     _bufferingDebounceTimer?.cancel();
+    enhancement.value = VideoEnhancementState(
+      requestedMode: preferences.value.videoEnhancementMode,
+    );
     core.value = core.value.copyWith(
       loading: true,
       buffering: true,
@@ -921,5 +964,6 @@ class PlaybackController {
     toastRevision.dispose();
     preferences.dispose();
     mediaInfo.dispose();
+    enhancement.dispose();
   }
 }

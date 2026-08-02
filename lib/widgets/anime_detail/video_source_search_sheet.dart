@@ -183,6 +183,8 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
 
   void _navigateToPlayer(Map<String, dynamic> videoData) {
     if (!mounted) return;
+    // 匹配成功，立即停止后台搜索以释放带宽给播放器。
+    _controller.cancelSearch();
     VideoSourceSearchController.cacheGlobal(widget.title, _controller);
     if (widget.headlessMode) {
       widget.onMatchFound?.call(videoData);

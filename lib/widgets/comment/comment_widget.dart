@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:baka/api/bgm.dart';
+import 'package:baka/instance.dart';
+import 'package:baka/services/bangumi_sync_service.dart';
 import 'package:baka/services/bgm_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/date_util.dart';
@@ -8,6 +10,7 @@ import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:baka/widgets/comment/comment_card.dart';
 import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/dialog/input_dialog.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -76,7 +79,10 @@ _BgmComment? _parseBgmComment(Object? value) {
 
   return (
     name: user?['nickname']?.toString() ?? '匿名',
-    avatarUrl: (user?['avatar'] as Map?)?['small']?.toString() ?? '',
+    avatarUrl: BgmUtils.bgmImageProxyUrl(
+      (user?['avatar'] as Map?)?['small']?.toString() ?? '',
+      width: 120,
+    ),
     content: content,
     images: images,
     createdAt: BgmUtils.toInt(value['createdAt']) ?? 0,
@@ -442,10 +448,10 @@ class CIslandCommentWidget extends StatefulWidget {
   final String? episodeName;
 
   @override
-  State<CIslandCommentWidget> createState() => _CIslandCommentWidgetState();
+  State<CIslandCommentWidget> createState() => CIslandCommentWidgetState();
 }
 
-class _CIslandCommentWidgetState extends State<CIslandCommentWidget> {
+class CIslandCommentWidgetState extends State<CIslandCommentWidget> {
   final _commentKey = GlobalKey<CommentListState>();
   late Future<_BgmSection> _bgmRequest = _loadBgmComments();
 
@@ -488,6 +494,56 @@ class _CIslandCommentWidgetState extends State<CIslandCommentWidget> {
     } catch (error) {
       debugPrint('获取BGM剧集评论失败: $error');
       return (episodeName: fallbackName, comments: const <_BgmComment>[]);
+    }
+  }
+
+  Future<void> sendComment(String rawText) async {
+    final text = rawText.trim();
+    if (text.isEmpty) return;
+    if (Instances.userToken.isNotEmpty) {
+      await _commentKey.currentState?.sendComment(text, 0, '');
+      return;
+    }
+    if (!BangumiSyncService.instance.isConnected) {
+      await _commentKey.currentState?.sendComment(text, 0, '');
+      return;
+    }
+
+    final subjectId = widget.bgmSubjectId;
+    final episodeIndex = widget.episodeIndex;
+    if (subjectId == null || episodeIndex == null) {
+      showSnackBar('当前条目无法定位到 Bangumi 剧集', isError: true);
+      return;
+    }
+    final action = await showAppConfirmDialog(
+      context,
+      title: '前往 Bangumi 发表评论',
+      content:
+          'Bangumi 官方公开 API 暂不提供评论发布接口。AniBaka 将复制你输入的内容，并打开对应的 Bangumi 官方剧集页，由你确认发布。\n\n'
+          '打开 Bangumi 可能需要网络代理。Bangumi 登录不能回复 AniBaka 评论；如需站内回复和云端历史，推荐登录 AniBaka。',
+      confirmText: '复制并打开',
+      cancelText: '取消',
+    );
+    if (action != DialogAction.confirm || !mounted) return;
+
+    try {
+      final episode = await BgmService.resolveEpisodeByIndex(
+        subjectId,
+        episodeIndex,
+      );
+      final episodeId = episode?.episodeId;
+      if (episodeId == null) {
+        throw const BangumiSyncException('无法定位 Bangumi 剧集页面');
+      }
+      await Clipboard.setData(ClipboardData(text: text));
+      final opened = await launchUrlString(
+        'https://bgm.tv/ep/$episodeId',
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened) throw const BangumiSyncException('无法打开浏览器');
+      showSnackBar('评论内容已复制，请在 Bangumi 页面粘贴并发布');
+    } catch (error) {
+      showSnackBar(error.toString(), isError: true);
     }
   }
 
@@ -605,11 +661,7 @@ class _CIslandCommentWidgetState extends State<CIslandCommentWidget> {
             },
           ),
         ),
-        CommentInputWidget(
-          isInline: true,
-          onSendComment: (text) =>
-              _commentKey.currentState?.sendComment(text, 0, ''),
-        ),
+        CommentInputWidget(isInline: true, onSendComment: sendComment),
       ],
     );
   }

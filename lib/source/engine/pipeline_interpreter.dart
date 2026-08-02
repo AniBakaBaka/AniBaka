@@ -363,7 +363,7 @@ class PipelineInterpreter {
     final template = step.str('url');
     final rawUrl = template != null && template.isNotEmpty
         ? _render(template, ctx)
-        : (step.op == 'follow' ? ctx.currentString : '');
+        : ctx.currentString;
     if (rawUrl.trim().isEmpty) {
       ctx.value = '';
       return;
@@ -513,7 +513,15 @@ class PipelineInterpreter {
   void _opJson(PipelineStep step, _PipelineContext ctx) {
     final data = _asJson(ctx.value);
     final path = step.str('path') ?? '';
-    ctx.value = AnimeRuleOps.jsonPath(data, path);
+    var val = AnimeRuleOps.jsonPath(data, path);
+    if ((val == null || val == '') && path.isNotEmpty) {
+      if (path.startsWith('data.')) {
+        val = AnimeRuleOps.jsonPath(data, path.substring(5));
+      } else if (!path.contains('.')) {
+        val = AnimeRuleOps.jsonPath(data, 'data.$path');
+      }
+    }
+    ctx.value = val;
   }
 
   /// `crypto`：加解密 / 摘要变换。
@@ -980,11 +988,23 @@ class PipelineInterpreter {
   /// `jsonSeries`：从 JSON 列表构建 Series（JSON API 搜索）。
   void _opJsonSeries(PipelineStep step, _PipelineContext ctx) {
     ctx.beginSink();
-    final data = _asJson(ctx.value);
-    final list = AnimeRuleOps.jsonPath(data, step.str('listPath') ?? '');
-    if (list is! List) return;
+    final rawData = _asJson(ctx.value);
+    if (rawData == null) return;
 
-    _appendJsonSeries(list, step, ctx);
+    final listPath = step.str('listPath') ?? '';
+    Object? target = AnimeRuleOps.jsonPath(rawData, listPath);
+    if (target is! List) {
+      if (rawData is List) {
+        target = rawData;
+      } else if (rawData is Map && rawData['data'] is List) {
+        target = rawData['data'];
+      } else if (rawData is Map && rawData['list'] is List) {
+        target = rawData['list'];
+      }
+    }
+    if (target is! List) return;
+
+    _appendJsonSeries(target, step, ctx);
   }
 
   void _appendJsonSeries(
@@ -1000,10 +1020,20 @@ class PipelineInterpreter {
     final descKey = step.str('descKey');
     final baseUrl = ctx.baseUrl;
 
+    final keyword = step.flag('keywordMatch')
+        ? (ctx.vars['keyword']?.toString() ?? '').toLowerCase().trim()
+        : '';
+
     for (final item in list) {
       if (item is! Map) continue;
       final name = item[nameKey]?.toString().trim() ?? '';
       if (name.isEmpty) continue;
+      if (keyword.isNotEmpty) {
+        final lowerName = name.toLowerCase();
+        if (!lowerName.contains(keyword) && !keyword.contains(lowerName)) {
+          continue;
+        }
+      }
       final rawId = item[idKey]?.toString().trim() ?? '';
       final id = _transformJsonSeriesId(rawId, step);
       final rawUrl = urlKey == null
@@ -1200,7 +1230,7 @@ class PipelineInterpreter {
     _PipelineContext ctx, {
     Object? sourceId,
   }) {
-    final epNameKey = step.str('episodeNameKey') ?? 'name';
+    final epNameKey = step.str('episodeNameKey') ?? step.str('nameKey') ?? 'name';
     final idTemplate = step.str('episodeIdTemplate') ?? '{id}';
     final plainIdTemplate = idTemplate == '{id}';
     final rawIdTemplate = idTemplate == '{id:raw}';
@@ -1237,7 +1267,21 @@ class PipelineInterpreter {
   /// 既让 `first` 误判分支成功（跳过 sniff 等后备分支），又会被
   /// runPlay 当作 URL 返回垃圾。
   void _opVideoUrl(PipelineStep step, _PipelineContext ctx) {
-    ctx.value = ctx.host.extractVideoUrl(ctx.currentString, ctx.pageUrl);
+    final raw = ctx.currentString.trim();
+    String url = '';
+    if (_httpSchemePattern.hasMatch(raw) && !raw.contains('<html') && !raw.contains('{')) {
+      url = raw;
+    } else {
+      url = ctx.host.extractVideoUrl(raw, ctx.pageUrl);
+    }
+    if (url.isNotEmpty) {
+      try {
+        url = Uri.encodeFull(Uri.decodeFull(url));
+      } catch (_) {
+        url = Uri.encodeFull(url);
+      }
+    }
+    ctx.value = url;
   }
 
   /// `setMediaHeaders`：从当前 JSON 值中提取播放器请求头并设置到 ctx。

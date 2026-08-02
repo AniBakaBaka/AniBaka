@@ -354,13 +354,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   child: Row(
                     children: [
                       if (Instances.isDesktopPlatform)
-                        Obx(
-                          () => WindowsSidebar(
+                        Obx(() {
+                          _appState.loginTrigger.value;
+                          return WindowsSidebar(
                             currentPageIndex: _appState.currentPageIndex.value,
-                            userInfo: _appState.userInfo.value,
                             onPageChange: _appState.changePage,
-                          ),
-                        ),
+                          );
+                        }),
                       Expanded(
                         child: Obx(() {
                           final currentIndex = _appState.currentPageIndex.value;

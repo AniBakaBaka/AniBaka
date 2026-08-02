@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:baka/api/play_history.dart';
+import 'package:baka/instance.dart';
 import 'package:baka/models/play_history.dart';
 import 'package:baka/services/app_storage.dart';
+import 'package:baka/services/bangumi_sync_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
@@ -295,8 +297,22 @@ class PlayHistorySyncService {
       await _persist(next);
 
       final remote = _toRemote(record);
-      if (remote != null) {
+      if (remote != null && Instances.userToken.isNotEmpty) {
         unawaited(PlayHistoryApi.addOrUpdatePlayHistory(remote));
+      }
+
+      final bgmId = BgmUtils.toInt(record['bgmId']);
+      if (record['isFinished'] == true &&
+          bgmId != null &&
+          BangumiSyncService.instance.isConnected &&
+          BangumiSyncService.instance.autoMarkEpisode) {
+        unawaited(
+          BangumiSyncService.instance
+              .markEpisodeWatched(subjectId: bgmId, watched: episodeIndex + 1)
+              .catchError((Object error, StackTrace stackTrace) {
+                debugPrint('更新 Bangumi 集数失败: $error');
+              }),
+        );
       }
     } catch (e) {
       debugPrint('保存历史记录错误: $e');
@@ -310,5 +326,4 @@ class PlayHistorySyncService {
       AppStorage.playHistoryBox.put(_resumeKey, const []),
     ]);
   }
-
 }

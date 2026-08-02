@@ -32,4 +32,20 @@ void main() {
       url,
     );
   });
+
+  test('Cycani verify-signed MP4 is treated as a signed CDN URL', () {
+    const url =
+        'https://r2n2kf6ygw.cycmedia.net:8080/cache/'
+        'VEhFIFdPUkxEIElTIERBTkNJTkcg5LiW55WM5Zyo6LW36IieMDF6bS5tcDQ=.mp4'
+        '?verify=1785679788-mvrwhrqUe+2Wsg90sCSsfZ/VbzfLfW98BcU8eTbikmI=';
+
+    expect(VideoUrlExtractor.isSignedCdnUrl(url), isTrue);
+    expect(
+      VideoUrlExtractor.normalizeResolvedUrl(
+        url,
+        'https://www.cycani.org/bangumi/1.html',
+      ),
+      url,
+    );
+  });
 }
