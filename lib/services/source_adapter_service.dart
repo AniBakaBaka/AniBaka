@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:baka/source/adapter_base.dart';
@@ -357,6 +358,7 @@ class SourceCatalog extends ChangeNotifier {
   Future<void> init() => _initialization ??= _loadSources();
 
   Future<void> _loadSources() async {
+    var legacyCleaned = false;
     final storedOverrides = AppStorage.customSourcesBox.get(
       _builtinOverridesKey,
     );
@@ -366,6 +368,10 @@ class SourceCatalog extends ChangeNotifier {
           Map<String, dynamic>.from(json),
         );
         if (AdapterRegistry.isBuiltinSource(source.id)) {
+          if (source.id == 'cycani' && _isLegacyCycaniConfig(source)) {
+            legacyCleaned = true;
+            continue;
+          }
           _builtinOverrides[source.id] = source;
         }
       }
@@ -379,6 +385,10 @@ class SourceCatalog extends ChangeNotifier {
           Map<String, dynamic>.from(json),
         );
         if (AdapterRegistry.isBuiltinSource(source.id)) {
+          if (source.id == 'cycani' && _isLegacyCycaniConfig(source)) {
+            legacyCleaned = true;
+            continue;
+          }
           final current = _builtinOverrides[source.id];
           if (current == null || source.updatedAt.isAfter(current.updatedAt)) {
             _builtinOverrides[source.id] = source;
@@ -388,10 +398,14 @@ class SourceCatalog extends ChangeNotifier {
           _customSources.add(source);
         }
       }
-      if (migratedBuiltin) {
+      if (migratedBuiltin || legacyCleaned) {
         await _commit();
         return;
       }
+    }
+    if (legacyCleaned) {
+      await _commit();
+      return;
     }
     _rebuildCustomIndex();
   }
@@ -588,5 +602,13 @@ class SourceCatalog extends ChangeNotifier {
     final item = copy.removeAt(oldIndex);
     copy.insert(target, item);
     return copy;
+  }
+
+  static bool _isLegacyCycaniConfig(CustomSourceConfig config) {
+    final rawJson = jsonEncode(config.toJson());
+    return rawJson.contains('/search/wd/') ||
+        rawJson.contains('playerDecrypt') ||
+        rawJson.contains('/search/{keyword}') ||
+        !rawJson.contains('/api/videos/');
   }
 }

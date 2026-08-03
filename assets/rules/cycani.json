@@ -7,34 +7,39 @@
   "description": "Cycani 次元城动画视频源",
   "headers": {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-    "Accept": "*/*"
+    "Accept": "application/json",
+    "X-App-Name": "cyc_web",
+    "X-Time-Zone": "Asia/Shanghai",
+    "X-App-Version": "cycweb",
+    "Referer": "https://www.cycani.org/"
   },
+  "useWebview": false,
   "search": [
     {
       "op": "first",
       "branches": [
         [
           {
-            "op": "maccmsSuggest",
-            "verify": true,
-            "headers": {
-              "Accept": "application/json, text/javascript, */*; q=0.01",
-              "Referer": "https://www.cycani.org/"
-            },
-            "detailUrlTemplate": "/bangumi/{id}.html"
+            "op": "fetch",
+            "url": "/api/videos/search?q={keyword}&page=1&page_size=20"
+          },
+          {
+            "op": "jsonSeries",
+            "listPath": "data.list",
+            "idKey": "video_id",
+            "nameKey": "title",
+            "imageKey": "cover_url",
+            "detailUrlTemplate": "/bangumi/{id}.html",
+            "keywordMatch": false
           }
         ],
         [
           {
             "op": "sniff",
             "goal": "html",
-            "url": "/index.php/ajax/suggest?mid=1&wd={keyword}&limit=20",
+            "url": "/api/videos/search?q={keyword}&page=1&page_size=20",
             "readyContains": [
               "\"list\""
-            ],
-            "rejectContains": [
-              "altcha-widget",
-              "aegis_altcha"
             ],
             "timeoutMs": 30000,
             "settleMs": 0
@@ -46,8 +51,12 @@
           },
           {
             "op": "jsonSeries",
-            "listPath": "list",
-            "detailUrlTemplate": "/bangumi/{id}.html"
+            "listPath": "data.list",
+            "idKey": "video_id",
+            "nameKey": "title",
+            "imageKey": "cover_url",
+            "detailUrlTemplate": "/bangumi/{id}.html",
+            "keywordMatch": false
           }
         ]
       ]
@@ -60,123 +69,76 @@
         [
           {
             "op": "regex",
-            "pattern": "/bangumi/(\\d+)",
+            "pattern": "(\\d+)",
             "group": 1
           },
           {
-            "op": "template",
-            "value": "/api.php/provide/vod/?ac=detail&ids={url:raw}"
+            "op": "fetch",
+            "url": "/api/videos/{url:raw}/sections?player_code=cychub&page=1&page_size=100"
           },
           {
-            "op": "follow",
-            "headers": {
-              "Referer": "https://www.cycani.org/"
-            }
-          },
-          {
-            "op": "maccmsVerify"
-          },
-          {
-            "op": "maccmsApiEpisodes",
-            "listPath": "list"
+            "op": "jsonEpisodes",
+            "episodesPath": "data.list",
+            "idKey": "id",
+            "nameKey": "title",
+            "episodeIdTemplate": "/api/sections/{id}/play-url"
           }
         ],
         [
           {
-            "op": "follow",
-            "headers": {
-              "Referer": "https://www.cycani.org/"
-            }
+            "op": "regex",
+            "pattern": "(\\d+)",
+            "group": 1
           },
-          {
-            "op": "maccmsVerify"
-          },
-          {
-            "op": "episodes",
-            "listSelectors": [
-              ".anthology-list .anthology-list-box",
-              ".anthology-list-box",
-              ".anthology-list-play"
-            ],
-            "tabSelectors": [
-              ".anthology-tab .swiper-slide",
-              ".anthology-tab a",
-              ".module-tab-item",
-              ".tab-item"
-            ]
-          }
-        ],
-        [
           {
             "op": "sniff",
             "goal": "html",
+            "url": "/api/videos/{url:raw}/sections?player_code=cychub&page=1&page_size=100",
             "readyContains": [
-              "anthology-list"
+              "list"
             ],
-            "rejectContains": [
-              "altcha-widget",
-              "aegis_altcha"
-            ],
-            "timeoutMs": 60000,
-            "settleMs": 0
+            "timeoutMs": 30000
           },
           {
-            "op": "episodes",
-            "listSelectors": [
-              ".anthology-list .anthology-list-box",
-              ".anthology-list-box",
-              ".anthology-list-play"
-            ],
-            "tabSelectors": [
-              ".anthology-tab .swiper-slide",
-              ".anthology-tab a",
-              ".module-tab-item",
-              ".tab-item"
-            ]
+            "op": "select",
+            "css": "body",
+            "attr": "text"
+          },
+          {
+            "op": "jsonEpisodes",
+            "episodesPath": "data.list",
+            "idKey": "id",
+            "nameKey": "title",
+            "episodeIdTemplate": "/api/sections/{id}/play-url"
           }
         ]
       ]
     }
   ],
-  "useWebview": true,
   "play": [
     {
-      "op": "first",
-      "branches": [
-        [
-          {
-            "op": "follow",
-            "headers": {
-              "Referer": "https://www.cycani.org/"
-            }
-          },
-          {
-            "op": "maccmsVerify"
-          }
-        ],
-        [
-          {
-            "op": "sniff",
-            "goal": "html",
-            "readyContains": [
-              "player_aaaa"
-            ],
-            "rejectContains": [
-              "altcha-widget",
-              "aegis_altcha"
-            ],
-            "timeoutMs": 60000,
-            "settleMs": 0
-          }
-        ]
-      ]
+      "op": "setMediaHeaders",
+      "headers": {
+        "Referer": "https://www.cycani.org/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+      }
     },
     {
       "op": "first",
       "branches": [
         [
           {
-            "op": "playerAaaa"
+            "op": "regex",
+            "pattern": "(\\d+)",
+            "group": 1
+          },
+          {
+            "op": "fetch",
+            "url": "/api/sections/{url:raw}/play-url"
+          },
+          {
+            "op": "json",
+            "path": "data.url"
           },
           {
             "op": "videoUrl"
@@ -184,39 +146,35 @@
         ],
         [
           {
-            "op": "playerAaaa"
-          },
-          {
-            "op": "template",
-            "value": "https://player.cycanime.com/?url={url:raw}"
-          },
-          {
-            "op": "follow",
-            "headers": {
-              "Referer": "https://www.cycani.org/"
-            }
-          },
-          {
-            "op": "playerDecrypt",
-            "salt": "YLwJVbXw77pk2eOrAnFdBo2c3mWkLtodMni2wk81GCnP94ZltW"
-          }
-        ],
-        [
-          {
-            "op": "videoUrl"
-          }
-        ],
-        [
-          {
-            "op": "playerAaaa"
-          },
-          {
-            "op": "template",
-            "value": "https://player.cycanime.com/?url={url:raw}"
+            "op": "regex",
+            "pattern": "(\\d+)",
+            "group": 1
           },
           {
             "op": "sniff",
-            "goal": "video"
+            "goal": "html",
+            "url": "/api/sections/{url:raw}/play-url",
+            "readyContains": [
+              "url"
+            ],
+            "timeoutMs": 15000
+          },
+          {
+            "op": "select",
+            "css": "body",
+            "attr": "text"
+          },
+          {
+            "op": "json",
+            "path": "data.url"
+          },
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "videoUrl"
           }
         ]
       ]

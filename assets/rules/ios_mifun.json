@@ -1,0 +1,102 @@
+{
+  "format": "anx-rule/2",
+  "id": "ios_mifun",
+  "name": "MiFun",
+  "baseUrl": "https://ios.mifun.org",
+  "iconUrl": "https://ugc.hitv.com/1/230324151010E2CA349174CE432E9353E29DE5C0EQ0NF/sVoWeL0.png?mxtheme/images/favicon.png",
+  "description": "MiFun在线动漫专注于资源收集整理，海量有效的高质量动漫资源在线观看，完全免费。",
+  "useWebview": true,
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "*/*",
+    "Referer": "https://ios.mifun.org/"
+  },
+  "search": [
+    {
+      "op": "maccmsSuggest",
+      "urlKey": "url",
+      "detailUrlTemplate": "/voddetail/{id}/"
+    }
+  ],
+  "detail": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "episodes",
+      "listSelectors": [
+        "ul.hl-plays-list"
+      ]
+    }
+  ],
+  "play": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "playerAaaa",
+      "var": "player_aaaa",
+      "key": "url"
+    },
+    {
+      "op": "setVar",
+      "name": "mediaToken",
+      "value": "{url:raw}"
+    },
+    {
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "fetch",
+            "url": "https://data.m3u8.in/player/?url={mediaToken}"
+          },
+          {
+            "op": "regex",
+            "pattern": "const\\s+Sign\\s*=\\s*\"([^\"]+)\"",
+            "group": 1
+          },
+          {
+            "op": "setVar",
+            "name": "mediaSign",
+            "value": "{url:raw}"
+          },
+          {
+            "op": "fetch",
+            "url": "https://data.m3u8.in/player/api.php?url={mediaToken}&sign={mediaSign}",
+            "headers": {
+              "X-Requested-With": "XMLHttpRequest",
+              "Referer": "https://data.m3u8.in/player/?url={mediaToken}"
+            }
+          },
+          {
+            "op": "json",
+            "path": "url"
+          }
+        ],
+        [
+          {
+            "op": "template",
+            "value": "https://data.m3u8.in/player/?url={mediaToken}"
+          },
+          {
+            "op": "sniff",
+            "goal": "video"
+          }
+        ],
+        [
+          {
+            "op": "sniff",
+            "goal": "video"
+          }
+        ]
+      ]
+    },
+    {
+      "op": "setMediaHeaders",
+      "headers": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      }
+    }
+  ]
+}

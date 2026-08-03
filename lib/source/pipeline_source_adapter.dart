@@ -727,6 +727,7 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
               ? Headers.formUrlEncodedContentType
               : contentType,
           headers: {
+            ...rule.headers,
             if (referer != null && referer.isNotEmpty) 'Referer': referer,
             ...?headers,
           },
@@ -735,7 +736,7 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
       );
       return resp.data?.toString() ?? '';
     } on DioException catch (e) {
-      debugPrint('$name: fetch 失败 $url: ${e.message ?? e.type.name}');
+      debugPrint('$name: fetch 失败 $url: ${e.message ?? e.type.name}, error: ${e.error}, resp: ${e.response?.statusCode}');
       return '';
     }
   }

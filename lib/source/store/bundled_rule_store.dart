@@ -24,7 +24,7 @@ class BundledRuleStore {
     'lm6': 'assets/rules/lm6.json',
     'jcydmz': 'assets/rules/jcydmz.json',
     'mgnacg': 'assets/rules/mgnacg.json',
-    'tvtfun': 'assets/rules/tvtfun.json',
+    'ios_mifun': 'assets/rules/ios_mifun.json',
     'xifanacg': 'assets/rules/xifanacg.json',
   };
 
@@ -35,7 +35,7 @@ class BundledRuleStore {
   static const Map<String, int> builtinVersions = <String, int>{
     'akianime': 4,
     'aniwatch': 0,
-    'cycani': 0,
+    'cycani': 1,
     'anime7': 2,
     'dm84': 0,
     'fsdm02': 0,
@@ -43,7 +43,7 @@ class BundledRuleStore {
     'lm6': 4,
     'jcydmz': 0,
     'mgnacg': 0,
-    'tvtfun': 5,
+    'ios_mifun': 4,
     'xifanacg': 2,
   };
 

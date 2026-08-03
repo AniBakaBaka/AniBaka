@@ -1231,7 +1231,8 @@ class PipelineInterpreter {
     Object? sourceId,
   }) {
     final epNameKey = step.str('episodeNameKey') ?? step.str('nameKey') ?? 'name';
-    final idTemplate = step.str('episodeIdTemplate') ?? '{id}';
+    final idTemplate =
+        step.str('episodeIdTemplate') ?? step.str('detailUrlTemplate') ?? '{id}';
     final plainIdTemplate = idTemplate == '{id}';
     final rawIdTemplate = idTemplate == '{id:raw}';
     final episodes = <Episode>[];

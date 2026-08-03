@@ -14,7 +14,6 @@ import 'package:baka/source/engine/rule_validator.dart';
 import 'package:baka/source/model/source_rule.dart';
 import 'package:baka/source/pipeline_source_adapter.dart';
 import 'package:baka/source/runtime/request_scheduler.dart';
-import 'package:baka/source/source_registry.dart';
 import 'package:baka/source/store/rule_migrator.dart';
 
 /// 可控的宿主替身：fetch 从预置表返回，解析类方法给出可预测的最小实现。
@@ -1055,38 +1054,39 @@ void main() {
     );
   });
 
-  test('Cycani uses HTTP suggest before the WebView fallback', () async {
+  test('Cycani uses HTTP search before the WebView fallback', () async {
     final rule = SourceRule.fromJson(
       jsonDecode(await File('assets/rules/cycani.json').readAsString())
           as Map<String, dynamic>,
     );
     expect(RuleValidator.validate(rule).errors, isEmpty);
     final host = FakeHost({
-      'https://example.com/index.php/ajax/suggest?mid=1&wd=x&limit=20':
-          '{"list":[{"id":"3049","name":"HTTP result"}]}',
+      'https://example.com/api/videos/search?q=x&page=1&page_size=20':
+          '{"code":0,"msg":"","data":{"list":[{"video_id":3049,"title":"HTTP x result"}]}}',
     });
 
     final results = await interp.runSearch(rule, host, 'x');
 
-    expect(results.single.name, 'HTTP result');
+    expect(results.single.name, 'HTTP x result');
     expect(results.single.seriesId, 'https://example.com/bangumi/3049.html');
     expect(host.fetched, hasLength(1));
   });
 
-  test('Cycani detail prefers API episode data over fragile page DOM', () async {
+  test('Cycani detail uses REST API sections data', () async {
     final rule = SourceRule.fromJson(
       jsonDecode(await File('assets/rules/cycani.json').readAsString())
           as Map<String, dynamic>,
     );
     final host = FakeHost({
-      'https://example.com/api.php/provide/vod/?ac=detail&ids=3049': jsonEncode({
-        'list': [
-          {
-            'vod_play_from': r'cycani$$$backup',
-            'vod_play_url':
-                r'第01集$/watch/3049/1/1.html#第02集$/watch/3049/1/2.html$$$第01集$/watch/3049/2/1.html',
-          },
-        ],
+      'https://example.com/api/videos/3049/sections?player_code=cychub&page=1&page_size=100': jsonEncode({
+        'code': 0,
+        'msg': '',
+        'data': {
+          'list': [
+            {'id': 1001, 'title': '第01集'},
+            {'id': 1002, 'title': '第02集'},
+          ],
+        },
       }),
     });
 
@@ -1096,17 +1096,14 @@ void main() {
       'https://www.cycani.org/bangumi/3049.html',
     );
 
-    expect(sources, hasLength(2));
-    expect(sources.first.sourceName, 'cycani');
+    expect(sources, hasLength(1));
     expect(sources.first.episodes, hasLength(2));
     expect(sources.first.episodes.first.name, '第01集');
-    expect(sources.first.episodes.first.episodeId, '/watch/3049/1/1.html');
-    expect(buildAdapterVideoList(sources), [
-      r'第01集$/watch/3049/1/1.html$/watch/3049/2/1.html',
-      r'第02集$/watch/3049/1/2.html',
-    ]);
+    expect(sources.first.episodes.first.episodeId, '/api/sections/1001/play-url');
     expect(host.fetched, hasLength(1));
   });
+
+
 
   test('custom source persistence keeps directConnection', () {
     final config = CustomSourceConfig.fromJson({

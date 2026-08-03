@@ -80,8 +80,8 @@ Future<void> _probe(
     );
   }
   final adapter = PipelineSourceAdapter(rule);
-
-  final series = await _interpreter.runSearch(rule, adapter, keyword);
+  var series = <dynamic>[];
+  series = await adapter.search('', keyword, enhanceWithBgm: false);
   // ignore: avoid_print
   print('[$file] search "$keyword" -> ${series.length} 条');
   for (final s in series.take(3)) {
