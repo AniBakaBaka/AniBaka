@@ -240,7 +240,7 @@ class PlaybackPreferences {
     this.videoFit = BoxFit.contain,
     this.videoFitDescription = '\u753b\u9762',
     this.hwdecMode = 'auto',
-    this.videoRenderer = 'auto',
+    this.videoRenderer = 'gpu',
   });
 
   final bool rememberLastPosition;
@@ -408,7 +408,7 @@ class PlaybackTechnicalInfo {
     this.audioDecoder,
     this.audioFormat,
     this.audioChannelLayout,
-    this.rendererProfile = 'auto',
+    this.rendererProfile = 'gpu',
     this.hardwareDecodeMode = 'auto',
     this.requestedEnhancementMode = VideoEnhancementMode.off,
     this.appliedEnhancementPipeline = VideoEnhancementPipeline.off,

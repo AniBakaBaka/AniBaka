@@ -29,9 +29,10 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
   };
 
   static const _rendererDescriptions = <String, String>{
-    'auto': '使用稳定、低开销的默认渲染参数',
-    'compatibility': '关闭高质量缩放，适合黑屏、花屏或性能不足的设备',
-    'quality': '启用高质量缩放，GPU 占用更高',
+    'gpu': 'GPU 渲染器，兼容性最好',
+    'gpu-next': '新一代 GPU 渲染器，画质更好但要求更高',
+    'mediacodec_embed':
+        'Android 专用：解码帧直写 Surface，绕过 GPU 合成，适合部分电视黑屏但有声',
   };
 
   /// 就地改字段 + 落盘，取代每个开关各写一个四行的 `_setXxx` 方法。
@@ -198,9 +199,12 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                       icon: Icons.monitor_rounded,
                       onTap: () => _pickOption<String>(
                         title: '视频渲染器',
-                        intro: '渲染器始终使用嵌入式 libmpv 输出，以下选项只调整安全的 GPU 渲染配置',
+                        intro: 'gpu/gpu-next 为 GPU 渲染器；'
+                            '若电视播放黑屏但有声音，可切换到 mediacodec_embed',
                         current: _videoRenderer,
-                        options: PlaybackSettingsService.videoRendererOptions,
+                        options:
+                            PlaybackSettingsService
+                                .videoRendererOptionsForPlatform,
                         labelOf: (renderer) =>
                             PlaybackSettingsService
                                 .videoRendererLabels[renderer] ??

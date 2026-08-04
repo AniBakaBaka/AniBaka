@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:baka/models/playback_state.dart';
+import 'package:baka/widgets/baka_player/mpv_config.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
@@ -20,7 +23,7 @@ abstract interface class PlaybackBackend {
   SubtitleTrack get currentSubtitleTrack;
   String? get currentMediaUri;
 
-  Future<void> initialize();
+  Future<void> initialize({String? videoRenderer});
   Future<void> open(
     String uri, {
     required bool autoplay,
@@ -79,7 +82,7 @@ class MediaKitPlaybackBackend implements PlaybackBackend {
       _player?.state.playlist.medias.firstOrNull?.uri;
 
   @override
-  Future<void> initialize() async {
+  Future<void> initialize({String? videoRenderer}) async {
     if (_player != null) return;
     final player = Player(
       configuration: const PlayerConfiguration(
@@ -88,7 +91,27 @@ class MediaKitPlaybackBackend implements PlaybackBackend {
       ),
     );
     _player = player;
-    _videoController = VideoController(player);
+    // Android 上把持久化的渲染器选择映射为 VideoController 的 vo：media_kit
+    // 会在 Flutter 视频 Surface 就绪（wid 非 0）后统一应用，避免提前初始化
+    // VO。'gpu' 是 media_kit Android 默认 vo，保持 null 即可。
+    final isAndroid = Platform.isAndroid;
+    String? vo;
+    if (isAndroid) {
+      vo = switch (videoRenderer) {
+        'gpu-next' => 'gpu-next',
+        mediacodecEmbedRenderer => mediacodecEmbedRenderer,
+        _ => null,
+      };
+    }
+    _videoController = VideoController(
+      player,
+      configuration: VideoControllerConfiguration(
+        vo: vo,
+        hwdec: isAndroid && videoRenderer == mediacodecEmbedRenderer
+            ? 'mediacodec'
+            : null,
+      ),
+    );
   }
 
   @override

@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/models/subtitle_config.dart';
 import 'package:baka/services/playback_settings_service.dart';
+import 'package:baka/utils/app_logger.dart';
 import 'package:baka/utils/date_util.dart';
 import 'package:baka/widgets/baka_player/anime4k.dart';
 import 'package:baka/widgets/baka_player/mpv_config.dart';
@@ -101,7 +103,7 @@ class PlaybackController {
     overlay.value = overlay.value.copyWith(
       showDanmaku: !loaded.defaultDanmakuOff,
     );
-    await _backend.initialize();
+    await _backend.initialize(videoRenderer: loaded.videoRenderer);
     if (_disposed) return;
     _bindBackend();
   }
@@ -319,6 +321,7 @@ class PlaybackController {
   void _onError(String error) {
     if (_disposed) return;
     final safeError = sanitizePlaybackError(error);
+    AppLogger.instance.warning('Playback error: $safeError', tag: 'Playback');
     final openGeneration = _openGeneration;
     _errorDebounceTimer?.cancel();
     _errorDebounceTimer = Timer(const Duration(milliseconds: 300), () {
@@ -769,14 +772,30 @@ class PlaybackController {
       );
     }
     if (previous.hwdecMode != next.hwdecMode) {
-      await _backend.setNativeProperty('hwdec', next.hwdecMode);
+      await _backend.setNativeProperty(
+        'hwdec',
+        effectiveHwdec(next.hwdecMode, next.videoRenderer),
+      );
     }
     if (previous.videoRenderer != next.videoRenderer) {
       await syncMpvProperties(
         _backend.setNativeProperty,
-        buildVideoRendererProperties(next.videoRenderer),
+        buildRendererSwitchProperties(
+          renderer: next.videoRenderer,
+          hwdecMode: next.hwdecMode,
+        ),
         debugLabel: 'video renderer',
       );
+      // 硬解直通切换涉及 VO 与解码链重建：回跳当前进度，强制按新配置输出
+      // 一帧，避免画面停留在切换前的黑帧。
+      if (Platform.isAndroid &&
+          (next.videoRenderer == mediacodecEmbedRenderer ||
+              previous.videoRenderer == mediacodecEmbedRenderer)) {
+        final position = _backend.currentPosition;
+        if (_backend.currentMediaUri != null && position > Duration.zero) {
+          await _backend.seek(position);
+        }
+      }
     }
     if (persist) {
       _settingsWrites = _settingsWrites.then((_) async {

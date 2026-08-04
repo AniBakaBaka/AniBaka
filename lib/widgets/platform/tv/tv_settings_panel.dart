@@ -253,9 +253,11 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
                           .toDouble(),
                       step: 1,
                       displayValue:
-                          PlaybackSettingsService.hwdecModeLabels[preferences
-                              .hwdecMode] ??
-                          preferences.hwdecMode,
+                          preferences.videoRenderer == 'mediacodec_embed'
+                          ? 'mediacodec_embed'
+                          : (PlaybackSettingsService.hwdecModeLabels[
+                                  preferences.hwdecMode] ??
+                              preferences.hwdecMode),
                       onChanged: (v) {
                         final index = v.toInt();
                         if (index >= 0 &&

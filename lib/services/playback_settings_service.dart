@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:baka/instance.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/models/subtitle_config.dart';
@@ -45,9 +47,9 @@ class PlaybackSettingsService {
   };
 
   static const videoRendererLabels = <String, String>{
-    'auto': '自动',
-    'compatibility': 'GPU 兼容',
-    'quality': 'GPU 高质量',
+    'gpu': 'gpu',
+    'gpu-next': 'gpu-next',
+    'mediacodec_embed': 'mediacodec_embed',
   };
 
   static const doubleTapActionLabels = <String, String>{
@@ -60,10 +62,27 @@ class PlaybackSettingsService {
     growable: false,
   );
 
-  /// 旧 vo=gpu / gpu-next 迁移到 libmpv 渲染档位。
+  /// 当前平台可选的渲染器（硬解直通依赖 Android 的 MediaCodec 输出）。
+  static List<String> get videoRendererOptionsForPlatform =>
+      Platform.isAndroid
+          ? videoRendererOptions
+          : videoRendererOptions
+                .where((renderer) => renderer != 'mediacodec_embed')
+                .toList(growable: false);
+
+  static Map<String, String> get videoRendererLabelsForPlatform =>
+      Platform.isAndroid
+          ? videoRendererLabels
+          : Map.unmodifiable(<String, String>{
+              for (final entry in videoRendererLabels.entries)
+                if (entry.key != 'mediacodec_embed') entry.key: entry.value,
+            });
+
+  /// 旧渲染档位迁移到真实 vo 名称：自动/兼容 → gpu，高质量 → gpu-next。
   static const _rendererMigrate = <String, String>{
-    'gpu': 'compatibility',
-    'gpu-next': 'quality',
+    'auto': 'gpu',
+    'compatibility': 'gpu',
+    'quality': 'gpu-next',
   };
 
   static const defaultPlaybackSpeed = 1.0;
@@ -87,9 +106,9 @@ class PlaybackSettingsService {
   }
 
   static String normalizeVideoRenderer(String? renderer) {
-    if (renderer == null) return 'auto';
+    if (renderer == null) return 'gpu';
     return _rendererMigrate[renderer] ??
-        (videoRendererLabels.containsKey(renderer) ? renderer : 'auto');
+        (videoRendererLabels.containsKey(renderer) ? renderer : 'gpu');
   }
 
   static double normalizePlaybackSpeed(double? speed) =>

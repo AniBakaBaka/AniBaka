@@ -109,7 +109,9 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                       PanelSelectTile(
                         title: '视频渲染器',
                         value: preferences.videoRenderer,
-                        options: PlaybackSettingsService.videoRendererLabels,
+                        options:
+                            PlaybackSettingsService
+                                .videoRendererLabelsForPlatform,
                         onChanged: (value) => _update(
                           (current) => current.copyWith(videoRenderer: value),
                         ),

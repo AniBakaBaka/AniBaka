@@ -260,7 +260,7 @@ void main() {
     final controller = PlaybackController(backend: backend);
     await controller.initialize();
     controller.preferences.value = controller.preferences.value.copyWith(
-      videoRenderer: 'quality',
+      videoRenderer: 'gpu-next',
       hwdecMode: 'auto-safe',
       videoEnhancementMode: VideoEnhancementMode.medium,
     );
@@ -274,7 +274,7 @@ void main() {
     expect(info.qualityLabel, '1080p');
     expect(info.resolution, '1920 × 1080');
     expect(info.videoOutput, 'libmpv');
-    expect(info.rendererProfile, 'quality');
+    expect(info.rendererProfile, 'gpu-next');
     expect(info.hardwareDecoder, 'd3d11va');
     expect(info.hardwareDecodeMode, 'auto-safe');
     expect(info.requestedEnhancementMode, VideoEnhancementMode.medium);
@@ -368,5 +368,33 @@ void main() {
     await controller.initialize();
     await controller.dispose();
     expect(backend.disposed, isTrue);
+  });
+
+  test('renderer switch outside Android never touches vo or hwdec', () async {
+    final backend = FakePlaybackBackend();
+    final controller = PlaybackController(backend: backend);
+    await controller.initialize();
+
+    await controller.updatePreferences(
+      controller.preferences.value.copyWith(
+        videoRenderer: 'mediacodec_embed',
+        hwdecMode: 'no',
+      ),
+      persist: false,
+    );
+
+    expect(backend.nativeProperties, isNot(contains('vo')));
+    expect(backend.nativeProperties['hwdec'], 'no');
+    expect(backend.nativeProperties['scale'], 'bilinear');
+
+    await controller.updatePreferences(
+      controller.preferences.value.copyWith(
+        videoRenderer: 'gpu',
+        hwdecMode: 'auto-safe',
+      ),
+      persist: false,
+    );
+    expect(backend.nativeProperties['hwdec'], 'auto-safe');
+    await controller.dispose();
   });
 }

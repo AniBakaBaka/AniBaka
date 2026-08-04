@@ -42,19 +42,30 @@ void main() {
 
   test('persists and migrates the video renderer selection', () async {
     const previous = PlaybackPreferences();
-    final next = previous.copyWith(videoRenderer: 'quality');
+    final next = previous.copyWith(videoRenderer: 'gpu-next');
 
     await PlaybackSettingsService.saveChanges(previous, next);
 
-    expect(Instances.sp.getString('player_videoRenderer'), 'quality');
+    expect(Instances.sp.getString('player_videoRenderer'), 'gpu-next');
+    expect(PlaybackSettingsService.normalizeVideoRenderer('auto'), 'gpu');
     expect(
-      PlaybackSettingsService.normalizeVideoRenderer('gpu'),
-      'compatibility',
+      PlaybackSettingsService.normalizeVideoRenderer('compatibility'),
+      'gpu',
     );
+    expect(
+      PlaybackSettingsService.normalizeVideoRenderer('quality'),
+      'gpu-next',
+    );
+    expect(PlaybackSettingsService.normalizeVideoRenderer('gpu'), 'gpu');
     expect(
       PlaybackSettingsService.normalizeVideoRenderer('gpu-next'),
-      'quality',
+      'gpu-next',
     );
+    expect(
+      PlaybackSettingsService.normalizeVideoRenderer('mediacodec_embed'),
+      'mediacodec_embed',
+    );
+    expect(PlaybackSettingsService.normalizeVideoRenderer(null), 'gpu');
   });
 
   test(

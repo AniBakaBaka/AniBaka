@@ -65,7 +65,7 @@ class FakePlaybackBackend implements PlaybackBackend {
   String? get currentMediaUri => _currentMediaUri;
 
   @override
-  Future<void> initialize() async => initialized = true;
+  Future<void> initialize({String? videoRenderer}) async => initialized = true;
 
   @override
   Future<void> open(
