@@ -14,7 +14,6 @@ import 'package:baka/services/player_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/utils/platform_page_route.dart';
-import 'package:baka/widgets/anime_detail/anime_detail_placeholder.dart';
 import 'package:baka/widgets/baka_player/index.dart';
 import 'package:baka/widgets/comment/comment_widget.dart';
 import 'package:baka/widgets/common/tab_indicator.dart';
@@ -23,6 +22,7 @@ import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:baka/widgets/danmaku/view.dart';
 import 'package:baka/widgets/episode/episode_list_dialog.dart';
 import 'package:baka/widgets/episode/episode_widgets.dart';
+import 'package:baka/widgets/anime_detail/anime_detail_placeholder.dart';
 import 'package:baka/widgets/platform/tv/tv_anime_detail.dart';
 import 'package:baka/widgets/platform/tv/tv_player_layout.dart';
 import 'package:baka/widgets/platform/windows/windows_player_layout.dart';
@@ -32,10 +32,16 @@ import 'package:baka/widgets/player/video_detail_card.dart';
 import 'package:baka/widgets/anime_detail/controller/video_source_search_controller.dart';
 
 class PlayerPage extends StatefulWidget {
-  const PlayerPage({required this.data, super.key, this.posIndex});
+  const PlayerPage({
+    required this.data,
+    super.key,
+    this.posIndex,
+    this.autoMatch = false,
+  });
 
   final Map data;
   final int? posIndex;
+  final bool autoMatch;
 
   @override
   State<StatefulWidget> createState() => _PlayerPageState();
@@ -74,11 +80,6 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
   final PlaybackController ctr = PlaybackController();
   final DanmakuController danmakuController = DanmakuController();
   final ValueNotifier<bool> _followNotifier = ValueNotifier<bool>(false);
-  // 细化重建粒度：以下 Notifier 替代过去多处 setState(() {})，避免播放器整页重建
-  // - _initedNotifier：仅驱动「加载中 / 播放器」切换
-  // - _pageDataVersion：剧集/线路/标签/BGM 元数据变化时整页数据刷新的信号
-  // - _showDetailNotifier：移动端 BGM 详情抽屉显隐
-  // - _sortAscendingNotifier：移动端选集排序方向
   final ValueNotifier<bool> _initedNotifier = ValueNotifier<bool>(false);
   final ValueNotifier<int> _pageDataVersion = ValueNotifier<int>(0);
   final ValueNotifier<bool> _showDetailNotifier = ValueNotifier<bool>(false);
@@ -105,6 +106,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
 
   bool _isStale(int requestId) => !mounted || !_session.isCurrent(requestId);
 
+  VideoSourceSearchController? _autoMatchController;
+
   @override
   void initState() {
     super.initState();
@@ -129,6 +132,36 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
 
     ctr.setMediaInfo(_svc.initialMediaInfo);
     _followNotifier.value = _svc.isFollow();
+    
+    final shouldAutoMatch = !_isLocalSource && widget.autoMatch;
+    if (shouldAutoMatch) {
+      _startHeadlessAutoMatch();
+    } else {
+      _loadInitialData();
+    }
+  }
+
+  void _startHeadlessAutoMatch() {
+    _autoMatchController = VideoSourceSearchController(
+      title: _svc.title,
+      seedData: _buildSourceSeedData(),
+      autoMatchMode: true,
+      targetEpisodeIndex: currPlayIndex,
+      onMatchFound: (resolvedData) {
+        if (!mounted) return;
+        _autoMatchController?.cancelSearch();
+        _autoMatchController = null;
+        _svc.adoptPrefetchedPlayback(resolvedData);
+        _bumpPageData();
+        initVideoController(_session.nextGeneration());
+      },
+      onMatchFailed: () {
+        if (!mounted) return;
+        _autoMatchController = null;
+        _loadInitialData();
+      },
+    );
+    _autoMatchController?.startSearch();
     _loadInitialData();
   }
 
@@ -204,6 +237,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _autoMatchController?.cancelSearch();
+    _autoMatchController?.dispose();
     unawaited(
       _session.dispose().whenComplete(() async {
         await ctr.dispose();
@@ -315,9 +350,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       } else {
         final videoUrl = await _svc.resolveEpisodeUrl(currPlayIndex);
         if (_isStale(requestId)) return;
-        if (videoUrl == null) {
-          showSnackBar('无法获取视频地址');
-          return;
+        if (videoUrl == null || videoUrl.isEmpty) {
+          throw Exception('无法获取视频播放地址');
         }
         _resolvedUrl = videoUrl;
         await ctr.open(videoUrl, autoplay: true);
@@ -345,7 +379,58 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     } catch (e) {
       if (_isStale(requestId)) return;
       debugPrint('初始化视频控制器失败: $e');
-      showSnackBar('初始化播放器失败');
+      await _handlePlaybackInitializationFailure(e);
+    }
+  }
+
+  final Set<String> _failedSourceKeys = {};
+  bool _isAutoSwitchingSource = false;
+
+  Future<void> _handlePlaybackInitializationFailure(Object error) async {
+    if (!mounted || _isAutoSwitchingSource) return;
+    _isAutoSwitchingSource = true;
+
+    try {
+      final currentSourceKey = widget.data['source']?.toString() ?? '';
+      if (currentSourceKey.isNotEmpty) {
+        _failedSourceKeys.add(currentSourceKey);
+      }
+      final currentSeriesId = widget.data['seriesId'] ?? widget.data['id'] ?? widget.data['url'];
+      if (currentSourceKey.isNotEmpty && currentSeriesId != null) {
+        _failedSourceKeys.add('$currentSourceKey|$currentSeriesId');
+      }
+
+      // 1. 尝试当前剧集的下一条线路
+      final currentEp = _svc.currentVideoItem;
+      if (currentEp != null && currUrl < currentEp.lineCount) {
+        await changeUrl(currUrl + 1);
+        return;
+      }
+
+      // 2. 静默自动匹配备用源
+      final seedData = _buildSourceSeedData();
+      final controller = _autoMatchController ?? VideoSourceSearchController.sharedFor(
+        title: _svc.title,
+        seedData: seedData,
+      );
+
+      final nextCandidateData = await controller.findNextPlayableCandidate(
+        excludedKeys: _failedSourceKeys,
+        episodeIndex: currPlayIndex,
+      );
+
+      if (!mounted) return;
+
+      if (nextCandidateData != null) {
+        _svc.adoptPrefetchedPlayback(nextCandidateData);
+        _bumpPageData();
+        await initVideoController(_session.nextGeneration());
+        return;
+      }
+    } catch (e) {
+      debugPrint('[PlayerPage] Auto fallback error: $e');
+    } finally {
+      _isAutoSwitchingSource = false;
     }
   }
 
@@ -383,7 +468,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     return ListenableBuilder(
       listenable: _pageDataVersion,
       builder: (context, _) {
-        if (videoList.isEmpty) {
+        if (videoList.isEmpty && !widget.autoMatch && _autoMatchController == null) {
           return Instances.isTV
               ? TvAnimeDetailPlaceholder(data: widget.data)
               : AnimeDetailPlaceholder(data: widget.data);
@@ -412,6 +497,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
           danmakuController: danmakuController,
           onEpisodeChanged: changePlayIndex,
           onUrlChanged: changeUrl,
+          isSearching: _autoMatchController != null,
         );
       },
     );
@@ -436,6 +522,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
             cachedTags: _cachedTags,
             sourceName: _currentSourceName,
             lineName: _currentLineName,
+            isSearching: _autoMatchController != null,
             onShowDetail: () => BgmDetailPage.show(
               context,
               title: _svc.title,
@@ -669,10 +756,29 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
                             full: false,
                           );
                         }
-                        return const Center(
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white24,
+                        return Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                (_autoMatchController != null || widget.autoMatch)
+                                    ? '正在自动匹配源中...'
+                                    : '正在加载播放器...',
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
                           ),
                         );
                       },
@@ -897,6 +1003,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
             sourceName: _currentSourceName,
             lineName: _currentLineName,
             onSourceTap: _openSourceSwitchSheet,
+            isSearching: _autoMatchController != null,
           ),
 
           ActiveDownloadIndicator(taskIdPrefix: _taskIdPrefix),

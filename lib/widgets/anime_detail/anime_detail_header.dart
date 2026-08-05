@@ -431,10 +431,10 @@ class _SearchSourceButton extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_rounded, size: 18, color: textColor),
-            const SizedBox(width: 6),
+            Icon(Icons.play_arrow_rounded, size: 20, color: textColor),
+            const SizedBox(width: 4),
             Text(
-              '找资源',
+              '开始观看',
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,

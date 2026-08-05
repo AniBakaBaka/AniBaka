@@ -35,7 +35,7 @@ class BundledRuleStore {
   static const Map<String, int> builtinVersions = <String, int>{
     'akianime': 4,
     'aniwatch': 0,
-    'cycani': 1,
+    'cycani': 2,
     'anime7': 2,
     'dm84': 0,
     'fsdm02': 0,

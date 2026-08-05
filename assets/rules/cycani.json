@@ -29,7 +29,7 @@
             "idKey": "video_id",
             "nameKey": "title",
             "imageKey": "cover_url",
-            "detailUrlTemplate": "/bangumi/{id}.html",
+            "detailUrlTemplate": "/anime/{id}",
             "keywordMatch": false
           }
         ],
@@ -55,7 +55,7 @@
             "idKey": "video_id",
             "nameKey": "title",
             "imageKey": "cover_url",
-            "detailUrlTemplate": "/bangumi/{id}.html",
+            "detailUrlTemplate": "/anime/{id}",
             "keywordMatch": false
           }
         ]
@@ -69,7 +69,7 @@
         [
           {
             "op": "regex",
-            "pattern": "(\\d+)",
+            "pattern": "(?:/anime/|/bangumi/)?(\\d+)",
             "group": 1
           },
           {
@@ -78,6 +78,7 @@
           },
           {
             "op": "jsonEpisodes",
+            "sourceName": "Cycani 次元城",
             "episodesPath": "data.list",
             "idKey": "id",
             "nameKey": "title",
@@ -87,7 +88,7 @@
         [
           {
             "op": "regex",
-            "pattern": "(\\d+)",
+            "pattern": "(?:/anime/|/bangumi/)?(\\d+)",
             "group": 1
           },
           {
@@ -106,6 +107,7 @@
           },
           {
             "op": "jsonEpisodes",
+            "sourceName": "Cycani 次元城",
             "episodesPath": "data.list",
             "idKey": "id",
             "nameKey": "title",
@@ -129,7 +131,7 @@
         [
           {
             "op": "regex",
-            "pattern": "(\\d+)",
+            "pattern": "(?:/api/sections/)?(\\d+)",
             "group": 1
           },
           {
@@ -138,7 +140,7 @@
           },
           {
             "op": "json",
-            "path": "data.url"
+            "path": "data.url|data"
           },
           {
             "op": "videoUrl"
@@ -147,7 +149,7 @@
         [
           {
             "op": "regex",
-            "pattern": "(\\d+)",
+            "pattern": "(?:/api/sections/)?(\\d+)",
             "group": 1
           },
           {
@@ -166,7 +168,7 @@
           },
           {
             "op": "json",
-            "path": "data.url"
+            "path": "data.url|data"
           },
           {
             "op": "videoUrl"

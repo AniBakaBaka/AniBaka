@@ -282,14 +282,18 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
                     builder: (context, preferences, _) => _TvSliderItem(
                       icon: Icons.monitor_rounded,
                       title: '视频渲染器',
-                      value: PlaybackSettingsService.videoRendererOptions
+                      // Android 平台移除 gpu-next（当前 mpv 构建不支持），
+                      // 仅保留 gpu 与 mediacodec_embed。
+                      value: PlaybackSettingsService
+                          .videoRendererOptionsForPlatform
                           .indexOf(preferences.videoRenderer)
                           .toDouble(),
                       min: 0,
-                      max:
-                          (PlaybackSettingsService.videoRendererOptions.length -
-                                  1)
-                              .toDouble(),
+                      max: (PlaybackSettingsService
+                                  .videoRendererOptionsForPlatform
+                                  .length -
+                              1)
+                          .toDouble(),
                       step: 1,
                       displayValue:
                           PlaybackSettingsService
@@ -300,12 +304,12 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
                         if (index >= 0 &&
                             index <
                                 PlaybackSettingsService
-                                    .videoRendererOptions
+                                    .videoRendererOptionsForPlatform
                                     .length) {
                           _ctrl.updatePreferences(
                             preferences.copyWith(
                               videoRenderer: PlaybackSettingsService
-                                  .videoRendererOptions[index],
+                                  .videoRendererOptionsForPlatform[index],
                             ),
                           );
                         }

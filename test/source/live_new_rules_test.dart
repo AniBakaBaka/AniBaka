@@ -405,7 +405,7 @@ void main() {
     );
     test(
       'cycani',
-      () => _probe('cycani.json', '鬼灭', strictPlay: false),
+      () => _probe('cycani.json', '鬼灭', strictPlay: true, verifyMedia: true),
       timeout: const Timeout(Duration(minutes: 2)),
     );
   }, skip: _live ? false : '仅在 --dart-define=LIVE=true 时执行');

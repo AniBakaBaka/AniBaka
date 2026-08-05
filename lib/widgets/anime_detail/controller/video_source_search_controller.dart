@@ -833,6 +833,38 @@ class VideoSourceSearchController {
     await Future.wait(List.generate(n, (_) => worker()));
   }
 
+  /// 查找下一个备用可播放的候选源数据（排除排除列表中的键）
+  Future<Map<String, dynamic>?> findNextPlayableCandidate({
+    required Set<String> excludedKeys,
+    int? episodeIndex,
+  }) async {
+    final ep = episodeIndex ?? _ep;
+    final context = await _matchContext();
+
+    final ranked = [
+      for (final item in _results.values)
+        if (item.sourceType != 'internal' &&
+            !excludedKeys.contains(item.key) &&
+            !excludedKeys.contains(item.sourceType))
+          _rankCache[item.key] ??= _engine.score(item.matchCandidate, context),
+    ]..sort(SourceMatchEngine.compareScores);
+
+    for (final rankedItem in ranked) {
+      final item = _results[rankedItem.candidate.key];
+      if (item == null) continue;
+      final probe = await ensureCandidatePlayable(
+        item,
+        episodeIndex: ep,
+        preferredLine: 1,
+      );
+      if (probe.status == SourceProbeStatus.direct && probe.data != null) {
+        unawaited(_remember(item, probe.data!));
+        return Map<String, dynamic>.from(probe.data!);
+      }
+    }
+    return null;
+  }
+
   int get _ep => targetEpisodeIndex < 0 ? 0 : targetEpisodeIndex;
 
   Future<SourceMatchContext> _matchContext() {

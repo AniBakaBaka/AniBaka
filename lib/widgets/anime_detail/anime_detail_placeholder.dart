@@ -8,13 +8,10 @@ import 'package:baka/models/anime_detail_view_data.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/services/bgm_service.dart';
 import 'package:baka/services/collection_service.dart';
-import 'package:baka/services/play_history_sync_service.dart';
-import 'package:baka/services/playback_settings_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/anime/post_card.dart';
 import 'package:baka/widgets/common/shimmer.dart';
-import 'package:baka/widgets/anime_detail/video_source_search_sheet.dart';
 import 'package:baka/services/navigation_service.dart';
 
 import 'package:baka/widgets/anime_detail/collection_sheet.dart';
@@ -34,12 +31,7 @@ class AnimeDetailPlaceholder extends StatefulWidget {
 
 class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   late final int? _postId;
-  bool _hasHandledInitialSearchSheet = false;
-  bool _isSearchSheetOpen = false;
-  bool _isAutoMatching = false;
   bool _isDetailLoading = true;
-  int _autoMatchTargetEpisodeIndex = 0;
-  late final Future<void> _initialDataFuture;
   late List<Map<String, dynamic>> _initialComments;
   late int _initialCommentTotal;
 
@@ -53,15 +45,6 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   late AnimeDetailViewData _detail;
 
   int? get _subjectId => _bgmInfo.subjectId;
-
-  int _resolveAutoMatchEpisodeIndex() {
-    final remembered = PlayHistorySyncService.getResumeSelection(widget.data);
-    if (remembered != null) return remembered.episodeIndex;
-
-    final watched = _collection?.epWatched;
-    if (watched != null && watched > 0) return watched - 1;
-    return 0;
-  }
 
   int? get _validPostId {
     final postId = _postId;
@@ -90,39 +73,11 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     _rebuildDetail();
     _isDetailLoading = _detailData == null;
     _isCollectionLoading = _subjectId != null;
-    _initialDataFuture = _loadInitialData();
-    _scheduleInitialSearchSheet();
+    _loadInitialData();
   }
 
-  void _scheduleInitialSearchSheet() {
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await Future.any([
-        _initialDataFuture,
-        Future<void>.delayed(const Duration(milliseconds: 300)),
-      ]);
-      if (!mounted || _hasHandledInitialSearchSheet) return;
-
-      final autoMatch = PlaybackSettingsService.getAutoMatchSource();
-      if (autoMatch) {
-        _hasHandledInitialSearchSheet = true;
-        _autoMatchTargetEpisodeIndex = _resolveAutoMatchEpisodeIndex();
-        setState(() => _isAutoMatching = true);
-      } else {
-        await _showSearchBottomSheet();
-      }
-    });
-  }
-
-  void _handleAutoMatchFound(Map<String, dynamic> resolvedData) {
-    if (!mounted) return;
-    setState(() => _isAutoMatching = false);
-    NavigationService.toPlayer(context, resolvedData, fade: true);
-  }
-
-  void _handleAutoMatchFailed() {
-    if (!mounted) return;
-    setState(() => _isAutoMatching = false);
-    _showSearchBottomSheet();
+  void _startWatching() {
+    NavigationService.toPlayer(context, widget.data, autoMatch: true);
   }
 
   Future<void> _loadInitialData() async {
@@ -261,42 +216,6 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
             : null,
       ),
     );
-  }
-
-  Future<void> _showSearchBottomSheet() async {
-    if (!mounted || _isSearchSheetOpen) return;
-
-    _hasHandledInitialSearchSheet = true;
-    _isSearchSheetOpen = true;
-
-    try {
-      await showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.transparent,
-        builder: (context) => VideoSourceSearchSheet(
-          title: widget.data['title'] ?? '',
-          cover: _detail.coverUrl,
-          score: _detail.score,
-          scoreCount: _detail.scoreCount > 0 ? _detail.scoreCount : null,
-          seedData: _buildVideoSeedData(),
-          heroTag: coverHeroTag(widget.data),
-          autoMatchMode: false,
-          targetEpisodeIndex: _resolveAutoMatchEpisodeIndex(),
-        ),
-      );
-    } finally {
-      _isSearchSheetOpen = false;
-    }
-  }
-
-  Map<String, dynamic> _buildVideoSeedData() {
-    return {
-      if (_bgmInfo.subjectId != null) 'bgmId': _bgmInfo.subjectId,
-      if (_detail.score != null) 'score': _detail.score,
-      if (_detail.coverUrl.isNotEmpty) 'bgmImageUrl': _detail.coverUrl,
-      if (_detailData != null) 'bgmDetailData': _detailData,
-    };
   }
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
@@ -438,7 +357,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                             collection: _collection,
                             isCollectionLoading: _isCollectionLoading,
                             onCollectionTap: _handleCollectionTap,
-                            onSearchTap: _showSearchBottomSheet,
+                            onSearchTap: _startWatching,
                           ),
                         ),
                       ),
@@ -471,21 +390,6 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     );
   }
 
-  Widget _buildAutoMatchSheet() {
-    if (!_isAutoMatching) return const SizedBox.shrink();
-    return VideoSourceSearchSheet(
-      title: widget.data['title']?.toString() ?? '',
-      cover: _detail.coverUrl,
-      score: _detail.score,
-      seedData: _buildVideoSeedData(),
-      autoMatchMode: true,
-      headlessMode: true,
-      targetEpisodeIndex: _autoMatchTargetEpisodeIndex,
-      onMatchFound: _handleAutoMatchFound,
-      onMatchFailed: _handleAutoMatchFailed,
-    );
-  }
-
   List<(String title, WidgetBuilder builder)> _buildTabs(bool isWide) {
     final tabs = <(String title, WidgetBuilder builder)>[
       (
@@ -511,10 +415,6 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                         flex: 2,
                         child: Column(
                           children: [
-                            if (_isAutoMatching) ...[
-                              _buildAutoMatchSheet(),
-                              const SizedBox(height: 24),
-                            ],
                             summary,
                             const SizedBox(height: 24),
                             genresSection,
@@ -561,10 +461,6 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                   )
                 : Column(
                     children: [
-                      if (_isAutoMatching) ...[
-                        _buildAutoMatchSheet(),
-                        const SizedBox(height: 24),
-                      ],
                       summary,
                       const SizedBox(height: 24),
                       genresSection,

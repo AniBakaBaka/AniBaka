@@ -25,6 +25,7 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
   static const _hwdecDescriptions = <String, String>{
     'auto': '自动选择最佳硬件解码器',
     'auto-safe': '仅使用经验证可靠的解码器',
+    'mediacodec-copy': 'MediaCodec 硬解后复制帧到 GPU，兼容性最好',
     'no': '使用CPU解码，兼容性最好',
   };
 
@@ -199,8 +200,8 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                       icon: Icons.monitor_rounded,
                       onTap: () => _pickOption<String>(
                         title: '视频渲染器',
-                        intro: 'gpu/gpu-next 为 GPU 渲染器；'
-                            '若电视播放黑屏但有声音，可切换到 mediacodec_embed',
+                        intro: 'gpu 为 GPU 渲染器；若电视播放黑屏但有声音，'
+                            '可切换到 mediacodec_embed',
                         current: _videoRenderer,
                         options:
                             PlaybackSettingsService

@@ -48,6 +48,11 @@ class PlaybackController {
     const VideoEnhancementState(),
   );
 
+  /// 当前后端持有的 [VideoController]。渲染器切换（Android 全量重建）时
+  /// 实例会整体替换，UI 通过监听此 notifier 挂载/卸载 [Video] 组件，
+  /// 确保视频 Surface 在媒体打开前就已创建。
+  final videoController = ValueNotifier<VideoController?>(null);
+
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   final StreamController<void> _completed = StreamController<void>.broadcast();
   final StreamController<Duration> _seekEvents =
@@ -81,7 +86,6 @@ class PlaybackController {
   Map<String, String>? _lastOpenHeaders;
   bool _lastOpenAutoplay = true;
 
-  VideoController? get videoController => _backend.videoController;
   String? get currentMediaUri => _backend.currentMediaUri;
   List<SubtitleTrack> get subtitleTracks => _backend.subtitleTracks;
   SubtitleTrack get currentSubtitleTrack => _backend.currentSubtitleTrack;
@@ -105,6 +109,7 @@ class PlaybackController {
     );
     await _backend.initialize(videoRenderer: loaded.videoRenderer);
     if (_disposed) return;
+    videoController.value = _backend.videoController;
     _bindBackend();
   }
 
@@ -148,8 +153,25 @@ class PlaybackController {
       autoplay: _lastOpenAutoplay,
       httpHeaders: _lastOpenHeaders,
     );
+    await _reapplyHwdec();
     if (_disposed) return;
     core.value = core.value.copyWith(loading: false);
+  }
+
+  /// 重新固定 hwdec：AndroidVideoController 初始化会覆盖它，必须在媒体
+  /// 打开（其初始化已完成）之后再设一次。硬解直通强制 mediacodec。
+  Future<void> _reapplyHwdec() async {
+    try {
+      await _backend.setNativeProperty(
+        'hwdec',
+        effectiveHwdec(
+          preferences.value.hwdecMode,
+          preferences.value.videoRenderer,
+        ),
+      );
+    } catch (error) {
+      debugPrint('重新应用 hwdec 失败: $error');
+    }
   }
 
   Future<void> applyPlaybackConfiguration() async {
@@ -198,6 +220,16 @@ class PlaybackController {
       }),
       _backend.tracks.listen(_onTracksChanged),
     ]);
+  }
+
+  /// 取消全部后端订阅，供 Android 渲染器切换时重建 Player 前后使用。
+  Future<void> _unbindBackend() async {
+    if (!_listenersBound) return;
+    _listenersBound = false;
+    for (final subscription in _subscriptions) {
+      await subscription.cancel();
+    }
+    _subscriptions.clear();
   }
 
   void _onPlayingChanged(bool playing) {
@@ -778,23 +810,22 @@ class PlaybackController {
       );
     }
     if (previous.videoRenderer != next.videoRenderer) {
-      await syncMpvProperties(
-        _backend.setNativeProperty,
-        buildRendererSwitchProperties(
-          renderer: next.videoRenderer,
-          hwdecMode: next.hwdecMode,
-        ),
-        debugLabel: 'video renderer',
-      );
-      // 硬解直通切换涉及 VO 与解码链重建：回跳当前进度，强制按新配置输出
-      // 一帧，避免画面停留在切换前的黑帧。
-      if (Platform.isAndroid &&
-          (next.videoRenderer == mediacodecEmbedRenderer ||
-              previous.videoRenderer == mediacodecEmbedRenderer)) {
-        final position = _backend.currentPosition;
-        if (_backend.currentMediaUri != null && position > Duration.zero) {
-          await _backend.seek(position);
-        }
+      if (Platform.isAndroid) {
+        // Android 的 vo 切换不能对运行中的实例热设置：gpu-next 不在当前
+        // mpv 构建中，且反复 set vo 会残留损坏的 GPU 上下文与 MediaCodec
+        // Surface（日志中的 vo=null、textureId=0、MediaCodec start failed）。
+        // 完整重建 Player + VideoController，在全新 Surface 上按新渲染器
+        // 重新打开当前媒体。
+        await _rebuildBackendForRenderer(next.videoRenderer);
+      } else {
+        await syncMpvProperties(
+          _backend.setNativeProperty,
+          buildRendererSwitchProperties(
+            renderer: next.videoRenderer,
+            hwdecMode: next.hwdecMode,
+          ),
+          debugLabel: 'video renderer',
+        );
       }
     }
     if (persist) {
@@ -905,6 +936,49 @@ class PlaybackController {
     await setRate(rate);
   }
 
+  /// Android 渲染器切换：整体重建 Player 与 VideoController。
+  ///
+  /// 旧实例连同其 GPU 上下文 / MediaCodec Surface 一起释放，再按新渲染器
+  /// 创建全新实例，最后在当前位置恢复播放，避免热切换 vo 后残留损坏的
+  /// 视频输出链路。
+  Future<void> _rebuildBackendForRenderer(String renderer) async {
+    final wasPlaying = _backend.isPlaying;
+    final position = _backend.currentPosition;
+    final mediaUri = _backend.currentMediaUri;
+    final subtitleTrack = _backend.currentSubtitleTrack;
+    final rate = core.value.playbackRate;
+
+    await _unbindBackend();
+    videoController.value = null;
+    await _backend.dispose();
+    if (_disposed) return;
+    await _backend.initialize(videoRenderer: renderer);
+    if (_disposed) return;
+    videoController.value = _backend.videoController;
+    _bindBackend();
+    _resetPlaybackState();
+    await _configurePlayer(rate);
+    if (mediaUri == null) return;
+    await _backend.open(
+      mediaUri,
+      autoplay: wasPlaying,
+      httpHeaders: _lastOpenHeaders,
+    );
+    if (_disposed) return;
+    // 同 _openCurrent：新 VideoController 创建后会重置 hwdec，重新固定。
+    await _reapplyHwdec();
+    if (position > Duration.zero) {
+      await _backend.seek(position);
+    }
+    if (subtitleTrack.id != 'auto' && subtitleTrack.id != 'no') {
+      try {
+        await _backend.setSubtitleTrack(subtitleTrack);
+      } catch (error) {
+        debugPrint('重建后恢复字幕轨道失败: $error');
+      }
+    }
+  }
+
   Future<void> _syncVideoEnhancement() async {
     final mode = preferences.value.videoEnhancementMode;
     final pipeline = selectEnhancementPipeline(mode);
@@ -984,5 +1058,6 @@ class PlaybackController {
     preferences.dispose();
     mediaInfo.dispose();
     enhancement.dispose();
+    videoController.dispose();
   }
 }

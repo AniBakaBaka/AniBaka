@@ -42,7 +42,7 @@ const lowMemoryPlayerProperties = <String, String>{
 
 /// Build player properties with configurable decode and render profiles.
 ///
-/// [hwdecMode] accepts 'auto', 'auto-safe', or 'no'.
+/// [hwdecMode] accepts 'auto', 'auto-safe', 'mediacodec-copy', or 'no'.
 /// [videoRenderer] usually changes libmpv's scaling profile instead of `vo`:
 /// media_kit's external texture requires `vo=libmpv` on Windows. The Android
 /// 硬解直通 profile is the exception — it pins `hwdec=mediacodec` here and
@@ -61,7 +61,7 @@ Map<String, String> buildPlayerProperties({
     ...playerProperties,
     if (lowMemoryMode) ...lowMemoryPlayerProperties,
     'hwdec': effectiveHwdec(hwdecMode, videoRenderer, android: android),
-    ...buildVideoRendererProperties(videoRenderer),
+    ...buildVideoRendererProperties(videoRenderer, android: android),
   };
 }
 
@@ -77,32 +77,44 @@ String effectiveHwdec(
       : hwdecMode;
 }
 
-/// 渲染器选择变化时按顺序应用的 mpv 属性。
-///
-/// Android 上每个选项都对应真实的 vo：gpu / gpu-next / mediacodec_embed。
-/// 切到 mediacodec_embed 时先固定 hwdec 再切换 vo（vo 重初始化会按当时的
-/// hwdec 重建解码链），并重设 vid 避免出现 "Could not open codec"。
-/// 非 Android 平台不动 vo 与 hwdec（media_kit 需要 vo=libmpv 纹理输出）。
 Map<String, String> buildRendererSwitchProperties({
   required String renderer,
   required String hwdecMode,
   bool? android,
 }) {
   final isAndroid = android ?? Platform.isAndroid;
-  const knownRenderers = {'gpu', 'gpu-next', mediacodecEmbedRenderer};
-  final props = <String, String>{};
-  if (isAndroid && knownRenderers.contains(renderer)) {
-    final direct = renderer == mediacodecEmbedRenderer;
-    // hwdec 必须先于 vo 应用：vo 重初始化会按当时的 hwdec 重建解码链。
-    props['hwdec'] = direct ? 'mediacodec' : hwdecMode;
-    props['vo'] = renderer;
-    if (direct) props['vid'] = 'auto';
-  }
-  props.addAll(buildVideoRendererProperties(renderer));
-  return props;
+  if (isAndroid) return const <String, String>{};
+  return buildVideoRendererProperties(renderer, android: false);
 }
 
-Map<String, String> buildVideoRendererProperties(String renderer) {
+/// 渲染器对应的 mpv 渲染属性。
+///
+/// Android 的 vo 只能是 `gpu`（media_kit 默认）或 `mediacodec_embed`，
+/// 两者都使用保守缩放；额外固定 rgba8 帧缓冲并关闭去色带 / 补帧等高显存
+/// 处理，避免 Mali-G52 这类低显存 GPU 在 rgba16f 中间纹理上 OOM。
+/// `gpu-next` 仅存在于桌面端（libmpv 的缩放档位），Android 传入时按 gpu
+/// 处理。
+Map<String, String> buildVideoRendererProperties(
+  String renderer, {
+  bool? android,
+}) {
+  final isAndroid = android ?? Platform.isAndroid;
+  if (isAndroid) {
+    return const <String, String>{
+      'gpu-context': 'android',
+      'profile': 'fast',
+      'fbo-format': 'rgba8',
+      'deband': 'no',
+      'interpolation': 'no',
+      'scale': 'bilinear',
+      'cscale': 'bilinear',
+      'dscale': 'bilinear',
+      'correct-downscaling': 'no',
+      'linear-downscaling': 'no',
+      'sigmoid-upscaling': 'no',
+    };
+  }
+
   if (renderer == 'gpu-next') {
     return const <String, String>{
       'scale': 'ewa_lanczossharp',
@@ -114,8 +126,8 @@ Map<String, String> buildVideoRendererProperties(String renderer) {
     };
   }
 
-  // gpu 与 mediacodec_embed 使用保守缩放。这些值也会在播放中切换渲染器时
-  // 重置 gpu-next 的高质量覆盖。
+  // gpu 使用保守缩放。这些值也会在播放中切换渲染器时重置 gpu-next 的
+  // 高质量覆盖。
   return const <String, String>{
     'scale': 'bilinear',
     'cscale': 'bilinear',

@@ -20,6 +20,7 @@ class VideoDetailCard extends StatelessWidget {
     this.sourceName,
     this.lineName,
     this.onSourceTap,
+    this.isSearching = false,
     super.key,
   });
 
@@ -32,6 +33,7 @@ class VideoDetailCard extends StatelessWidget {
   final String? sourceName;
   final String? lineName;
   final VoidCallback? onSourceTap;
+  final bool isSearching;
 
   @override
   Widget build(BuildContext context) {
@@ -162,6 +164,7 @@ class VideoDetailCard extends StatelessWidget {
                     _SourceChip(
                       sourceName: sourceName!,
                       lineName: lineName,
+                      isSearching: isSearching,
                       onTap: onSourceTap!,
                     ),
                     if (cachedTags.isNotEmpty) const SizedBox(width: 8),
@@ -233,11 +236,13 @@ class _SourceChip extends StatelessWidget {
     required this.sourceName,
     required this.onTap,
     this.lineName,
+    this.isSearching = false,
   });
 
   final String sourceName;
   final String? lineName;
   final VoidCallback onTap;
+  final bool isSearching;
 
   @override
   Widget build(BuildContext context) {
@@ -245,7 +250,9 @@ class _SourceChip extends StatelessWidget {
     final primary = theme.colorScheme.primary;
     final isDark = theme.brightness == Brightness.dark;
 
-    final label = lineName != null ? '$sourceName · $lineName' : sourceName;
+    final label = isSearching
+        ? '正在解构优选源...'
+        : (lineName != null ? '$sourceName · $lineName' : sourceName);
 
     return ScaleButton(
       onTap: onTap,
@@ -258,8 +265,22 @@ class _SourceChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.sensors_rounded, size: 12, color: primary),
-            const SizedBox(width: 4),
+            if (isSearching)
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: SizedBox(
+                  width: 13,
+                  height: 13,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: primary,
+                  ),
+                ),
+              )
+            else ...[
+              Icon(Icons.sensors_rounded, size: 12, color: primary),
+              const SizedBox(width: 4),
+            ],
             Text(
               label,
               style: TextStyle(
@@ -268,6 +289,7 @@ class _SourceChip extends StatelessWidget {
                 fontWeight: FontWeight.w600,
               ),
             ),
+            const SizedBox(width: 2),
             Icon(
               Icons.keyboard_arrow_right_rounded,
               size: 13,

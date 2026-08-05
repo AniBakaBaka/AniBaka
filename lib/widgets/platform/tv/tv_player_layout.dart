@@ -26,6 +26,7 @@ class TvPlayerLayout extends StatefulWidget {
   final DanmakuController danmakuController;
   final void Function(int) onEpisodeChanged;
   final void Function(int) onUrlChanged;
+  final bool isSearching;
 
   const TvPlayerLayout({
     required this.data,
@@ -37,6 +38,7 @@ class TvPlayerLayout extends StatefulWidget {
     required this.danmakuController,
     required this.onEpisodeChanged,
     required this.onUrlChanged,
+    this.isSearching = false,
     this.sourceNames,
     super.key,
   });
@@ -408,7 +410,7 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
           ),
           const SizedBox(height: 24),
           Text(
-            '正在加载...',
+            widget.isSearching ? '正在自动匹配源中...' : '正在加载...',
             style: TextStyle(color: context.tvTextSecondaryColor, fontSize: 18),
           ),
         ],

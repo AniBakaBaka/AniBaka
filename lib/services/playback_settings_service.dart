@@ -4,6 +4,7 @@ import 'package:baka/instance.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/models/subtitle_config.dart';
 import 'package:baka/services/low_memory_mode_service.dart';
+import 'package:baka/widgets/baka_player/mpv_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 播放器设置持久化服务。
@@ -43,6 +44,7 @@ class PlaybackSettingsService {
   static const hwdecModeLabels = <String, String>{
     'auto': '自动',
     'auto-safe': '安全模式',
+    'mediacodec-copy': '硬解复制',
     'no': '软件解码',
   };
 
@@ -62,23 +64,30 @@ class PlaybackSettingsService {
     growable: false,
   );
 
-  /// 当前平台可选的渲染器（硬解直通依赖 Android 的 MediaCodec 输出）。
-  static List<String> get videoRendererOptionsForPlatform =>
-      Platform.isAndroid
-          ? videoRendererOptions
-          : videoRendererOptions
-                .where((renderer) => renderer != 'mediacodec_embed')
-                .toList(growable: false);
+  /// 当前平台可选的渲染器。
+  static List<String> get videoRendererOptionsForPlatform {
+    final isAndroid = Platform.isAndroid;
+    return videoRendererOptions
+        .where(
+          (renderer) =>
+              (isAndroid && renderer != 'gpu-next') ||
+              (!isAndroid && renderer != mediacodecEmbedRenderer),
+        )
+        .toList(growable: false);
+  }
 
-  static Map<String, String> get videoRendererLabelsForPlatform =>
-      Platform.isAndroid
-          ? videoRendererLabels
-          : Map.unmodifiable(<String, String>{
-              for (final entry in videoRendererLabels.entries)
-                if (entry.key != 'mediacodec_embed') entry.key: entry.value,
-            });
+  static Map<String, String> get videoRendererLabelsForPlatform {
+    final isAndroid = Platform.isAndroid;
+    return Map.unmodifiable(<String, String>{
+      for (final entry in videoRendererLabels.entries)
+        if ((isAndroid && entry.key != 'gpu-next') ||
+            (!isAndroid && entry.key != mediacodecEmbedRenderer))
+          entry.key: entry.value,
+    });
+  }
 
   /// 旧渲染档位迁移到真实 vo 名称：自动/兼容 → gpu，高质量 → gpu-next。
+  /// Android 上 gpu-next 不可用，高质量档位直接落到 gpu。
   static const _rendererMigrate = <String, String>{
     'auto': 'gpu',
     'compatibility': 'gpu',
@@ -102,13 +111,19 @@ class PlaybackSettingsService {
 
   static String normalizeHwdecMode(String? mode) {
     if (mode != null && hwdecModeLabels.containsKey(mode)) return mode;
-    return Instances.isTV ? 'auto-safe' : 'auto';
+    // Android TV 的 Mali-G52 等 GPU 对 direct 硬解纹理互操作不稳定，
+    // 默认走 MediaCodec 解码 + 帧复制到 GPU，兼容性最好。
+    return Instances.isTV ? 'mediacodec-copy' : 'auto';
   }
 
-  static String normalizeVideoRenderer(String? renderer) {
+  /// [renderer] 归一化到当前平台可用的值；Android 上 gpu-next 不可用，
+  /// 存量配置（含旧档位 'quality'）一律迁移到 gpu。
+  static String normalizeVideoRenderer(String? renderer, {bool? android}) {
+    final isAndroid = android ?? Platform.isAndroid;
     if (renderer == null) return 'gpu';
-    return _rendererMigrate[renderer] ??
-        (videoRendererLabels.containsKey(renderer) ? renderer : 'gpu');
+    final migrated = _rendererMigrate[renderer] ?? renderer;
+    if (isAndroid && migrated == 'gpu-next') return 'gpu';
+    return videoRendererLabels.containsKey(migrated) ? migrated : 'gpu';
   }
 
   static double normalizePlaybackSpeed(double? speed) =>

@@ -43,6 +43,7 @@ class WindowsPlayerLayout extends StatelessWidget {
   final void Function(String, String?, String) onCommentLinkTap;
   final VoidCallback onDownloadPressed;
   final VoidCallback onFollowPressed;
+  final bool isSearching;
 
   const WindowsPlayerLayout({
     required this.data,
@@ -67,6 +68,7 @@ class WindowsPlayerLayout extends StatelessWidget {
     required this.onCommentLinkTap,
     required this.onDownloadPressed,
     required this.onFollowPressed,
+    this.isSearching = false,
     this.sourceNames,
     this.bgmInfo = const BgmInfo(),
     super.key,
@@ -100,6 +102,7 @@ class WindowsPlayerLayout extends StatelessWidget {
                           onEpisodeChanged: onEpisodeChanged,
                           onPickEpisode: onPickEpisode,
                           onFullScreenChanged: onFullScreenChanged,
+                          isSearching: isSearching,
                         ),
                       ),
                       SliverToBoxAdapter(
@@ -113,6 +116,7 @@ class WindowsPlayerLayout extends StatelessWidget {
                           onSourceTap: onSourceTap,
                           onFollowPressed: onFollowPressed,
                           onShowDetail: onShowDetail,
+                          isSearching: isSearching,
                         ),
                       ),
                       const SliverToBoxAdapter(
@@ -170,6 +174,7 @@ class _PlayerArea extends StatelessWidget {
   final void Function(int) onEpisodeChanged;
   final VoidCallback onPickEpisode;
   final ValueChanged<bool> onFullScreenChanged;
+  final bool isSearching;
 
   const _PlayerArea({
     required this.data,
@@ -182,6 +187,7 @@ class _PlayerArea extends StatelessWidget {
     required this.onEpisodeChanged,
     required this.onPickEpisode,
     required this.onFullScreenChanged,
+    this.isSearching = false,
   });
 
   @override
@@ -199,7 +205,7 @@ class _PlayerArea extends StatelessWidget {
               if (core.failed) {
                 return _buildErrorState(context);
               }
-              if (!inited) return _loadingState;
+              if (!inited) return _buildLoadingState();
               return BakaPlayer(
                 detail: data,
                 danmuWidget: DanmakuView(controller: danmakuController),
@@ -275,20 +281,25 @@ class _PlayerArea extends StatelessWidget {
     );
   }
 
-  static const _loadingState = Center(
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        SizedBox(
-          height: 20,
-          width: 20,
-          child: CircularProgressIndicator(color: Colors.white),
-        ),
-        SizedBox(height: 16),
-        Text('正在加载播放器...', style: TextStyle(color: Colors.white, fontSize: 14)),
-      ],
-    ),
-  );
+  Widget _buildLoadingState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(
+            height: 20,
+            width: 20,
+            child: CircularProgressIndicator(color: Colors.white),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            isSearching ? '正在自动匹配源中...' : '正在加载播放器...',
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _PlayerSidebar extends StatelessWidget {

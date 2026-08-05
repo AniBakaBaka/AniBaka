@@ -40,10 +40,15 @@ class NavigationService {
   }
 
   /// 导航到番剧详情/播放页面（pushAndRemoveUntil，保留首页）
-  static void toDetail(BuildContext context, Map data, {int? posIndex}) {
+  static void toDetail(
+    BuildContext context,
+    Map data, {
+    int? posIndex,
+    bool autoMatch = false,
+  }) {
     Navigator.pushAndRemoveUntil(
       context,
-      _slideRoute(PlayerPage(data: data, posIndex: posIndex)),
+      _slideRoute(PlayerPage(data: data, posIndex: posIndex, autoMatch: autoMatch)),
       (route) => route.isFirst,
     );
   }
@@ -54,16 +59,17 @@ class NavigationService {
     int? posIndex,
     bool popFirst = false,
     bool fade = false,
+    bool autoMatch = false,
   }) {
     if (popFirst) Navigator.of(context).pop();
     final PageRoute<void> route = fade
         ? platformPageRoute<void>(
-            builder: (_) => PlayerPage(data: data),
+            builder: (_) => PlayerPage(data: data, posIndex: posIndex, autoMatch: autoMatch),
             transitionsBuilder: (_, anim, _, child) =>
                 FadeTransition(opacity: anim, child: child),
             transitionDuration: const Duration(milliseconds: 300),
           )
-        : _slideRoute(PlayerPage(data: data, posIndex: posIndex));
+        : _slideRoute(PlayerPage(data: data, posIndex: posIndex, autoMatch: autoMatch));
     Navigator.push(context, route);
   }
 

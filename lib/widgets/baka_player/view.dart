@@ -369,66 +369,70 @@ class _BakaPlayerState extends State<BakaPlayer> {
   }
 
   Widget _buildVideoPlayer() {
-    final videoController = widget.controller.videoController;
-    if (videoController == null) {
-      return const Center(
-        child: SizedBox(
-          height: 32,
-          width: 32,
-          child: CircularProgressIndicator(color: Colors.white),
-        ),
-      );
-    }
-    return ValueListenableBuilder<PlaybackPreferences>(
-      valueListenable: widget.controller.preferences,
-      builder: (context, preferences, _) {
-        if (!widget.full && _fullscreenRouteActive) {
-          return const ColoredBox(
-            color: Colors.black,
-            child: SizedBox.expand(),
+    return ValueListenableBuilder<VideoController?>(
+      valueListenable: widget.controller.videoController,
+      builder: (context, videoController, _) {
+        if (videoController == null) {
+          return const Center(
+            child: SizedBox(
+              height: 32,
+              width: 32,
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
           );
         }
-        final cfg = preferences.subtitleConfig;
-        final height = MediaQuery.sizeOf(context).height * 0.5;
-        return ValueListenableBuilder<VideoEnhancementState>(
-          valueListenable: widget.controller.enhancement,
-          builder: (context, enhancement, _) => Video(
-            controller: videoController,
-            controls: NoVideoControls,
-            pauseUponEnteringBackgroundMode: false,
-            resumeUponEnteringForegroundMode: true,
-            filterQuality: Platform.isAndroid && enhancement.enabled
-                ? FilterQuality.medium
-                : FilterQuality.low,
-            subtitleViewConfiguration: SubtitleViewConfiguration(
-              visible: preferences.showSubtitle,
-              style: TextStyle(
-                height: 1.5,
-                fontSize: cfg.fontSize,
-                fontFamily: cfg.fontFamily.isEmpty ? null : cfg.fontFamily,
-                letterSpacing: 0.5,
-                color: cfg.fontColor.withValues(alpha: cfg.opacity),
-                fontWeight: cfg.bold ? FontWeight.w700 : FontWeight.w500,
-                backgroundColor: cfg.backgroundColor,
-                shadows: [
-                  Shadow(
-                    blurRadius: cfg.borderWidth * 2,
-                    color: cfg.borderColor,
-                    offset: const Offset(0, 1),
+        return ValueListenableBuilder<PlaybackPreferences>(
+          valueListenable: widget.controller.preferences,
+          builder: (context, preferences, _) {
+            if (!widget.full && _fullscreenRouteActive) {
+              return const ColoredBox(
+                color: Colors.black,
+                child: SizedBox.expand(),
+              );
+            }
+            final cfg = preferences.subtitleConfig;
+            final height = MediaQuery.sizeOf(context).height * 0.5;
+            return ValueListenableBuilder<VideoEnhancementState>(
+              valueListenable: widget.controller.enhancement,
+              builder: (context, enhancement, _) => Video(
+                controller: videoController,
+                controls: NoVideoControls,
+                pauseUponEnteringBackgroundMode: false,
+                resumeUponEnteringForegroundMode: true,
+                filterQuality: Platform.isAndroid && enhancement.enabled
+                    ? FilterQuality.medium
+                    : FilterQuality.low,
+                subtitleViewConfiguration: SubtitleViewConfiguration(
+                  visible: preferences.showSubtitle,
+                  style: TextStyle(
+                    height: 1.5,
+                    fontSize: cfg.fontSize,
+                    fontFamily: cfg.fontFamily.isEmpty ? null : cfg.fontFamily,
+                    letterSpacing: 0.5,
+                    color: cfg.fontColor.withValues(alpha: cfg.opacity),
+                    fontWeight: cfg.bold ? FontWeight.w700 : FontWeight.w500,
+                    backgroundColor: cfg.backgroundColor,
+                    shadows: [
+                      Shadow(
+                        blurRadius: cfg.borderWidth * 2,
+                        color: cfg.borderColor,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
                   ),
-                ],
+                  padding: EdgeInsets.fromLTRB(
+                    24,
+                    cfg.position < 50 ? cfg.position / 100 * height : 0,
+                    24,
+                    cfg.position >= 50
+                        ? (100 - cfg.position) / 100 * height + 24
+                        : 24,
+                  ),
+                ),
+                fit: preferences.videoFit,
               ),
-              padding: EdgeInsets.fromLTRB(
-                24,
-                cfg.position < 50 ? cfg.position / 100 * height : 0,
-                24,
-                cfg.position >= 50
-                    ? (100 - cfg.position) / 100 * height + 24
-                    : 24,
-              ),
-            ),
-            fit: preferences.videoFit,
-          ),
+            );
+          },
         );
       },
     );

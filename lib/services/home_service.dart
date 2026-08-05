@@ -16,7 +16,6 @@ class HomeDataService {
   static const String pureTag = '纯净';
   static const List<String> baseTags = [recommendTag, latestTag, pureTag];
 
-  static const String _xinfanSort = '新番';
   static const String _swiperTag = '幻灯';
   static const String _swiperCacheKey = 'home_swiper_backdrop_v1';
   static final Map<String, Future<dynamic>> _requests = {};
@@ -46,8 +45,8 @@ class HomeDataService {
       allowExpired: true,
     );
     final cachedSwipers = _readCache(_swiperCacheKey, allowExpired: true);
-    final cachedRank = _readCache('home_rank_0', allowExpired: true);
-    final cachedSchedule = _readCache('home_xinfan', allowExpired: true);
+    final cachedRank = _readCache('home_rank_bgm_0', allowExpired: true);
+    final cachedSchedule = _readCache('home_xinfan_bgm_v2', allowExpired: true);
 
     if (cachedFeed is List) {
       _feed.value = List<dynamic>.of(cachedFeed);
@@ -270,8 +269,16 @@ class HomeDataService {
     try {
       final items = _listOf(
         await _cached(
-          'home_rank_$index',
-          () async => _responseItems((await getRank(rankDays[index])).data),
+          'home_rank_bgm_$index',
+          () async {
+            final response = await searchBgmByTag(
+              const [],
+              limit: 21,
+              sort: 'rank',
+              airDate: _rankAirDateFilter(rankDays[index]),
+            );
+            return BgmService.convertSearchResponseToAppFormat(response.data);
+          },
           force: force,
         ),
       );
@@ -281,6 +288,15 @@ class HomeDataService {
     } catch (error) {
       debugPrint('home rank $index: $error');
     }
+  }
+
+  /// 排行榜各档期对应的 BGM 放送日期下限；总榜不限日期。
+  static List<String>? _rankAirDateFilter(int days) {
+    if (days >= 1000) return null;
+    final start = DateTime.now().subtract(Duration(days: days));
+    final month = start.month.toString().padLeft(2, '0');
+    final day = start.day.toString().padLeft(2, '0');
+    return ['>=${start.year}-$month-$day'];
   }
 
   Future<void> selectRank(int index) async {
@@ -298,19 +314,22 @@ class HomeDataService {
   }
 
   /// 新番更新表与更新时间表页面共用同一份缓存。
+  /// 数据源为 BGM 每日放送（p1/calendar），key 1=周一 … 7=周日。
   static Future<List<List<dynamic>>> loadSharedXinfan({
     bool force = false,
   }) async {
-    final raw = await _cached('home_xinfan', () async {
+    final raw = await _cached('home_xinfan_bgm_v2', () async {
       final groups = _emptyGroups(7);
-      final items = _responseItems(
-        (await getPost(_xinfanSort, '', 1, 100)).data,
+      final days = BgmUtils.parseJsonMap(
+        (await getBgmCalendar()).data,
       );
+      if (days == null) return groups;
 
-      for (final item in items.whereType<Map>()) {
-        final date = DateTime.tryParse(item['time']?.toString() ?? '');
-        if (date != null) groups[date.weekday - 1].add(item);
-      }
+      days.forEach((key, value) {
+        final day = int.tryParse(key);
+        if (day == null || day < 1 || day > 7 || value is! List) return;
+        groups[day - 1] = BgmService.convertTrendingToAppFormat(value);
+      });
       return groups;
     }, force: force);
 

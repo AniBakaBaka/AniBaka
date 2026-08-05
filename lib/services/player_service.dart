@@ -81,10 +81,6 @@ class PlayerService {
   }
 
   PlayerService({required this.data, this.posIndex}) {
-    final source = data['source']?.toString();
-    isLocalSource = source == '_local';
-    isAdapter = !isLocalSource && AdapterRegistry.isAdapterSource(source);
-
     sourceNames = _parseSourceNames(data['sourceNames']);
     if (!isLocalSource) {
       bgmInfo = BgmUtils.readFromData(data);
@@ -100,8 +96,12 @@ class PlayerService {
   int currPlayIndex = 0;
   int currUrl = 1;
   List<String>? sourceNames;
-  late final bool isLocalSource;
-  late final bool isAdapter;
+
+  bool get isLocalSource => data['source']?.toString() == '_local';
+  bool get isAdapter {
+    final source = data['source']?.toString();
+    return !isLocalSource && AdapterRegistry.isAdapterSource(source);
+  }
 
   String? get localFilePath => data['localFilePath'] as String?;
   String? get danmakuPath => data['danmakuPath'] as String?;
@@ -400,10 +400,41 @@ class PlayerService {
     _playbackKeepAliveAdapter = null;
   }
 
-  /// 从另一份视频数据搬运预取直链（如换源面板返回的数据），避免调用方直写魔法键。
+  /// 从另一份视频数据搬运预取直链与完整的源与剧集元数据（如换源面板或自动匹配返回的数据）。
   void adoptPrefetchedPlayback(Map from) {
     final v = from[_prefetchedPlaybackKey];
     if (v != null) data[_prefetchedPlaybackKey] = v;
+
+    for (final key in [
+      'id',
+      'source',
+      'sourceUrl',
+      'sourceDisplayName',
+      'seriesUrl',
+      'seriesId',
+      'videos',
+      'videoList',
+      'sourceNames',
+      'currPlayIndex',
+      'currUrl',
+    ]) {
+      if (from.containsKey(key) && from[key] != null) {
+        data[key] = from[key];
+      }
+    }
+
+    final episodes = PlaybackEpisodeCatalog.parse(
+      PlaybackEpisodeCatalog.rawEpisodesOf(data),
+      mergeDuplicateTitles: true,
+    );
+    if (episodes.isNotEmpty) {
+      syncVideoData(
+        episodes,
+        sourceNames: _parseSourceNames(data['sourceNames']),
+        preferredEpisodeIndex: BgmUtils.toInt(from['currPlayIndex']) ?? currPlayIndex,
+        preferredLineIndex: BgmUtils.toInt(from['currUrl']) ?? currUrl,
+      );
+    }
   }
 
   ({String url, Map<String, String> httpHeaders})? _readPrefetchedPlaybackMedia(

@@ -14,6 +14,7 @@ import 'package:baka/source/engine/pipeline_host.dart';
 import 'package:baka/source/engine/torrent_records.dart';
 import 'package:baka/source/model/source_rule.dart';
 import 'package:baka/source/runtime/request_scheduler.dart';
+import 'package:baka/source/video_url_extractor.dart';
 
 typedef PipelinePlayResult = ({
   String url,
@@ -1275,7 +1276,7 @@ class PipelineInterpreter {
     } else {
       url = ctx.host.extractVideoUrl(raw, ctx.pageUrl);
     }
-    if (url.isNotEmpty) {
+    if (url.isNotEmpty && !VideoUrlExtractor.isSignedCdnUrl(url)) {
       try {
         url = Uri.encodeFull(Uri.decodeFull(url));
       } catch (_) {

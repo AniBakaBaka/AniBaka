@@ -68,6 +68,44 @@ void main() {
     expect(PlaybackSettingsService.normalizeVideoRenderer(null), 'gpu');
   });
 
+  test('Android migrates gpu-next and quality renderers down to gpu', () {
+    expect(
+      PlaybackSettingsService.normalizeVideoRenderer('gpu-next', android: true),
+      'gpu',
+    );
+    expect(
+      PlaybackSettingsService.normalizeVideoRenderer('quality', android: true),
+      'gpu',
+    );
+    expect(
+      PlaybackSettingsService.normalizeVideoRenderer(
+        'mediacodec_embed',
+        android: true,
+      ),
+      'mediacodec_embed',
+    );
+    expect(
+      PlaybackSettingsService.normalizeVideoRenderer('gpu', android: true),
+      'gpu',
+    );
+    expect(
+      PlaybackSettingsService.normalizeVideoRenderer(null, android: true),
+      'gpu',
+    );
+  });
+
+  test('normalizes hwdec modes including the Android TV default', () {
+    expect(PlaybackSettingsService.normalizeHwdecMode('auto'), 'auto');
+    expect(PlaybackSettingsService.normalizeHwdecMode('auto-safe'), 'auto-safe');
+    expect(
+      PlaybackSettingsService.normalizeHwdecMode('mediacodec-copy'),
+      'mediacodec-copy',
+    );
+    expect(PlaybackSettingsService.normalizeHwdecMode('no'), 'no');
+    expect(PlaybackSettingsService.normalizeHwdecMode('bogus'), 'auto');
+    expect(PlaybackSettingsService.normalizeHwdecMode(null), 'auto');
+  });
+
   test(
     'migrates enabled legacy Anime4K levels to the same named levels',
     () async {

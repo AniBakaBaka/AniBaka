@@ -123,6 +123,14 @@ Future<Response> getTrendingSubjects({
   );
 }
 
+/// BGM 每日放送（一周更新表）。
+///
+/// 返回以星期为 key（1=周一 … 7=周日）的 Map，值为
+/// `[{subject: {...}, watchers: n}]`，subject 与 trending 接口同构。
+Future<Response> getBgmCalendar() {
+  return _get('$_bgmNextBase/p1/calendar');
+}
+
 Future<Response> getBgmSubjectComments(
   int subjectId, {
   int limit = 20,

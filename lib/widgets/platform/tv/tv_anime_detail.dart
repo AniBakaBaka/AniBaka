@@ -7,13 +7,10 @@ import 'package:baka/api/bgm.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/services/bgm_service.dart';
 import 'package:baka/services/collection_service.dart';
-import 'package:baka/services/play_history_sync_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/reg_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
-import 'package:baka/services/playback_settings_service.dart';
-import 'package:baka/widgets/anime_detail/video_source_search_sheet.dart';
-import 'package:baka/widgets/anime/post_card.dart';
+import 'package:baka/services/navigation_service.dart';
 import 'package:baka/widgets/common/shimmer.dart';
 import 'package:baka/widgets/platform/tv/tv_focusable.dart';
 
@@ -58,9 +55,6 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
     _refreshCachedData();
     _fetchBgmData().then((_) {
       if (mounted) _fetchCollectionStatus();
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _showSearchSheet();
     });
   }
 
@@ -178,36 +172,8 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
     }
   }
 
-  void _showSearchSheet() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => VideoSourceSearchSheet(
-        title: widget.data['title'] ?? '',
-        cover: _displayCover,
-        score: _displayScore,
-        scoreCount: _displayScoreCount > 0 ? _displayScoreCount : null,
-        seedData: {
-          if (_bgmInfo.subjectId != null) 'bgmId': _bgmInfo.subjectId,
-          if (_displayScore != null) 'score': _displayScore,
-          if (_bgmCoverUrl != null && _bgmCoverUrl!.isNotEmpty)
-            'bgmImageUrl': _bgmCoverUrl,
-          if (_detailData != null) 'bgmDetailData': _detailData,
-        },
-        autoMatchMode: PlaybackSettingsService.getAutoMatchSource(),
-        headlessMode: false,
-        targetEpisodeIndex:
-            PlayHistorySyncService.getResumeSelection(
-              widget.data,
-            )?.episodeIndex ??
-            0,
-        onMatchFailed: () {
-          showSnackBar('自动匹配失败，已切换至手动搜索');
-        },
-        heroTag: coverHeroTag(widget.data),
-      ),
-    );
+  void _startWatching() {
+    NavigationService.toPlayer(context, widget.data, autoMatch: true);
   }
 
   @override
@@ -401,10 +367,10 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                               runSpacing: 12,
                               children: [
                                 _buildActionButton(
-                                  icon: Icons.search,
-                                  label: '搜索视频源',
+                                  icon: Icons.play_arrow_rounded,
+                                  label: '开始观看',
                                   color: Theme.of(context).colorScheme.primary,
-                                  onPressed: _showSearchSheet,
+                                  onPressed: _startWatching,
                                 ),
                                 _buildCollectionButton(),
                               ],

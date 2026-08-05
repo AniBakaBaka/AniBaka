@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/widgets/baka_player/mpv_config.dart';
+import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
@@ -41,6 +43,10 @@ abstract interface class PlaybackBackend {
 }
 
 class MediaKitPlaybackBackend implements PlaybackBackend {
+  /// Android 上等待视频输出 Surface 就绪的上限，避免页面尚未挂载 Video
+  /// 组件时把媒体打开无限期卡在加载态。
+  static const _surfaceReadyTimeout = Duration(seconds: 4);
+
   Player? _player;
   VideoController? _videoController;
 
@@ -93,15 +99,14 @@ class MediaKitPlaybackBackend implements PlaybackBackend {
     _player = player;
     // Android 上把持久化的渲染器选择映射为 VideoController 的 vo：media_kit
     // 会在 Flutter 视频 Surface 就绪（wid 非 0）后统一应用，避免提前初始化
-    // VO。'gpu' 是 media_kit Android 默认 vo，保持 null 即可。
+    // VO。'gpu' 是 media_kit Android 默认 vo，保持 null 即可。gpu-next 不
+    // 在当前 mpv 构建中，任何残留选择都回落到 gpu。
     final isAndroid = Platform.isAndroid;
     String? vo;
     if (isAndroid) {
-      vo = switch (videoRenderer) {
-        'gpu-next' => 'gpu-next',
-        mediacodecEmbedRenderer => mediacodecEmbedRenderer,
-        _ => null,
-      };
+      vo = videoRenderer == mediacodecEmbedRenderer
+          ? mediacodecEmbedRenderer
+          : null;
     }
     _videoController = VideoController(
       player,
@@ -114,12 +119,52 @@ class MediaKitPlaybackBackend implements PlaybackBackend {
     );
   }
 
+  /// 等待 Android 视频输出 Surface 就绪后再打开媒体。
+  ///
+  /// 日志中的 "Both surface and native_window are NULL" / "Using surface 0x0"
+  /// 来自解码先于 Surface 创建启动：mpv 拿到 wid=0 后只能在空 Surface 上
+  /// 初始化视频链路。media_kit 的 AndroidVideoController 创建时即注册
+  /// SurfaceProducer，[VideoController.id] 在原生 Surface 可用后才会置位，
+  /// 因此这里等它到位即可，超时则照常打开（media_kit 会在 wid 到达时
+  /// 重建 VO）。整个等待有上限，避免平台初始化异常时把 open 永久卡住。
+  Future<void> _waitForAndroidSurface() async {
+    if (!Platform.isAndroid) return;
+    final videoController = _videoController;
+    if (videoController == null) return;
+    try {
+      final platform = await videoController.platform.future
+          .timeout(_surfaceReadyTimeout);
+      if ((platform.id.value ?? 0) != 0) return;
+      final completer = Completer<void>();
+      void listener() {
+        if ((platform.id.value ?? 0) != 0 && !completer.isCompleted) {
+          completer.complete();
+        }
+      }
+
+      platform.id.addListener(listener);
+      listener();
+      try {
+        await completer.future.timeout(_surfaceReadyTimeout);
+      } on TimeoutException {
+        debugPrint('media_kit: video surface not ready, opening media anyway');
+      } finally {
+        platform.id.removeListener(listener);
+      }
+    } on TimeoutException {
+      debugPrint('media_kit: video controller not ready, opening media anyway');
+    } catch (error) {
+      debugPrint('media_kit: waiting for video surface failed: $error');
+    }
+  }
+
   @override
   Future<void> open(
     String uri, {
     required bool autoplay,
     Map<String, String>? httpHeaders,
-  }) {
+  }) async {
+    await _waitForAndroidSurface();
     return _requiredPlayer.open(
       Media(uri, httpHeaders: httpHeaders ?? const <String, String>{}),
       play: autoplay,

@@ -9,6 +9,13 @@ import 'package:baka/services/source_adapter_service.dart';
 import 'package:baka/widgets/anime_detail/controller/video_source_search_controller.dart';
 import 'package:baka/widgets/common/shimmer.dart';
 
+class SourceSwitchSelection {
+  const SourceSwitchSelection({required this.data, required this.lineIndex});
+
+  final Map<String, dynamic> data;
+  final int lineIndex;
+}
+
 class FrostedContainer extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -35,7 +42,13 @@ class FrostedContainer extends StatelessWidget {
   }
 }
 
-/// 视频源搜索底部滑栏
+typedef _RouteView = ({
+  DirectSourceGroup group,
+  String sources,
+  bool isCurrent,
+});
+
+/// 视频源搜索与线路切换底部滑栏（合并视频源搜索与线路切换）
 class VideoSourceSearchSheet extends StatefulWidget {
   final String title;
   final String cover;
@@ -45,8 +58,14 @@ class VideoSourceSearchSheet extends StatefulWidget {
   final bool autoMatchMode;
   final bool headlessMode;
   final int targetEpisodeIndex;
+  final int currentEpisodeIndex;
+  final int currentLineIndex;
+  final String? currentSource;
+  final String? currentSourceName;
+  final VideoSourceSearchController? searchController;
   final ValueChanged<Map<String, dynamic>>? onMatchFound;
   final VoidCallback? onMatchFailed;
+  final String? heroTag;
 
   const VideoSourceSearchSheet({
     required this.title,
@@ -54,6 +73,11 @@ class VideoSourceSearchSheet extends StatefulWidget {
     this.autoMatchMode = false,
     this.headlessMode = false,
     this.targetEpisodeIndex = 0,
+    this.currentEpisodeIndex = 0,
+    this.currentLineIndex = 1,
+    this.currentSource,
+    this.currentSourceName,
+    this.searchController,
     this.onMatchFound,
     this.onMatchFailed,
     super.key,
@@ -63,43 +87,93 @@ class VideoSourceSearchSheet extends StatefulWidget {
     this.heroTag,
   });
 
-  final String? heroTag;
+  static Future<SourceSwitchSelection?> show(
+    BuildContext context, {
+    required String title,
+    required String cover,
+    required Map<String, dynamic> seedData,
+    int currentEpisodeIndex = 0,
+    int currentLineIndex = 1,
+    String? currentSource,
+    String? currentSourceName,
+    VideoSourceSearchController? searchController,
+  }) {
+    return showModalBottomSheet<SourceSwitchSelection>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.42),
+      constraints: const BoxConstraints(maxWidth: 860),
+      builder: (_) => VideoSourceSearchSheet(
+        title: title,
+        cover: cover,
+        seedData: seedData,
+        targetEpisodeIndex: currentEpisodeIndex,
+        currentEpisodeIndex: currentEpisodeIndex,
+        currentLineIndex: currentLineIndex,
+        currentSource: currentSource,
+        currentSourceName: currentSourceName,
+        searchController: searchController,
+      ),
+    );
+  }
 
   @override
   State<VideoSourceSearchSheet> createState() => _VideoSourceSearchSheetState();
 }
 
 class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
+  static const _identityKeys = ['seriesId', 'seriesUrl', 'id', 'url'];
+
   late final VideoSourceSearchController _controller;
-  final ValueNotifier<String> _selectedFilterNotifier = ValueNotifier<String>(
-    'all',
-  );
+  final ValueNotifier<String> _selectedFilterNotifier = ValueNotifier<String>('all');
   late final ValueNotifier<Map<String, _SourceMeta>> _sourceConfigsNotifier;
+
+  late final Set<String> _currentIds;
+  List<_RouteView> _routes = const [];
+  String? _selectingKey;
+  bool _hasPending = false;
+  bool _routeRefreshScheduled = false;
+
+  bool get _isSelecting => _selectingKey != null;
 
   @override
   void initState() {
     super.initState();
-    _controller = VideoSourceSearchController(
-      title: widget.title,
-      seedData: widget.seedData,
-      autoMatchMode: widget.autoMatchMode,
-      targetEpisodeIndex: widget.targetEpisodeIndex,
-      onMatchFound: _navigateToPlayer,
-      onMatchFailed: () {
-        final cb = widget.onMatchFailed;
-        if (cb != null) {
-          cb();
-        } else if (!widget.headlessMode) {
-          Navigator.of(context).pop('failed');
-        }
-      },
-    );
+    final seed = widget.seedData ?? const {};
+    _currentIds = {
+      for (final key in _identityKeys)
+        if (seed[key]?.toString().trim() case final String value when value.isNotEmpty)
+          value,
+    };
+
+    _controller = widget.searchController ??
+        VideoSourceSearchController(
+          title: widget.title,
+          seedData: widget.seedData,
+          autoMatchMode: widget.autoMatchMode,
+          targetEpisodeIndex: widget.targetEpisodeIndex,
+          onMatchFound: _navigateToPlayer,
+          onMatchFailed: () {
+            final cb = widget.onMatchFailed;
+            if (cb != null) {
+              cb();
+            } else if (!widget.headlessMode) {
+              Navigator.of(context).pop('failed');
+            }
+          },
+        );
 
     _sourceConfigsNotifier = ValueNotifier<Map<String, _SourceMeta>>(
       _currentSourceRegistry(),
     );
 
-    // 适配器初始化完成后刷新源注册表（此时自定义源列表已加载）
+    _controller.resultsNotifier.addListener(_onCandidatesChanged);
+    _controller.candidateRevisionNotifier.addListener(_onCandidatesChanged);
+    _controller.progressNotifier.addListener(_onCandidatesChanged);
+    _controller.isSearchingNotifier.addListener(_onCandidatesChanged);
+
     _controller.ensureAdapterReady().then((_) {
       if (!mounted) return;
       final next = _currentSourceRegistry();
@@ -107,22 +181,164 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
         _sourceConfigsNotifier.value = next;
       }
     });
-    _controller.startSearch();
+
+    _readRoutes();
+
+    if (_controller.resultsNotifier.value.isEmpty && !_controller.isSearchingNotifier.value) {
+      _controller.startSearch();
+    } else {
+      _continueAutoProbe();
+    }
   }
 
   Map<String, _SourceMeta> _currentSourceRegistry() => _buildSourceRegistry(
-    quickSources: SourceCatalog.instance.quickSearchSources,
-    customSources: SourceCatalog.instance.enabledCustomSources,
-  );
+        quickSources: SourceCatalog.instance.quickSearchSources,
+        customSources: SourceCatalog.instance.enabledCustomSources,
+      );
 
   @override
   void dispose() {
-    if (!VideoSourceSearchController.isGlobalCached(_controller)) {
+    _controller.resultsNotifier.removeListener(_onCandidatesChanged);
+    _controller.candidateRevisionNotifier.removeListener(_onCandidatesChanged);
+    _controller.progressNotifier.removeListener(_onCandidatesChanged);
+    _controller.isSearchingNotifier.removeListener(_onCandidatesChanged);
+
+    if (widget.searchController == null && !VideoSourceSearchController.isGlobalCached(_controller)) {
       _controller.dispose();
     }
     _selectedFilterNotifier.dispose();
     _sourceConfigsNotifier.dispose();
     super.dispose();
+  }
+
+  void _onCandidatesChanged() {
+    if (!mounted || _routeRefreshScheduled) return;
+    _routeRefreshScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _routeRefreshScheduled = false;
+      if (!mounted) return;
+      setState(_readRoutes);
+      _continueAutoProbe();
+    });
+  }
+
+  void _continueAutoProbe() {
+    if (!_hasPending) return;
+    _controller.startSwitchProbes(
+      _routes.expand((route) => route.group.origins),
+    );
+  }
+
+  void _readRoutes() {
+    var hasPending = false;
+    final routes = <_RouteView>[];
+
+    for (final group in _controller.getDirectSourceGroups(
+      episodeIndex: widget.currentEpisodeIndex,
+      preferredLine: widget.currentLineIndex,
+      currentSource: widget.currentSource,
+    )) {
+      if (group.status == SourceProbeStatus.pending) {
+        hasPending = true;
+      }
+
+      final labels = <String>{};
+      var isCurrent = false;
+      for (final origin in group.origins) {
+        labels.add(_sourceLabel(origin.item));
+        if (!isCurrent && _matchesCurrent(origin)) isCurrent = true;
+      }
+      routes.add((
+        group: group,
+        sources: labels.isEmpty ? '未知来源' : labels.join(' · '),
+        isCurrent: isCurrent,
+      ));
+    }
+
+    _routes = routes;
+    _hasPending = hasPending;
+  }
+
+  String _sourceLabel(SearchResultItem item) {
+    if (item.sourceType == 'internal') return '站内';
+    final descriptor = AdapterRegistry.descriptorFor(item.sourceType);
+    if (descriptor != null) return descriptor.displayName;
+    final name = item.data['sourceDisplayName']?.toString().trim();
+    return name == null || name.isEmpty ? '自定义源' : name;
+  }
+
+  bool _matchesCurrent(SourceCandidateState origin) {
+    if (_currentIds.isEmpty ||
+        origin.item.sourceType != widget.currentSource ||
+        (origin.probe.resolvedLineIndex ?? origin.probe.preferredLine) != widget.currentLineIndex) {
+      return false;
+    }
+    for (final key in _identityKeys) {
+      final value = origin.item.data[key]?.toString().trim();
+      if (value != null && _currentIds.contains(value)) return true;
+    }
+    return false;
+  }
+
+  Future<void> _selectBest() async {
+    if (_isSelecting) return;
+    DirectSourceGroup? fallback;
+    for (final route in _routes) {
+      if (route.group.isReady) return _selectRoute(route.group);
+      if (fallback == null && route.group.status != SourceProbeStatus.failed) {
+        fallback = route.group;
+      }
+    }
+    if (fallback != null) return _selectRoute(fallback);
+    _message('暂时没有可用线路');
+  }
+
+  Future<void> _selectRoute(DirectSourceGroup group) async {
+    if (_isSelecting) return;
+
+    var origin = group.primary;
+    for (final candidate in group.origins) {
+      if (candidate.item.sourceType == widget.currentSource) {
+        origin = candidate;
+        break;
+      }
+    }
+
+    setState(() => _selectingKey = group.key);
+    try {
+      final probe = await _controller.resolveSwitchCandidate(origin);
+      final data = probe.data;
+      if (!probe.isReady || data == null) {
+        _message('线路解析失败，请尝试其他线路');
+        return;
+      }
+
+      final lineIndex = probe.resolvedLineIndex ?? probe.preferredLine;
+      final selectionData = Map<String, dynamic>.from(data)
+        ..['currPlayIndex'] = widget.currentEpisodeIndex
+        ..['currUrl'] = lineIndex;
+      await _controller.persistMatchMemory(origin.item, selectionData);
+      if (mounted) {
+        final selection = SourceSwitchSelection(data: selectionData, lineIndex: lineIndex);
+        Navigator.of(context).pop(selection);
+      }
+    } finally {
+      if (mounted) setState(() => _selectingKey = null);
+    }
+  }
+
+  void _message(String text) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(text),
+          behavior: SnackBarBehavior.floating,
+          showCloseIcon: true,
+        ),
+      );
   }
 
   Future<void> _showAddAliasDialog() async {
@@ -147,8 +363,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
               child: const Text('取消'),
             ),
             FilledButton(
-              onPressed: () =>
-                  Navigator.pop(dialogContext, textController.text),
+              onPressed: () => Navigator.pop(dialogContext, textController.text),
               child: const Text('添加'),
             ),
           ],
@@ -161,9 +376,9 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
 
     final success = await _controller.addManualAlias(value);
     if (!success && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('别名已存在')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('别名已存在')),
+      );
     }
   }
 
@@ -171,19 +386,26 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     _controller.markUserSelected();
     try {
       final videoData = await _controller.resolveVideoData(item);
+      if (!mounted) return;
+      final navigator = Navigator.of(context);
+      final isCurrentRoute = ModalRoute.of(context)?.isCurrent == true;
+      if (navigator.canPop() && isCurrentRoute) {
+        final selection = SourceSwitchSelection(data: videoData, lineIndex: 1);
+        navigator.pop(selection);
+        return;
+      }
       _navigateToPlayer(videoData);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('打开失败: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('打开失败: $e')),
+        );
       }
     }
   }
 
   void _navigateToPlayer(Map<String, dynamic> videoData) {
     if (!mounted) return;
-    // 匹配成功，立即停止后台搜索以释放带宽给播放器。
     _controller.cancelSearch();
     VideoSourceSearchController.cacheGlobal(widget.title, _controller);
     if (widget.headlessMode) {
@@ -195,10 +417,8 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
 
   @override
   Widget build(BuildContext context) {
-    // 普通模式下无需监听 isSearching，避免整个 Sheet 因 isSearching 变化而重建
     if (!widget.autoMatchMode) return _buildNormalSheet();
 
-    // autoMatchMode 下需根据搜索状态在加载占位与正常 Sheet 之间切换
     return ValueListenableBuilder<bool>(
       valueListenable: _controller.isSearchingNotifier,
       builder: (context, isSearching, _) {
@@ -217,8 +437,8 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
   Widget _buildNormalSheet() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return DraggableScrollableSheet(
-      initialChildSize: 0.72,
-      minChildSize: 0.5,
+      initialChildSize: 0.76,
+      minChildSize: 0.46,
       maxChildSize: 0.96,
       builder: (context, scrollController) {
         return RepaintBoundary(
@@ -245,6 +465,9 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
                           heroTag: widget.heroTag,
                           controller: _controller,
                           onAddAlias: _showAddAliasDialog,
+                          hasRoutes: _routes.isNotEmpty,
+                          isSelecting: _isSelecting,
+                          onBest: _selectBest,
                         ),
                       ),
                       _SearchErrorBanner(controller: _controller),
@@ -273,6 +496,10 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
                           sharedCover: widget.cover,
                           selectedFilterNotifier: _selectedFilterNotifier,
                           sourceConfigsNotifier: _sourceConfigsNotifier,
+                          routes: _routes,
+                          selectingKey: _selectingKey,
+                          isSelecting: _isSelecting,
+                          onSelectRoute: _selectRoute,
                           onOpenVideo: _openVideo,
                         ),
                       ),
@@ -317,9 +544,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
       ),
       child: widget.cover.isNotEmpty
           ? ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(24),
-              ),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
               child: Opacity(
                 opacity: 0.08,
                 child: CachedNetworkImage(
@@ -369,10 +594,13 @@ class _HeadlessLoadingWidget extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         child: Row(
           children: [
-            ShimmerCircle(
-              size: 18,
-              baseColor: primaryColor.withValues(alpha: 0.22),
-              highlightColor: primaryColor.withValues(alpha: 0.55),
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: primaryColor,
+              ),
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -390,10 +618,7 @@ class _HeadlessLoadingWidget extends StatelessWidget {
               valueListenable: controller.progressNotifier,
               builder: (context, progressState, _) {
                 return Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: primaryColor.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(20),
@@ -472,12 +697,18 @@ class _SearchHeaderCard extends StatelessWidget {
   final String? heroTag;
   final VideoSourceSearchController controller;
   final Future<void> Function() onAddAlias;
+  final bool hasRoutes;
+  final bool isSelecting;
+  final VoidCallback onBest;
 
   const _SearchHeaderCard({
     required this.title,
     required this.cover,
     required this.controller,
     required this.onAddAlias,
+    required this.hasRoutes,
+    required this.isSelecting,
+    required this.onBest,
     this.score,
     this.scoreCount,
     this.heroTag,
@@ -526,28 +757,52 @@ class _SearchHeaderCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        height: 1.3,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              height: 1.3,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (hasRoutes) ...[
+                          const SizedBox(width: 8),
+                          Tooltip(
+                            message: '自动选择最优线路',
+                            child: FilledButton.icon(
+                              onPressed: isSelecting ? null : onBest,
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size(0, 32),
+                                padding: const EdgeInsets.symmetric(horizontal: 10),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              icon: isSelecting
+                                  ? const SizedBox(
+                                      width: 13,
+                                      height: 13,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.auto_awesome_rounded, size: 15),
+                              label: Text(isSelecting ? '切换中' : '优选', style: const TextStyle(fontSize: 12)),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                    if (scoreText != null &&
-                        scoreCount != null &&
-                        scoreCount! > 0) ...[
+                    if (scoreText != null && scoreCount != null && scoreCount! > 0) ...[
                       const SizedBox(height: 4),
                       SizedBox(
                         width: double.infinity,
                         child: _CompactBadge(
                           icon: Icons.star_rounded,
                           label: '$scoreText 分 · $scoreCount 人评分',
-                          color: const Color(
-                            0xFFFFC107,
-                          ).withValues(alpha: isDarkMode ? 0.25 : 0.2),
+                          color: const Color(0xFFFFC107).withValues(alpha: isDarkMode ? 0.25 : 0.2),
                           foreground: const Color(0xFFFFC107),
                         ),
                       ),
@@ -562,7 +817,7 @@ class _SearchHeaderCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          '来自番剧详情页',
+                          '播放源与线路选择',
                           style: TextStyle(
                             fontSize: 11,
                             color: isDarkMode ? Colors.white70 : Colors.black54,
@@ -598,7 +853,6 @@ class _AliasControlsWidget extends StatelessWidget {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final primary = Theme.of(context).colorScheme.primary;
 
-    // 合并 4 个 Notifier 为单层监听
     return ListenableBuilder(
       listenable: Listenable.merge([
         controller.isSearchingNotifier,
@@ -702,7 +956,6 @@ class _AliasChip extends StatelessWidget {
       : (isDarkMode ? Colors.white : _manualColor);
 
   double get _bgAlpha => isActive ? 0.15 : 0.08;
-
   double get _borderAlpha => isActive ? 0.2 : 0.1;
 
   @override
@@ -894,7 +1147,6 @@ class _SearchProgressIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
-    // 合并多个 Notifier 为单层监听，消除嵌套 rebuild
     return ListenableBuilder(
       listenable: Listenable.merge([
         controller.progressNotifier,
@@ -909,6 +1161,12 @@ class _SearchProgressIndicator extends StatelessWidget {
         final isSearching = controller.isSearchingNotifier.value;
         final completed = progressState.finishedSources;
         final inProgress = progressState.progressingSources;
+        final primaryColor = Theme.of(context).colorScheme.primary;
+
+        final totalSourcesCount = (sourceConfigs.length - 1).clamp(1, 99);
+        final progressFraction = totalSourcesCount > 0
+            ? (completed.length / totalSourcesCount).clamp(0.05, 0.98)
+            : 1.0;
 
         final indicatorItems = sourceConfigs.entries
             .where((e) => e.key != 'all')
@@ -925,40 +1183,66 @@ class _SearchProgressIndicator extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (results.isNotEmpty || isSearching)
-              Row(
-                children: [
+            if (isSearching) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: completed.isEmpty ? null : progressFraction,
+                  minHeight: 3,
+                  backgroundColor: primaryColor.withValues(alpha: isDarkMode ? 0.15 : 0.08),
+                  color: primaryColor,
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            Row(
+              children: [
+                if (isSearching)
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: primaryColor,
+                    ),
+                  )
+                else
                   Icon(
-                    isSearching
-                        ? Icons.autorenew_rounded
-                        : Icons.check_circle_rounded,
+                    Icons.check_circle_rounded,
                     size: 16,
-                    color: isSearching
-                        ? Theme.of(context).colorScheme.primary
-                        : Theme.of(context).colorScheme.secondary,
+                    color: Theme.of(context).colorScheme.secondary,
                   ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      isSearching ? '正在搜索资源...' : '搜索完成',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: isDarkMode ? Colors.white70 : Colors.black87,
-                      ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    isSearching
+                        ? '正在自动匹配全网资源与解析优选线路...'
+                        : '资源匹配完成 (${results.length} 个结果)',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: isSearching ? primaryColor : (isDarkMode ? Colors.white70 : Colors.black87),
                     ),
                   ),
-                  Text(
-                    '${results.length}',
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: primaryColor.withValues(alpha: isDarkMode ? 0.18 : 0.10),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '${completed.length}/$totalSourcesCount 源已完成',
                     style: TextStyle(
                       fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: isDarkMode ? Colors.white60 : Colors.black54,
+                      fontWeight: FontWeight.w700,
+                      color: primaryColor,
                     ),
                   ),
-                ],
-              ),
-            const SizedBox(height: 6),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               physics: const BouncingScrollPhysics(),
@@ -979,13 +1263,13 @@ class _SearchProgressIndicator extends StatelessWidget {
     final color = isCompleted
         ? meta.color
         : isInProgress
-        ? meta.color.withValues(alpha: 0.6)
-        : (isDarkMode ? Colors.white24 : Colors.black12);
+            ? meta.color.withValues(alpha: 0.6)
+            : (isDarkMode ? Colors.white24 : Colors.black12);
     final labelColor = isCompleted
         ? meta.color
         : isInProgress
-        ? meta.color.withValues(alpha: 0.8)
-        : (isDarkMode ? Colors.white54 : Colors.black45);
+            ? meta.color.withValues(alpha: 0.8)
+            : (isDarkMode ? Colors.white54 : Colors.black45);
 
     return Padding(
       padding: const EdgeInsets.only(right: 8),
@@ -1079,13 +1363,17 @@ class _SourceFilterChips extends StatelessWidget {
   }
 }
 
-/// 视频搜索结果滚动列表组件 (包含站点分组、搜索状态占位与空列表状态)
+/// 视频搜索结果与探针线路滚动列表组件
 class _VideoSearchResultList extends StatelessWidget {
   final ScrollController scrollController;
   final VideoSourceSearchController controller;
   final String sharedCover;
   final ValueNotifier<String> selectedFilterNotifier;
   final ValueNotifier<Map<String, _SourceMeta>> sourceConfigsNotifier;
+  final List<_RouteView> routes;
+  final String? selectingKey;
+  final bool isSelecting;
+  final ValueChanged<DirectSourceGroup> onSelectRoute;
   final ValueChanged<SearchResultItem> onOpenVideo;
 
   const _VideoSearchResultList({
@@ -1094,21 +1382,23 @@ class _VideoSearchResultList extends StatelessWidget {
     required this.sharedCover,
     required this.selectedFilterNotifier,
     required this.sourceConfigsNotifier,
+    required this.routes,
+    required this.selectingKey,
+    required this.isSelecting,
+    required this.onSelectRoute,
     required this.onOpenVideo,
   });
 
   _SourceMeta _meta(
     Map<String, _SourceMeta> sourceConfigs,
     String sourceType,
-  ) => sourceConfigs[sourceType] ?? _kFallbackSourceMeta;
+  ) =>
+      sourceConfigs[sourceType] ?? _kFallbackSourceMeta;
 
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
-    // 只监听真正影响列表呈现的 Notifier：过滤项、结果、源配置、是否搜索中。
-    // 不再监听 progressNotifier（包含 errors/finished/progressing 集合），
-    // 避免在错误或单个源状态变化时重建整个列表。
     return ListenableBuilder(
       listenable: Listenable.merge([
         selectedFilterNotifier,
@@ -1122,8 +1412,7 @@ class _VideoSearchResultList extends StatelessWidget {
         final sourceConfigs = sourceConfigsNotifier.value;
         final isSearching = controller.isSearchingNotifier.value;
 
-        // 搜索中且无结果 → 加载占位
-        if (isSearching && results.isEmpty) {
+        if (isSearching && results.isEmpty && routes.isEmpty) {
           return ListView(
             controller: scrollController,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
@@ -1131,8 +1420,15 @@ class _VideoSearchResultList extends StatelessWidget {
           );
         }
 
-        // 每个源只追加一批结果；一次扫描直接生成标题/卡片流。
         final entries = <Object>[];
+
+        if (routes.isNotEmpty && (selectedFilter == 'all' || selectedFilter == 'internal')) {
+          entries.add('__SECTION_ROUTES__');
+          for (final route in routes) {
+            entries.add(route);
+          }
+        }
+
         String? lastSource;
         for (final item in results) {
           if (selectedFilter != 'all' && item.sourceType != selectedFilter) {
@@ -1161,6 +1457,23 @@ class _VideoSearchResultList extends StatelessWidget {
           itemCount: entries.length,
           itemBuilder: (context, index) {
             final entry = entries[index];
+            if (entry == '__SECTION_ROUTES__') {
+              return _buildSectionHeader('可用线路', Icons.alt_route_rounded, Theme.of(context).colorScheme.primary, isDarkMode);
+            }
+            if (entry is _RouteView) {
+              return RepaintBoundary(
+                child: _RouteTile(
+                  index: routes.indexOf(entry),
+                  group: entry.group,
+                  sources: entry.sources,
+                  isCurrent: entry.isCurrent,
+                  isRecommended: routes.indexOf(entry) == 0 && entry.group.isReady && !entry.isCurrent,
+                  isSelecting: selectingKey == entry.group.key,
+                  enabled: !isSelecting || selectingKey == entry.group.key,
+                  onTap: () => onSelectRoute(entry.group),
+                ),
+              );
+            }
             if (entry is String) {
               return _buildGroupHeader(_meta(sourceConfigs, entry), isDarkMode);
             }
@@ -1168,9 +1481,7 @@ class _VideoSearchResultList extends StatelessWidget {
             return RepaintBoundary(
               child: _VideoSearchResultCard(
                 item: result,
-                imageUrl: sharedCover.isNotEmpty
-                    ? sharedCover
-                    : result.coverUrl,
+                imageUrl: sharedCover.isNotEmpty ? sharedCover : result.coverUrl,
                 meta: _meta(sourceConfigs, result.sourceType),
                 onTap: () => onOpenVideo(result),
               ),
@@ -1178,6 +1489,33 @@ class _VideoSearchResultList extends StatelessWidget {
           },
         );
       },
+    );
+  }
+
+  Widget _buildSectionHeader(String title, IconData icon, Color color, bool isDarkMode) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12, bottom: 6),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: isDarkMode ? Colors.white.withValues(alpha: 0.9) : Colors.black87,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Divider(
+              thickness: 0.5,
+              color: color.withValues(alpha: isDarkMode ? 0.25 : 0.2),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1193,9 +1531,7 @@ class _VideoSearchResultList extends StatelessWidget {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: isDarkMode
-                  ? Colors.white.withValues(alpha: 0.9)
-                  : Colors.black87,
+              color: isDarkMode ? Colors.white.withValues(alpha: 0.9) : Colors.black87,
             ),
           ),
           const SizedBox(width: 8),
@@ -1218,16 +1554,12 @@ class _VideoSearchResultList extends StatelessWidget {
         children: [
           ShimmerCircle(
             size: 40,
-            baseColor: Theme.of(
-              context,
-            ).colorScheme.primary.withValues(alpha: 0.18),
-            highlightColor: Theme.of(
-              context,
-            ).colorScheme.primary.withValues(alpha: 0.5),
+            baseColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.18),
+            highlightColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
           ),
           const SizedBox(height: 12),
           Text(
-            '正在搜索各个视频站点...',
+            '正在搜索各个视频站点与线路...',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -1257,7 +1589,7 @@ class _VideoSearchResultList extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            '未找到匹配的视频源',
+            '未找到匹配的视频源或线路',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -1267,40 +1599,164 @@ class _VideoSearchResultList extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 16),
-          Wrap(
-            spacing: 10,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: [
-              ElevatedButton.icon(
-                onPressed: isSearching ? null : controller.startSearch,
-                icon: const Icon(Icons.refresh_rounded, size: 16),
-                label: const Text('重新搜索', style: TextStyle(fontSize: 12)),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  minimumSize: const Size(80, 32),
-                ),
-              ),
-              OutlinedButton.icon(
-                onPressed: () => ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('感谢反馈，功能稍后开放。'))),
-                icon: const Icon(Icons.feedback_outlined, size: 16),
-                label: const Text('提交番剧信息', style: TextStyle(fontSize: 12)),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  minimumSize: const Size(80, 32),
-                ),
-              ),
-            ],
+          ElevatedButton.icon(
+            onPressed: isSearching ? null : controller.startSearch,
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: const Text('重新搜索', style: TextStyle(fontSize: 12)),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              minimumSize: const Size(80, 32),
+            ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 线路 Tile 组件（合并 SourceSwitchSheet 线路样式）
+class _RouteTile extends StatelessWidget {
+  const _RouteTile({
+    required this.index,
+    required this.group,
+    required this.sources,
+    required this.isCurrent,
+    required this.isRecommended,
+    required this.isSelecting,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final int index;
+  final DirectSourceGroup group;
+  final String sources;
+  final bool isCurrent;
+  final bool isRecommended;
+  final bool isSelecting;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final isDarkMode = theme.brightness == Brightness.dark;
+
+    final (status, statusIcon, statusColor) = switch (group.status) {
+      SourceProbeStatus.direct => ('已验证', Icons.check_circle_rounded, colors.primary),
+      SourceProbeStatus.playable => ('可播放', Icons.play_circle_fill_rounded, colors.tertiary),
+      SourceProbeStatus.resolving => ('解析中', Icons.sync_rounded, colors.secondary),
+      SourceProbeStatus.pending => ('待检测', Icons.schedule_rounded, colors.onSurfaceVariant),
+      SourceProbeStatus.failed => ('不可用', Icons.error_outline_rounded, colors.error),
+    };
+    final accent = isCurrent ? colors.primary : statusColor;
+
+    final backgroundColor = isCurrent
+        ? colors.primaryContainer.withValues(alpha: isDarkMode ? 0.35 : 0.25)
+        : (isDarkMode ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03));
+
+    final borderColor = isCurrent
+        ? colors.primary.withValues(alpha: 0.7)
+        : isRecommended
+            ? colors.primary.withValues(alpha: 0.3)
+            : (isDarkMode ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06));
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: enabled ? onTap : null,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              color: backgroundColor,
+              border: Border.all(color: borderColor, width: 1),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '${index + 1}'.padLeft(2, '0'),
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: accent,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        sources,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(statusIcon, size: 13, color: statusColor),
+                          const SizedBox(width: 4),
+                          Text(
+                            status,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: statusColor,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (isCurrent || isRecommended) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: colors.primary.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                isCurrent ? '当前线路' : '推荐',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: colors.primary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                if (isSelecting)
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: accent),
+                  )
+                else
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    size: 20,
+                    color: colors.onSurfaceVariant,
+                  ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1491,8 +1947,8 @@ class _VideoSearchResultCard extends StatelessWidget {
     final (icon, text) = lineInfo != null
         ? (Icons.hub_rounded, lineInfo)
         : updateInfo != null
-        ? (Icons.schedule_rounded, updateInfo)
-        : (null, '点击即可进入播放');
+            ? (Icons.schedule_rounded, updateInfo)
+            : (null, '点击即可进入播放');
 
     return Expanded(
       child: Row(
@@ -1531,7 +1987,6 @@ class _VideoSearchResultCard extends StatelessWidget {
     );
   }
 
-  /// 通用迷你标签：合并原 _buildSourceChip / _buildMiniChip
   Widget _buildTagChip({
     required IconData icon,
     required String label,
@@ -1572,13 +2027,11 @@ class _VideoSearchResultCard extends StatelessWidget {
   }
 }
 
-/// 60×80 圆角封面缩略图（头部卡片与结果卡片共用）
+/// 60×80 圆角封面缩略图
 class _CoverThumb extends StatelessWidget {
   final String imageUrl;
   final Widget Function(BuildContext, String)? placeholder;
   final Widget Function(BuildContext, String, Object)? errorWidget;
-
-  /// 底部渐变叠加色（结果卡片用）
   final Color? overlayColor;
 
   const _CoverThumb({

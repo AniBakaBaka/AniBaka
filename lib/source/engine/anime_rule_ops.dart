@@ -346,7 +346,15 @@ class AnimeRuleOps {
   }
 
   /// Walks a dot path (with optional `[n]` list indexes) through decoded JSON.
+  /// Supports pipe (`|`) delimiter to try alternative candidate paths in order.
   static Object? jsonPath(Object? value, String path) {
+    if (path.contains('|')) {
+      for (final candidate in path.split('|')) {
+        final res = jsonPath(value, candidate.trim());
+        if (res != null && res != '') return res;
+      }
+      return null;
+    }
     Object? current = value;
     if (path.trim().isEmpty) return current;
     for (final segment in path.split('.')) {
