@@ -72,7 +72,35 @@ void main() {
     final pack = ranked.firstWhere((s) => s.candidate.key == 'pack');
     expect(ranked.first.candidate.key, 'single');
     expect(pack.severeEpisodeConflict, isTrue);
-    expect(pack.confidence, lessThan(0.8));
+    expect(pack.confidence, lessThan(0.70));
+  });
+
+  test('penalizes title similarity when modifiers differ (movie vs tv)', () {
+    final context = SourceMatchContext(primaryTitle: '海贼王');
+    final ranked = engine.rank([
+      candidate('movie', '海贼王 剧场版 红发歌姬', source: 's1', episodes: 1),
+      candidate('tv', '海贼王', source: 's2', episodes: 1000),
+    ], context);
+
+    expect(ranked.first.candidate.key, 'tv');
+    final movieScore = ranked.firstWhere((s) => s.candidate.key == 'movie');
+    expect(movieScore.confidence, lessThan(0.70));
+  });
+
+  test('caps confidence score strictly under 0.35 for severe episode conflict', () {
+    final context = SourceMatchContext(
+      primaryTitle: 'Test Anime',
+      bgmEpisodeCount: 12,
+      bgmCompleted: true,
+    );
+
+    final ranked = engine.rank([
+      candidate('mismatch', 'Test Anime', source: 's1', episodes: 100),
+    ], context);
+
+    expect(ranked.first.severeEpisodeConflict, isTrue);
+    expect(ranked.first.confidence, lessThanOrEqualTo(0.35));
+    expect(ranked.first.shouldProbeImmediately, isFalse);
   });
 
   test('counts video rows without allocating split substrings', () {

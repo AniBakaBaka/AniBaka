@@ -19,7 +19,6 @@ class PlaybackSettingsService {
   static const _clearCacheOnExitKey = 'app_clearCacheOnExit';
   static const _lowMemoryModeKey = 'app_lowMemoryMode';
   static const _enableBtDownloadKey = 'player_enableBtDownload';
-  static const _autoMatchSourceKey = 'player_autoMatchSource';
   static const _rememberLastPositionKey = 'player_rememberLastPosition';
   static const _autoFullscreenKey = 'player_autoFullscreen';
   static const _enableSkipOpEdKey = 'player_enableSkipOpEd';
@@ -63,6 +62,26 @@ class PlaybackSettingsService {
   static final videoRendererOptions = videoRendererLabels.keys.toList(
     growable: false,
   );
+
+  /// 当前平台可选的硬解模式。
+  ///
+  /// Android TV 上 `auto`（mpv direct 硬解）会落到不稳定的纹理互操作路径，
+  /// [normalizeHwdecMode] 会把它改写成 `mediacodec-copy`；选项列表同步去掉
+  /// `auto`，避免 UI 出现不可达档位。
+  static List<String> get hwdecModeOptionsForPlatform {
+    if (!Instances.isTV) return hwdecModeOptions;
+    return hwdecModeOptions
+        .where((mode) => mode != 'auto')
+        .toList(growable: false);
+  }
+
+  static Map<String, String> get hwdecModeLabelsForPlatform {
+    if (!Instances.isTV) return hwdecModeLabels;
+    return Map.unmodifiable(<String, String>{
+      for (final entry in hwdecModeLabels.entries)
+        if (entry.key != 'auto') entry.key: entry.value,
+    });
+  }
 
   /// 当前平台可选的渲染器。
   static List<String> get videoRendererOptionsForPlatform {
@@ -110,9 +129,11 @@ class PlaybackSettingsService {
   static final _speedLabelTrim = RegExp(r'\.?0+$');
 
   static String normalizeHwdecMode(String? mode) {
-    if (mode != null && hwdecModeLabels.containsKey(mode)) return mode;
     // Android TV 的 Mali-G52 等 GPU 对 direct 硬解纹理互操作不稳定，
-    // 默认走 MediaCodec 解码 + 帧复制到 GPU，兼容性最好。
+    final effective = Instances.isTV && mode == 'auto' ? null : mode;
+    if (effective != null && hwdecModeLabels.containsKey(effective)) {
+      return effective;
+    }
     return Instances.isTV ? 'mediacodec-copy' : 'auto';
   }
 
@@ -172,12 +193,6 @@ class PlaybackSettingsService {
     await _prefs.setBool(_lowMemoryModeKey, value);
     LowMemoryModeService.apply(value);
   }
-
-  static bool getAutoMatchSource() =>
-      _prefs.getBool(_autoMatchSourceKey) ?? true;
-
-  static Future<void> setAutoMatchSource(bool value) =>
-      _prefs.setBool(_autoMatchSourceKey, value);
 
   static String getHwdecMode() =>
       normalizeHwdecMode(_prefs.getString(_hwdecModeKey));

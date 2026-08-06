@@ -345,12 +345,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
                         sliver: SliverToBoxAdapter(
                           child: AnimeDetailHeader(
-                            imageUrl: _detail.coverUrl,
-                            title: _detail.title,
-                            alias: _detail.alias,
-                            score: _detail.score,
-                            scoreCount: _detail.scoreCount,
-                            tags: _detail.tags,
+                            detail: _detail,
                             updateTime: widget.data['time']?.toString(),
                             category: widget.data['sort']?.toString(),
                             heroTag: coverHeroTag(widget.data),

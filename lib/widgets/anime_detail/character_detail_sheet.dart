@@ -1,12 +1,73 @@
-import 'dart:convert';
 import 'dart:math' as math;
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+
 import 'package:baka/api/bgm.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/date_util.dart';
 import 'package:baka/widgets/common/shimmer.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+/// 统一的网络图片组件（封装 wsrv.nl 图片代理 + 缓存 + Shimmer 占位 + 错误处理）
+class _NetImage extends StatelessWidget {
+  final String url;
+  final double? width;
+  final double? height;
+  final double borderRadius;
+  final int proxyWidth;
+
+  const _NetImage({
+    required this.url,
+    this.width,
+    this.height,
+    this.borderRadius = 0,
+    this.proxyWidth = 240,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final proxyUrl = BgmUtils.bgmImageProxyUrl(url, width: proxyWidth);
+    final fallbackBg = (isDark ? Colors.white : Colors.black).withValues(alpha: 0.05);
+    final iconColor = (isDark ? Colors.white : Colors.black).withValues(alpha: 0.24);
+
+    Widget child;
+    if (proxyUrl.isEmpty) {
+      child = Container(
+        width: width,
+        height: height,
+        color: fallbackBg,
+        alignment: Alignment.center,
+        child: Icon(Icons.person_off, color: iconColor, size: (width != null && width! < 50) ? 18 : 32),
+      );
+    } else {
+      child = CachedNetworkImage(
+        imageUrl: proxyUrl,
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+        alignment: Alignment.topCenter,
+        memCacheWidth: proxyWidth,
+        placeholder: (_, _) => ShimmerBox(
+          width: width ?? double.infinity,
+          height: height ?? double.infinity,
+          borderRadius: BorderRadius.all(Radius.circular(borderRadius)),
+        ),
+        errorWidget: (_, _, _) => Container(
+          width: width,
+          height: height,
+          color: fallbackBg,
+          alignment: Alignment.center,
+          child: Icon(Icons.person_off, color: iconColor, size: (width != null && width! < 50) ? 18 : 32),
+        ),
+      );
+    }
+
+    return borderRadius > 0
+        ? ClipRRect(borderRadius: BorderRadius.circular(borderRadius), child: child)
+        : child;
+  }
+}
 
 /// 角色卡片（用于角色 Tab 的网格展示）
 class CharacterCard extends StatelessWidget {
@@ -16,16 +77,10 @@ class CharacterCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final fgColor = isDark ? Colors.white : Colors.black;
     final textColor = isDark ? Colors.white : Colors.black87;
     final name = character['name']?.toString() ?? '未知';
-    final imageUrl = BgmUtils.bgmImageProxyUrl(
-      character['images']?['large']?.toString() ?? '',
-      width: 240,
-    );
     final role = character['role_name']?.toString();
-    final voiceActor =
-        (character['actors'] as List?)
+    final voiceActor = (character['actors'] as List?)
             ?.map((actor) => (actor as Map)['name']?.toString())
             .where((v) => v != null && v.isNotEmpty)
             .join(' / ') ??
@@ -47,41 +102,17 @@ class CharacterCard extends StatelessWidget {
                 ),
               ],
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: CachedNetworkImage(
-                imageUrl: imageUrl,
-                fit: BoxFit.cover,
-                alignment: Alignment.topCenter,
-                memCacheWidth: 240,
-                placeholder: (context, url) => const ShimmerBox(
-                  width: double.infinity,
-                  height: double.infinity,
-                  borderRadius: BorderRadius.all(Radius.circular(12)),
-                ),
-                errorWidget: (context, url, error) => Container(
-                  color: fgColor.withValues(alpha: 0.05),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.person_off,
-                    color: fgColor.withValues(alpha: 0.24),
-                    size: 32,
-                  ),
-                ),
-              ),
+            child: _NetImage(
+              url: character['images']?['large']?.toString() ?? character['images']?['grid']?.toString() ?? '',
+              borderRadius: 12,
+              proxyWidth: 240,
             ),
           ),
         ),
         const SizedBox(height: 10),
         Text(
           name,
-          style: TextStyle(
-            color: textColor,
-            fontWeight: FontWeight.w600,
-            fontSize: 13,
-            letterSpacing: 0.2,
-            height: 1.2,
-          ),
+          style: TextStyle(color: textColor, fontWeight: FontWeight.w600, fontSize: 13, height: 1.2),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -89,11 +120,7 @@ class CharacterCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             role,
-            style: TextStyle(
-              color: textColor.withValues(alpha: 0.6),
-              fontSize: 11,
-              height: 1.2,
-            ),
+            style: TextStyle(color: textColor.withValues(alpha: 0.6), fontSize: 11, height: 1.2),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -102,11 +129,7 @@ class CharacterCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             'CV: $voiceActor',
-            style: TextStyle(
-              color: textColor.withValues(alpha: 0.4),
-              fontSize: 10,
-              height: 1.2,
-            ),
+            style: TextStyle(color: textColor.withValues(alpha: 0.4), fontSize: 10, height: 1.2),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -120,6 +143,7 @@ class CharacterCard extends StatelessWidget {
 class CharactersSection extends StatelessWidget {
   final List<Map<String, dynamic>> characters;
   final ValueChanged<Map<String, dynamic>>? onCharacterTap;
+
   const CharactersSection({
     required this.characters,
     this.onCharacterTap,
@@ -130,10 +154,8 @@ class CharactersSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        int columns = (constraints.maxWidth / 120).floor();
-        if (columns < 3) columns = 3;
-        final itemWidth =
-            (constraints.maxWidth - (12 * (columns - 1))) / columns;
+        final columns = math.max(3, (constraints.maxWidth / 120).floor());
+        final itemWidth = (constraints.maxWidth - (12 * (columns - 1))) / columns;
         return Wrap(
           spacing: 12,
           runSpacing: 24,
@@ -154,11 +176,10 @@ class CharactersSection extends StatelessWidget {
 }
 
 /// 显示角色详情弹窗的便捷方法
-void showCharacterDetailSheet(
-  BuildContext context,
-  Map<String, dynamic> character,
-) {
-  final characterId = character['id'] as int?;
+void showCharacterDetailSheet(BuildContext context, Map<String, dynamic> character) {
+  final characterId = BgmUtils.toInt(
+    character['id'] ?? character['character_id'] ?? character['characterId'],
+  );
   if (characterId == null) return;
   HapticFeedback.selectionClick();
   showModalBottomSheet(
@@ -166,14 +187,23 @@ void showCharacterDetailSheet(
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     barrierColor: Colors.black.withValues(alpha: 0.8),
-    builder: (_) => CharacterDetailSheet(characterId: characterId),
+    builder: (_) => CharacterDetailSheet(
+      characterId: characterId,
+      initialData: character,
+    ),
   );
 }
 
 /// 角色详情 + 评论底部弹窗
 class CharacterDetailSheet extends StatefulWidget {
   final int characterId;
-  const CharacterDetailSheet({required this.characterId, super.key});
+  final Map<String, dynamic>? initialData;
+
+  const CharacterDetailSheet({
+    required this.characterId,
+    this.initialData,
+    super.key,
+  });
 
   @override
   State<CharacterDetailSheet> createState() => _CharacterDetailSheetState();
@@ -187,6 +217,10 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
   @override
   void initState() {
     super.initState();
+    // 秒开预览：优先保留外部传入的角色基础信息
+    if (widget.initialData != null) {
+      _charInfo = Map<String, dynamic>.from(widget.initialData!);
+    }
     _loadData();
   }
 
@@ -197,11 +231,20 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
         getBgmCharacterComments(widget.characterId),
       ]);
       if (!mounted) return;
-      final charInfo = BgmUtils.asMap(jsonDecode(results[0].data));
-      final comments = BgmUtils.asMapList(jsonDecode(results[1].data));
+
+      // 使用安全解析与提取（支持 { code: 200, data: {...} } 包装结构）
+      final infoData = BgmUtils.parseJsonMap(results[0].data);
+      final rawComments = BgmUtils.parseJsonList(results[1].data);
+      final commentsList = BgmUtils.asMapList(rawComments);
+
       setState(() {
-        _charInfo = charInfo;
-        _charComments = comments;
+        if (infoData != null && infoData.isNotEmpty) {
+          _charInfo = {
+            if (_charInfo != null) ..._charInfo!,
+            ...infoData,
+          };
+        }
+        _charComments = commentsList;
         _isLoading = false;
       });
     } catch (e) {
@@ -215,6 +258,8 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final fgColor = isDark ? Colors.white : Colors.black;
     final textColor = isDark ? Colors.white : Colors.black87;
+    final summary = _charInfo?['summary']?.toString().trim() ?? '';
+    final hasBasicData = _charInfo != null && _charInfo!.isNotEmpty;
 
     return DraggableScrollableSheet(
       initialChildSize: 0.85,
@@ -227,7 +272,7 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
             color: isDark ? const Color(0xFF121212) : const Color(0xFFF9F9F9),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
-          child: _isLoading
+          child: (_isLoading && !hasBasicData)
               ? const _CharacterDetailSkeleton()
               : CustomScrollView(
                   controller: scrollController,
@@ -236,7 +281,7 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
                     SliverToBoxAdapter(
                       child: Center(
                         child: Container(
-                          margin: const EdgeInsets.only(top: 12, bottom: 32),
+                          margin: const EdgeInsets.only(top: 12, bottom: 24),
                           width: 36,
                           height: 4,
                           decoration: BoxDecoration(
@@ -246,60 +291,51 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
                         ),
                       ),
                     ),
-                    if (_charInfo != null)
-                      SliverToBoxAdapter(child: _CharHeader(info: _charInfo!)),
-                    if (_charInfo?['summary'] != null &&
-                        (_charInfo!['summary'] as String).isNotEmpty)
+                    if (_charInfo != null) SliverToBoxAdapter(child: _CharHeader(info: _charInfo!)),
+                    if (summary.isNotEmpty)
                       SliverToBoxAdapter(
                         child: Padding(
-                          padding: const EdgeInsets.fromLTRB(24, 32, 24, 0),
+                          padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
                           child: Text(
-                            _charInfo!['summary'].toString().trim(),
+                            summary,
                             style: TextStyle(
                               color: textColor.withValues(alpha: 0.8),
                               fontSize: 14,
-                              height: 1.8,
-                              letterSpacing: 0.3,
-                              fontWeight: FontWeight.w400,
+                              height: 1.7,
                             ),
                           ),
                         ),
                       ),
                     SliverToBoxAdapter(
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 32),
-                        child: Divider(
-                          color: fgColor.withValues(alpha: 0.05),
-                          height: 1,
-                          thickness: 1,
-                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 24),
+                        child: Divider(color: fgColor.withValues(alpha: 0.05), height: 1),
                       ),
                     ),
                     SliverToBoxAdapter(
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+                        padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
                         child: Text(
                           '评论',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.5,
-                            color: textColor,
-                          ),
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: textColor),
                         ),
                       ),
                     ),
-                    if (_charComments.isEmpty)
+                    if (_isLoading && _charComments.isEmpty)
+                      const SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.all(40),
+                          child: Center(child: CircularProgressIndicator.adaptive()),
+                        ),
+                      )
+                    else if (_charComments.isEmpty)
                       SliverToBoxAdapter(
                         child: Padding(
                           padding: const EdgeInsets.all(40),
                           child: Center(
                             child: Text(
                               '暂无评论',
-                              style: TextStyle(
-                                color: textColor.withValues(alpha: 0.4),
-                                fontSize: 13,
-                              ),
+                              style: TextStyle(color: textColor.withValues(alpha: 0.4), fontSize: 13),
                             ),
                           ),
                         ),
@@ -307,12 +343,11 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
                     else
                       SliverList(
                         delegate: SliverChildBuilderDelegate(
-                          (context, index) =>
-                              _CharCommentItem(comment: _charComments[index]),
+                          (context, index) => _CharCommentItem(comment: _charComments[index]),
                           childCount: math.min(_charComments.length, 50),
                         ),
                       ),
-                    const SliverToBoxAdapter(child: SizedBox(height: 48)),
+                    const SliverToBoxAdapter(child: SizedBox(height: 32)),
                   ],
                 ),
         );
@@ -321,7 +356,7 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
   }
 }
 
-/// 角色头部信息 — 独立 Widget
+/// 角色头部信息
 class _CharHeader extends StatelessWidget {
   final Map<String, dynamic> info;
   const _CharHeader({required this.info});
@@ -329,17 +364,21 @@ class _CharHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final fgColor = isDark ? Colors.white : Colors.black;
     final textColor = isDark ? Colors.white : Colors.black87;
-    final name = info['name']?.toString() ?? '';
+    final name = info['name']?.toString() ?? info['nameCN']?.toString() ?? '未知';
     final nameCN = info['nameCN']?.toString() ?? '';
-    final imageUrl = BgmUtils.bgmImageProxyUrl(
-      (info['images'] as Map?)?['large']?.toString() ?? '',
-      width: 240,
-    );
-    final collects = info['collects'] as int? ?? 0;
-    final commentCount = info['comment'] as int? ?? 0;
-    final infoStr = info['info']?.toString() ?? '';
+    final role = info['role_name']?.toString();
+    final voiceActor = (info['actors'] as List?)
+            ?.map((actor) => (actor as Map)['name']?.toString())
+            .where((v) => v != null && v.isNotEmpty)
+            .join(' / ') ??
+        '';
+    final collects = info['collects'] as int? ?? info['collects_count'] as int? ?? 0;
+    final commentCount = info['comment'] as int? ?? info['comment_count'] as int? ?? 0;
+    final infoStr = info['info']?.toString().replaceAll('\r\n', '\n').trim() ?? '';
+    final imageUrl = (info['images'] as Map?)?['large']?.toString() ??
+        (info['images'] as Map?)?['grid']?.toString() ??
+        '';
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -347,99 +386,78 @@ class _CharHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 110,
-            height: 154,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.15),
-                  blurRadius: 24,
-                  offset: const Offset(0, 12),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: CachedNetworkImage(
-                imageUrl: imageUrl,
-                fit: BoxFit.cover,
-                alignment: Alignment.topCenter,
-                memCacheWidth: 240,
-                placeholder: (_, _) => const ShimmerBox(
-                  width: double.infinity,
-                  height: double.infinity,
-                  borderRadius: BorderRadius.all(Radius.circular(16)),
-                ),
-                errorWidget: (_, _, _) => Container(
-                  color: fgColor.withValues(alpha: 0.05),
-                  child: Icon(
-                    Icons.person_off,
-                    color: fgColor.withValues(alpha: 0.24),
-                    size: 40,
-                  ),
-                ),
-              ),
+            child: _NetImage(
+              url: imageUrl,
+              width: 110,
+              height: 154,
+              borderRadius: 16,
+              proxyWidth: 240,
             ),
           ),
-          const SizedBox(width: 24),
+          const SizedBox(width: 20),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   name,
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: textColor,
-                    letterSpacing: -0.5,
-                    height: 1.1,
-                  ),
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: textColor, height: 1.1),
                 ),
                 if (nameCN.isNotEmpty && nameCN != name) ...[
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   Text(
                     nameCN,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: textColor.withValues(alpha: 0.6),
-                      fontWeight: FontWeight.w400,
-                    ),
+                    style: TextStyle(fontSize: 13, color: textColor.withValues(alpha: 0.6)),
                   ),
                 ],
-                if (infoStr.isNotEmpty) ...[
-                  const SizedBox(height: 16),
+                if (role != null && role.isNotEmpty) ...[
+                  const SizedBox(height: 6),
                   Text(
-                    infoStr.replaceAll('\r\n', '\n').trim(),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: textColor.withValues(alpha: 0.4),
-                      height: 1.4,
-                    ),
-                    maxLines: 4,
+                    '定位：$role',
+                    style: TextStyle(fontSize: 12, color: textColor.withValues(alpha: 0.6)),
+                  ),
+                ],
+                if (voiceActor.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'CV：$voiceActor',
+                    style: TextStyle(fontSize: 12, color: textColor.withValues(alpha: 0.6)),
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
-                const SizedBox(height: 20),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    if (collects > 0)
-                      _badge(
-                        Icons.favorite_rounded,
-                        '$collects',
-                        const Color(0xFFE57373),
-                      ),
-                    if (commentCount > 0)
-                      _badge(
-                        Icons.chat_bubble_rounded,
-                        '$commentCount',
-                        const Color(0xFF64B5F6),
-                      ),
-                  ],
-                ),
+                if (infoStr.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    infoStr,
+                    style: TextStyle(fontSize: 12, color: textColor.withValues(alpha: 0.4), height: 1.35),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+                if (collects > 0 || commentCount > 0) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (collects > 0)
+                        _badge(Icons.favorite_rounded, '$collects', const Color(0xFFE57373)),
+                      if (commentCount > 0)
+                        _badge(Icons.chat_bubble_rounded, '$commentCount', const Color(0xFF64B5F6)),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -450,7 +468,7 @@ class _CharHeader extends StatelessWidget {
 
   Widget _badge(IconData icon, String label, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
@@ -458,183 +476,115 @@ class _CharHeader extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 4),
+          Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
         ],
       ),
     );
   }
 }
 
-/// 角色评论项 — 独立 Widget 减少 SliverList 中每项的 rebuild 范围
+/// 角色评论项
 class _CharCommentItem extends StatelessWidget {
   final Map<String, dynamic> comment;
   const _CharCommentItem({required this.comment});
 
   @override
   Widget build(BuildContext context) {
-    final textColor = Theme.of(context).brightness == Brightness.dark
-        ? Colors.white
-        : Colors.black87;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fgColor = isDark ? Colors.white : Colors.black;
+    final textColor = isDark ? Colors.white : Colors.black87;
     final user = comment['user'] as Map<String, dynamic>? ?? const {};
     final nickname = user['nickname']?.toString() ?? '匿名';
-    final avatarUrl = BgmUtils.bgmImageProxyUrl(
-      (user['avatar'] as Map?)?['medium']?.toString() ?? '',
-      width: 96,
-    );
     final content = comment['content']?.toString() ?? '';
     final createdAt = comment['createdAt'] as int? ?? 0;
     final replies = (comment['replies'] as List?) ?? const [];
-    final timeStr = createdAt > 0
-        ? DateTime.fromMillisecondsSinceEpoch(createdAt * 1000).toRelativeTime()
-        : '';
+    final timeStr = createdAt > 0 ? DateTime.fromMillisecondsSinceEpoch(createdAt * 1000).toRelativeTime() : '';
+    final displayReplies = math.min(replies.length, 3);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              ClipOval(
-                child: CachedNetworkImage(
-                  imageUrl: avatarUrl,
-                  width: 32,
-                  height: 32,
-                  fit: BoxFit.cover,
-                  memCacheWidth: 96,
-                  placeholder: (_, _) => const ShimmerCircle(size: 32),
-                  errorWidget: (_, _, _) => const ShimmerCircle(size: 32),
-                ),
+              _NetImage(
+                url: (user['avatar'] as Map?)?['medium']?.toString() ?? '',
+                width: 32,
+                height: 32,
+                borderRadius: 16,
+                proxyWidth: 96,
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      nickname,
-                      style: TextStyle(
-                        color: textColor,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    if (timeStr.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        timeStr,
-                        style: TextStyle(
-                          color: textColor.withValues(alpha: 0.4),
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
+                    Text(nickname, style: TextStyle(color: textColor, fontSize: 13, fontWeight: FontWeight.w600)),
+                    if (timeStr.isNotEmpty)
+                      Text(timeStr, style: TextStyle(color: textColor.withValues(alpha: 0.4), fontSize: 11)),
                   ],
                 ),
               ),
             ],
           ),
-          if (content.isNotEmpty) ...[
-            const SizedBox(height: 12),
+          if (content.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(left: 44),
+              padding: const EdgeInsets.only(left: 44, top: 8),
               child: Text(
                 BgmUtils.cleanBbCode(content).trim(),
-                style: TextStyle(
-                  color: textColor.withValues(alpha: 0.85),
-                  fontSize: 13,
-                  height: 1.6,
+                style: TextStyle(color: textColor.withValues(alpha: 0.85), fontSize: 13, height: 1.5),
+              ),
+            ),
+          if (replies.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 44, top: 10),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: fgColor.withValues(alpha: 0.03),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (int i = 0; i < displayReplies; i++)
+                      Padding(
+                        padding: EdgeInsets.only(bottom: i < displayReplies - 1 ? 8 : 0),
+                        child: _replyRichText(replies[i] as Map, textColor),
+                      ),
+                    if (replies.length > 3)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          '还有 ${replies.length - 3} 条回复',
+                          style: const TextStyle(color: Color(0xFF64B5F6), fontSize: 11, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
-          ],
-          if (replies.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _RepliesBlock(replies: replies),
-          ],
         ],
       ),
     );
   }
-}
 
-/// 回复块
-class _RepliesBlock extends StatelessWidget {
-  final List<dynamic> replies;
-  const _RepliesBlock({required this.replies});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final fgColor = isDark ? Colors.white : Colors.black;
-    final textColor = isDark ? Colors.white : Colors.black87;
-    final displayCount = math.min(replies.length, 3);
-
-    return Padding(
-      padding: const EdgeInsets.only(left: 44),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: fgColor.withValues(alpha: 0.03),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (int i = 0; i < displayCount; i++)
-              Padding(
-                padding: EdgeInsets.only(bottom: i < displayCount - 1 ? 10 : 0),
-                child: _replyText(replies[i] as Map, textColor),
-              ),
-            if (replies.length > 3)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Text(
-                  '还有 ${replies.length - 3} 条回复',
-                  style: const TextStyle(
-                    color: Color(0xFF64B5F6),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _replyText(Map reply, Color textColor) {
-    final rUser = reply['user'] as Map? ?? const {};
-    final rNick = rUser['nickname']?.toString() ?? '匿名';
+  Widget _replyRichText(Map reply, Color textColor) {
+    final rNick = (reply['user'] as Map?)?['nickname']?.toString() ?? '匿名';
     final rContent = reply['content']?.toString() ?? '';
     return RichText(
       text: TextSpan(
         children: [
           TextSpan(
             text: '$rNick  ',
-            style: TextStyle(
-              color: textColor,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
+            style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.w600),
           ),
           TextSpan(
             text: BgmUtils.cleanBbCode(rContent).trim(),
-            style: TextStyle(
-              color: textColor.withValues(alpha: 0.6),
-              fontSize: 12,
-              height: 1.5,
-            ),
+            style: TextStyle(color: textColor.withValues(alpha: 0.6), fontSize: 12, height: 1.4),
           ),
         ],
       ),
@@ -642,90 +592,46 @@ class _RepliesBlock extends StatelessWidget {
   }
 }
 
+/// 简单高质感的加载骨架屏
 class _CharacterDetailSkeleton extends StatelessWidget {
   const _CharacterDetailSkeleton();
 
   @override
   Widget build(BuildContext context) {
     return const Padding(
-      padding: EdgeInsets.symmetric(horizontal: 24),
+      padding: EdgeInsets.symmetric(horizontal: 24, vertical: 40),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(height: 48),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              ShimmerBox(
-                width: 110,
-                height: 154,
-                borderRadius: BorderRadius.all(Radius.circular(16)),
-              ),
-              SizedBox(width: 24),
+              ShimmerBox(width: 110, height: 154, borderRadius: BorderRadius.all(Radius.circular(16))),
+              SizedBox(width: 20),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    ShimmerBox(
-                      width: 160,
-                      height: 24,
-                      borderRadius: BorderRadius.all(Radius.circular(6)),
-                    ),
+                    ShimmerBox(width: 140, height: 22, borderRadius: BorderRadius.all(Radius.circular(6))),
                     SizedBox(height: 8),
-                    ShimmerBox(
-                      width: 100,
-                      height: 14,
-                      borderRadius: BorderRadius.all(Radius.circular(4)),
-                    ),
+                    ShimmerBox(width: 90, height: 14, borderRadius: BorderRadius.all(Radius.circular(4))),
                     SizedBox(height: 16),
-                    ShimmerBox(
-                      width: 80,
-                      height: 28,
-                      borderRadius: BorderRadius.all(Radius.circular(8)),
-                    ),
+                    ShimmerBox(width: 70, height: 26, borderRadius: BorderRadius.all(Radius.circular(8))),
                   ],
                 ),
               ),
             ],
           ),
           SizedBox(height: 32),
-          ShimmerBox(
-            width: double.infinity,
-            height: 12,
-            borderRadius: BorderRadius.all(Radius.circular(4)),
-          ),
+          ShimmerBox(width: double.infinity, height: 12, borderRadius: BorderRadius.all(Radius.circular(4))),
           SizedBox(height: 8),
-          ShimmerBox(
-            width: double.infinity,
-            height: 12,
-            borderRadius: BorderRadius.all(Radius.circular(4)),
-          ),
-          SizedBox(height: 8),
-          ShimmerBox(
-            width: 200,
-            height: 12,
-            borderRadius: BorderRadius.all(Radius.circular(4)),
-          ),
+          ShimmerBox(width: 220, height: 12, borderRadius: BorderRadius.all(Radius.circular(4))),
           SizedBox(height: 32),
-          ShimmerBox(
-            width: 60,
-            height: 18,
-            borderRadius: BorderRadius.all(Radius.circular(4)),
-          ),
-          SizedBox(height: 24),
-          ShimmerCircle(size: 38),
+          ShimmerBox(width: 50, height: 16, borderRadius: BorderRadius.all(Radius.circular(4))),
+          SizedBox(height: 20),
+          ShimmerCircle(size: 32),
           SizedBox(height: 12),
-          ShimmerBox(
-            width: double.infinity,
-            height: 12,
-            borderRadius: BorderRadius.all(Radius.circular(4)),
-          ),
-          SizedBox(height: 8),
-          ShimmerBox(
-            width: 250,
-            height: 12,
-            borderRadius: BorderRadius.all(Radius.circular(4)),
-          ),
+          ShimmerBox(width: double.infinity, height: 12, borderRadius: BorderRadius.all(Radius.circular(4))),
         ],
       ),
     );

@@ -68,10 +68,6 @@ class _ThreadPageState extends State<ThreadPage>
     super.dispose();
   }
 
-  // ─── Data ───
-
-  // ─── Data ───
-
   Future<void> _ensureLoaded(int i) async {
     final hasCache = _svc.loadCached(i, ignoreExpiry: true);
     if (hasCache) {

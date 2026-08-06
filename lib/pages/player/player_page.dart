@@ -143,8 +143,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
 
   void _startHeadlessAutoMatch() {
     _autoMatchController = VideoSourceSearchController(
-      title: _svc.title,
-      seedData: _buildSourceSeedData(),
+      seedData: _svc.buildSourceSeedData(),
       autoMatchMode: true,
       targetEpisodeIndex: currPlayIndex,
       onMatchFound: (resolvedData) {
@@ -408,11 +407,9 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       }
 
       // 2. 静默自动匹配备用源
-      final seedData = _buildSourceSeedData();
-      final controller = _autoMatchController ?? VideoSourceSearchController.sharedFor(
-        title: _svc.title,
-        seedData: seedData,
-      );
+      final seedData = _svc.buildSourceSeedData();
+      final controller = _autoMatchController ??
+          VideoSourceSearchController.sharedFor(seedData: seedData);
 
       final nextCandidateData = await controller.findNextPlayableCandidate(
         excludedKeys: _failedSourceKeys,
@@ -579,52 +576,20 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     return lineName.isEmpty ? null : lineName;
   }
 
-  String get _currentSourceSummary {
-    final lineName = _currentLineName;
-    return lineName == null
-        ? _currentSourceName
-        : '$_currentSourceName - $lineName';
-  }
-
-  Map<String, dynamic> _buildSourceSeedData() {
-    final seed = <String, dynamic>{};
-    for (final key in const ['seriesId', 'seriesUrl', 'id', 'url']) {
-      final value = widget.data[key];
-      if (value != null) seed[key] = value;
-    }
-    final bgmInfo = _bgmInfo;
-    final coverImageUrl = _svc.coverImageUrl;
-
-    if (bgmInfo.subjectId != null) seed['bgmId'] = bgmInfo.subjectId;
-    if (bgmInfo.score != null) seed['score'] = bgmInfo.score;
-    if (coverImageUrl != null && coverImageUrl.isNotEmpty) {
-      seed['bgmImageUrl'] = coverImageUrl;
-    }
-    if (_svc.bgmDetailData != null) {
-      seed['bgmDetailData'] = _svc.bgmDetailData;
-    }
-    return seed;
-  }
-
   Future<void> _openSourceSwitchSheet() async {
     if (_isLocalSource) return;
 
-    final seedData = _buildSourceSeedData();
+    final seedData = _svc.buildSourceSeedData();
 
-    final searchController = VideoSourceSearchController.sharedFor(
-      title: _svc.title,
-      seedData: seedData,
-    );
+    final searchController =
+        VideoSourceSearchController.sharedFor(seedData: seedData);
 
     final selection = await SourceSwitchSheet.show(
       context,
-      title: _svc.title,
-      cover: _svc.coverImageUrl ?? '',
       seedData: seedData,
       currentEpisodeIndex: currPlayIndex,
       currentLineIndex: currUrl,
       currentSource: widget.data['source']?.toString(),
-      currentSourceName: _currentSourceSummary,
       searchController: searchController,
     );
     if (!mounted || selection == null) return;

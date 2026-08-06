@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:baka/api/bgm.dart';
+import 'package:baka/models/anime_detail_view_data.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/services/bgm_service.dart';
 import 'package:baka/services/collection_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
-import 'package:baka/utils/reg_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/services/navigation_service.dart';
 import 'package:baka/widgets/common/shimmer.dart';
@@ -25,12 +25,9 @@ class TvAnimeDetailPlaceholder extends StatefulWidget {
 }
 
 class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
-  late final String _cardCoverUrl;
   late BgmInfo _bgmInfo;
   Map<String, dynamic>? _detailData;
-  String? _bgmCoverUrl;
-  String _displayCover = '';
-  List<String> _tags = const [];
+  late AnimeDetailViewData _detail;
 
   AnimeCollection? _collection;
   bool _isCollectionLoading = false;
@@ -42,36 +39,23 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
     return (postId != null && postId > 0) ? postId : null;
   }
 
-  double? get _displayScore =>
-      BgmUtils.extractScore(_detailData?['rating']) ?? _bgmInfo.score;
-
-  int get _displayScoreCount =>
-      BgmUtils.toInt(BgmUtils.asMap(_detailData?['rating'])?['total']) ?? 0;
+  void _rebuildDetail() {
+    _bgmInfo = BgmUtils.readFromData(widget.data);
+    _detailData = BgmUtils.asMap(widget.data['bgmDetailData']);
+    _detail = AnimeDetailViewData.from(
+      source: widget.data,
+      bgmInfo: _bgmInfo,
+      bgm: _detailData,
+    );
+  }
 
   @override
   void initState() {
     super.initState();
-    _cardCoverUrl = BgmUtils.resolveCoverImage(widget.data) ?? kDefaultImage;
-    _refreshCachedData();
+    _rebuildDetail();
     _fetchBgmData().then((_) {
       if (mounted) _fetchCollectionStatus();
     });
-  }
-
-  void _refreshCachedData() {
-    _bgmInfo = BgmUtils.readFromData(widget.data);
-    _detailData = BgmUtils.asMap(widget.data['bgmDetailData']);
-    _bgmCoverUrl = BgmUtils.resolveCoverImage(widget.data, bgmInfo: _bgmInfo);
-    _displayCover = _cardCoverUrl != kDefaultImage
-        ? _cardCoverUrl
-        : (_bgmCoverUrl ?? _cardCoverUrl);
-    final tags = _detailData?['tags'];
-    _tags = tags is List
-        ? [
-            for (final tag in tags)
-              if (tag is Map && tag['name'] != null) tag['name'].toString(),
-          ]
-        : const [];
   }
 
   Future<void> _fetchBgmData() async {
@@ -79,7 +63,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
     try {
       await BgmService.resolveFromData(widget.data);
       if (!mounted) return;
-      setState(_refreshCachedData);
+      setState(_rebuildDetail);
 
       final subjectId = _subjectId;
       if (subjectId == null || _detailData != null) return;
@@ -88,7 +72,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
       if (!mounted || detail == null) return;
 
       widget.data['bgmDetailData'] = detail;
-      setState(_refreshCachedData);
+      setState(_rebuildDetail);
     } catch (e) {
       debugPrint('获取番剧详情失败: $e');
     }
@@ -130,14 +114,10 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
         postId: _validPostId,
         bgmId: _subjectId,
         status: status.value,
-        postTitle: widget.data['title']?.toString() ?? '',
-        postCover: _displayCover,
+        postTitle: _detail.title,
+        postCover: _detail.coverUrl,
         bgmImage: _bgmInfo.imageUrl,
-        bgmTitle:
-            _detailData?['name_cn']?.toString() ??
-            _detailData?['name']?.toString() ??
-            widget.data['title']?.toString() ??
-            '',
+        bgmTitle: _detail.title,
       );
       final result = await CollectionService.addOrUpdate(col);
       if (result != null && mounted) {
@@ -178,9 +158,13 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.data['title']?.toString() ?? '番剧详情';
-    final summary = _detailData?['summary']?.toString() ?? '';
-    final score = _displayScore;
+    final title = _detail.title;
+    final summary = _detail.summary;
+    final score = _detail.score;
+    final cover = _detail.coverUrl;
+    final tags = _detail.tags;
+    final scoreCount = _detail.scoreCount;
+    final alias = _detail.alias;
 
     return Scaffold(
       backgroundColor: context.tvBgColor,
@@ -198,10 +182,10 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (_displayCover.isNotEmpty)
+            if (cover.isNotEmpty)
               Positioned.fill(
                 child: CachedNetworkImage(
-                  imageUrl: _displayCover,
+                  imageUrl: cover,
                   memCacheWidth: 960,
                   fit: BoxFit.cover,
                   alignment: Alignment.topCenter,
@@ -279,9 +263,9 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                             child: SizedBox(
                               width: 200,
                               height: 280,
-                              child: _displayCover.isNotEmpty
+                              child: cover.isNotEmpty
                                   ? CachedNetworkImage(
-                                      imageUrl: _displayCover,
+                                      imageUrl: cover,
                                       fit: BoxFit.cover,
                                       errorWidget: (_, _, _) =>
                                           _buildPlaceholderCover(),
@@ -308,10 +292,10 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
-                                if (_displayScoreCount > 0) ...[
+                                if (scoreCount > 0) ...[
                                   const SizedBox(width: 8),
                                   Text(
-                                    '($_displayScoreCount人)',
+                                    '($scoreCount人)',
                                     style: TextStyle(
                                       color: context.tvTextHintColor,
                                       fontSize: 13,
@@ -345,12 +329,11 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                               overflow: TextOverflow.ellipsis,
                             ),
 
-                            if (_detailData?['name'] != null &&
-                                _detailData!['name'] != title)
+                            if (alias.isNotEmpty && alias != title)
                               Padding(
                                 padding: const EdgeInsets.only(top: 6),
                                 child: Text(
-                                  _detailData!['name'].toString(),
+                                  alias,
                                   style: TextStyle(
                                     color: context.tvTextSecondaryColor,
                                     fontSize: 16,
@@ -378,14 +361,14 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
 
                             const SizedBox(height: 24),
 
-                            if (_tags.isNotEmpty)
+                            if (tags.isNotEmpty)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 16),
                                 child: Wrap(
                                   spacing: 8,
                                   runSpacing: 8,
                                   children: [
-                                    for (final tag in _tags.take(10))
+                                    for (final tag in tags.take(10))
                                       Container(
                                         padding: const EdgeInsets.symmetric(
                                           horizontal: 12,

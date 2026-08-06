@@ -165,15 +165,17 @@ abstract class AdapterBase {
       final headers = mediaValidationHeaders;
       var resp = await _validationDio
           .head(url, options: Options(headers: headers))
-          .timeout(const Duration(seconds: 7));
+          .timeout(const Duration(seconds: 4));
 
       final status = resp.statusCode ?? 0;
       if (status == 401 ||
           status == 403 ||
           status == 404 ||
           status == 405 ||
-          status == 501 ||
-          status == 503) {
+          status == 500 ||
+          status == 502 ||
+          status == 503 ||
+          status == 504) {
         resp = await _validationDio
             .get(
               url,
@@ -182,11 +184,25 @@ abstract class AdapterBase {
                 responseType: ResponseType.bytes,
               ),
             )
-            .timeout(const Duration(seconds: 7));
+            .timeout(const Duration(seconds: 4));
       }
 
       final code = resp.statusCode ?? 0;
-      return code == 401 || code == 403 || code == 404 || code == 503;
+      return code == 401 ||
+          code == 403 ||
+          code == 404 ||
+          code == 500 ||
+          code == 502 ||
+          code == 503 ||
+          code == 504;
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.connectionError) {
+        return true;
+      }
+      return false;
     } catch (_) {
       return false;
     }

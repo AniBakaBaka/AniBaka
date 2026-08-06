@@ -16,7 +16,6 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
   bool _clearCacheOnExit = PlaybackSettingsService.getClearCacheOnExit();
   bool _lowMemoryMode = PlaybackSettingsService.getLowMemoryMode();
   bool _enableBtDownload = PlaybackSettingsService.getEnableBtDownload();
-  bool _autoMatchSource = PlaybackSettingsService.getAutoMatchSource();
   double _defaultPlaybackSpeed =
       PlaybackSettingsService.getDefaultPlaybackSpeed();
   String _hwdecMode = PlaybackSettingsService.getHwdecMode();
@@ -169,16 +168,21 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                     SettingsTile(
                       title: '硬件解码',
                       value:
-                          PlaybackSettingsService.hwdecModeLabels[_hwdecMode] ??
+                          PlaybackSettingsService
+                              .hwdecModeLabelsForPlatform[_hwdecMode] ??
+                          PlaybackSettingsService
+                              .hwdecModeLabels[_hwdecMode] ??
                           '自动',
                       icon: Icons.memory_rounded,
                       onTap: () => _pickOption<String>(
                         title: '硬件解码模式',
                         intro: '如果遇到视频黑屏、花屏或卡顿，可尝试切换解码模式',
                         current: _hwdecMode,
-                        options: PlaybackSettingsService.hwdecModeOptions,
+                        options:
+                            PlaybackSettingsService.hwdecModeOptionsForPlatform,
                         labelOf: (mode) =>
-                            PlaybackSettingsService.hwdecModeLabels[mode] ??
+                            PlaybackSettingsService
+                                .hwdecModeLabelsForPlatform[mode] ??
                             mode,
                         descriptionOf: (mode) => _hwdecDescriptions[mode] ?? '',
                         onSelected: (mode) {
@@ -224,22 +228,6 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                           );
                         },
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                const SettingsSectionHeader('图源搜索'),
-                SettingsGroup(
-                  children: [
-                    SettingsSwitchTile(
-                      title: '自动匹配播放源',
-                      value: _autoMatchSource,
-                      icon: Icons.auto_awesome_rounded,
-                      onChanged: (value) => _apply(
-                        () => _autoMatchSource = value,
-                        () => PlaybackSettingsService.setAutoMatchSource(value),
-                      ),
-                      showDivider: false,
                     ),
                   ],
                 ),

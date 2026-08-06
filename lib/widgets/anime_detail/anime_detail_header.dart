@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:baka/models/anime_detail_view_data.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/widgets/anime_detail/collection_sheet.dart';
@@ -9,12 +10,8 @@ import 'package:baka/widgets/common/scale_button.dart';
 import 'package:baka/widgets/common/shimmer.dart';
 
 class AnimeDetailHeader extends StatelessWidget {
-  final String imageUrl;
-  final String title;
-  final String alias;
-  final double? score;
-  final int scoreCount;
-  final List<String> tags;
+  /// 直接消费详情模型，避免调用方把 title/alias/score/tags 等字段再拆一遍。
+  final AnimeDetailViewData detail;
   final String? updateTime;
   final String? category;
   final Object heroTag;
@@ -24,12 +21,7 @@ class AnimeDetailHeader extends StatelessWidget {
   final VoidCallback? onSearchTap;
 
   const AnimeDetailHeader({
-    required this.imageUrl,
-    required this.title,
-    required this.alias,
-    required this.score,
-    required this.scoreCount,
-    required this.tags,
+    required this.detail,
     required this.heroTag,
     required this.collection,
     required this.isCollectionLoading,
@@ -43,14 +35,19 @@ class AnimeDetailHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final title = detail.title;
+    final alias = detail.alias;
+    final score = detail.score;
+    final scoreCount = detail.scoreCount;
+    final imageUrl = detail.coverUrl;
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth > 800;
-        final coverWidth = isWide ? 240.0 : 110.0;
-        final coverHeight = isWide ? 336.0 : 154.0;
-        final hasScore = score != null && score! > 0;
+        final coverWidth = isWide ? 270.0 : 130.0;
+        final coverHeight = isWide ? 378.0 : 182.0;
+        final hasScore = score != null && score > 0;
         final tagList = _TagsWrap(
-          tags: tags,
+          tags: detail.tags,
           updateTime: updateTime,
           category: category,
           isDark: isDark,
@@ -121,7 +118,7 @@ class AnimeDetailHeader extends StatelessWidget {
               if (!isWide) const Spacer(),
               if (hasScore)
                 _ScoreRow(
-                  score: score!,
+                  score: score,
                   scoreCount: scoreCount,
                   isDark: isDark,
                 ),
@@ -176,8 +173,8 @@ class _CoverImage extends StatelessWidget {
     required this.imageUrl,
     required this.heroTag,
     required this.isDark,
-    this.width = 110,
-    this.height = 154,
+    this.width = 130,
+    this.height = 182,
   });
 
   @override

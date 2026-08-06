@@ -12,6 +12,10 @@ void main() {
     Instances.sp = await SharedPreferences.getInstance();
   });
 
+  tearDown(() {
+    Instances.isTV = false;
+  });
+
   test('persists only keys changed between preference snapshots', () async {
     const previous = PlaybackPreferences();
     final next = previous.copyWith(autoFullscreen: true, longPressSpeed: 2.5);
@@ -104,6 +108,55 @@ void main() {
     expect(PlaybackSettingsService.normalizeHwdecMode('no'), 'no');
     expect(PlaybackSettingsService.normalizeHwdecMode('bogus'), 'auto');
     expect(PlaybackSettingsService.normalizeHwdecMode(null), 'auto');
+  });
+
+  test('Android TV defaults to and migrates to mediacodec-copy', () {
+    Instances.isTV = true;
+    // 未设置或遗留的 auto 一律落到 mediacodec-copy。
+    expect(PlaybackSettingsService.normalizeHwdecMode(null), 'mediacodec-copy');
+    expect(
+      PlaybackSettingsService.normalizeHwdecMode('auto'),
+      'mediacodec-copy',
+    );
+    expect(
+      PlaybackSettingsService.normalizeHwdecMode('bogus'),
+      'mediacodec-copy',
+    );
+    // 用户显式选择的模式保持不变。
+    expect(
+      PlaybackSettingsService.normalizeHwdecMode('auto-safe'),
+      'auto-safe',
+    );
+    expect(PlaybackSettingsService.normalizeHwdecMode('no'), 'no');
+    expect(
+      PlaybackSettingsService.normalizeHwdecMode('mediacodec-copy'),
+      'mediacodec-copy',
+    );
+  });
+
+  test('platform hwdec options hide auto on Android TV', () {
+    expect(
+      PlaybackSettingsService.hwdecModeOptionsForPlatform,
+      contains('auto'),
+    );
+    expect(
+      PlaybackSettingsService.hwdecModeLabelsForPlatform.containsKey('auto'),
+      isTrue,
+    );
+
+    Instances.isTV = true;
+    expect(
+      PlaybackSettingsService.hwdecModeOptionsForPlatform,
+      isNot(contains('auto')),
+    );
+    expect(
+      PlaybackSettingsService.hwdecModeLabelsForPlatform.containsKey('auto'),
+      isFalse,
+    );
+    expect(
+      PlaybackSettingsService.hwdecModeOptionsForPlatform,
+      containsAll(['auto-safe', 'mediacodec-copy', 'no']),
+    );
   });
 
   test(

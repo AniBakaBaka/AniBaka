@@ -37,6 +37,10 @@ void main() {
     Instances.sp = await SharedPreferences.getInstance();
   });
 
+  tearDown(() {
+    Instances.isTV = false;
+  });
+
   test('reduces backend events into bounded timeline updates', () async {
     final backend = FakePlaybackBackend();
     final controller = PlaybackController(backend: backend);
@@ -395,6 +399,36 @@ void main() {
       persist: false,
     );
     expect(backend.nativeProperties['hwdec'], 'auto-safe');
+    await controller.dispose();
+  });
+
+  test('TV normalizes hwdec auto to mediacodec-copy on update and reset', () async {
+    Instances.isTV = true;
+    final backend = FakePlaybackBackend();
+    final controller = PlaybackController(backend: backend);
+    await controller.initialize();
+
+    // TV 未配置时默认即为 mediacodec-copy。
+    expect(controller.preferences.value.hwdecMode, 'mediacodec-copy');
+
+    // 显式选择保持原样。
+    await controller.updatePreferences(
+      controller.preferences.value.copyWith(hwdecMode: 'no'),
+    );
+    expect(controller.preferences.value.hwdecMode, 'no');
+    expect(backend.nativeProperties['hwdec'], 'no');
+
+    // 选择「自动」立即归一化为 mediacodec-copy。
+    await controller.updatePreferences(
+      controller.preferences.value.copyWith(hwdecMode: 'auto'),
+    );
+    expect(controller.preferences.value.hwdecMode, 'mediacodec-copy');
+    expect(backend.nativeProperties['hwdec'], 'mediacodec-copy');
+
+    // 恢复默认同样落在 mediacodec-copy。
+    await controller.resetPreferences();
+    expect(controller.preferences.value.hwdecMode, 'mediacodec-copy');
+
     await controller.dispose();
   });
 }

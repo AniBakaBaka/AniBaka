@@ -100,7 +100,8 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                       PanelSelectTile(
                         title: '硬件解码',
                         value: preferences.hwdecMode,
-                        options: PlaybackSettingsService.hwdecModeLabels,
+                        options:
+                            PlaybackSettingsService.hwdecModeLabelsForPlatform,
                         onChanged: (value) => _update(
                           (current) => current.copyWith(hwdecMode: value),
                         ),

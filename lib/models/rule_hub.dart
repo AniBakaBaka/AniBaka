@@ -1,33 +1,3 @@
-/// 远程规则库（Rule Hub）的数据模型。
-///
-/// 规则库索引默认从 GitHub 加速节点获取，并依次回退到 jsDelivr 和 GitHub。
-/// 采用与 kazumi 不同的清单式字段命名，索引结构如下：
-///
-/// ```json
-/// {
-///   "format": "anx-rulehub/1",
-///   "title": "AniBaka 官方规则库",
-///   "intro": "社区维护的图源规则集合",
-///   "synced": "2026-01-01T00:00:00Z",
-///   "entries": [
-///     {
-///       "key": "example-source",
-///       "title": "示例源",
-///       "by": "someone",
-///       "rev": 3,
-///       "intro": "支持 1080P / 弹幕",
-///       "site": "https://example.com",
-///       "badge": "https://.../icon.png",
-///       "labels": ["1080P", "弹幕"],
-///       "pack": "baka://...",          // 推荐：内联编码配置
-///       "ref": "rules/example.json",   // 或：相对索引的远程文件
-///       "raw": { ... }                 // 或：内联原始 JSON 配置
-///     }
-///   ]
-/// }
-/// ```
-library;
-
 class RuleHubIndex {
   /// 该索引的来源订阅 URL。
   final String sourceUrl;

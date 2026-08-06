@@ -8,27 +8,24 @@ export 'package:baka/widgets/anime_detail/video_source_search_sheet.dart'
 class SourceSwitchSheet {
   SourceSwitchSheet._();
 
+  /// 展示字段统一从 [seedData] 解析，避免调用方重复拆 title/cover。
   static Future<SourceSwitchSelection?> show(
     BuildContext context, {
-    required String title,
-    required String cover,
     required Map<String, dynamic> seedData,
     required int currentEpisodeIndex,
     required int currentLineIndex,
     String? currentSource,
-    String? currentSourceName,
     VideoSourceSearchController? searchController,
+    String? heroTag,
   }) {
     return VideoSourceSearchSheet.show(
       context,
-      title: title,
-      cover: cover,
       seedData: seedData,
       currentEpisodeIndex: currentEpisodeIndex,
       currentLineIndex: currentLineIndex,
       currentSource: currentSource,
-      currentSourceName: currentSourceName,
       searchController: searchController,
+      heroTag: heroTag,
     );
   }
 }

@@ -28,7 +28,6 @@ class SourceMatchCandidate {
   );
 
   static int? _episodeCount(Map<String, dynamic> data) {
-    // 与播放器目录同一个扫描器：过去这里手抄了一份，对 videoList 还漏了空串过滤。
     final counted = PlaybackEpisodeCatalog.countFrom(data);
     if (counted > 0) return counted;
 
@@ -102,7 +101,7 @@ class SourceMatchScore {
   int get score => (confidence * 100).round();
 
   bool get shouldProbeImmediately =>
-      confidence >= 0.8 && !seasonConflict && !severeEpisodeConflict;
+      confidence >= 0.75 && !seasonConflict && !severeEpisodeConflict;
 }
 
 /// 候选源排序：标题相似度为主，季度/集数/类型做有界修正。
@@ -148,8 +147,11 @@ class SourceMatchEngine {
       completed: context.bgmCompleted,
     );
 
-    // 标题主导；结构化信号只做小幅修正，冲突用硬顶。
-    var confidence = similarity * 0.85 + 0.05;
+    // 标题主导；相似度极低时强行惩罚，结构化信号做修正。
+    var confidence = similarity * 0.85;
+    if (similarity < 0.40) {
+      confidence *= 0.5;
+    }
 
     if (qSeason != null && cSeason != null) {
       confidence += cSeason == qSeason ? 0.08 : -0.20;
@@ -181,8 +183,8 @@ class SourceMatchEngine {
 
     if (candidate.sourceType == context.currentSource) confidence += 0.02;
 
-    if (seasonConflict) confidence = confidence.clamp(0.0, 0.35);
-    if (severeEpisodeConflict) confidence = confidence.clamp(0.0, 0.58);
+    if (seasonConflict) confidence = confidence.clamp(0.0, 0.30);
+    if (severeEpisodeConflict) confidence = confidence.clamp(0.0, 0.35);
 
     return SourceMatchScore(
       candidate: candidate,

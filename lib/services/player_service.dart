@@ -162,6 +162,25 @@ class PlayerService {
   String? get coverImageUrl =>
       BgmUtils.resolveCoverImage(data, bgmInfo: bgmInfo);
 
+  /// 换源 / 自动匹配共用的 seed：title、身份字段、BGM 元数据一次打包，
+  /// 避免 PlayerPage / Sheet 各自再拆 title/cover/score。
+  Map<String, dynamic> buildSourceSeedData() {
+    final seed = <String, dynamic>{'title': title};
+    for (final key in const ['seriesId', 'seriesUrl', 'id', 'url']) {
+      final value = data[key];
+      if (value != null) seed[key] = value;
+    }
+    final subjectId = bgmInfo.subjectId;
+    if (subjectId != null) seed['bgmId'] = subjectId;
+    final score = bgmInfo.score;
+    if (score != null) seed['score'] = score;
+    final cover = coverImageUrl;
+    if (cover != null && cover.isNotEmpty) seed['bgmImageUrl'] = cover;
+    final detail = bgmDetailData;
+    if (detail != null) seed['bgmDetailData'] = detail;
+    return seed;
+  }
+
   PlaybackMediaInfo get initialMediaInfo =>
       PlaybackMediaInfo(title: title, imageUrl: coverImageUrl ?? '');
 
@@ -352,7 +371,7 @@ class PlayerService {
     var media =
         _readPrefetchedPlaybackMedia(episodeId) ??
         await adapter.resolvePlaybackMedia(episodeId);
-    if (media.url.isEmpty && adapter.validateAutoMatchedUrls) {
+    if (media.url.isEmpty) {
       final episode = currentVideoItem;
       if (episode != null) {
         for (var line = 1; line <= episode.lines.length; line++) {

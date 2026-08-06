@@ -182,8 +182,13 @@ class BgmUtils {
   /// with the same wsrv.nl cache used by search covers.
   static String bgmImageProxyUrl(String url, {int width = 360}) {
     if (url.isEmpty) return url;
+    if (url.contains('wsrv.nl')) return url;
+    var formatted = url.trim();
+    if (formatted.startsWith('//')) {
+      formatted = 'https:$formatted';
+    }
     return Uri.https('wsrv.nl', '/', {
-      'url': url,
+      'url': formatted,
       'w': '$width',
       'output': 'webp',
       'q': '85',

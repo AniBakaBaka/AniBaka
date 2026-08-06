@@ -50,35 +50,35 @@ class ProgressState {
   );
 }
 
-/// 搜索结果项
+/// 搜索结果项 —— 以 [SourceMatchCandidate] 为唯一数据模型，UI 展示字段惰性派生。
 class SearchResultItem {
-  final String title;
-  final String sourceType;
-  final Map<String, dynamic> data;
+  SearchResultItem({
+    required String title,
+    required String sourceType,
+    required Map<String, dynamic> data,
+  }) : matchCandidate = SourceMatchCandidate(
+         key:
+             '$sourceType|${data['seriesId'] ?? data['id'] ?? data['url'] ?? data['title'] ?? title}',
+         title: title,
+         sourceType: sourceType,
+         data: data,
+       );
 
-  late final String key =
-      '$sourceType|${data['seriesId'] ?? data['id'] ?? data['url'] ?? data['title'] ?? title}';
+  final SourceMatchCandidate matchCandidate;
 
-  late final SourceMatchCandidate matchCandidate = SourceMatchCandidate(
-    key: key,
-    title: title,
-    sourceType: sourceType,
-    data: data,
-  );
+  String get title => matchCandidate.title;
+  String get sourceType => matchCandidate.sourceType;
+  Map<String, dynamic> get data => matchCandidate.data;
+  String get key => matchCandidate.key;
 
-  late final String coverUrl = BgmUtils.resolveCoverImage(data) ?? '';
+  late final String coverUrl =
+      BgmUtils.resolveCoverImage(matchCandidate.data) ?? '';
   late final String? episodeInfo = switch (matchCandidate.episodeCount) {
     final int count when count > 0 => '约 $count 集',
     _ => null,
   };
-  late final String? lineInfo = _lineInfo(data);
-  late final String? updateInfo = _updateInfo(data);
-
-  SearchResultItem({
-    required this.title,
-    required this.sourceType,
-    required this.data,
-  });
+  late final String? lineInfo = _lineInfo(matchCandidate.data);
+  late final String? updateInfo = _updateInfo(matchCandidate.data);
 }
 
 String? _lineInfo(Map data) {
@@ -107,12 +107,12 @@ class _Policy {
   static const minResultsBeforeAlias = 8;
   static const perSourceLimit = 20;
   static const globalLimit = 100;
-  static const autoProbeLimit = 12;
+  static const autoProbeLimit = 4;
   static const autoProbePerSource = 2;
-  static const autoProbeConcurrency = 3;
+  static const autoProbeConcurrency = 2;
   static const switchProbeLimit = 4;
-  static const resolveTimeout = Duration(seconds: 12);
-  static const directProbeTimeout = Duration(seconds: 8);
+  static const resolveTimeout = Duration(seconds: 8);
+  static const directProbeTimeout = Duration(seconds: 5);
   static const memoryProbeTimeout = Duration(seconds: 5);
 }
 
@@ -252,18 +252,29 @@ class VideoSourceSearchController {
   static bool isGlobalCached(VideoSourceSearchController controller) =>
       identical(globalCached, controller);
 
-  /// 按标题复用全局缓存控制器；标题不同则重建（沿用旧 seedData 的语义与此前一致）
-  static VideoSourceSearchController sharedFor({
-    required String title,
+  /// 从 [seedData] 解析标题（可显式覆盖）；同标题复用全局缓存控制器。
+  static String resolveTitle({
+    String? title,
     Map<String, dynamic>? seedData,
   }) {
-    if (globalCachedTitle != title || globalCached == null) {
+    final explicit = title?.trim();
+    if (explicit != null && explicit.isNotEmpty) return explicit;
+    return seedData?['title']?.toString().trim() ?? '';
+  }
+
+  /// 按标题复用全局缓存控制器；标题不同则重建。
+  static VideoSourceSearchController sharedFor({
+    Map<String, dynamic>? seedData,
+    String? title,
+  }) {
+    final resolved = resolveTitle(title: title, seedData: seedData);
+    if (globalCachedTitle != resolved || globalCached == null) {
       globalCached?.dispose();
       globalCached = VideoSourceSearchController(
-        title: title,
         seedData: seedData,
+        title: resolved,
       );
-      globalCachedTitle = title;
+      globalCachedTitle = resolved;
     }
     return globalCached!;
   }
@@ -321,14 +332,14 @@ class VideoSourceSearchController {
   void markUserSelected() => _userSelected = true;
 
   VideoSourceSearchController({
-    required this.title,
     this.seedData,
+    String? title,
     this.autoMatchMode = false,
     this.targetEpisodeIndex = 0,
     this.onMatchFound,
     this.onMatchFailed,
-  }) {
-    _primary = title.trim();
+  }) : title = resolveTitle(title: title, seedData: seedData) {
+    _primary = this.title;
     _aliasKey = _buildAliasKey();
     manualAliasesNotifier.value = _readManualAliases();
     automaticAliasesNotifier.value = _buildAutoAliases();
@@ -782,7 +793,7 @@ class VideoSourceSearchController {
     final bySource = <String, List<SearchResultItem>>{};
     for (final s in ranked) {
       if (finalPass) {
-        if (s.confidence < 0.45) break;
+        if (s.confidence < 0.70) break;
       } else if (!s.shouldProbeImmediately) {
         continue;
       }
@@ -1203,7 +1214,7 @@ class VideoSourceSearchController {
       final media = await adapter
           .resolvePlaybackMedia(
             episodeId,
-            skipValidation: !adapter.validateAutoMatchedUrls,
+            skipValidation: false,
           )
           .timeout(
             _Policy.directProbeTimeout,

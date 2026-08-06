@@ -3,9 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'package:baka/source/source_registry.dart';
-import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/services/navigation_service.dart';
 import 'package:baka/services/source_adapter_service.dart';
+import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/widgets/anime_detail/controller/video_source_search_controller.dart';
 import 'package:baka/widgets/common/shimmer.dart';
 
@@ -49,54 +49,36 @@ typedef _RouteView = ({
 });
 
 /// 视频源搜索与线路切换底部滑栏（合并视频源搜索与线路切换）
+///
+/// 展示字段（title/cover/score）统一从 [seedData] 解析，调用方不必再拆模型参数。
 class VideoSourceSearchSheet extends StatefulWidget {
-  final String title;
-  final String cover;
-  final double? score;
-  final int? scoreCount;
-  final Map<String, dynamic>? seedData;
-  final bool autoMatchMode;
-  final bool headlessMode;
+  final Map<String, dynamic> seedData;
   final int targetEpisodeIndex;
   final int currentEpisodeIndex;
   final int currentLineIndex;
   final String? currentSource;
-  final String? currentSourceName;
   final VideoSourceSearchController? searchController;
-  final ValueChanged<Map<String, dynamic>>? onMatchFound;
-  final VoidCallback? onMatchFailed;
   final String? heroTag;
 
   const VideoSourceSearchSheet({
-    required this.title,
-    required this.cover,
-    this.autoMatchMode = false,
-    this.headlessMode = false,
+    required this.seedData,
     this.targetEpisodeIndex = 0,
     this.currentEpisodeIndex = 0,
     this.currentLineIndex = 1,
     this.currentSource,
-    this.currentSourceName,
     this.searchController,
-    this.onMatchFound,
-    this.onMatchFailed,
     super.key,
-    this.score,
-    this.scoreCount,
-    this.seedData,
     this.heroTag,
   });
 
   static Future<SourceSwitchSelection?> show(
     BuildContext context, {
-    required String title,
-    required String cover,
     required Map<String, dynamic> seedData,
     int currentEpisodeIndex = 0,
     int currentLineIndex = 1,
     String? currentSource,
-    String? currentSourceName,
     VideoSourceSearchController? searchController,
+    String? heroTag,
   }) {
     return showModalBottomSheet<SourceSwitchSelection>(
       context: context,
@@ -106,15 +88,13 @@ class VideoSourceSearchSheet extends StatefulWidget {
       barrierColor: Colors.black.withValues(alpha: 0.42),
       constraints: const BoxConstraints(maxWidth: 860),
       builder: (_) => VideoSourceSearchSheet(
-        title: title,
-        cover: cover,
         seedData: seedData,
         targetEpisodeIndex: currentEpisodeIndex,
         currentEpisodeIndex: currentEpisodeIndex,
         currentLineIndex: currentLineIndex,
         currentSource: currentSource,
-        currentSourceName: currentSourceName,
         searchController: searchController,
+        heroTag: heroTag,
       ),
     );
   }
@@ -128,9 +108,15 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
 
   late final VideoSourceSearchController _controller;
   final ValueNotifier<String> _selectedFilterNotifier = ValueNotifier<String>('all');
-  late final ValueNotifier<Map<String, _SourceMeta>> _sourceConfigsNotifier;
+  /// 源筛选 key 列表；展示元数据按需从 SourceCatalog/AdapterRegistry 解析，
+  /// 避免 widget 侧把 AdapterDescriptor 再复制成 _SourceMeta 注册表。
+  late final ValueNotifier<List<String>> _sourceKeysNotifier;
 
   late final Set<String> _currentIds;
+  late final String _title;
+  late final String _cover;
+  late final double? _score;
+  late final int? _scoreCount;
   List<_RouteView> _routes = const [];
   String? _selectingKey;
   bool _hasPending = false;
@@ -141,7 +127,15 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
   @override
   void initState() {
     super.initState();
-    final seed = widget.seedData ?? const {};
+    final seed = widget.seedData;
+    _title = seed['title']?.toString().trim() ?? '';
+    _cover = BgmUtils.resolveCoverImage(seed) ?? '';
+    final bgm = BgmUtils.readFromData(seed);
+    _score = bgm.score;
+    final detail = BgmUtils.asMap(seed['bgmDetailData']);
+    final rating = BgmUtils.asMap(detail?['rating']);
+    _scoreCount = BgmUtils.toInt(rating?['total']);
+
     _currentIds = {
       for (final key in _identityKeys)
         if (seed[key]?.toString().trim() case final String value when value.isNotEmpty)
@@ -150,24 +144,11 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
 
     _controller = widget.searchController ??
         VideoSourceSearchController(
-          title: widget.title,
-          seedData: widget.seedData,
-          autoMatchMode: widget.autoMatchMode,
+          seedData: seed,
           targetEpisodeIndex: widget.targetEpisodeIndex,
-          onMatchFound: _navigateToPlayer,
-          onMatchFailed: () {
-            final cb = widget.onMatchFailed;
-            if (cb != null) {
-              cb();
-            } else if (!widget.headlessMode) {
-              Navigator.of(context).pop('failed');
-            }
-          },
         );
 
-    _sourceConfigsNotifier = ValueNotifier<Map<String, _SourceMeta>>(
-      _currentSourceRegistry(),
-    );
+    _sourceKeysNotifier = ValueNotifier<List<String>>(_currentSourceKeys());
 
     _controller.resultsNotifier.addListener(_onCandidatesChanged);
     _controller.candidateRevisionNotifier.addListener(_onCandidatesChanged);
@@ -176,9 +157,9 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
 
     _controller.ensureAdapterReady().then((_) {
       if (!mounted) return;
-      final next = _currentSourceRegistry();
-      if (!mapEquals(_sourceConfigsNotifier.value, next)) {
-        _sourceConfigsNotifier.value = next;
+      final next = _currentSourceKeys();
+      if (!listEquals(_sourceKeysNotifier.value, next)) {
+        _sourceKeysNotifier.value = next;
       }
     });
 
@@ -191,10 +172,13 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     }
   }
 
-  Map<String, _SourceMeta> _currentSourceRegistry() => _buildSourceRegistry(
-        quickSources: SourceCatalog.instance.quickSearchSources,
-        customSources: SourceCatalog.instance.enabledCustomSources,
-      );
+  List<String> _currentSourceKeys() => [
+        'all',
+        'internal',
+        for (final s in SourceCatalog.instance.quickSearchSources) s.key,
+        for (final s in SourceCatalog.instance.enabledCustomSources)
+          AdapterRegistry.customSourceKey(s.id),
+      ];
 
   @override
   void dispose() {
@@ -207,7 +191,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
       _controller.dispose();
     }
     _selectedFilterNotifier.dispose();
-    _sourceConfigsNotifier.dispose();
+    _sourceKeysNotifier.dispose();
     super.dispose();
   }
 
@@ -407,32 +391,12 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
   void _navigateToPlayer(Map<String, dynamic> videoData) {
     if (!mounted) return;
     _controller.cancelSearch();
-    VideoSourceSearchController.cacheGlobal(widget.title, _controller);
-    if (widget.headlessMode) {
-      widget.onMatchFound?.call(videoData);
-      return;
-    }
+    VideoSourceSearchController.cacheGlobal(_title, _controller);
     NavigationService.toPlayer(context, videoData, popFirst: true);
   }
 
   @override
-  Widget build(BuildContext context) {
-    if (!widget.autoMatchMode) return _buildNormalSheet();
-
-    return ValueListenableBuilder<bool>(
-      valueListenable: _controller.isSearchingNotifier,
-      builder: (context, isSearching, _) {
-        final waiting = !_controller.hasMatched && isSearching;
-        if (widget.headlessMode) {
-          return waiting
-              ? _HeadlessLoadingWidget(controller: _controller)
-              : const SizedBox.shrink();
-        }
-        if (waiting) return const _FullscreenLoadingWidget();
-        return _buildNormalSheet();
-      },
-    );
-  }
+  Widget build(BuildContext context) => _buildNormalSheet();
 
   Widget _buildNormalSheet() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -458,10 +422,10 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                         child: _SearchHeaderCard(
-                          title: widget.title,
-                          cover: widget.cover,
-                          score: widget.score,
-                          scoreCount: widget.scoreCount,
+                          title: _title,
+                          cover: _cover,
+                          score: _score,
+                          scoreCount: _scoreCount,
                           heroTag: widget.heroTag,
                           controller: _controller,
                           onAddAlias: _showAddAliasDialog,
@@ -479,12 +443,12 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
                           children: [
                             _SearchProgressIndicator(
                               controller: _controller,
-                              sourceConfigsNotifier: _sourceConfigsNotifier,
+                              sourceKeysNotifier: _sourceKeysNotifier,
                             ),
                             const SizedBox(height: 8),
                             _SourceFilterChips(
                               selectedFilterNotifier: _selectedFilterNotifier,
-                              sourceConfigsNotifier: _sourceConfigsNotifier,
+                              sourceKeysNotifier: _sourceKeysNotifier,
                             ),
                           ],
                         ),
@@ -493,9 +457,9 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
                         child: _VideoSearchResultList(
                           scrollController: scrollController,
                           controller: _controller,
-                          sharedCover: widget.cover,
+                          sharedCover: _cover,
                           selectedFilterNotifier: _selectedFilterNotifier,
-                          sourceConfigsNotifier: _sourceConfigsNotifier,
+                          sourceKeysNotifier: _sourceKeysNotifier,
                           routes: _routes,
                           selectingKey: _selectingKey,
                           isSelecting: _isSelecting,
@@ -542,13 +506,13 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
               : Colors.black.withValues(alpha: 0.08),
         ),
       ),
-      child: widget.cover.isNotEmpty
+      child: _cover.isNotEmpty
           ? ClipRRect(
               borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
               child: Opacity(
                 opacity: 0.08,
                 child: CachedNetworkImage(
-                  imageUrl: widget.cover,
+                  imageUrl: _cover,
                   fit: BoxFit.cover,
                   useOldImageOnUrlChange: true,
                   fadeInDuration: Duration.zero,
@@ -565,128 +529,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
   }
 }
 
-/// 无头模式下的自动匹配加载状态组件
-class _HeadlessLoadingWidget extends StatelessWidget {
-  final VideoSourceSearchController controller;
 
-  const _HeadlessLoadingWidget({required this.controller});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final primaryColor = Theme.of(context).colorScheme.primary;
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.08)
-            : Colors.black.withValues(alpha: 0.03),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.1)
-              : Colors.black.withValues(alpha: 0.05),
-          width: 0.5,
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: primaryColor,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text(
-                '正在自动匹配最优播放源',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.5,
-                  color: isDark ? Colors.white : Colors.black87,
-                ),
-              ),
-            ),
-            ValueListenableBuilder<ProgressState>(
-              valueListenable: controller.progressNotifier,
-              builder: (context, progressState, _) {
-                return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: primaryColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '${progressState.progressingSources.length}',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: primaryColor,
-                    ),
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 普通自动匹配模式下的加载状态。
-class _FullscreenLoadingWidget extends StatelessWidget {
-  const _FullscreenLoadingWidget();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    return Container(
-      height: 320,
-      decoration: BoxDecoration(
-        color: isDark
-            ? const Color(0xFF1C1C1E).withValues(alpha: 0.95)
-            : const Color(0xFFF2F2F7).withValues(alpha: 0.95),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 48,
-              height: 48,
-              child: CircularProgressIndicator(
-                strokeWidth: 3,
-                color: theme.colorScheme.primary,
-              ),
-            ),
-            const SizedBox(height: 28),
-            Text(
-              '智能匹配中...',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 2.0,
-                color: isDark ? Colors.white : Colors.black87,
-                decoration: TextDecoration.none,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 /// 头部信息卡片组件
 class _SearchHeaderCard extends StatelessWidget {
@@ -831,26 +674,26 @@ class _SearchHeaderCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          _AliasControlsWidget(controller: controller, onAddAlias: onAddAlias),
+          _AliasBar(controller: controller, onAddAlias: onAddAlias),
         ],
       ),
     );
   }
 }
 
-/// 别名 Chip 栏控制组件
-class _AliasControlsWidget extends StatelessWidget {
+/// 别名 Chip 栏（合并自动/手动别名与添加按钮）
+class _AliasBar extends StatelessWidget {
   final VideoSourceSearchController controller;
   final Future<void> Function() onAddAlias;
 
-  const _AliasControlsWidget({
-    required this.controller,
-    required this.onAddAlias,
-  });
+  const _AliasBar({required this.controller, required this.onAddAlias});
+
+  static const _activeColor = Color(0xFF66BB6A);
+  static const _manualColor = Color(0xFF42A5F5);
 
   @override
   Widget build(BuildContext context) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final primary = Theme.of(context).colorScheme.primary;
 
     return ListenableBuilder(
@@ -862,57 +705,52 @@ class _AliasControlsWidget extends StatelessWidget {
       ]),
       builder: (context, _) {
         final isSearching = controller.isSearchingNotifier.value;
-        final autoAliases = controller.automaticAliasesNotifier.value;
-        final manualAliases = controller.manualAliasesNotifier.value;
         final activeAuto = controller.activeAutoAliasesNotifier.value;
 
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           physics: const BouncingScrollPhysics(),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              for (final alias in autoAliases)
-                Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: _AliasChip(
-                    alias: alias,
-                    isAuto: true,
-                    isActive: activeAuto.contains(alias),
-                    isDarkMode: isDarkMode,
-                    isSearching: isSearching,
-                    onToggle: () => controller.toggleAutoAlias(alias),
+              for (final alias in controller.automaticAliasesNotifier.value)
+                _chip(
+                  alias: alias,
+                  active: activeAuto.contains(alias),
+                  color: activeAuto.contains(alias)
+                      ? _activeColor
+                      : (isDark ? Colors.white30 : Colors.black26),
+                  icon: activeAuto.contains(alias)
+                      ? Icons.auto_awesome_rounded
+                      : Icons.add_circle_outline_rounded,
+                  onPressed: isSearching ? null : () => controller.toggleAutoAlias(alias),
+                ),
+              for (final alias in controller.manualAliasesNotifier.value)
+                _chip(
+                  alias: alias,
+                  active: true,
+                  color: _manualColor,
+                  icon: Icons.edit_rounded,
+                  // 手动别名固定 InputChip，搜索中仅禁用删除，避免控件类型切换闪烁。
+                  deletable: true,
+                  onDelete: isSearching
+                      ? null
+                      : () => controller.removeManualAlias(alias),
+                ),
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: ActionChip(
+                  avatar: Icon(Icons.add_rounded, size: 16, color: primary),
+                  label: const Text('别名'),
+                  onPressed: isSearching ? null : onAddAlias,
+                  labelStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: primary),
+                  backgroundColor: primary.withValues(alpha: isDark ? 0.16 : 0.10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: BorderSide(color: primary.withValues(alpha: 0.22)),
                   ),
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-              for (final alias in manualAliases)
-                Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: _AliasChip(
-                    alias: alias,
-                    isAuto: false,
-                    isDarkMode: isDarkMode,
-                    isSearching: isSearching,
-                    onDelete: () => controller.removeManualAlias(alias),
-                  ),
-                ),
-              ActionChip(
-                avatar: Icon(Icons.add_rounded, size: 16, color: primary),
-                label: const Text('别名'),
-                onPressed: isSearching ? null : onAddAlias,
-                labelStyle: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: primary,
-                ),
-                backgroundColor: primary.withValues(
-                  alpha: isDarkMode ? 0.16 : 0.10,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(color: primary.withValues(alpha: 0.22)),
-                ),
-                visualDensity: VisualDensity.compact,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ],
           ),
@@ -920,94 +758,53 @@ class _AliasControlsWidget extends StatelessWidget {
       },
     );
   }
-}
 
-/// 统一别名 Chip 组件（自动/手动）
-class _AliasChip extends StatelessWidget {
-  final String alias;
-  final bool isAuto;
-  final bool isActive;
-  final bool isDarkMode;
-  final bool isSearching;
-  final VoidCallback? onToggle;
-  final VoidCallback? onDelete;
-
-  const _AliasChip({
-    required this.alias,
-    required this.isAuto,
-    required this.isDarkMode,
-    required this.isSearching,
-    this.isActive = false,
-    this.onToggle,
-    this.onDelete,
-  });
-
-  static const _activeColor = Color(0xFF66BB6A);
-  static const _manualColor = Color(0xFF42A5F5);
-
-  Color get _color => isAuto
-      ? (isActive
-            ? _activeColor
-            : (isDarkMode ? Colors.white30 : Colors.black26))
-      : _manualColor;
-
-  Color get _labelColor => isAuto
-      ? (isActive ? (isDarkMode ? Colors.white : _activeColor) : _color)
-      : (isDarkMode ? Colors.white : _manualColor);
-
-  double get _bgAlpha => isActive ? 0.15 : 0.08;
-  double get _borderAlpha => isActive ? 0.2 : 0.1;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _color;
+  static Widget _chip({
+    required String alias,
+    required bool active,
+    required Color color,
+    required IconData icon,
+    VoidCallback? onPressed,
+    VoidCallback? onDelete,
+    bool deletable = false,
+  }) {
+    final bgAlpha = active ? 0.15 : 0.08;
+    final borderAlpha = active ? 0.2 : 0.1;
+    final style = TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color);
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(16),
+      side: BorderSide(color: color.withValues(alpha: borderAlpha)),
+    );
     final label = ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 180),
       child: Text(alias, overflow: TextOverflow.ellipsis, maxLines: 1),
     );
-    final labelStyle = TextStyle(
-      fontSize: 11,
-      fontWeight: FontWeight.w600,
-      color: _labelColor,
-    );
-    final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(16),
-      side: BorderSide(color: color.withValues(alpha: _borderAlpha)),
-    );
 
-    if (isAuto) {
-      return ActionChip(
-        avatar: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          child: Icon(
-            isActive
-                ? Icons.auto_awesome_rounded
-                : Icons.add_circle_outline_rounded,
-            key: ValueKey(isActive),
-            size: 14,
-            color: color,
-          ),
-        ),
-        label: label,
-        onPressed: isSearching ? null : onToggle,
-        labelStyle: labelStyle,
-        backgroundColor: color.withValues(alpha: _bgAlpha),
-        shape: shape,
-        visualDensity: VisualDensity.compact,
-        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      );
-    }
-
-    return InputChip(
-      avatar: Icon(Icons.edit_rounded, size: 14, color: color),
-      label: label,
-      onDeleted: isSearching ? null : onDelete,
-      deleteIcon: const Icon(Icons.close_rounded, size: 14),
-      labelStyle: labelStyle,
-      backgroundColor: color.withValues(alpha: _bgAlpha),
-      shape: shape,
-      visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      // 用 deletable 而非 onDelete != null 决定控件类型，避免搜索时 InputChip ↔ ActionChip 切换。
+      child: deletable
+          ? InputChip(
+              avatar: Icon(icon, size: 14, color: color),
+              label: label,
+              onDeleted: onDelete,
+              deleteIcon: const Icon(Icons.close_rounded, size: 14),
+              labelStyle: style,
+              backgroundColor: color.withValues(alpha: bgAlpha),
+              shape: shape,
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            )
+          : ActionChip(
+              avatar: Icon(icon, size: 14, color: color),
+              label: label,
+              onPressed: onPressed,
+              labelStyle: style,
+              backgroundColor: color.withValues(alpha: bgAlpha),
+              shape: shape,
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
     );
   }
 }
@@ -1056,72 +853,46 @@ class _CompactBadge extends StatelessWidget {
   }
 }
 
-/// 部分来源搜索失败 Banner 组件
+/// 搜索失败提示（精简单行式）
 class _SearchErrorBanner extends StatelessWidget {
   final VideoSourceSearchController controller;
-
   const _SearchErrorBanner({required this.controller});
 
   @override
   Widget build(BuildContext context) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-
     return ListenableBuilder(
-      listenable: Listenable.merge([
-        controller.progressNotifier,
-        controller.isSearchingNotifier,
-      ]),
+      listenable: Listenable.merge([controller.progressNotifier, controller.isSearchingNotifier]),
       builder: (context, _) {
         final errors = controller.progressNotifier.value.searchErrors;
         if (errors.isEmpty) return const SizedBox.shrink();
+        final isDark = Theme.of(context).brightness == Brightness.dark;
 
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: FrostedContainer(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.info_outline_rounded,
-                      size: 18,
-                      color: Color(0xFFFFB347),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '部分来源搜索失败',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: isDarkMode ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                ...errors.map(
-                  (err) => Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(
-                      '• $err',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isDarkMode ? Colors.white70 : Colors.black54,
-                      ),
+                const Icon(Icons.info_outline_rounded, size: 16, color: Color(0xFFFFB347)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${errors.length} 个来源搜索失败',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white70 : Colors.black54,
                     ),
                   ),
                 ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    onPressed: controller.isSearchingNotifier.value
-                        ? null
-                        : controller.startSearch,
-                    icon: const Icon(Icons.refresh_rounded, size: 16),
-                    label: const Text('再次尝试'),
+                TextButton.icon(
+                  onPressed: controller.isSearchingNotifier.value ? null : controller.startSearch,
+                  icon: const Icon(Icons.refresh_rounded, size: 14),
+                  label: const Text('重试', style: TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 28),
+                    visualDensity: VisualDensity.compact,
                   ),
                 ),
               ],
@@ -1136,11 +907,11 @@ class _SearchErrorBanner extends StatelessWidget {
 /// 进度状态与多源状态圆点指示器组件
 class _SearchProgressIndicator extends StatelessWidget {
   final VideoSourceSearchController controller;
-  final ValueNotifier<Map<String, _SourceMeta>> sourceConfigsNotifier;
+  final ValueNotifier<List<String>> sourceKeysNotifier;
 
   const _SearchProgressIndicator({
     required this.controller,
-    required this.sourceConfigsNotifier,
+    required this.sourceKeysNotifier,
   });
 
   @override
@@ -1152,29 +923,29 @@ class _SearchProgressIndicator extends StatelessWidget {
         controller.progressNotifier,
         controller.isSearchingNotifier,
         controller.resultsNotifier,
-        sourceConfigsNotifier,
+        sourceKeysNotifier,
       ]),
       builder: (context, _) {
         final progressState = controller.progressNotifier.value;
         final results = controller.resultsNotifier.value;
-        final sourceConfigs = sourceConfigsNotifier.value;
+        final sourceKeys = sourceKeysNotifier.value;
         final isSearching = controller.isSearchingNotifier.value;
         final completed = progressState.finishedSources;
         final inProgress = progressState.progressingSources;
         final primaryColor = Theme.of(context).colorScheme.primary;
 
-        final totalSourcesCount = (sourceConfigs.length - 1).clamp(1, 99);
+        final totalSourcesCount = (sourceKeys.length - 1).clamp(1, 99);
         final progressFraction = totalSourcesCount > 0
             ? (completed.length / totalSourcesCount).clamp(0.05, 0.98)
             : 1.0;
 
-        final indicatorItems = sourceConfigs.entries
-            .where((e) => e.key != 'all')
+        final indicatorItems = sourceKeys
+            .where((key) => key != 'all')
             .map(
-              (e) => _buildSourceDot(
-                e.value,
-                completed.contains(e.key),
-                inProgress.contains(e.key) && !completed.contains(e.key),
+              (key) => _buildSourceDot(
+                _resolveSourceMeta(key),
+                completed.contains(key),
+                inProgress.contains(key) && !completed.contains(key),
                 isDarkMode,
               ),
             )
@@ -1301,11 +1072,11 @@ class _SearchProgressIndicator extends StatelessWidget {
 /// 数据源筛选 Chips 栏组件
 class _SourceFilterChips extends StatelessWidget {
   final ValueNotifier<String> selectedFilterNotifier;
-  final ValueNotifier<Map<String, _SourceMeta>> sourceConfigsNotifier;
+  final ValueNotifier<List<String>> sourceKeysNotifier;
 
   const _SourceFilterChips({
     required this.selectedFilterNotifier,
-    required this.sourceConfigsNotifier,
+    required this.sourceKeysNotifier,
   });
 
   @override
@@ -1315,29 +1086,30 @@ class _SourceFilterChips extends StatelessWidget {
     return ListenableBuilder(
       listenable: Listenable.merge([
         selectedFilterNotifier,
-        sourceConfigsNotifier,
+        sourceKeysNotifier,
       ]),
       builder: (context, _) {
         final selectedFilter = selectedFilterNotifier.value;
-        final sourceConfigs = sourceConfigsNotifier.value;
+        final sourceKeys = sourceKeysNotifier.value;
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           physics: const BouncingScrollPhysics(),
           child: Row(
-            children: sourceConfigs.entries.map((e) {
-              final selected = selectedFilter == e.key;
+            children: sourceKeys.map((key) {
+              final meta = _resolveSourceMeta(key);
+              final selected = selectedFilter == key;
               return Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: FilterChip(
-                  label: Text(e.value.label),
+                  label: Text(meta.label),
                   selected: selected,
                   onSelected: (value) {
-                    if (value) selectedFilterNotifier.value = e.key;
+                    if (value) selectedFilterNotifier.value = key;
                   },
                   backgroundColor: isDarkMode
                       ? Colors.white.withValues(alpha: 0.04)
                       : Colors.black.withValues(alpha: 0.04),
-                  selectedColor: e.value.color.withValues(
+                  selectedColor: meta.color.withValues(
                     alpha: isDarkMode ? 0.3 : 0.2,
                   ),
                   checkmarkColor: Colors.white,
@@ -1369,7 +1141,7 @@ class _VideoSearchResultList extends StatelessWidget {
   final VideoSourceSearchController controller;
   final String sharedCover;
   final ValueNotifier<String> selectedFilterNotifier;
-  final ValueNotifier<Map<String, _SourceMeta>> sourceConfigsNotifier;
+  final ValueNotifier<List<String>> sourceKeysNotifier;
   final List<_RouteView> routes;
   final String? selectingKey;
   final bool isSelecting;
@@ -1381,19 +1153,13 @@ class _VideoSearchResultList extends StatelessWidget {
     required this.controller,
     required this.sharedCover,
     required this.selectedFilterNotifier,
-    required this.sourceConfigsNotifier,
+    required this.sourceKeysNotifier,
     required this.routes,
     required this.selectingKey,
     required this.isSelecting,
     required this.onSelectRoute,
     required this.onOpenVideo,
   });
-
-  _SourceMeta _meta(
-    Map<String, _SourceMeta> sourceConfigs,
-    String sourceType,
-  ) =>
-      sourceConfigs[sourceType] ?? _kFallbackSourceMeta;
 
   @override
   Widget build(BuildContext context) {
@@ -1403,13 +1169,12 @@ class _VideoSearchResultList extends StatelessWidget {
       listenable: Listenable.merge([
         selectedFilterNotifier,
         controller.resultsNotifier,
-        sourceConfigsNotifier,
+        sourceKeysNotifier,
         controller.isSearchingNotifier,
       ]),
       builder: (context, _) {
         final selectedFilter = selectedFilterNotifier.value;
         final results = controller.resultsNotifier.value;
-        final sourceConfigs = sourceConfigsNotifier.value;
         final isSearching = controller.isSearchingNotifier.value;
 
         if (isSearching && results.isEmpty && routes.isEmpty) {
@@ -1461,29 +1226,33 @@ class _VideoSearchResultList extends StatelessWidget {
               return _buildSectionHeader('可用线路', Icons.alt_route_rounded, Theme.of(context).colorScheme.primary, isDarkMode);
             }
             if (entry is _RouteView) {
+              final idx = routes.indexOf(entry);
               return RepaintBoundary(
-                child: _RouteTile(
-                  index: routes.indexOf(entry),
+                child: _SourceCard.route(
+                  index: idx,
                   group: entry.group,
                   sources: entry.sources,
                   isCurrent: entry.isCurrent,
-                  isRecommended: routes.indexOf(entry) == 0 && entry.group.isReady && !entry.isCurrent,
+                  isRecommended: idx == 0 && entry.group.isReady && !entry.isCurrent,
                   isSelecting: selectingKey == entry.group.key,
                   enabled: !isSelecting || selectingKey == entry.group.key,
                   onTap: () => onSelectRoute(entry.group),
+                  colors: Theme.of(context).colorScheme,
                 ),
               );
             }
             if (entry is String) {
-              return _buildGroupHeader(_meta(sourceConfigs, entry), isDarkMode);
+              final m = _resolveSourceMeta(entry);
+              return _buildSectionHeader(m.label, m.icon, m.color, isDarkMode);
             }
             final result = entry as SearchResultItem;
             return RepaintBoundary(
-              child: _VideoSearchResultCard(
+              child: _SourceCard.result(
                 item: result,
                 imageUrl: sharedCover.isNotEmpty ? sharedCover : result.coverUrl,
-                meta: _meta(sourceConfigs, result.sourceType),
+                meta: _resolveSourceMeta(result.sourceType),
                 onTap: () => onOpenVideo(result),
+                isDark: isDarkMode,
               ),
             );
           },
@@ -1512,33 +1281,6 @@ class _VideoSearchResultList extends StatelessWidget {
             child: Divider(
               thickness: 0.5,
               color: color.withValues(alpha: isDarkMode ? 0.25 : 0.2),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGroupHeader(_SourceMeta meta, bool isDarkMode) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 12, bottom: 6),
-      child: Row(
-        children: [
-          Icon(meta.icon, size: 16, color: meta.color),
-          const SizedBox(width: 6),
-          Text(
-            meta.label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: isDarkMode ? Colors.white.withValues(alpha: 0.9) : Colors.black87,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Divider(
-              thickness: 0.5,
-              color: meta.color.withValues(alpha: isDarkMode ? 0.25 : 0.2),
             ),
           ),
         ],
@@ -1614,34 +1356,42 @@ class _VideoSearchResultList extends StatelessWidget {
   }
 }
 
-/// 线路 Tile 组件（合并 SourceSwitchSheet 线路样式）
-class _RouteTile extends StatelessWidget {
-  const _RouteTile({
-    required this.index,
-    required this.group,
-    required this.sources,
-    required this.isCurrent,
-    required this.isRecommended,
-    required this.isSelecting,
-    required this.enabled,
+/// 统一视频源卡片组件（合并线路 Tile 与搜索结果卡片）
+class _SourceCard extends StatelessWidget {
+  const _SourceCard({
+    required this.title,
+    required this.accent,
     required this.onTap,
+    this.leading,
+    this.trailing,
+    this.chips,
+    this.enabled = true,
+    this.highlighted = false,
+    this.borderAccent,
   });
 
-  final int index;
-  final DirectSourceGroup group;
-  final String sources;
-  final bool isCurrent;
-  final bool isRecommended;
-  final bool isSelecting;
-  final bool enabled;
+  final String title;
+  final Color accent;
   final VoidCallback onTap;
+  final Widget? leading;
+  final Widget? trailing;
+  final List<({IconData icon, String label})>? chips;
+  final bool enabled;
+  final bool highlighted;
+  final Color? borderAccent;
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    final isDarkMode = theme.brightness == Brightness.dark;
-
+  /// 从线路数据快速构建
+  factory _SourceCard.route({
+    required int index,
+    required DirectSourceGroup group,
+    required String sources,
+    required bool isCurrent,
+    required bool isRecommended,
+    required bool isSelecting,
+    required bool enabled,
+    required VoidCallback onTap,
+    required ColorScheme colors,
+  }) {
     final (status, statusIcon, statusColor) = switch (group.status) {
       SourceProbeStatus.direct => ('已验证', Icons.check_circle_rounded, colors.primary),
       SourceProbeStatus.playable => ('可播放', Icons.play_circle_fill_rounded, colors.tertiary),
@@ -1649,17 +1399,102 @@ class _RouteTile extends StatelessWidget {
       SourceProbeStatus.pending => ('待检测', Icons.schedule_rounded, colors.onSurfaceVariant),
       SourceProbeStatus.failed => ('不可用', Icons.error_outline_rounded, colors.error),
     };
-    final accent = isCurrent ? colors.primary : statusColor;
+    final cardAccent = isCurrent ? colors.primary : statusColor;
 
-    final backgroundColor = isCurrent
-        ? colors.primaryContainer.withValues(alpha: isDarkMode ? 0.35 : 0.25)
-        : (isDarkMode ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03));
+    return _SourceCard(
+      title: sources,
+      accent: cardAccent,
+      onTap: onTap,
+      enabled: enabled,
+      highlighted: isCurrent,
+      borderAccent: isRecommended ? colors.primary.withValues(alpha: 0.3) : null,
+      leading: _IndexBadge(index: index, color: cardAccent),
 
-    final borderColor = isCurrent
+      chips: [
+        (icon: statusIcon, label: status),
+        if (isCurrent) (icon: Icons.radio_button_checked, label: '当前线路'),
+        if (isRecommended && !isCurrent) (icon: Icons.star_rounded, label: '推荐'),
+      ],
+      trailing: isSelecting
+          ? SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2, color: cardAccent),
+            )
+          : Icon(Icons.chevron_right_rounded, size: 20, color: colors.onSurfaceVariant),
+    );
+  }
+
+  /// 从搜索结果快速构建
+  factory _SourceCard.result({
+    required SearchResultItem item,
+    required String imageUrl,
+    required _SourceMeta meta,
+    required VoidCallback onTap,
+    required bool isDark,
+  }) {
+    final c = meta.color;
+    return _SourceCard(
+      title: item.title,
+      accent: c,
+      onTap: onTap,
+      leading: imageUrl.isNotEmpty
+          ? _CoverThumb(
+              imageUrl: imageUrl,
+              overlayColor: c.withValues(alpha: 0.15),
+              placeholder: (ctx, url) => ShimmerBox(
+                width: 60,
+                height: 80,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              errorWidget: (ctx, url, err) => Container(
+                color: isDark ? Colors.grey[800] : Colors.grey[200],
+                alignment: Alignment.center,
+                child: Icon(
+                  Icons.broken_image,
+                  color: isDark ? Colors.grey[600] : Colors.grey[400],
+                  size: 20,
+                ),
+              ),
+            )
+          : Container(
+              width: 60,
+              height: 80,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: c.withValues(alpha: isDark ? 0.25 : 0.15),
+                border: Border.all(color: c.withValues(alpha: 0.3)),
+              ),
+              alignment: Alignment.center,
+              child: Icon(meta.icon, color: Colors.white, size: 24),
+            ),
+      chips: [
+        (icon: meta.icon, label: meta.label),
+        (icon: meta.icon, label: meta.statusLabel ?? '其他来源'),
+        if (item.episodeInfo case final ep?) (icon: Icons.playlist_play_rounded, label: ep),
+        if (item.lineInfo case final ln?) (icon: Icons.hub_rounded, label: ln),
+        if (item.updateInfo case final up?) (icon: Icons.schedule_rounded, label: up),
+      ],
+      trailing: Icon(
+        Icons.play_circle_filled_rounded,
+        size: 28,
+        color: c.withValues(alpha: isDark ? 0.85 : 0.9),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colors = Theme.of(context).colorScheme;
+
+    final bg = highlighted
+        ? colors.primaryContainer.withValues(alpha: isDark ? 0.35 : 0.25)
+        : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03));
+
+    final border = highlighted
         ? colors.primary.withValues(alpha: 0.7)
-        : isRecommended
-            ? colors.primary.withValues(alpha: 0.3)
-            : (isDarkMode ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06));
+        : borderAccent ?? accent.withValues(alpha: isDark ? 0.15 : 0.1);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -1668,360 +1503,100 @@ class _RouteTile extends StatelessWidget {
         child: InkWell(
           onTap: enabled ? onTap : null,
           borderRadius: BorderRadius.circular(16),
+          splashColor: accent.withValues(alpha: 0.12),
+          highlightColor: accent.withValues(alpha: 0.06),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
-              color: backgroundColor,
-              border: Border.all(color: borderColor, width: 1),
+              color: bg,
+              border: Border.all(color: border),
             ),
             child: Row(
               children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    '${index + 1}'.padLeft(2, '0'),
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: accent,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
+                if (leading != null) ...[leading!, const SizedBox(width: 12)],
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        sources,
-                        maxLines: 1,
+                        title,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          height: 1.3,
+                          color: isDark ? Colors.white.withValues(alpha: 0.95) : Colors.black87,
+                        ),
                       ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Icon(statusIcon, size: 13, color: statusColor),
-                          const SizedBox(width: 4),
-                          Text(
-                            status,
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: statusColor,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          if (isCurrent || isRecommended) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: colors.primary.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                isCurrent ? '当前线路' : '推荐',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: colors.primary,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
+                      if (chips != null && chips!.isNotEmpty) ...[
+                        const SizedBox(height: 5),
+                        Wrap(
+                          spacing: 5,
+                          runSpacing: 4,
+                          children: [
+                            for (final c in chips!)
+                              _miniChip(c.icon, c.label, accent, isDark),
                           ],
-                        ],
-                      ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
-                if (isSelecting)
-                  SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: accent),
-                  )
-                else
-                  Icon(
-                    Icons.chevron_right_rounded,
-                    size: 20,
-                    color: colors.onSurfaceVariant,
-                  ),
+                if (trailing != null) ...[const SizedBox(width: 8), trailing!],
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  static Widget _miniChip(IconData icon, String label, Color color, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: isDark ? 0.18 : 0.10),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 10, color: color),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color, height: 1),
+          ),
+        ],
       ),
     );
   }
 }
 
-/// 视频搜索结果卡片组件
-class _VideoSearchResultCard extends StatelessWidget {
-  final SearchResultItem item;
-  final String imageUrl;
-  final _SourceMeta meta;
-  final VoidCallback onTap;
-
-  const _VideoSearchResultCard({
-    required this.item,
-    required this.imageUrl,
-    required this.meta,
-    required this.onTap,
-  });
+class _IndexBadge extends StatelessWidget {
+  const _IndexBadge({required this.index, required this.color});
+  final int index;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    final baseColor = meta.color;
-    final backgroundColor = isDarkMode
-        ? Colors.white.withValues(alpha: 0.05)
-        : Colors.black.withValues(alpha: 0.03);
-    final borderColor = baseColor.withValues(alpha: isDarkMode ? 0.15 : 0.1);
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
-          splashColor: baseColor.withValues(alpha: 0.12),
-          highlightColor: baseColor.withValues(alpha: 0.06),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              color: backgroundColor,
-              border: Border.all(color: borderColor, width: 1),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                _buildCoverPreview(isDarkMode),
-                const SizedBox(width: 12),
-                Expanded(child: _buildInfoColumn(isDarkMode)),
-                const SizedBox(width: 8),
-                _buildPlayButton(baseColor, isDarkMode),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCoverPreview(bool isDarkMode) {
-    final baseColor = meta.color;
-
-    if (imageUrl.isNotEmpty) {
-      return _CoverThumb(
-        imageUrl: imageUrl,
-        overlayColor: baseColor.withValues(alpha: 0.15),
-        placeholder: (context, url) => ShimmerBox(
-          width: 60,
-          height: 80,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        errorWidget: (context, url, error) => Container(
-          color: isDarkMode ? Colors.grey[800] : Colors.grey[200],
-          alignment: Alignment.center,
-          child: Icon(
-            Icons.broken_image,
-            color: isDarkMode ? Colors.grey[600] : Colors.grey[400],
-            size: 20,
-          ),
-        ),
-      );
-    }
-
     return Container(
-      width: 60,
-      height: 80,
+      width: 36,
+      height: 36,
+      alignment: Alignment.center,
       decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(10),
-        color: baseColor.withValues(alpha: isDarkMode ? 0.25 : 0.15),
-        border: Border.all(color: baseColor.withValues(alpha: 0.3), width: 1),
       ),
-      alignment: Alignment.center,
-      child: Icon(meta.icon, color: Colors.white, size: 24),
-    );
-  }
-
-  Widget _buildInfoColumn(bool isDarkMode) {
-    final baseColor = meta.color;
-    final primaryText = isDarkMode
-        ? Colors.white.withValues(alpha: 0.95)
-        : Colors.black87;
-    final secondaryText = isDarkMode ? Colors.white70 : Colors.black54;
-    final statusLabel = meta.statusLabel ?? '其他来源';
-    final episodeInfo = item.episodeInfo;
-    final lineInfo = item.lineInfo;
-    final updateInfo = item.updateInfo;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Text(
-                item.title,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  height: 1.3,
-                  color: primaryText,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(width: 8),
-            _buildTagChip(
-              icon: meta.icon,
-              label: meta.label,
-              color: baseColor,
-              isDarkMode: isDarkMode,
-              fontSize: 9,
-              iconSize: 10,
-              radius: 8,
-              fillAlphaDark: 0.25,
-              fillAlphaLight: 0.15,
-            ),
-          ],
+      child: Text(
+        '${index + 1}'.padLeft(2, '0'),
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w800,
         ),
-        const SizedBox(height: 6),
-        Row(
-          children: [
-            _buildTagChip(
-              icon: meta.icon,
-              label: statusLabel,
-              color: baseColor,
-              isDarkMode: isDarkMode,
-            ),
-            if (episodeInfo != null) ...[
-              const SizedBox(width: 6),
-              _buildTagChip(
-                icon: Icons.playlist_play_rounded,
-                label: episodeInfo,
-                color: baseColor.withValues(alpha: 0.6),
-                isDarkMode: isDarkMode,
-              ),
-            ],
-          ],
-        ),
-        const SizedBox(height: 6),
-        Row(
-          children: [
-            _buildInfoLine(lineInfo, updateInfo, baseColor, secondaryText),
-            const SizedBox(width: 6),
-            Text(
-              '立即播放',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: baseColor.withValues(alpha: isDarkMode ? 0.9 : 1.0),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildInfoLine(
-    String? lineInfo,
-    String? updateInfo,
-    Color baseColor,
-    Color secondaryText,
-  ) {
-    final (icon, text) = lineInfo != null
-        ? (Icons.hub_rounded, lineInfo)
-        : updateInfo != null
-            ? (Icons.schedule_rounded, updateInfo)
-            : (null, '点击即可进入播放');
-
-    return Expanded(
-      child: Row(
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 12, color: baseColor.withValues(alpha: 0.7)),
-            const SizedBox(width: 3),
-          ],
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(fontSize: 11, color: secondaryText, height: 1.2),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPlayButton(Color baseColor, bool isDarkMode) {
-    return Container(
-      width: 40,
-      height: 40,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: baseColor.withValues(alpha: isDarkMode ? 0.9 : 1.0),
-      ),
-      alignment: Alignment.center,
-      child: const Icon(
-        Icons.play_arrow_rounded,
-        size: 20,
-        color: Colors.white,
-      ),
-    );
-  }
-
-  Widget _buildTagChip({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required bool isDarkMode,
-    double fontSize = 8,
-    double iconSize = 9,
-    double radius = 6,
-    double fillAlphaDark = 0.2,
-    double fillAlphaLight = 0.1,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withValues(
-          alpha: isDarkMode ? fillAlphaDark : fillAlphaLight,
-        ),
-        borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: color.withValues(alpha: 0.3), width: 0.5),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: iconSize, color: color),
-          const SizedBox(width: 3),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: fontSize,
-              fontWeight: FontWeight.w600,
-              color: color,
-              height: 1,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -2144,26 +1719,34 @@ const List<Color> _customSourcePalette = [
 Color _customSourceColor(String name) =>
     _customSourcePalette[name.hashCode.abs() % _customSourcePalette.length];
 
-Map<String, _SourceMeta> _buildSourceRegistry({
-  required List<AdapterDescriptor> quickSources,
-  required List<CustomSourceConfig> customSources,
-}) {
-  return {
-    'all': _kAllSourceMeta,
-    'internal': _kInternalSourceMeta,
-    for (final s in quickSources)
-      s.key: _SourceMeta(
-        label: s.displayName,
-        icon: s.icon,
-        color: s.color,
-        statusLabel: s.statusLabel,
-      ),
-    for (final s in customSources)
-      AdapterRegistry.customSourceKey(s.id): _SourceMeta(
-        label: s.name,
-        icon: Icons.extension_rounded,
-        color: _customSourceColor(s.name),
-        statusLabel: '自定义源',
-      ),
-  };
+/// 按需解析源展示元数据，复用 AdapterDescriptor / CustomSourceConfig，不在 widget 再建模。
+_SourceMeta _resolveSourceMeta(String key) {
+  if (key == 'all') return _kAllSourceMeta;
+  if (key == 'internal') return _kInternalSourceMeta;
+
+  final descriptor = AdapterRegistry.descriptorFor(key);
+  if (descriptor != null) {
+    return _SourceMeta(
+      label: descriptor.displayName,
+      icon: descriptor.icon,
+      color: descriptor.color,
+      statusLabel: descriptor.statusLabel,
+    );
+  }
+
+  if (AdapterRegistry.isCustomSource(key)) {
+    final id = key.substring(AdapterRegistry.customSourcePrefix.length);
+    for (final s in SourceCatalog.instance.enabledCustomSources) {
+      if (s.id == id) {
+        return _SourceMeta(
+          label: s.name,
+          icon: Icons.extension_rounded,
+          color: _customSourceColor(s.name),
+          statusLabel: '自定义源',
+        );
+      }
+    }
+  }
+
+  return _kFallbackSourceMeta;
 }

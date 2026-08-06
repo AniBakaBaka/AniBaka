@@ -242,38 +242,38 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
 
                   ValueListenableBuilder<PlaybackPreferences>(
                     valueListenable: _ctrl.preferences,
-                    builder: (context, preferences, _) => _TvSliderItem(
-                      icon: Icons.memory_rounded,
-                      title: '硬件解码',
-                      value: PlaybackSettingsService.hwdecModeOptions
+                    builder: (context, preferences, _) {
+                      final hwdecOptions =
+                          PlaybackSettingsService.hwdecModeOptionsForPlatform;
+                      final hwdecIndex = hwdecOptions
                           .indexOf(preferences.hwdecMode)
-                          .toDouble(),
-                      min: 0,
-                      max: (PlaybackSettingsService.hwdecModeOptions.length - 1)
-                          .toDouble(),
-                      step: 1,
-                      displayValue:
-                          preferences.videoRenderer == 'mediacodec_embed'
-                          ? 'mediacodec_embed'
-                          : (PlaybackSettingsService.hwdecModeLabels[
-                                  preferences.hwdecMode] ??
-                              preferences.hwdecMode),
-                      onChanged: (v) {
-                        final index = v.toInt();
-                        if (index >= 0 &&
-                            index <
-                                PlaybackSettingsService
-                                    .hwdecModeOptions
-                                    .length) {
-                          _ctrl.updatePreferences(
-                            preferences.copyWith(
-                              hwdecMode: PlaybackSettingsService
-                                  .hwdecModeOptions[index],
-                            ),
-                          );
-                        }
-                      },
-                    ),
+                          .clamp(0, hwdecOptions.length - 1);
+                      return _TvSliderItem(
+                        icon: Icons.memory_rounded,
+                        title: '硬件解码',
+                        value: hwdecIndex.toDouble(),
+                        min: 0,
+                        max: (hwdecOptions.length - 1).toDouble(),
+                        step: 1,
+                        displayValue:
+                            preferences.videoRenderer == 'mediacodec_embed'
+                            ? 'mediacodec_embed'
+                            : (PlaybackSettingsService
+                                      .hwdecModeLabelsForPlatform[preferences
+                                      .hwdecMode] ??
+                                  preferences.hwdecMode),
+                        onChanged: (v) {
+                          final index = v.toInt();
+                          if (index >= 0 && index < hwdecOptions.length) {
+                            _ctrl.updatePreferences(
+                              preferences.copyWith(
+                                hwdecMode: hwdecOptions[index],
+                              ),
+                            );
+                          }
+                        },
+                      );
+                    },
                   ),
                   const SizedBox(height: 8),
 

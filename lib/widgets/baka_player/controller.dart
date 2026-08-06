@@ -785,6 +785,10 @@ class PlaybackController {
   }) async {
     if (_disposed) return;
     final previous = preferences.value;
+    // TV 上不允许 auto：选择「自动」立即归一化为 mediacodec-copy，
+    // 保证会话内应用值与持久化值一致（resetPreferences 同样受益）。
+    final hwdec = PlaybackSettingsService.normalizeHwdecMode(next.hwdecMode);
+    if (hwdec != next.hwdecMode) next = next.copyWith(hwdecMode: hwdec);
     if (previous == next) return;
     preferences.value = next;
     if (previous.longPressSpeed != next.longPressSpeed) {
