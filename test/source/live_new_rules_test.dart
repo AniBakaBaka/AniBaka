@@ -332,6 +332,30 @@ void main() {
         timeout: const Timeout(Duration(minutes: 2)),
       );
       test(
+        'lm6',
+        () => _probe('lm6.json', '海贼王', verifyMedia: true, seriesIndex: 2),
+        timeout: const Timeout(Duration(minutes: 3)),
+      );
+      test('lm6 ecvod detail 8221', () async {
+        final rule = await _loadRule('lm6.json');
+        final adapter = PipelineSourceAdapter(rule);
+        final sources = await _interpreter.runDetail(
+          rule,
+          adapter,
+          'https://m.lm6.net/detail/8221.html',
+        );
+        expect(sources, isNotEmpty);
+        final source = sources.firstWhere(
+          (source) => source.episodes.isNotEmpty,
+        );
+        final episodeId = source.episodes.first.episodeId as String;
+        final media = await adapter.resolvePlaybackMedia(episodeId);
+        // ignore: avoid_print
+        print('[lm6 ecvod] $episodeId -> ${media.url}');
+        expect(media.url, isNotEmpty);
+        expect(media.url, startsWith('http'));
+      }, timeout: const Timeout(Duration(minutes: 2)));
+      test(
         'fsdm02',
         () => _probe('fsdm02.json', '咔嗒咔嗒', verifyMedia: true),
         timeout: const Timeout(Duration(minutes: 4)),

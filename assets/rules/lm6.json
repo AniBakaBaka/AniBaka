@@ -13,42 +13,352 @@
   },
   "search": [
     {
-      "op": "sniff",
-      "goal": "html",
-      "url": "/index.php/vod/search/wd/{keyword}.html",
-      "readyContains": ["video-img-box"],
-      "rejectContains": ["身份验证", "安全验证"],
-      "timeoutMs": 30000,
-      "settleMs": 2000
-    },
-    {
-      "op": "searchList",
-      "selectors": [".video-img-box .detail"],
-      "detailPattern": "/detail/"
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "fetch",
+            "url": "/index.php/ajax/suggest?mid=1&wd={keyword}"
+          },
+          {
+            "op": "jsonSeries",
+            "listPath": "list",
+            "idKey": "id",
+            "nameKey": "name",
+            "imageKey": "pic",
+            "detailUrlTemplate": "/detail/{id}.html"
+          }
+        ],
+        [
+          {
+            "op": "sniff",
+            "goal": "html",
+            "url": "/index.php/vod/search/wd/{keyword}.html",
+            "readyContains": ["video-img-box"],
+            "rejectContains": ["身份验证", "安全验证"],
+            "timeoutMs": 30000,
+            "settleMs": 2000
+          },
+          {
+            "op": "searchList",
+            "selectors": [".video-img-box .detail"],
+            "detailPattern": "/detail/"
+          }
+        ]
+      ]
     }
   ],
   "detail": [
     {
-      "op": "sniff",
-      "goal": "html",
-      "url": "{seriesId:raw}",
-      "readyContains": ["module-player-list"],
-      "rejectContains": ["身份验证", "安全验证"],
-      "timeoutMs": 30000,
-      "settleMs": 2000
-    },
-    {
-      "op": "episodes",
-      "listSelectors": [
-        ".module-player-list"
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "fetch",
+            "url": "{seriesId:raw}"
+          },
+          {
+            "op": "episodes",
+            "listSelectors": [
+              ".module-player-list"
+            ]
+          }
+        ],
+        [
+          {
+            "op": "sniff",
+            "goal": "html",
+            "url": "{seriesId:raw}",
+            "readyContains": ["module-player-list"],
+            "rejectContains": ["身份验证", "安全验证"],
+            "timeoutMs": 30000,
+            "settleMs": 2000
+          },
+          {
+            "op": "episodes",
+            "listSelectors": [
+              ".module-player-list"
+            ]
+          }
+        ]
       ]
     }
   ],
   "play": [
     {
-      "op": "sniff",
-      "goal": "video",
-      "url": "{episodeId:raw}"
+      "op": "first",
+      "branches": [
+        [
+          {
+            "op": "fetch",
+            "url": "{episodeId:raw}"
+          },
+          {
+            "op": "setVar",
+            "name": "page",
+            "value": "{url:raw}"
+          },
+          {
+            "op": "playerAaaa"
+          },
+          {
+            "op": "setVar",
+            "name": "purl",
+            "value": "{url:raw}"
+          },
+          {
+            "op": "setVar",
+            "name": "playref",
+            "value": "{episodeId:raw}"
+          },
+          {
+            "op": "template",
+            "value": "{page:raw}"
+          },
+          {
+            "op": "regex",
+            "pattern": "var\\s+player_aaaa\\s*=\\s*\\{[^}]*?\"from\"\\s*:\\s*\"([^\"]*)\"",
+            "group": 1
+          },
+          {
+            "op": "setVar",
+            "name": "from",
+            "value": "{url:raw}"
+          },
+          {
+            "op": "template",
+            "value": "{purl:raw}"
+          },
+          {
+            "op": "first",
+            "branches": [
+              [
+                {
+                  "op": "regex",
+                  "pattern": "^(.+?)&t=[^&]+",
+                  "group": 1
+                }
+              ],
+              [
+                {
+                  "op": "regex",
+                  "pattern": "^(.+?)&ct=[^&]+",
+                  "group": 1
+                }
+              ],
+              [
+                {
+                  "op": "template",
+                  "value": "{purl:raw}"
+                }
+              ]
+            ]
+          },
+          {
+            "op": "setVar",
+            "name": "vid",
+            "value": "{url:raw}"
+          },
+          {
+            "op": "template",
+            "value": "{purl:raw}"
+          },
+          {
+            "op": "first",
+            "branches": [
+              [
+                {
+                  "op": "regex",
+                  "pattern": "^.+?&t=([^&]+)",
+                  "group": 1
+                }
+              ],
+              [
+                {
+                  "op": "template",
+                  "value": "{from:raw}"
+                }
+              ]
+            ]
+          },
+          {
+            "op": "setVar",
+            "name": "type",
+            "value": "{url:raw}"
+          },
+          {
+            "op": "template",
+            "value": "{type:raw}"
+          },
+          {
+            "op": "first",
+            "branches": [
+              [
+                {
+                  "op": "regex",
+                  "pattern": "^(hls|mp4)$",
+                  "group": 1
+                },
+                {
+                  "op": "replace",
+                  "pattern": "^(hls|mp4)$",
+                  "replacement": "mp4hls",
+                  "regex": true
+                }
+              ],
+              [
+                {
+                  "op": "template",
+                  "value": "yunbox"
+                }
+              ]
+            ]
+          },
+          {
+            "op": "setVar",
+            "name": "dir",
+            "value": "{url:raw}"
+          },
+          {
+            "op": "template",
+            "value": "https://yun.92cj.com/{dir:raw}/?type={type:raw}&vid={vid:raw}&referer={playref:raw}"
+          },
+          {
+            "op": "fetch"
+          },
+          {
+            "op": "setVar",
+            "name": "page2",
+            "value": "{url:raw}"
+          },
+          {
+            "op": "regex",
+            "pattern": "var\\s+vid\\s*=\\s*\"([^\"]*)\"",
+            "group": 1
+          },
+          {
+            "op": "setVar",
+            "name": "vid2",
+            "value": "{url:raw}"
+          },
+          {
+            "op": "template",
+            "value": "{page2:raw}"
+          },
+          {
+            "op": "regex",
+            "pattern": "var\\s+t\\s*=\\s*\"([^\"]*)\"",
+            "group": 1
+          },
+          {
+            "op": "setVar",
+            "name": "t",
+            "value": "{url:raw}"
+          },
+          {
+            "op": "template",
+            "value": "{page2:raw}"
+          },
+          {
+            "op": "regex",
+            "pattern": "var\\s+token\\s*=\\s*\"([^\"]*)\"",
+            "group": 1
+          },
+          {
+            "op": "setVar",
+            "name": "token",
+            "value": "{url:raw}"
+          },
+          {
+            "op": "template",
+            "value": "{page2:raw}"
+          },
+          {
+            "op": "regex",
+            "pattern": "var\\s+act\\s*=\\s*\"([^\"]*)\"",
+            "group": 1
+          },
+          {
+            "op": "setVar",
+            "name": "act",
+            "value": "{url:raw}"
+          },
+          {
+            "op": "template",
+            "value": "{page2:raw}"
+          },
+          {
+            "op": "regex",
+            "pattern": "var\\s+play\\s*=\\s*\"([^\"]*)\"",
+            "group": 1
+          },
+          {
+            "op": "setVar",
+            "name": "play",
+            "value": "{url:raw}"
+          },
+          {
+            "op": "template",
+            "value": "{page2:raw}"
+          },
+          {
+            "op": "regex",
+            "pattern": "\\$\\.post\\(\"([^\"]+)\"",
+            "group": 1
+          },
+          {
+            "op": "setVar",
+            "name": "api",
+            "value": "{url:raw}"
+          },
+          {
+            "op": "crypto",
+            "algo": "aes-cbc",
+            "mode": "decrypt",
+            "input": "{token:raw}",
+            "key": "OG2)9Cc%0_mADSCL",
+            "iv": "5re6a)@&wfDCMS^A"
+          },
+          {
+            "op": "setVar",
+            "name": "sig",
+            "value": "{url:raw}"
+          },
+          {
+            "op": "template",
+            "value": "https://yun.92cj.com/{dir:raw}/{api:raw}"
+          },
+          {
+            "op": "fetch",
+            "method": "POST",
+            "contentType": "form",
+            "headers": {
+              "X-Requested-With": "XMLHttpRequest"
+            },
+            "body": {
+              "vid": "{vid2:raw}",
+              "t": "{t:raw}",
+              "token": "{sig:raw}",
+              "act": "{act:raw}",
+              "play": "{play:raw}"
+            }
+          },
+          {
+            "op": "json",
+            "path": "url"
+          },
+          {
+            "op": "videoUrl"
+          }
+        ],
+        [
+          {
+            "op": "sniff",
+            "goal": "video",
+            "url": "{episodeId:raw}"
+          }
+        ]
+      ]
     }
   ]
 }
