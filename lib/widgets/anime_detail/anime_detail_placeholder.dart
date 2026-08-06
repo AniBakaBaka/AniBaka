@@ -11,7 +11,6 @@ import 'package:baka/services/collection_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/anime/post_card.dart';
-import 'package:baka/widgets/common/skeletonizer.dart';
 import 'package:baka/services/navigation_service.dart';
 
 import 'package:baka/widgets/anime_detail/collection_sheet.dart';
@@ -31,7 +30,7 @@ class AnimeDetailPlaceholder extends StatefulWidget {
 
 class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   late final int? _postId;
-  bool _isDetailLoading = true;
+
   late List<Map<String, dynamic>> _initialComments;
   late int _initialCommentTotal;
 
@@ -71,7 +70,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
         BgmUtils.toInt(widget.data['bgmCommentTotal']) ??
         _initialComments.length;
     _rebuildDetail();
-    _isDetailLoading = _detailData == null;
+
     _isCollectionLoading = _subjectId != null;
     _loadInitialData();
   }
@@ -81,40 +80,54 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   }
 
   Future<void> _loadInitialData() async {
-    try {
-      if (_subjectId == null) {
+    // Phase 1: 解析 bgmId（若未知）
+    if (_subjectId == null) {
+      try {
         await BgmService.resolveFromData(widget.data);
         _bgmInfo = BgmUtils.readFromData(widget.data);
+        if (mounted) setState(() => _rebuildDetail());
+      } catch (e) {
+        debugPrint('解析bgmId失败: $e');
       }
-
-      final bgmId = _subjectId;
-      final results = await Future.wait<Object?>([
-        if (bgmId != null && _anibakaData == null)
-          getAnimeDetail(bgmId)
-        else
-          Future<Object?>.value(_anibakaData),
-        if (bgmId != null && _detailData == null)
-          getBgmAnimePageDetail(bgmId)
-        else
-          Future<Object?>.value(_detailData),
-        if (bgmId != null)
-          CollectionService.getByBgmId(bgmId)
-        else
-          Future<Object?>.value(null),
-      ]);
-
-      _anibakaData = BgmUtils.asMap(results[0]);
-      _detailData = BgmUtils.asMap(results[1]);
-      if (_detailData != null) widget.data['bgmDetailData'] = _detailData;
-      _collection = results[2] as AnimeCollection?;
-      _rebuildDetail();
-    } catch (e) {
-      debugPrint('加载番剧详情失败: $e');
     }
-    if (!mounted) return;
-    setState(() {
-      _isDetailLoading = false;
-      _isCollectionLoading = false;
+
+    final bgmId = _subjectId;
+    if (bgmId == null) {
+      if (mounted) setState(() => _isCollectionLoading = false);
+      return;
+    }
+
+    // Phase 2: 并发启动所有请求，各自独立更新 UI
+    // AniBaka 自有 API（含 overview）
+    if (_anibakaData == null) {
+      getAnimeDetail(bgmId).then((data) {
+        if (!mounted) return;
+        _anibakaData = BgmUtils.asMap(data);
+        _rebuildDetail();
+        setState(() {});
+      }).catchError((_) {});
+    }
+
+    // BGM 主条目 API（含 summary + characters）
+    if (_detailData == null) {
+      getBgmAnimePageDetail(bgmId).then((data) {
+        if (!mounted) return;
+        _detailData = BgmUtils.asMap(data);
+        if (_detailData != null) widget.data['bgmDetailData'] = _detailData;
+        _rebuildDetail();
+        setState(() {});
+      }).catchError((_) {});
+    }
+
+    // Phase 3: 收藏状态独立加载
+    CollectionService.getByBgmId(bgmId).then((collection) {
+      if (!mounted) return;
+      setState(() {
+        _collection = collection;
+        _isCollectionLoading = false;
+      });
+    }).catchError((_) {
+      if (mounted) setState(() => _isCollectionLoading = false);
     });
   }
 
@@ -390,12 +403,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
       (
         '概览',
         (_) {
-          final summary = _isDetailLoading
-              ? AppSkeletonizer(
-                  enabled: true,
-                  child: _buildSummarySection('这是一段用于自动骨架遮罩的动画简介占位文本...'),
-                )
-              : _buildSummarySection(_detail.summary);
+          final summary = _buildSummarySection(_detail.summary);
           final genresSection = _detail.genres.isEmpty
               ? const SizedBox.shrink()
               : _buildGenresSection(_detail.genres);
@@ -478,24 +486,16 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                 widget.data['bgmCommentTotal'] = result.$2;
               },
             )
-          : _isDetailLoading
-          ? const Center(child: CircularProgressIndicator())
           : _buildEmptySection('暂无评论数据'),
     ));
 
-    if (_isDetailLoading || _detail.infobox.isNotEmpty) {
+    if (_detail.infobox.isNotEmpty) {
       tabs.add((
         '信息',
-        (_) => _buildTabSection(
-          content: _detail.infobox.isEmpty
-              ? null
-              : _buildInfoSection(_detail.infobox),
-          skeletonContent: _buildInfoSection(const [
-            {'key': '中文名', 'value': '动画名称占位'},
-            {'key': '话数', 'value': '12'},
-            {'key': '放送星期', 'value': '星期六'},
-          ]),
-          emptyText: '暂无基本信息',
+        (_) => _wrapTabContent(
+          _detail.infobox.isNotEmpty
+              ? _buildInfoSection(_detail.infobox)
+              : _buildEmptySection('暂无基本信息'),
         ),
       ));
     }
@@ -506,23 +506,14 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
 
     tabs.add((
       '角色',
-      (_) => _buildTabSection(
-        content: _detail.characters.isEmpty
-            ? null
+      (_) => _wrapTabContent(
+        _detail.characters.isEmpty
+            ? _buildEmptySection('暂无角色信息')
             : CharactersSection(
                 characters: _detail.characters,
                 onCharacterTap: (character) =>
                     showCharacterDetailSheet(context, character),
               ),
-        skeletonContent: CharactersSection(
-          characters: const [
-            {'name': '角色1', 'role_name': '主角'},
-            {'name': '角色2', 'role_name': '配角'},
-            {'name': '角色3', 'role_name': '配角'},
-          ],
-          onCharacterTap: (_) {},
-        ),
-        emptyText: '暂无角色信息',
       ),
     ));
 
@@ -557,17 +548,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     );
   }
 
-  Widget _buildTabSection({
-    required Widget? content,
-    required Widget skeletonContent,
-    required String emptyText,
-  }) {
-    return _wrapTabContent(
-      _isDetailLoading
-          ? AppSkeletonizer(child: skeletonContent)
-          : content ?? _buildEmptySection(emptyText),
-    );
-  }
+
 
   Widget _buildEmptySection(String message) {
     return Padding(

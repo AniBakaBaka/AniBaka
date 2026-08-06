@@ -1,5 +1,4 @@
 import 'package:baka/api/bgm.dart';
-import 'package:baka/widgets/common/skeletonizer.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -64,7 +63,6 @@ class BgmDetailPage extends StatefulWidget {
 }
 
 class _BgmDetailPageState extends State<BgmDetailPage> {
-  bool _loading = false;
   bool _error = false;
   late String _title = widget.title;
   late String _summary = widget.fixedSummary ?? '暂无简介';
@@ -82,10 +80,7 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
   }
 
   Future<void> _fetchDetail() async {
-    setState(() {
-      _loading = true;
-      _error = false;
-    });
+    setState(() => _error = false);
     try {
       final detail = await getBgmAnimeFullDetail(widget.subjectId!);
       if (!mounted) return;
@@ -104,13 +99,11 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
         _score =
             (rating?['score'] as num?)?.toDouble() ?? widget.initialScore ?? 0;
         _ratingCount = (rating?['total'] as num?)?.toInt() ?? 0;
-        _loading = false;
       });
     } catch (_) {
       if (mounted) {
         setState(() {
-          _loading = false;
-          _error = widget.fixedSummary == null;
+          _error = widget.fixedSummary?.isNotEmpty != true;
         });
       }
     }
@@ -140,31 +133,6 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
   }
 
   Widget _buildBody(ThemeData theme) {
-    if (_loading) {
-      return AppSkeletonizer(
-        enabled: true,
-        child: ListView(
-          controller: widget.scrollController,
-          padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
-          children: [
-            _buildHeader(theme),
-            _buildSectionTitle('简介'),
-            const Text(
-              '这是一段用于自动骨架遮罩的详细简介占位内容，展示动画故事背景与情节梗概，维持真实的页面渲染与尺寸。',
-            ),
-            _buildSectionTitle('标签'),
-            const Wrap(
-              spacing: 8,
-              children: [
-                Chip(label: Text('标签一')),
-                Chip(label: Text('标签二')),
-                Chip(label: Text('标签三')),
-              ],
-            ),
-          ],
-        ),
-      );
-    }
     if (_error) return _buildError(theme);
 
     return ListView(

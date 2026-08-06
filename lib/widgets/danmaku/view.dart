@@ -261,6 +261,7 @@ class _DanmakuViewState extends State<DanmakuView>
     final option = _controller.option;
     if (checkBlock) {
       if (_controller.isBlocked(item.text)) return;
+      if (_controller.isColorBlocked(item.color)) return;
       if (_controller.blockRepeat &&
           _repeatWindow.shouldBlock(item.text, _clockMs)) {
         return;

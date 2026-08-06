@@ -451,8 +451,15 @@ class CIslandCommentWidget extends StatefulWidget {
   State<CIslandCommentWidget> createState() => CIslandCommentWidgetState();
 }
 
-class CIslandCommentWidgetState extends State<CIslandCommentWidget> {
+Color? _mutedColor(ThemeData theme, {double alpha = 0.35}) =>
+    theme.textTheme.bodySmall?.color?.withValues(alpha: alpha);
+
+class CIslandCommentWidgetState extends State<CIslandCommentWidget>
+    with AutomaticKeepAliveClientMixin<CIslandCommentWidget> {
   final _commentKey = GlobalKey<CommentListState>();
+
+  @override
+  bool get wantKeepAlive => true;
   late Future<_BgmSection> _bgmRequest = _loadBgmComments();
 
   @override
@@ -549,6 +556,7 @@ class CIslandCommentWidgetState extends State<CIslandCommentWidget> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final theme = Theme.of(context);
     final hasBgm = widget.bgmSubjectId != null && widget.episodeIndex != null;
 
@@ -627,18 +635,17 @@ class CIslandCommentWidgetState extends State<CIslandCommentWidget> {
                               children: List.generate(
                                 2,
                                 (_) => Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 8),
-                                  child: _buildBgmComment(
-                                    (
-                                      name: '用户名称占位符',
-                                      avatarUrl: '',
-                                      content: '这是一条用于自动骨架遮罩的占位剧评内容文本...',
-                                      images: const <String>[],
-                                      createdAt: 1700000000,
-                                      replies: const <_BgmReply>[],
-                                    ),
-                                    theme,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 8,
                                   ),
+                                  child: _buildBgmComment((
+                                    name: '用户名称占位符',
+                                    avatarUrl: '',
+                                    content: '这是一条用于自动骨架遮罩的占位剧评内容文本...',
+                                    images: const <String>[],
+                                    createdAt: 1700000000,
+                                    replies: const <_BgmReply>[],
+                                  ), theme),
                                 ),
                               ),
                             ),
@@ -719,171 +726,131 @@ class CIslandCommentWidgetState extends State<CIslandCommentWidget> {
   }
 
   Widget _buildBgmComment(_BgmComment comment, ThemeData theme) {
-    final mutedColor = theme.textTheme.bodySmall?.color?.withValues(alpha: 0.4);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: CommentAvatar(url: comment.avatarUrl, size: 36),
+    final mutedColor = _mutedColor(theme, alpha: 0.4);
+    final badge = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF09199).withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: const Text(
+        'BGM',
+        style: TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFFF09199),
+        ),
+      ),
+    );
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (comment.content.isNotEmpty)
+          Text(
+            comment.content,
+            style: TextStyle(
+              fontSize: 14,
+              height: 1.5,
+              color: theme.textTheme.bodyMedium?.color,
+            ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        if (comment.images.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        comment.name,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: theme.textTheme.bodyLarge?.color,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 5,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF09199).withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Text(
-                        'BGM',
-                        style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFFF09199),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    if (comment.createdAt > 0)
-                      Text(
-                        DateTime.fromMillisecondsSinceEpoch(
-                          comment.createdAt * 1000,
-                        ).toRelativeTime(),
-                        style: TextStyle(fontSize: 11, color: mutedColor),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                if (comment.content.isNotEmpty)
-                  Text(
-                    comment.content,
-                    style: TextStyle(
-                      fontSize: 14,
-                      height: 1.5,
-                      color: theme.textTheme.bodyMedium?.color,
+                for (final url in comment.images)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: CachedNetworkImage(
+                      imageUrl: url,
+                      memCacheWidth: 240,
+                      width: 120,
+                      height: 120,
+                      fit: BoxFit.cover,
+                      placeholder: (_, _) =>
+                          ColoredBox(color: AppShimmer.defaultBaseColor(theme)),
+                      errorWidget: (_, _, _) => const SizedBox.shrink(),
                     ),
                   ),
-                if (comment.images.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final url in comment.images)
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: CachedNetworkImage(
-                              imageUrl: url,
-                              memCacheWidth: 240,
-                              width: 120,
-                              height: 120,
-                              fit: BoxFit.cover,
-                              placeholder: (_, _) => ColoredBox(
-                                color: AppShimmer.defaultBaseColor(theme),
-                              ),
-                              errorWidget: (_, _, _) => const SizedBox.shrink(),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.info_outline_rounded,
-                      size: 12,
-                      color: mutedColor,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      '来自 Bangumi · 无法回复',
-                      style: TextStyle(fontSize: 11, color: mutedColor),
-                    ),
-                  ],
-                ),
-                if (comment.replies.isNotEmpty)
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(top: 8),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      color: theme.dividerColor.withValues(alpha: 0.04),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        for (final reply in comment.replies)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 4),
-                            child: Text.rich(
-                              TextSpan(
-                                children: [
-                                  TextSpan(
-                                    text: '${reply.name}: ',
-                                    style: TextStyle(
-                                      color: theme.colorScheme.primary,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                  TextSpan(
-                                    text: reply.content,
-                                    style: TextStyle(
-                                      color: theme.textTheme.bodyMedium?.color
-                                          ?.withValues(alpha: 0.8),
-                                      fontSize: 13,
-                                      height: 1.4,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Divider(
-                    height: 0.5,
-                    color: theme.dividerColor.withValues(alpha: 0.08),
-                  ),
-                ),
               ],
             ),
           ),
-        ],
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Icon(Icons.info_outline_rounded, size: 12, color: mutedColor),
+            const SizedBox(width: 4),
+            Text(
+              '来自 Bangumi · 无法回复',
+              style: TextStyle(fontSize: 11, color: mutedColor),
+            ),
+          ],
+        ),
+      ],
+    );
+    final replies = comment.replies.isEmpty
+        ? null
+        : Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              color: theme.dividerColor.withValues(alpha: 0.04),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final reply in comment.replies)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: '${reply.name}: ',
+                            style: TextStyle(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                          TextSpan(
+                            text: reply.content,
+                            style: TextStyle(
+                              color: theme.textTheme.bodyMedium?.color
+                                  ?.withValues(alpha: 0.8),
+                              fontSize: 13,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: CommentTile(
+        name: comment.name,
+        avatar: CommentAvatar(url: comment.avatarUrl, size: 36),
+        nameColor: theme.textTheme.bodyLarge?.color,
+        badge: badge,
+        time: comment.createdAt > 0
+            ? DateTime.fromMillisecondsSinceEpoch(
+                comment.createdAt * 1000,
+              ).toRelativeTime()
+            : '',
+        content: content,
+        replies: replies,
+        avatarSize: 36,
+        avatarPadding: 2,
+        spacing: 12,
       ),
     );
   }

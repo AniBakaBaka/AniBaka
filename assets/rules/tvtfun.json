@@ -1,0 +1,50 @@
+{
+  "format": "anx-rule/2",
+  "id": "tvtfun",
+  "name": "TvTFun",
+  "baseUrl": "https://www.tvtfun.net",
+  "iconUrl": "https://www.tvtfun.net/favicon-32x32.png",
+  "description": "TvTFun 动漫视频源。",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "Referer": "https://tvtfun.net/"
+  },
+  "search": [
+    {
+      "op": "fetch",
+      "url": "/videos?keyword={keyword}"
+    },
+    {
+      "op": "searchList",
+      "selectors": [
+        "a[href*=\"/video/\"]",
+        ".video-item",
+        ".video-list li"
+      ],
+      "detailPattern": "/video/"
+    }
+  ],
+  "detail": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "episodes",
+      "listSelectors": [
+        "body"
+      ],
+      "tabSelectors": [
+        "a[href*=\"source=\"]"
+      ]
+    }
+  ],
+  "play": [
+    {
+      "op": "sniff",
+      "goal": "video",
+      "url": "{episodeId:raw}",
+      "timeoutMs": 60000,
+      "settleMs": 1000
+    }
+  ]
+}

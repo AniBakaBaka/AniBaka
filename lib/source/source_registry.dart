@@ -85,16 +85,6 @@ class AdapterRegistry {
       factory: () => _createBundledRuleAdapter('akianime'),
     ),
     AdapterDescriptor(
-      key: 'aniwatch',
-      displayName: 'AniWatch',
-      playerContent: '来源: AniWatch。',
-      idPattern: r'/anime/(\d+)',
-      icon: Icons.movie_outlined,
-      color: const Color(0xFF3F51B5),
-      statusLabel: '第三方源',
-      factory: () => _createBundledRuleAdapter('aniwatch'),
-    ),
-    AdapterDescriptor(
       key: 'cycani',
       displayName: 'Cycani',
       playerContent: '来源: Cycani。',
@@ -189,6 +179,25 @@ class AdapterRegistry {
       color: const Color(0xFF26A69A),
       statusLabel: '第三方源',
       factory: () => _createBundledRuleAdapter('xifanacg'),
+    ),
+    AdapterDescriptor(
+      key: 'tvtfun',
+      displayName: 'TvTFun',
+      playerContent: '来源: TvTFun。',
+      icon: Icons.live_tv_rounded,
+      color: const Color(0xFF5C6BC0),
+      statusLabel: '第三方源',
+      factory: () => _createBundledRuleAdapter('tvtfun'),
+    ),
+    AdapterDescriptor(
+      key: 'moonci',
+      displayName: 'Moonci',
+      playerContent: '来源: Moonci。',
+      idPattern: r'/anime/(\d+)',
+      icon: Icons.nightlight_round,
+      color: const Color(0xFF3949AB),
+      statusLabel: '第三方源',
+      factory: () => _createBundledRuleAdapter('moonci'),
     ),
   ];
 

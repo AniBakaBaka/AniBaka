@@ -26,6 +26,7 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
   late DanmakuOption _option;
   late List<String> _blockWords;
   late bool _blockRepeat;
+  late bool _blockColor;
   bool _isAppearanceExpanded = false;
 
   final TextEditingController _wordController = TextEditingController();
@@ -36,6 +37,7 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
     _option = widget.controller.option;
     _blockWords = List<String>.from(widget.controller.blockWords);
     _blockRepeat = widget.controller.blockRepeat;
+    _blockColor = widget.controller.blockColor;
   }
 
   @override
@@ -48,10 +50,12 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
     if (applyOption) widget.controller.updateOption(_option);
     widget.controller.blockWords = List<String>.unmodifiable(_blockWords);
     widget.controller.blockRepeat = _blockRepeat;
+    widget.controller.blockColor = _blockColor;
     return DanmakuService.saveSettings(
       _option,
       blockWords: _blockWords,
       blockRepeat: _blockRepeat,
+      blockColor: _blockColor,
     );
   }
 
@@ -71,6 +75,7 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
       _option = option;
       _blockWords.clear();
       _blockRepeat = false;
+      _blockColor = false;
     });
     widget.controller.updateOption(option);
     _saveSettings();
@@ -208,8 +213,13 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                             ),
                           ),
                           const SizedBox(height: 16),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          GridView.count(
+                            crossAxisCount: 3,
+                            crossAxisSpacing: 10,
+                            mainAxisSpacing: 10,
+                            childAspectRatio: 0.82,
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
                             children: [
                               _buildTypeToggleBtn(
                                 icon: Icons.arrow_forward_rounded,
@@ -252,6 +262,16 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                                 activeColor: primaryColor,
                                 onTap: () {
                                   setState(() => _blockRepeat = !_blockRepeat);
+                                  _saveSettings();
+                                },
+                              ),
+                              _buildTypeToggleBtn(
+                                icon: Icons.palette_outlined,
+                                label: '屏蔽彩色',
+                                isActive: _blockColor,
+                                activeColor: primaryColor,
+                                onTap: () {
+                                  setState(() => _blockColor = !_blockColor);
                                   _saveSettings();
                                 },
                               ),
@@ -416,40 +436,46 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
     required Color activeColor,
     required VoidCallback onTap,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        width: 56,
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          color: isActive
-              ? activeColor.withValues(alpha: 0.2)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          border: isActive
-              ? Border.all(color: activeColor.withValues(alpha: 0.5), width: 1)
-              : Border.all(
-                  color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
-                  width: 1,
+    final theme = Theme.of(context);
+    final foreground = isActive ? activeColor : Colors.white;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          decoration: BoxDecoration(
+            color: isActive
+                ? activeColor.withValues(alpha: 0.14)
+                : theme.colorScheme.onSurface.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isActive
+                  ? activeColor.withValues(alpha: 0.45)
+                  : theme.colorScheme.onSurface.withValues(alpha: 0.08),
+            ),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: foreground, size: 20),
+              const SizedBox(height: 3),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: foreground,
+                  fontSize: 12,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                 ),
-        ),
-        child: Column(
-          children: [
-            Icon(
-              icon,
-              color: isActive ? activeColor : Theme.of(context).disabledColor,
-              size: 20,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                color: isActive ? activeColor : Theme.of(context).disabledColor,
-                fontSize: 10,
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -11,6 +11,7 @@ class DanmakuController {
   bool _running = true;
   double _playbackRate = 1.0;
   bool blockRepeat = false;
+  bool blockColor = false;
   List<String> blockWords = [];
   List<DanmakuItem> _items = const [];
   DanmakuOption _option = DanmakuOption(
@@ -75,6 +76,9 @@ class DanmakuController {
     }
     return false;
   }
+
+  bool isColorBlocked(Color color) =>
+      blockColor && color.toARGB32() != Colors.white.toARGB32();
 
   void attach(DanmakuListener listener) {
     if (_listener != null && !identical(_listener, listener)) {

@@ -394,7 +394,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       if (currentSourceKey.isNotEmpty) {
         _failedSourceKeys.add(currentSourceKey);
       }
-      final currentSeriesId = widget.data['seriesId'] ?? widget.data['id'] ?? widget.data['url'];
+      final currentSeriesId =
+          widget.data['seriesId'] ?? widget.data['id'] ?? widget.data['url'];
       if (currentSourceKey.isNotEmpty && currentSeriesId != null) {
         _failedSourceKeys.add('$currentSourceKey|$currentSeriesId');
       }
@@ -408,7 +409,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
 
       // 2. 静默自动匹配备用源
       final seedData = _svc.buildSourceSeedData();
-      final controller = _autoMatchController ??
+      final controller =
+          _autoMatchController ??
           VideoSourceSearchController.sharedFor(seedData: seedData);
 
       final nextCandidateData = await controller.findNextPlayableCandidate(
@@ -465,7 +467,9 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     return ListenableBuilder(
       listenable: _pageDataVersion,
       builder: (context, _) {
-        if (videoList.isEmpty && !widget.autoMatch && _autoMatchController == null) {
+        if (videoList.isEmpty &&
+            !widget.autoMatch &&
+            _autoMatchController == null) {
           return Instances.isTV
               ? TvAnimeDetailPlaceholder(data: widget.data)
               : AnimeDetailPlaceholder(data: widget.data);
@@ -581,8 +585,9 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
 
     final seedData = _svc.buildSourceSeedData();
 
-    final searchController =
-        VideoSourceSearchController.sharedFor(seedData: seedData);
+    final searchController = VideoSourceSearchController.sharedFor(
+      seedData: seedData,
+    );
 
     final selection = await SourceSwitchSheet.show(
       context,
@@ -735,7 +740,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
                               ),
                               const SizedBox(height: 12),
                               Text(
-                                (_autoMatchController != null || widget.autoMatch)
+                                (_autoMatchController != null ||
+                                        widget.autoMatch)
                                     ? '正在自动匹配源中...'
                                     : '正在加载播放器...',
                                 style: const TextStyle(
@@ -904,6 +910,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         ? _bgmInfo.subjectId!
         : (int.tryParse(widget.data['id'].toString()) ?? 11);
     return CIslandCommentWidget(
+      key: const ValueKey('commentTab'),
       postId: effectivePostId,
       bgmSubjectId: _bgmInfo.subjectId,
       episodeIndex: currPlayIndex,

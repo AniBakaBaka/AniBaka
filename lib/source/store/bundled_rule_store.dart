@@ -15,7 +15,6 @@ class BundledRuleStore {
 
   static const Map<String, String> builtinAssets = <String, String>{
     'akianime': 'assets/rules/akianime.json',
-    'aniwatch': 'assets/rules/aniwatch.json',
     'cycani': 'assets/rules/cycani.json',
     'anime7': 'assets/rules/anime7.json',
     'dm84': 'assets/rules/dm84.json',
@@ -26,6 +25,8 @@ class BundledRuleStore {
     'mgnacg': 'assets/rules/mgnacg.json',
     'ios_mifun': 'assets/rules/ios_mifun.json',
     'xifanacg': 'assets/rules/xifanacg.json',
+    'tvtfun': 'assets/rules/tvtfun.json',
+    'moonci': 'assets/rules/moonci.json',
   };
 
   /// Rule Hub revisions represented by the bundled copies.
@@ -34,7 +35,6 @@ class BundledRuleStore {
   /// official Rule Hub entry yet.
   static const Map<String, int> builtinVersions = <String, int>{
     'akianime': 4,
-    'aniwatch': 0,
     'cycani': 2,
     'anime7': 2,
     'dm84': 0,
@@ -45,6 +45,8 @@ class BundledRuleStore {
     'mgnacg': 0,
     'ios_mifun': 4,
     'xifanacg': 2,
+    'tvtfun': 6,
+    'moonci': 1,
   };
 
   static Map<String, SourceRule> _rules = const <String, SourceRule>{};

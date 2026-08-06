@@ -309,8 +309,7 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
       }
     }
 
-    if (!_materializesHls ||
-        !prepared.url.toLowerCase().contains('.m3u8')) {
+    if (!_materializesHls || !prepared.url.toLowerCase().contains('.m3u8')) {
       return prepared;
     }
     final manifestUri = Uri.tryParse(prepared.url);
@@ -736,7 +735,9 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
       );
       return resp.data?.toString() ?? '';
     } on DioException catch (e) {
-      debugPrint('$name: fetch 失败 $url: ${e.message ?? e.type.name}, error: ${e.error}, resp: ${e.response?.statusCode}');
+      debugPrint(
+        '$name: fetch 失败 $url: ${e.message ?? e.type.name}, error: ${e.error}, resp: ${e.response?.statusCode}',
+      );
       return '';
     }
   }

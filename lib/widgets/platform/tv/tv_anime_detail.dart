@@ -53,9 +53,8 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   void initState() {
     super.initState();
     _rebuildDetail();
-    _fetchBgmData().then((_) {
-      if (mounted) _fetchCollectionStatus();
-    });
+    _fetchBgmData();
+    _fetchCollectionStatus();
   }
 
   Future<void> _fetchBgmData() async {

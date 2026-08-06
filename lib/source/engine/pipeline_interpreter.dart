@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:encrypt/encrypt.dart' as enc;
 import 'package:html/parser.dart' show parse;
 
+import 'package:baka/services/matching/title_matcher.dart';
 import 'package:baka/source/models/series.dart';
 import 'package:baka/source/models/episode.dart';
 import 'package:baka/source/models/source.dart';
@@ -775,7 +776,22 @@ class PipelineInterpreter {
       }
     }
 
-    if (list != null) _appendJsonSeries(list, step, ctx);
+    if (list != null) {
+      final nameKey = step.str('nameKey') ?? 'name';
+      final kw = keyword.toLowerCase().trim();
+      final filtered = list.where((item) {
+        if (item is! Map) return false;
+        final name = item[nameKey]?.toString().toLowerCase().trim() ?? '';
+        if (name.isEmpty) return false;
+        if (kw.isEmpty) return true;
+        // 校验 MacCMS ajax 建议结果：若名称与关键词无任何相关重合，判定为 MacCMS 返回的热门榜单并过滤
+        return name.contains(kw) || kw.contains(name) || TitleFingerprint(name).similarityTo(TitleFingerprint(kw)) > 0.10;
+      }).toList();
+
+      if (filtered.isNotEmpty) {
+        _appendJsonSeries(filtered, step, ctx);
+      }
+    }
   }
 
   void _opEcPlayer(PipelineStep step, _PipelineContext ctx) {

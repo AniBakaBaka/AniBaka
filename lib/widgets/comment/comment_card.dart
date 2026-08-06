@@ -17,6 +17,114 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
+Color? _commentMutedColor(ThemeData theme, {double alpha = 0.35}) =>
+    theme.textTheme.bodySmall?.color?.withValues(alpha: alpha);
+
+class CommentTile extends StatelessWidget {
+  const CommentTile({
+    required this.name,
+    required this.avatar,
+    required this.nameColor,
+    required this.time,
+    required this.content,
+    this.badge,
+    this.replies,
+    this.actions,
+    this.avatarSize = 40,
+    this.avatarPadding = 4,
+    this.spacing = 14,
+    this.showDivider = false,
+    super.key,
+  });
+
+  final String name;
+  final Widget avatar;
+  final Color? nameColor;
+  final String time;
+  final Widget content;
+  final Widget? badge;
+  final Widget? replies;
+  final Widget? actions;
+  final double avatarSize;
+  final double avatarPadding;
+  final double spacing;
+  final bool showDivider;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: showDivider ? 4 : 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: EdgeInsets.only(top: avatarPadding),
+            child: avatar,
+          ),
+          SizedBox(width: spacing),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        name,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: showDivider ? 0.2 : 0,
+                          color: nameColor,
+                        ),
+                      ),
+                    ),
+                    if (badge case final badge?) ...[
+                      const SizedBox(width: 6),
+                      badge,
+                    ],
+                    const SizedBox(width: 8),
+                    if (time.isNotEmpty)
+                      Text(
+                        time,
+                        style: TextStyle(
+                          fontSize: showDivider ? 12 : 11,
+                          letterSpacing: showDivider ? 0.2 : 0,
+                          fontWeight: showDivider ? FontWeight.w500 : null,
+                          color: _commentMutedColor(
+                            Theme.of(context),
+                            alpha: showDivider ? 0.35 : 0.4,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                SizedBox(height: showDivider ? 6 : 4),
+                content,
+                ?actions,
+                ?replies,
+                if (showDivider)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Divider(
+                      height: 0.5,
+                      color: Theme.of(
+                        context,
+                      ).dividerColor.withValues(alpha: 0.08),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class CommentList extends StatefulWidget {
   const CommentList({
     required this.pid,
@@ -51,6 +159,8 @@ class CommentListState extends State<CommentList> {
   late final Map userInfo = getUserInfo();
   List? _internalComments;
   int _requestSerial = 0;
+  late MarkdownStyleSheet _markdownStyle;
+  ThemeData? _markdownTheme;
 
   List? get _effectiveComments => widget.comments ?? _internalComments;
   bool get needsLoad => _effectiveComments == null;
@@ -60,6 +170,42 @@ class CommentListState extends State<CommentList> {
   void initState() {
     super.initState();
     if (widget.comments == null && widget.autoLoad) _loadComments();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final theme = Theme.of(context);
+    if (_markdownTheme == theme) return;
+    _markdownTheme = theme;
+    _markdownStyle = MarkdownStyleSheet(
+      blockquotePadding: const EdgeInsets.only(left: 12, top: 2, bottom: 2),
+      blockquoteDecoration: BoxDecoration(
+        border: Border(
+          left: BorderSide(
+            width: 3,
+            color: theme.colorScheme.primary.withValues(alpha: 0.3),
+          ),
+        ),
+      ),
+      blockquote: TextStyle(
+        fontSize: 14,
+        fontStyle: FontStyle.italic,
+        color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.7),
+      ),
+      code: const TextStyle(fontFamily: 'Source Code Pro', fontSize: 13),
+      a: TextStyle(
+        color: theme.colorScheme.primary,
+        decoration: TextDecoration.none,
+        fontWeight: FontWeight.w500,
+      ),
+      p: TextStyle(
+        fontSize: 15,
+        height: 1.6,
+        letterSpacing: 0.2,
+        color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.95),
+      ),
+    );
   }
 
   @override
@@ -155,14 +301,6 @@ class CommentListState extends State<CommentList> {
 
     if (comments == null) {
       final nowSeconds = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final markdownStyle = MarkdownStyleSheet(
-        p: TextStyle(
-          fontSize: 15,
-          height: 1.6,
-          letterSpacing: 0.2,
-          color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.95),
-        ),
-      );
       final loading = AppSkeletonizer(
         enabled: true,
         child: Column(
@@ -174,16 +312,14 @@ class CommentListState extends State<CommentList> {
                 context,
                 _dummyComment,
                 theme,
-                markdownStyle,
+                _markdownStyle,
                 nowSeconds,
               ),
             ),
           ),
         ),
       );
-      return widget.asSliver
-          ? SliverToBoxAdapter(child: loading)
-          : loading;
+      return widget.asSliver ? SliverToBoxAdapter(child: loading) : loading;
     }
 
     if (comments.isEmpty) {
@@ -214,40 +350,11 @@ class CommentListState extends State<CommentList> {
     }
 
     final nowSeconds = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final markdownStyle = MarkdownStyleSheet(
-      blockquotePadding: const EdgeInsets.only(left: 12, top: 2, bottom: 2),
-      blockquoteDecoration: BoxDecoration(
-        border: Border(
-          left: BorderSide(
-            width: 3,
-            color: theme.colorScheme.primary.withValues(alpha: 0.3),
-          ),
-        ),
-      ),
-      blockquote: TextStyle(
-        fontSize: 14,
-        fontStyle: FontStyle.italic,
-        color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.7),
-      ),
-      code: const TextStyle(fontFamily: 'Source Code Pro', fontSize: 13),
-      a: TextStyle(
-        color: theme.colorScheme.primary,
-        decoration: TextDecoration.none,
-        fontWeight: FontWeight.w500,
-      ),
-      p: TextStyle(
-        fontSize: 15,
-        height: 1.6,
-        letterSpacing: 0.2,
-        color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.95),
-      ),
-    );
-
     Widget buildComment(int index) => _buildCommentItem(
       context,
       comments[index] as Map,
       theme,
-      markdownStyle,
+      _markdownStyle,
       nowSeconds,
     );
 
@@ -304,211 +411,169 @@ class CommentListState extends State<CommentList> {
         ? comment['replies'] as List
         : const [];
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                CommentAvatar(
-                  url: getAvatar(avatar: comment['uqq'] ?? ''),
-                  size: 40,
+    final avatar = Stack(
+      clipBehavior: Clip.none,
+      children: [
+        CommentAvatar(url: getAvatar(avatar: comment['uqq'] ?? ''), size: 40),
+        if (isVip || isUp)
+          Positioned(
+            right: -2,
+            bottom: -2,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: theme.scaffoldBackgroundColor,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(2),
+                child: SvgPicture.asset(
+                  isVip ? 'assets/dahuiyuan.svg' : 'assets/upzhu.svg',
+                  width: 12,
+                  height: 12,
+                  colorFilter: ColorFilter.mode(nameColor, BlendMode.srcIn),
                 ),
-                if (isVip || isUp)
-                  Positioned(
-                    right: -2,
-                    bottom: -2,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: theme.scaffoldBackgroundColor,
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(2),
-                        child: SvgPicture.asset(
-                          isVip ? 'assets/dahuiyuan.svg' : 'assets/upzhu.svg',
-                          width: 12,
-                          height: 12,
-                          colorFilter: ColorFilter.mode(
-                            nameColor,
-                            BlendMode.srcIn,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
+              ),
             ),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      ],
+    );
+
+    return CommentTile(
+      avatar: avatar,
+      avatarPadding: 4,
+      name: comment['uname']?.toString() ?? '匿名',
+      nameColor: nameColor,
+      time: DateTime.parse(comment['time']).toEnDate(),
+      content: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          MarkdownBody(
+            selectable: true,
+            data: comment['content']?.toString() ?? '',
+            onTapLink: (text, url, title) {
+              if (url == null) return;
+              if (widget.onTapLink != null) {
+                widget.onTapLink!(text, url, title);
+              } else if (!url.startsWith('time')) {
+                launchUrlString(
+                  url.startsWith('gv')
+                      ? 'https://www.anibaka.com/play/$url'
+                      : url,
+                  mode: LaunchMode.externalApplication,
+                );
+              }
+            },
+            styleSheetTheme: MarkdownStyleSheetBaseTheme.platform,
+            styleSheet: markdownStyle,
+            sizedImageBuilder: (config) =>
+                _buildMarkdownImage(config.uri, theme),
+          ),
+          const SizedBox(height: 10),
+          if ((userInfo['id'] as num? ?? 0) != 0)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        comment['uname']?.toString() ?? '匿名',
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.2,
-                          color: nameColor,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      DateTime.parse(comment['time']).toEnDate(),
-                      style: TextStyle(
-                        fontSize: 12,
-                        letterSpacing: 0.2,
-                        fontWeight: FontWeight.w500,
-                        color: mutedColor,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                MarkdownBody(
-                  selectable: true,
-                  data: comment['content']?.toString() ?? '',
-                  onTapLink: (text, url, title) {
-                    if (url == null) return;
-                    if (widget.onTapLink != null) {
-                      widget.onTapLink!(text, url, title);
-                    } else if (!url.startsWith('time')) {
+                if ((userInfo['level'] as num? ?? 0) > 1 ||
+                    userInfo['id'] == comment['uid']) ...[
+                  _buildActionButton(
+                    icon: Icons.delete_outline_rounded,
+                    color: mutedColor,
+                    onTap: () {
+                      HapticFeedback.lightImpact();
                       launchUrlString(
-                        url.startsWith('gv')
-                            ? 'https://www.anibaka.com/play/$url'
-                            : url,
-                        mode: LaunchMode.externalApplication,
+                        '$host/comment/delete/${comment['id']}?token=${Instances.userToken}',
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 16),
+                ],
+                _buildActionButton(
+                  icon: isLiked
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                  color: isLiked ? theme.colorScheme.primary : mutedColor,
+                  onTap: () async {
+                    HapticFeedback.selectionClick();
+                    try {
+                      final response = await updateCommentUv(
+                        comment['id'],
+                        userName,
+                      );
+                      if (!mounted) return;
+                      comment['uv'] = jsonDecode(response.data)['msg'];
+                      setState(() {});
+                    } catch (_) {
+                      showSnackBar('操作失败');
+                    }
+                  },
+                ),
+                const SizedBox(width: 16),
+                _buildActionButton(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  color: mutedColor,
+                  onTap: () async {
+                    HapticFeedback.selectionClick();
+                    final result = await CommentInputWidget.show(context);
+                    if (result != null) {
+                      await sendComment(
+                        result,
+                        comment['id'] as int,
+                        comment['uname']?.toString() ?? '',
                       );
                     }
                   },
-                  styleSheetTheme: MarkdownStyleSheetBaseTheme.platform,
-                  styleSheet: markdownStyle,
-                  sizedImageBuilder: (config) =>
-                      _buildMarkdownImage(config.uri, theme),
                 ),
-                const SizedBox(height: 10),
-                if ((userInfo['id'] as num? ?? 0) != 0)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      if ((userInfo['level'] as num? ?? 0) > 1 ||
-                          userInfo['id'] == comment['uid']) ...[
-                        _buildActionButton(
-                          icon: Icons.delete_outline_rounded,
-                          color: mutedColor,
-                          onTap: () {
-                            HapticFeedback.lightImpact();
-                            launchUrlString(
-                              '$host/comment/delete/${comment['id']}?token=${Instances.userToken}',
-                            );
-                          },
-                        ),
-                        const SizedBox(width: 16),
-                      ],
-                      _buildActionButton(
-                        icon: isLiked
-                            ? Icons.favorite_rounded
-                            : Icons.favorite_border_rounded,
-                        color: isLiked ? theme.colorScheme.primary : mutedColor,
-                        onTap: () async {
-                          HapticFeedback.selectionClick();
-                          try {
-                            final response = await updateCommentUv(
-                              comment['id'],
-                              userName,
-                            );
-                            if (!mounted) return;
-                            comment['uv'] = jsonDecode(response.data)['msg'];
-                            setState(() {});
-                          } catch (_) {
-                            showSnackBar('操作失败');
-                          }
-                        },
-                      ),
-                      const SizedBox(width: 16),
-                      _buildActionButton(
-                        icon: Icons.chat_bubble_outline_rounded,
-                        color: mutedColor,
-                        onTap: () async {
-                          HapticFeedback.selectionClick();
-                          final result = await CommentInputWidget.show(context);
-                          if (result != null) {
-                            await sendComment(
-                              result,
-                              comment['id'] as int,
-                              comment['uname']?.toString() ?? '',
-                            );
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                if (replies.isNotEmpty || likes.isNotEmpty)
-                  Container(
-                    margin: const EdgeInsets.only(top: 12),
-                    padding: const EdgeInsets.only(left: 14, top: 4, bottom: 4),
-                    decoration: BoxDecoration(
-                      border: Border(
-                        left: BorderSide(
-                          color: theme.colorScheme.primary.withValues(
-                            alpha: 0.15,
-                          ),
-                          width: 2,
-                        ),
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (likes.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Icon(
-                                  Icons.favorite_rounded,
-                                  size: 14,
-                                  color: theme.colorScheme.primary.withValues(
-                                    alpha: 0.7,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    likes,
-                                    style: TextStyle(
-                                      color: theme.textTheme.bodySmall?.color
-                                          ?.withValues(alpha: 0.6),
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                      height: 1.4,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        for (final reply in replies.reversed)
-                          if (reply is Map)
-                            _buildReplyItem(reply, comment, theme),
-                      ],
-                    ),
-                  ),
               ],
             ),
-          ),
+          if (replies.isNotEmpty || likes.isNotEmpty)
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              padding: const EdgeInsets.only(left: 14, top: 4, bottom: 4),
+              decoration: BoxDecoration(
+                border: Border(
+                  left: BorderSide(
+                    color: theme.colorScheme.primary.withValues(alpha: 0.15),
+                    width: 2,
+                  ),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (likes.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.favorite_rounded,
+                            size: 14,
+                            color: theme.colorScheme.primary.withValues(
+                              alpha: 0.7,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              likes,
+                              style: TextStyle(
+                                color: theme.textTheme.bodySmall?.color
+                                    ?.withValues(alpha: 0.6),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  for (final reply in replies.reversed)
+                    if (reply is Map) _buildReplyItem(reply, comment, theme),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -683,5 +748,3 @@ class CommentListState extends State<CommentList> {
     }
   }
 }
-
-

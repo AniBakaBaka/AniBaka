@@ -13,6 +13,7 @@ class DanmakuService {
   static const String _settingsKey = 'danmaku_settings';
   static const String _blockWordsKey = 'danmaku_block_words';
   static const String _blockRepeatKey = 'danmaku_block_repeat';
+  static const String _blockColorKey = 'danmaku_block_color';
   static const int maxCachedEpisodes = 8;
   static const int maxCachedItems = 20000;
 
@@ -120,6 +121,7 @@ class DanmakuService {
         preferences.getString(_blockWordsKey),
       ).map((value) => value.toString()).toList(growable: false);
       controller.blockRepeat = preferences.getBool(_blockRepeatKey) ?? false;
+      controller.blockColor = preferences.getBool(_blockColorKey) ?? false;
       controller.updateOption(option);
     }
     return option;
@@ -144,6 +146,7 @@ class DanmakuService {
     DanmakuOption option, {
     Iterable<String>? blockWords,
     bool? blockRepeat,
+    bool? blockColor,
   }) async {
     final preferences = await SharedPreferences.getInstance();
     final writes = <Future<bool>>[
@@ -164,6 +167,7 @@ class DanmakuService {
         preferences.setString(_blockWordsKey, jsonEncode(blockWords.toList())),
       if (blockRepeat != null)
         preferences.setBool(_blockRepeatKey, blockRepeat),
+      if (blockColor != null) preferences.setBool(_blockColorKey, blockColor),
     ];
     await Future.wait(writes);
   }

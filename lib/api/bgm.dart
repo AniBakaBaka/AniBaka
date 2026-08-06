@@ -69,13 +69,27 @@ Future<Map<String, dynamic>?> getBgmAnimePageDetail(int subjectId) async {
 }
 
 Future<Map<String, dynamic>?> _loadBgmAnimePageDetail(int subjectId) async {
-  final responses = await Future.wait([
-    _get('$_bgmApiBase/v0/subjects/$subjectId?responseGroup=large'),
-    _get('$_bgmApiBase/v0/subjects/$subjectId/characters'),
-  ]);
-  final data = BgmUtils.parseJsonMap(responses[0].data);
+  // 先请求主条目（含 summary），角色列表并发但不阻塞主数据返回
+  final subjectFuture = _get(
+    '$_bgmApiBase/v0/subjects/$subjectId?responseGroup=large',
+  );
+  final charFuture = _get(
+    '$_bgmApiBase/v0/subjects/$subjectId/characters',
+  );
+
+  final subjectResponse = await subjectFuture;
+  final data = BgmUtils.parseJsonMap(subjectResponse.data);
   if (data == null) return null;
-  data['characters'] = BgmUtils.parseJsonList(responses[1].data);
+
+  // 角色数据：尝试在短超时内获取，超时则留空后续懒加载
+  try {
+    final charResponse = await charFuture.timeout(
+      const Duration(seconds: 4),
+    );
+    data['characters'] = BgmUtils.parseJsonList(charResponse.data);
+  } catch (_) {
+    data['characters'] = <Map<String, dynamic>>[];
+  }
   return data;
 }
 

@@ -1,0 +1,64 @@
+{
+  "format": "anx-rule/2",
+  "id": "moonci",
+  "name": "Moonci",
+  "baseUrl": "https://moonci.com",
+  "iconUrl": "https://moonci.com/favicon.ico",
+  "description": "Moonci 动漫视频源。",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "Referer": "https://moonci.com/"
+  },
+  "search": [
+    {
+      "op": "fetch",
+      "url": "/search/-------------.html?wd={keyword}"
+    },
+    {
+      "op": "searchList",
+      "selectors": [
+        ".search-item",
+        ".module-item",
+        "a[href*=\"/anime/\"]"
+      ],
+      "detailPattern": "/anime/",
+      "keywordMatch": true
+    }
+  ],
+  "detail": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "episodes",
+      "listSelectors": [
+        "ul.hl-plays-list",
+        ".anthology-list-play",
+        ".module-player-list",
+        ".module-play-list",
+        ".play-list",
+        ".playlist",
+        ".episode-list",
+        ".content_playlist"
+      ],
+      "tabSelectors": [
+        ".play-source-tab a",
+        ".source a"
+      ]
+    }
+  ],
+  "play": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "sniff",
+      "goal": "video",
+      "url": "{episodeId:raw}",
+      "resolveMediaRedirects": true,
+      "timeoutMs": 60000,
+      "settleMs": 1000
+    }
+  ],
+  "useWebview": true
+}
