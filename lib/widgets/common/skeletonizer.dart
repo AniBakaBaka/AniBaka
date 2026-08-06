@@ -113,8 +113,6 @@ class _AppShimmerState extends State<AppShimmer> with WidgetsBindingObserver {
     final highlightColor =
         widget.highlightColor ?? AppShimmer.defaultHighlightColor(theme);
 
-    // RepaintBoundary 将 ShaderMask 的逐帧重绘隔离在内部，
-    // 避免连带父级（如列表项、骨架网格）一起重绘。
     return RepaintBoundary(
       child: ShaderMask(
         blendMode: BlendMode.srcATop,
@@ -133,19 +131,15 @@ class _AppShimmerState extends State<AppShimmer> with WidgetsBindingObserver {
   }
 }
 
-class ShimmerBox extends StatelessWidget {
-  final double? width;
-  final double? height;
-  final BorderRadiusGeometry borderRadius;
-  final EdgeInsetsGeometry? margin;
+class AppSkeletonizer extends StatelessWidget {
+  final Widget child;
+  final bool enabled;
   final Color? baseColor;
   final Color? highlightColor;
 
-  const ShimmerBox({
-    this.width,
-    this.height,
-    this.borderRadius = BorderRadius.zero,
-    this.margin,
+  const AppSkeletonizer({
+    required this.child,
+    this.enabled = true,
     this.baseColor,
     this.highlightColor,
     super.key,
@@ -153,135 +147,28 @@ class ShimmerBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final resolvedBaseColor =
-        baseColor ?? AppShimmer.defaultBaseColor(Theme.of(context));
-    final fillColor = highlightColor == null
-        ? resolvedBaseColor
-        : Color.lerp(resolvedBaseColor, highlightColor, 0.2)!;
-    final child = SizedBox(
-      width: width,
-      height: height,
-      child: DecoratedBox(
-        decoration: BoxDecoration(color: fillColor, borderRadius: borderRadius),
-      ),
-    );
+    if (!enabled) return child;
 
-    if (margin == null) return child;
-    return Padding(padding: margin!, child: child);
-  }
-}
+    final theme = Theme.of(context);
+    final base = baseColor ?? AppShimmer.defaultBaseColor(theme);
 
-class ShimmerCircle extends StatelessWidget {
-  final double size;
-  final EdgeInsetsGeometry? margin;
-  final Color? baseColor;
-  final Color? highlightColor;
-
-  const ShimmerCircle({
-    this.size = 40,
-    this.margin,
-    this.baseColor,
-    this.highlightColor,
-    super.key,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ShimmerBox(
-      width: size,
-      height: size,
-      borderRadius: BorderRadius.circular(size / 2),
-      margin: margin,
-      baseColor: baseColor,
-      highlightColor: highlightColor,
-    );
-  }
-}
-
-class ShimmerTextLine extends StatelessWidget {
-  final double? width;
-  final double height;
-  final double widthFactor;
-  final EdgeInsetsGeometry? margin;
-  final Color? baseColor;
-  final Color? highlightColor;
-
-  const ShimmerTextLine({
-    this.width,
-    this.height = 12,
-    this.widthFactor = 1,
-    this.margin,
-    this.baseColor,
-    this.highlightColor,
-    super.key,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final line = ShimmerBox(
-      width: width,
-      height: height,
-      borderRadius: BorderRadius.circular(height / 2),
-      baseColor: baseColor,
-      highlightColor: highlightColor,
-    );
-
-    final Widget child = width == null && widthFactor < 1
-        ? FractionallySizedBox(widthFactor: widthFactor, child: line)
-        : line;
-
-    if (margin == null) return child;
-    return Padding(padding: margin!, child: child);
-  }
-}
-
-class ShimmerCoverCard extends StatelessWidget {
-  final double? width;
-  final double aspectRatio;
-  final BorderRadiusGeometry borderRadius;
-  final bool showSubtitle;
-
-  const ShimmerCoverCard({
-    this.width,
-    this.aspectRatio = 2 / 3,
-    this.borderRadius = const BorderRadius.all(Radius.circular(12)),
-    this.showSubtitle = false,
-    super.key,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final titleWidth = width == null ? double.infinity : width! * 0.82;
-    final subtitleWidth = width == null ? double.infinity : width! * 0.58;
-
-    return SizedBox(
-      width: width,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AspectRatio(
-            aspectRatio: aspectRatio,
-            child: ShimmerBox(borderRadius: borderRadius),
+    return IgnorePointer(
+      child: AppShimmer(
+        baseColor: base,
+        highlightColor: highlightColor,
+        child: ColorFiltered(
+          colorFilter: ColorFilter.mode(
+            base,
+            BlendMode.srcIn,
           ),
-          const SizedBox(height: 10),
-          ShimmerBox(
-            width: titleWidth,
-            height: 14,
-            borderRadius: BorderRadius.circular(7),
-          ),
-          if (showSubtitle) ...[
-            const SizedBox(height: 8),
-            ShimmerBox(
-              width: subtitleWidth,
-              height: 12,
-              borderRadius: BorderRadius.circular(6),
-            ),
-          ],
-        ],
+          child: child,
+        ),
       ),
     );
   }
 }
+
+typedef Skeletonizer = AppSkeletonizer;
 
 class _ShimmerGradientTransform extends GradientTransform {
   final double percent;

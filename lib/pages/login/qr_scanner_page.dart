@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:baka/widgets/common/shimmer.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'package:baka/instance.dart';
@@ -189,11 +188,7 @@ class _QrScannerPageState extends State<QrScannerPage> {
             Container(
               color: Colors.black54,
               child: const Center(
-                child: ShimmerCircle(
-                  size: 36,
-                  baseColor: Colors.white24,
-                  highlightColor: Colors.white70,
-                ),
+                child: CircularProgressIndicator(),
               ),
             ),
         ],

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:baka/api/bgm.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/widgets/anime/post_card.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 
 /// 详情页的相关动画。只读取关系列表，不为每个条目额外预取详情。
 class AnimeDetailRelatedSection extends StatefulWidget {
@@ -90,8 +90,16 @@ class _AnimeDetailRelatedSectionState extends State<AnimeDetailRelatedSection> {
               scrollDirection: Axis.horizontal,
               itemCount: 5,
               separatorBuilder: (_, _) => const SizedBox(width: 14),
-              itemBuilder: (_, _) =>
-                  const ShimmerCoverCard(width: 140, showSubtitle: true),
+              itemBuilder: (_, _) => AppSkeletonizer(
+                enabled: true,
+                child: SizedBox(
+                  width: 140,
+                  child: PostCard(
+                    const {'title': '相关动画标题占位', 'image': ''},
+                    onTap: () {},
+                  ),
+                ),
+              ),
             ),
           );
         }

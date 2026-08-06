@@ -6,7 +6,7 @@ import 'package:baka/services/source_adapter_service.dart';
 import 'package:baka/source/source_registry.dart';
 import 'package:baka/theme.dart';
 import 'package:baka/utils/toast_utils.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 import 'package:baka/widgets/source/source_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -556,8 +556,14 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
             childAspectRatio: 0.85,
           ),
           delegate: SliverChildBuilderDelegate(
-            (_, _) => const ShimmerBox(
-              borderRadius: BorderRadius.all(Radius.circular(20)),
+            (context, _) => AppSkeletonizer(
+              enabled: true,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).cardColor,
+                  borderRadius: const BorderRadius.all(Radius.circular(20)),
+                ),
+              ),
             ),
             childCount: 6,
           ),

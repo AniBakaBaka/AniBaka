@@ -6,7 +6,7 @@ import 'package:baka/storage/local_storage_provider.dart';
 import 'package:baka/storage/storage_config.dart';
 import 'package:baka/storage/storage_provider.dart';
 import 'package:baka/storage/webdav_storage_provider.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -199,7 +199,24 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
         future: _initFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
-            return _buildStorageListSkeleton();
+            return AppSkeletonizer(
+              enabled: true,
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                itemCount: 4,
+                itemBuilder: (context, index) => _StorageTile(
+                  config: const StorageConfig(
+                    id: 'dummy',
+                    name: '存储源名称占位符',
+                    type: StorageProviderType.local,
+                    path: '/',
+                  ),
+                  onTap: () {},
+                  onEdit: () {},
+                  onDelete: () {},
+                ),
+              ),
+            );
           }
           return ValueListenableBuilder<List<StorageConfig>>(
             valueListenable: StorageConfigService.configsListenable,
@@ -225,42 +242,7 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
     );
   }
 
-  Widget _buildStorageListSkeleton() {
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      itemCount: 4,
-      separatorBuilder: (_, _) => const SizedBox(height: 4),
-      itemBuilder: (_, _) => const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          children: [
-            ShimmerBox(
-              width: 28,
-              height: 28,
-              borderRadius: BorderRadius.all(Radius.circular(8)),
-            ),
-            SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ShimmerTextLine(height: 16, widthFactor: 0.42),
-                  SizedBox(height: 8),
-                  ShimmerTextLine(height: 12, widthFactor: 0.78),
-                ],
-              ),
-            ),
-            SizedBox(width: 16),
-            ShimmerBox(
-              width: 20,
-              height: 20,
-              borderRadius: BorderRadius.all(Radius.circular(10)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+
 
   Widget _buildEmptyState(ThemeData theme) {
     return Center(

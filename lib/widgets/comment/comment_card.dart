@@ -9,7 +9,7 @@ import 'package:baka/utils/image_utils.dart';
 import 'package:baka/utils/reg_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/comment/comment_widget.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -141,19 +141,48 @@ class CommentListState extends State<CommentList> {
     setState(() => _internalComments = newComments);
   }
 
+  static final Map<String, dynamic> _dummyComment = {
+    'uname': '用户名称占位符',
+    'time': '2026-08-06 12:00:00',
+    'content': '这是一条用于自动骨架遮罩的占位评论内容文本，展示真实的评论排版与风格。',
+    'uqq': '',
+  };
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final comments = _effectiveComments;
 
     if (comments == null) {
-      const loading = AppShimmer(
+      final nowSeconds = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final markdownStyle = MarkdownStyleSheet(
+        p: TextStyle(
+          fontSize: 15,
+          height: 1.6,
+          letterSpacing: 0.2,
+          color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.95),
+        ),
+      );
+      final loading = AppSkeletonizer(
+        enabled: true,
         child: Column(
-          children: [CommentSkeleton(), CommentSkeleton(), CommentSkeleton()],
+          children: List.generate(
+            3,
+            (_) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: _buildCommentItem(
+                context,
+                _dummyComment,
+                theme,
+                markdownStyle,
+                nowSeconds,
+              ),
+            ),
+          ),
         ),
       );
       return widget.asSliver
-          ? const SliverToBoxAdapter(child: loading)
+          ? SliverToBoxAdapter(child: loading)
           : loading;
     }
 
@@ -655,65 +684,4 @@ class CommentListState extends State<CommentList> {
   }
 }
 
-/// 静态评论骨架形状；由外层统一添加动画，避免每个占位块各持有 ticker。
-class CommentSkeleton extends StatelessWidget {
-  const CommentSkeleton({this.avatarSize = 40, super.key});
 
-  final double avatarSize;
-
-  @override
-  Widget build(BuildContext context) {
-    const color = Colors.white;
-    Widget bar(double width, double height) => Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(height / 2),
-      ),
-    );
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          DecoratedBox(
-            decoration: const BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
-            child: SizedBox(width: avatarSize, height: avatarSize),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    bar(96, 14),
-                    const SizedBox(width: 8),
-                    bar(58, 12),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                FractionallySizedBox(
-                  widthFactor: 1,
-                  child: bar(double.infinity, 15),
-                ),
-                const SizedBox(height: 8),
-                FractionallySizedBox(
-                  widthFactor: 0.7,
-                  child: bar(double.infinity, 15),
-                ),
-                const SizedBox(height: 12),
-                Align(alignment: Alignment.centerRight, child: bar(82, 18)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

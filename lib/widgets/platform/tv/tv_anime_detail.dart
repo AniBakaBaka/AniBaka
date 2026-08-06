@@ -11,7 +11,7 @@ import 'package:baka/services/collection_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/services/navigation_service.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 import 'package:baka/widgets/platform/tv/tv_focusable.dart';
 
 class TvAnimeDetailPlaceholder extends StatefulWidget {
@@ -465,13 +465,16 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
 
   Widget _buildCollectionButton() {
     if (_isCollectionLoading) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-        decoration: BoxDecoration(
-          color: context.tvHighlightColor(0.06),
-          borderRadius: BorderRadius.circular(12),
+      return AppSkeletonizer(
+        enabled: true,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          decoration: BoxDecoration(
+            color: context.tvHighlightColor(0.06),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Text('收藏状态', style: TextStyle(fontSize: 14)),
         ),
-        child: const ShimmerTextLine(width: 72, height: 14),
       );
     }
 

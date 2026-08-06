@@ -9,7 +9,6 @@ import 'package:baka/source/pipeline_source_adapter.dart';
 import 'package:baka/source/store/rule_migrator.dart';
 import 'package:baka/theme.dart';
 import 'package:baka/utils/toast_utils.dart';
-import 'package:baka/widgets/common/shimmer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -370,7 +369,11 @@ class _CustomSourceEditPageState extends State<CustomSourceEditPage> {
           TextButton(
             onPressed: _isSaving ? null : _save,
             child: _isSaving
-                ? const ShimmerCircle(size: 18)
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : const Text(
                     '保存',
                     style: TextStyle(fontWeight: FontWeight.w600),

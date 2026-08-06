@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:baka/api/bgm.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/date_util.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 
 /// 评论 Tab — 独立管理评论加载状态
 class AnimeCommentsTab extends StatefulWidget {
@@ -121,7 +121,18 @@ class _AnimeCommentsTabState extends State<AnimeCommentsTab>
           padding: const EdgeInsets.fromLTRB(4, 16, 4, 0),
           sliver: SliverList(
             delegate: SliverChildBuilderDelegate(
-              (context, index) => const _CommentSkeletonItem(),
+              (context, index) => AppSkeletonizer(
+                enabled: true,
+                child: _CommentItem(
+                  comment: const {
+                    'user': {'nickname': '用户名称占位符', 'avatar': {'large': ''}},
+                    'rate': 8,
+                    'comment': '这是一条用于自动骨架遮罩的评论内容占位文本...',
+                    'updated_at': '2026-08-06 12:00:00',
+                  },
+                  isDark: isDark,
+                ),
+              ),
               childCount: 5,
             ),
           ),
@@ -152,7 +163,18 @@ class _AnimeCommentsTabState extends State<AnimeCommentsTab>
         sliver: SliverList(
           delegate: SliverChildBuilderDelegate((context, index) {
             if (index >= _comments.length) {
-              return const _CommentSkeletonItem();
+              return AppSkeletonizer(
+                enabled: true,
+                child: _CommentItem(
+                  comment: const {
+                    'user': {'nickname': '用户名称占位符', 'avatar': {'large': ''}},
+                    'rate': 8,
+                    'comment': '这是一条用于自动骨架遮罩的评论内容占位文本...',
+                    'updated_at': '2026-08-06 12:00:00',
+                  },
+                  isDark: isDark,
+                ),
+              );
             }
             return _CommentItem(comment: _comments[index], isDark: isDark);
           }, childCount: _comments.length + (_hasMoreComments ? 1 : 0)),
@@ -160,61 +182,6 @@ class _AnimeCommentsTabState extends State<AnimeCommentsTab>
       ),
       const SliverToBoxAdapter(child: SizedBox(height: 16)),
     ];
-  }
-}
-
-class _CommentSkeletonItem extends StatelessWidget {
-  const _CommentSkeletonItem();
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.04)
-            : Colors.black.withValues(alpha: 0.02),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : Colors.black.withValues(alpha: 0.04),
-        ),
-      ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              ShimmerCircle(size: 32),
-              SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ShimmerTextLine(height: 13, widthFactor: 0.36),
-                    SizedBox(height: 6),
-                    ShimmerTextLine(height: 11, widthFactor: 0.22),
-                  ],
-                ),
-              ),
-              SizedBox(width: 12),
-              ShimmerBox(
-                width: 32,
-                height: 20,
-                borderRadius: BorderRadius.all(Radius.circular(10)),
-              ),
-            ],
-          ),
-          SizedBox(height: 14),
-          ShimmerTextLine(height: 13),
-          SizedBox(height: 8),
-          ShimmerTextLine(height: 13, widthFactor: 0.74),
-        ],
-      ),
-    );
   }
 }
 
@@ -311,7 +278,14 @@ class _CommentItem extends StatelessWidget {
     );
   }
 
-  Widget get _avatarPlaceholder => const ShimmerCircle(size: 32);
+  Widget get _avatarPlaceholder => Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: isDark ? Colors.white12 : Colors.black12,
+          shape: BoxShape.circle,
+        ),
+      );
 
   Widget _buildRateBadge(int rate) {
     return Container(

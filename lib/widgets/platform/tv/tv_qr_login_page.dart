@@ -10,7 +10,6 @@ import 'package:baka/services/qr_login_server.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/platform/tv/tv_focusable.dart';
 import 'package:baka/widgets/platform/tv/tv_theme_util.dart';
-import 'package:baka/widgets/common/shimmer.dart';
 
 enum _QrLoginState { loading, waiting, success, error }
 
@@ -165,7 +164,7 @@ class _TvQrLoginPageState extends State<TvQrLoginPage> {
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const ShimmerCircle(size: 42),
+          const CircularProgressIndicator(),
           const SizedBox(height: 24),
           Text(
             '正在准备二维码...',
@@ -255,18 +254,10 @@ class _TvQrLoginPageState extends State<TvQrLoginPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              SizedBox(
+              const SizedBox(
                 width: 16,
                 height: 16,
-                child: ShimmerCircle(
-                  size: 16,
-                  baseColor: context.tvTextSecondaryColor.withValues(
-                    alpha: 0.18,
-                  ),
-                  highlightColor: context.tvTextSecondaryColor.withValues(
-                    alpha: 0.45,
-                  ),
-                ),
+                child: CircularProgressIndicator(strokeWidth: 2),
               ),
               const SizedBox(width: 12),
               Text(

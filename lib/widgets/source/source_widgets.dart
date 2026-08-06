@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:baka/services/source/rule_repository_service.dart';
 import 'package:baka/theme.dart';
 import 'package:baka/utils/toast_utils.dart';
-import 'package:baka/widgets/common/shimmer.dart';
 
 class SourceIcon extends StatelessWidget {
   final String name;
@@ -35,11 +34,7 @@ class SourceIcon extends StatelessWidget {
           width: size,
           height: size,
           fit: BoxFit.cover,
-          placeholder: (_, _) => ShimmerBox(
-            width: size,
-            height: size,
-            borderRadius: BorderRadius.circular(radius),
-          ),
+          placeholder: (context, _) => _buildFallback(context),
           errorWidget: (_, _, _) => _buildFallback(context),
         ),
       );

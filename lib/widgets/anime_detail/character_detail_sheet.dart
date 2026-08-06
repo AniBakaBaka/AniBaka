@@ -3,12 +3,12 @@ import 'dart:math' as math;
 import 'package:baka/api/bgm.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/date_util.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// 统一的网络图片组件（封装 wsrv.nl 图片代理 + 缓存 + Shimmer 占位 + 错误处理）
+/// 统一的网络图片组件（封装 wsrv.nl 图片代理 + 缓存 + 错误处理）
 class _NetImage extends StatelessWidget {
   final String url;
   final double? width;
@@ -48,10 +48,10 @@ class _NetImage extends StatelessWidget {
         fit: BoxFit.cover,
         alignment: Alignment.topCenter,
         memCacheWidth: proxyWidth,
-        placeholder: (_, _) => ShimmerBox(
-          width: width ?? double.infinity,
-          height: height ?? double.infinity,
-          borderRadius: BorderRadius.all(Radius.circular(borderRadius)),
+        placeholder: (_, _) => Container(
+          width: width,
+          height: height,
+          color: fallbackBg,
         ),
         errorWidget: (_, _, _) => Container(
           width: width,
@@ -273,7 +273,40 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: (_isLoading && !hasBasicData)
-              ? const _CharacterDetailSkeleton()
+              ? AppSkeletonizer(
+                  enabled: true,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const _CharHeader(
+                          info: {
+                            'name': '角色名称占位',
+                            'nameCN': '角色中文名占位',
+                            'role_name': '主角',
+                            'actors': [
+                              {'name': '声优名称占位'}
+                            ],
+                            'collects': 100,
+                            'comment': 50,
+                            'info': '性别: 女性\n生日: 1月1日',
+                            'images': {'large': ''},
+                          },
+                        ),
+                        const SizedBox(height: 24),
+                        Text(
+                          '这是一段用于自动骨架遮罩的角色详细介绍文本，展示真实的人物背景和设定描述...',
+                          style: TextStyle(
+                            color: textColor.withValues(alpha: 0.8),
+                            fontSize: 14,
+                            height: 1.7,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
               : CustomScrollView(
                   controller: scrollController,
                   physics: const BouncingScrollPhysics(),
@@ -592,48 +625,4 @@ class _CharCommentItem extends StatelessWidget {
   }
 }
 
-/// 简单高质感的加载骨架屏
-class _CharacterDetailSkeleton extends StatelessWidget {
-  const _CharacterDetailSkeleton();
 
-  @override
-  Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ShimmerBox(width: 110, height: 154, borderRadius: BorderRadius.all(Radius.circular(16))),
-              SizedBox(width: 20),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ShimmerBox(width: 140, height: 22, borderRadius: BorderRadius.all(Radius.circular(6))),
-                    SizedBox(height: 8),
-                    ShimmerBox(width: 90, height: 14, borderRadius: BorderRadius.all(Radius.circular(4))),
-                    SizedBox(height: 16),
-                    ShimmerBox(width: 70, height: 26, borderRadius: BorderRadius.all(Radius.circular(8))),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: 32),
-          ShimmerBox(width: double.infinity, height: 12, borderRadius: BorderRadius.all(Radius.circular(4))),
-          SizedBox(height: 8),
-          ShimmerBox(width: 220, height: 12, borderRadius: BorderRadius.all(Radius.circular(4))),
-          SizedBox(height: 32),
-          ShimmerBox(width: 50, height: 16, borderRadius: BorderRadius.all(Radius.circular(4))),
-          SizedBox(height: 20),
-          ShimmerCircle(size: 32),
-          SizedBox(height: 12),
-          ShimmerBox(width: double.infinity, height: 12, borderRadius: BorderRadius.all(Radius.circular(4))),
-        ],
-      ),
-    );
-  }
-}

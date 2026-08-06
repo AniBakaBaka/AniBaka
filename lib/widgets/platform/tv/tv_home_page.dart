@@ -1,6 +1,6 @@
 import 'package:baka/services/home_service.dart';
 import 'package:baka/widgets/anime/post_card.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 import 'package:baka/widgets/platform/tv/tv_focusable.dart';
 import 'package:baka/widgets/platform/tv/tv_theme_util.dart';
 import 'package:flutter/material.dart';
@@ -97,7 +97,22 @@ class _TvHomePageState extends State<TvHomePage> {
                     ValueListenableBuilder<List<dynamic>>(
                       valueListenable: svc.feed,
                       builder: (context, items, _) {
-                        if (items.isEmpty) return const _TvHomeSkeleton();
+                        if (items.isEmpty) {
+                          return AppSkeletonizer(
+                            enabled: true,
+                            child: _buildContentGrid(
+                              tag,
+                              List.generate(
+                                10,
+                                (_) => {
+                                  'title': '动画标题占位符',
+                                  'subtitle': '更新至第12集',
+                                  'cover': '',
+                                },
+                              ),
+                            ),
+                          );
+                        }
                         return _buildContentGrid(tag, items);
                       },
                     ),
@@ -290,85 +305,7 @@ class _TvTopBar extends StatelessWidget {
   }
 }
 
-class _TvHomeSkeleton extends StatelessWidget {
-  const _TvHomeSkeleton();
 
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(48, 24, 48, 60),
-      physics: const NeverScrollableScrollPhysics(),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final columns = _columnsFor(constraints.maxWidth);
-          final cardWidth =
-              (constraints.maxWidth - (columns - 1) * 16) / columns;
-          final cardHeight = cardWidth * 1.45;
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Row(
-                children: [
-                  ShimmerBox(
-                    width: 4,
-                    height: 24,
-                    borderRadius: BorderRadius.all(Radius.circular(2)),
-                  ),
-                  SizedBox(width: 12),
-                  ShimmerBox(
-                    width: 120,
-                    height: 24,
-                    borderRadius: BorderRadius.all(Radius.circular(8)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 16,
-                runSpacing: 20,
-                children: [
-                  for (var index = 0; index < columns * 2; index++)
-                    SizedBox(
-                      width: cardWidth,
-                      height: cardHeight,
-                      child: const _TvPosterSkeletonCard(),
-                    ),
-                ],
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _TvPosterSkeletonCard extends StatelessWidget {
-  const _TvPosterSkeletonCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Stack(
-      fit: StackFit.expand,
-      children: [
-        ShimmerBox(borderRadius: BorderRadius.all(Radius.circular(12))),
-        Positioned(
-          left: 12,
-          right: 12,
-          bottom: 12,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ShimmerTextLine(height: 15, widthFactor: 0.8),
-              SizedBox(height: 8),
-              ShimmerTextLine(height: 12, widthFactor: 0.48),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
 
 class _TvAnimeCard extends StatelessWidget {
   const _TvAnimeCard({required this.data, this.autofocus = false, super.key});

@@ -9,7 +9,7 @@ import 'package:baka/services/navigation_service.dart';
 import 'package:baka/widgets/platform/tv/tv_focusable.dart';
 import 'package:baka/widgets/platform/tv/tv_theme_util.dart';
 import 'package:baka/widgets/anime/post_card.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 
 class TvSearchPage extends StatefulWidget {
   final String? initialKeyword;
@@ -368,7 +368,16 @@ class _TvSearchPageState extends State<TvSearchPage> {
               mainAxisSpacing: 24,
             ),
             itemCount: 10,
-            itemBuilder: (_, _) => const _TvSearchResultSkeletonCard(),
+            itemBuilder: (_, _) => AppSkeletonizer(
+              enabled: true,
+              child: _TvSearchResultCard(
+                title: '搜索动画标题占位符',
+                imageUrl: '',
+                sourceName: '数据源',
+                score: 8.5,
+                onPressed: () {},
+              ),
+            ),
           );
         }
         return ValueListenableBuilder<List<dynamic>>(
@@ -471,49 +480,6 @@ class _TvSearchPageState extends State<TvSearchPage> {
   }
 }
 
-class _TvSearchResultSkeletonCard extends StatelessWidget {
-  const _TvSearchResultSkeletonCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              ShimmerBox(borderRadius: BorderRadius.all(Radius.circular(12))),
-              Positioned(
-                top: 8,
-                right: 8,
-                child: ShimmerBox(
-                  width: 46,
-                  height: 22,
-                  borderRadius: BorderRadius.all(Radius.circular(6)),
-                ),
-              ),
-              Positioned(
-                bottom: 8,
-                left: 8,
-                child: ShimmerBox(
-                  width: 48,
-                  height: 22,
-                  borderRadius: BorderRadius.all(Radius.circular(6)),
-                ),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(height: 10),
-        ShimmerTextLine(height: 14, widthFactor: 0.86),
-        SizedBox(height: 8),
-        ShimmerTextLine(height: 14, widthFactor: 0.58),
-      ],
-    );
-  }
-}
-
 class _TvSearchResultCard extends StatelessWidget {
   final String title;
   final String? imageUrl;
@@ -547,10 +513,8 @@ class _TvSearchResultCard extends StatelessWidget {
                       ? CachedNetworkImage(
                           imageUrl: imageUrl!,
                           fit: BoxFit.cover,
-                          placeholder: (_, _) => const ShimmerBox(
-                            width: double.infinity,
-                            height: double.infinity,
-                            borderRadius: BorderRadius.all(Radius.circular(12)),
+                          placeholder: (_, _) => Container(
+                            color: context.tvHighlightColor(0.05),
                           ),
                           errorWidget: (_, _, _) => Container(
                             color: context.tvHighlightColor(0.05),

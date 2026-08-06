@@ -8,7 +8,6 @@ import 'package:baka/services/version_service.dart';
 import 'package:baka/utils/reg_utils.dart';
 import 'package:baka/widgets/anime/post_card.dart';
 import 'package:baka/widgets/common/refresh.dart';
-import 'package:baka/widgets/common/shimmer.dart';
 import 'package:baka/widgets/home/rank_section.dart';
 import 'package:baka/widgets/home/swiper_banner.dart';
 import 'package:baka/widgets/search/tag_filter_sheet.dart';
@@ -325,11 +324,7 @@ class _HomePageState extends State<HomePage>
               width: 32,
               height: 32,
               fit: BoxFit.cover,
-              placeholder: (_, _) => const ShimmerBox(
-                width: 32,
-                height: 32,
-                borderRadius: BorderRadius.all(Radius.circular(16)),
-              ),
+              placeholder: (_, _) => Container(color: Colors.grey[800]),
               errorWidget: (_, _, _) => Container(color: Colors.grey[800]),
             ),
           ),

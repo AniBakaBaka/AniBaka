@@ -7,7 +7,6 @@ import 'package:baka/services/navigation_service.dart';
 import 'package:baka/services/source_adapter_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/widgets/anime_detail/controller/video_source_search_controller.dart';
-import 'package:baka/widgets/common/shimmer.dart';
 
 class SourceSwitchSelection {
   const SourceSwitchSelection({required this.data, required this.lineIndex});
@@ -1294,10 +1293,10 @@ class _VideoSearchResultList extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          ShimmerCircle(
-            size: 40,
-            baseColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.18),
-            highlightColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
+          const SizedBox(
+            width: 32,
+            height: 32,
+            child: CircularProgressIndicator(strokeWidth: 3),
           ),
           const SizedBox(height: 12),
           Text(
@@ -1442,10 +1441,10 @@ class _SourceCard extends StatelessWidget {
           ? _CoverThumb(
               imageUrl: imageUrl,
               overlayColor: c.withValues(alpha: 0.15),
-              placeholder: (ctx, url) => ShimmerBox(
+              placeholder: (ctx, url) => Container(
                 width: 60,
                 height: 80,
-                borderRadius: BorderRadius.circular(10),
+                color: isDark ? Colors.grey[800] : Colors.grey[200],
               ),
               errorWidget: (ctx, url, err) => Container(
                 color: isDark ? Colors.grey[800] : Colors.grey[200],

@@ -2,7 +2,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:baka/instance.dart';
-import 'package:baka/widgets/common/shimmer.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:dio/dio.dart';
@@ -32,11 +31,7 @@ class ImageUtils {
                 imageUrl: imagePath,
                 fit: BoxFit.contain,
                 placeholder: (_, _) => const Center(
-                  child: ShimmerBox(
-                    width: 96,
-                    height: 96,
-                    borderRadius: BorderRadius.all(Radius.circular(16)),
-                  ),
+                  child: CircularProgressIndicator(),
                 ),
                 errorWidget: (_, _, _) => const Icon(
                   Icons.broken_image_outlined,

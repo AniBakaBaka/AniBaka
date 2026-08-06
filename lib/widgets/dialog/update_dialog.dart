@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:baka/instance.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
-import 'package:baka/widgets/common/shimmer.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -48,10 +47,10 @@ Widget _buildRichText(BuildContext context, String text) {
             child: CachedNetworkImage(
               imageUrl: url,
               fit: BoxFit.cover,
-              placeholder: (context, url) => const ShimmerBox(
+              placeholder: (context, url) => Container(
                 width: double.infinity,
                 height: 160,
-                borderRadius: BorderRadius.all(Radius.circular(8)),
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
               ),
               errorWidget: (context, url, error) =>
                   const Icon(Icons.broken_image),

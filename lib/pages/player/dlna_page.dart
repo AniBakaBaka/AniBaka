@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:baka/utils/date_util.dart';
-import 'package:baka/widgets/common/shimmer.dart';
 import 'package:dlna_dart/dlna.dart';
 import 'package:flutter/material.dart';
 import 'package:baka/models/playback_episode.dart';
@@ -388,7 +387,7 @@ class DlnaCastPanel extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: c.isSearching.value
                 ? [
-                    const ShimmerCircle(size: 28),
+                    const CircularProgressIndicator(),
                     const SizedBox(height: 16),
                     Text('正在搜索设备...', style: secondary),
                   ]
@@ -465,7 +464,11 @@ class DlnaCastPanel extends StatelessWidget {
             ),
             trailing: Obx(
               () => c.isLoadingNext.value
-                  ? const ShimmerCircle(size: 16)
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const SizedBox.shrink(),
             ),
           ),

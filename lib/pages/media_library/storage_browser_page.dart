@@ -2,7 +2,7 @@ import 'package:baka/pages/player/player_page.dart';
 import 'package:baka/storage/storage_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 
 /// 文件浏览器页面：浏览目录和文件，点击视频播放
 class StorageBrowserPage extends StatefulWidget {
@@ -162,7 +162,22 @@ class _StorageBrowserPageState extends State<StorageBrowserPage> {
 
   Widget _buildBody(ThemeData theme) {
     if (_isLoading) {
-      return _buildBrowserListSkeleton();
+      return AppSkeletonizer(
+        enabled: true,
+        child: ListView.builder(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          itemCount: 6,
+          itemBuilder: (context, index) => _ListItemTile(
+            item: StorageItem(
+              name: '媒体文件名称占位符.mp4',
+              path: '/dummy.mp4',
+              type: StorageItemType.file,
+              size: 1024000,
+            ),
+            onTap: () {},
+          ),
+        ),
+      );
     }
 
     if (_error != null) {
@@ -232,53 +247,7 @@ class _StorageBrowserPageState extends State<StorageBrowserPage> {
     );
   }
 
-  Widget _buildBrowserListSkeleton() {
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: 8,
-      separatorBuilder: (_, _) => const SizedBox(height: 2),
-      itemBuilder: (_, index) {
-        final hasSubtitle = index % 3 != 0;
-        final hasTrailing = !hasSubtitle;
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            children: [
-              const ShimmerBox(
-                width: 32,
-                height: 32,
-                borderRadius: BorderRadius.all(Radius.circular(8)),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ShimmerTextLine(
-                      height: 14,
-                      widthFactor: hasSubtitle ? 0.64 : 0.42,
-                    ),
-                    if (hasSubtitle) ...[
-                      const SizedBox(height: 8),
-                      const ShimmerTextLine(height: 12, widthFactor: 0.36),
-                    ],
-                  ],
-                ),
-              ),
-              if (hasTrailing) ...[
-                const SizedBox(width: 12),
-                const ShimmerBox(
-                  width: 20,
-                  height: 20,
-                  borderRadius: BorderRadius.all(Radius.circular(10)),
-                ),
-              ],
-            ],
-          ),
-        );
-      },
-    );
-  }
+
 }
 
 class _ListItemTile extends StatelessWidget {

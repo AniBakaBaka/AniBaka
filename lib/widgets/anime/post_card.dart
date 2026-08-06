@@ -4,7 +4,6 @@ import 'package:baka/instance.dart';
 import 'package:baka/services/navigation_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/reg_utils.dart';
-import 'package:baka/widgets/common/shimmer.dart';
 import 'package:baka/widgets/platform/windows/windows_post_card.dart';
 import 'package:flutter/material.dart';
 
@@ -136,8 +135,9 @@ Widget buildCachedImage(
     useOldImageOnUrlChange: true,
     fadeInDuration: Duration.zero,
     fadeOutDuration: Duration.zero,
-    placeholder: (context, url) =>
-        const ShimmerBox(width: double.infinity, height: double.infinity),
+    placeholder: (context, url) => Container(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        ),
     errorWidget: (context, url, error) {
       final theme = Theme.of(context);
       return ColoredBox(

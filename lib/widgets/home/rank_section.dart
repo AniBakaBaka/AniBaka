@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:baka/widgets/anime/post_card.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 
 class RankSection extends StatelessWidget {
   static const double _cardWidth = 136;
@@ -45,42 +45,22 @@ class RankSection extends StatelessWidget {
   }
 
   Widget _buildLoadingCards() {
-    return AppShimmer(
+    return AppSkeletonizer(
+      enabled: true,
       child: ListView.separated(
         padding: EdgeInsets.zero,
         scrollDirection: Axis.horizontal,
         physics: const NeverScrollableScrollPhysics(),
         itemCount: 5,
         separatorBuilder: (_, _) => const SizedBox(width: 12),
-        itemBuilder: (_, _) => _buildLoadingCard(),
-      ),
-    );
-  }
-
-  Widget _buildLoadingCard() {
-    return SizedBox(
-      width: _cardWidth,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ShimmerBox(
-            width: _cardWidth,
-            height: _cardHeight,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          const SizedBox(height: 8),
-          ShimmerBox(
-            width: _cardWidth * 0.9,
-            height: 12,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          const SizedBox(height: 6),
-          ShimmerBox(
-            width: _cardWidth * 0.6,
-            height: 12,
-            borderRadius: BorderRadius.circular(6),
-          ),
-        ],
+        itemBuilder: (context, index) => _buildRankItem(
+          context,
+          const {
+            'name': '排行动画标题',
+            'images': {'common': ''},
+          },
+          index,
+        ),
       ),
     );
   }

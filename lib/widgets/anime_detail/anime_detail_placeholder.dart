@@ -11,7 +11,7 @@ import 'package:baka/services/collection_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/anime/post_card.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 import 'package:baka/services/navigation_service.dart';
 
 import 'package:baka/widgets/anime_detail/collection_sheet.dart';
@@ -391,11 +391,9 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
         '概览',
         (_) {
           final summary = _isDetailLoading
-              ? _buildSkeletonGrid(
-                  itemCount: 6,
-                  columns: 1,
-                  itemHeight: 14,
-                  spacing: 10,
+              ? AppSkeletonizer(
+                  enabled: true,
+                  child: _buildSummarySection('这是一段用于自动骨架遮罩的动画简介占位文本...'),
                 )
               : _buildSummarySection(_detail.summary);
           final genresSection = _detail.genres.isEmpty
@@ -485,19 +483,18 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
           : _buildEmptySection('暂无评论数据'),
     ));
 
-    if (!isWide) {
+    if (_isDetailLoading || _detail.infobox.isNotEmpty) {
       tabs.add((
         '信息',
         (_) => _buildTabSection(
           content: _detail.infobox.isEmpty
               ? null
               : _buildInfoSection(_detail.infobox),
-          skeleton: _buildSkeletonGrid(
-            itemCount: 6,
-            columns: 1,
-            itemHeight: 44,
-            spacing: 1,
-          ),
+          skeletonContent: _buildInfoSection(const [
+            {'key': '中文名', 'value': '动画名称占位'},
+            {'key': '话数', 'value': '12'},
+            {'key': '放送星期', 'value': '星期六'},
+          ]),
           emptyText: '暂无基本信息',
         ),
       ));
@@ -517,11 +514,13 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                 onCharacterTap: (character) =>
                     showCharacterDetailSheet(context, character),
               ),
-        skeleton: _buildSkeletonGrid(
-          itemCount: 0,
-          columns: 0,
-          itemHeight: 0,
-          square: true,
+        skeletonContent: CharactersSection(
+          characters: const [
+            {'name': '角色1', 'role_name': '主角'},
+            {'name': '角色2', 'role_name': '配角'},
+            {'name': '角色3', 'role_name': '配角'},
+          ],
+          onCharacterTap: (_) {},
         ),
         emptyText: '暂无角色信息',
       ),
@@ -560,11 +559,13 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
 
   Widget _buildTabSection({
     required Widget? content,
-    required Widget skeleton,
+    required Widget skeletonContent,
     required String emptyText,
   }) {
     return _wrapTabContent(
-      _isDetailLoading ? skeleton : content ?? _buildEmptySection(emptyText),
+      _isDetailLoading
+          ? AppSkeletonizer(child: skeletonContent)
+          : content ?? _buildEmptySection(emptyText),
     );
   }
 
@@ -577,49 +578,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     );
   }
 
-  Widget _buildSkeletonGrid({
-    required int itemCount,
-    required int columns,
-    required double itemHeight,
-    double spacing = 12,
-    bool square = false,
-  }) {
-    return AppShimmer(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final columnCount = columns > 0
-                ? columns
-                : (constraints.maxWidth / 120).floor().clamp(3, 12);
-            final width =
-                (constraints.maxWidth - spacing * (columnCount - 1)) /
-                columnCount;
-            final count = itemCount > 0 ? itemCount : columnCount * 2;
-            final color = AppShimmer.defaultBaseColor(Theme.of(context));
 
-            return Wrap(
-              spacing: spacing,
-              runSpacing: spacing,
-              children: [
-                for (var i = 0; i < count; i++)
-                  SizedBox(
-                    width: width,
-                    height: square ? width : itemHeight,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: color,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                  ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
-  }
 
   Widget _buildGenresSection(List<String> genres) {
     return Padding(
@@ -708,9 +667,10 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                         imageUrl: url,
                         fit: BoxFit.cover,
                         memCacheWidth: imageWidth,
-                        placeholder: (context, url) => const ShimmerBox(
+                        placeholder: (context, url) => Container(
                           width: double.infinity,
                           height: double.infinity,
+                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
                         ),
                         errorWidget: (context, url, error) =>
                             const SizedBox.shrink(),
@@ -757,8 +717,11 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                               height: 220,
                               fit: BoxFit.cover,
                               memCacheWidth: 400,
-                              placeholder: (context, url) =>
-                                  const ShimmerBox(width: 150, height: 220),
+                              placeholder: (context, url) => Container(
+                                width: 150,
+                                height: 220,
+                                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                              ),
                               errorWidget: (context, url, error) =>
                                   const SizedBox.shrink(),
                             ),
@@ -850,7 +813,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
           SelectableText(
             summary,
             style: TextStyle(
-              color: _isDark
+              color: Theme.of(context).brightness == Brightness.dark
                   ? Colors.white.withValues(alpha: 0.8)
                   : const Color(0xFF3A3A3C),
               fontSize: 15,

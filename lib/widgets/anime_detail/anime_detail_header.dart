@@ -7,7 +7,6 @@ import 'package:baka/models/collection.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/widgets/anime_detail/collection_sheet.dart';
 import 'package:baka/widgets/common/scale_button.dart';
-import 'package:baka/widgets/common/shimmer.dart';
 
 class AnimeDetailHeader extends StatelessWidget {
   /// 直接消费详情模型，避免调用方把 title/alias/score/tags 等字段再拆一遍。
@@ -58,7 +57,6 @@ class AnimeDetailHeader extends StatelessWidget {
               SizedBox(
                 width: 160,
                 child: _CollectionButton(
-                  isLoading: isCollectionLoading,
                   collection: collection,
                   onTap: onCollectionTap,
                 ),
@@ -66,7 +64,6 @@ class AnimeDetailHeader extends StatelessWidget {
             else
               Expanded(
                 child: _CollectionButton(
-                  isLoading: isCollectionLoading,
                   collection: collection,
                   onTap: onCollectionTap,
                 ),
@@ -224,10 +221,7 @@ class _CoverImage extends StatelessWidget {
                   fadeInDuration: Duration.zero,
                   fadeOutDuration: Duration.zero,
                   memCacheWidth: (width * 2).round(),
-                  placeholder: (context, url) => const ShimmerBox(
-                    width: double.infinity,
-                    height: double.infinity,
-                  ),
+                  placeholder: (context, url) => fallback,
                   errorWidget: (context, url, error) => fallback,
                 ),
         ),
@@ -331,12 +325,10 @@ class _TagsWrap extends StatelessWidget {
 }
 
 class _CollectionButton extends StatelessWidget {
-  final bool isLoading;
   final AnimeCollection? collection;
   final VoidCallback onTap;
 
   const _CollectionButton({
-    required this.isLoading,
     required this.collection,
     required this.onTap,
   });
@@ -379,24 +371,22 @@ class _CollectionButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
         ),
         child: Center(
-          child: isLoading
-              ? const ShimmerTextLine(width: 64, height: 14)
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(icon, size: 18, color: textColor),
-                    const SizedBox(width: 6),
-                    Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.5,
-                        color: textColor,
-                      ),
-                    ),
-                  ],
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: textColor),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.5,
+                  color: textColor,
                 ),
+              ),
+            ],
+          ),
         ),
       ),
     );

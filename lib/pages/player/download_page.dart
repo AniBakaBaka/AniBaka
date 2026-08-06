@@ -6,7 +6,6 @@ import 'package:get/get.dart';
 import 'package:baka/models/download_task.dart';
 import 'package:baka/pages/player/player_page.dart';
 import 'package:baka/services/download_service.dart';
-import 'package:baka/widgets/common/shimmer.dart';
 
 class DownloadManagerController extends GetxController {
   final service = DownloadService.instance;
@@ -184,10 +183,7 @@ class _Thumbnail extends StatelessWidget {
             : CachedNetworkImage(
                 imageUrl: url!,
                 fit: BoxFit.cover,
-                placeholder: (_, _) => const ShimmerBox(
-                  width: double.infinity,
-                  height: double.infinity,
-                ),
+                placeholder: (_, _) => fallback,
                 errorWidget: (_, _, _) => fallback,
               ),
       ),

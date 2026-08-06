@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:baka/utils/toast_utils.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -175,11 +175,11 @@ class WebViewPageState extends State<WebViewPage> {
 
   Widget _buildWebView() {
     if (!_isReady) {
-      return const ShimmerBox(
-        width: double.infinity,
-        height: double.infinity,
+      return const AppSkeletonizer(
+        enabled: true,
         baseColor: Color(0xFF161616),
         highlightColor: Color(0xFF282828),
+        child: SizedBox.expand(),
       );
     }
     return _isDesktop

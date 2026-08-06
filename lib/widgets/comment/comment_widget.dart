@@ -9,7 +9,7 @@ import 'package:baka/utils/date_util.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:baka/widgets/comment/comment_card.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -618,11 +618,30 @@ class CIslandCommentWidgetState extends State<CIslandCommentWidget> {
                       ),
                     ),
                     if (loading)
-                      const SliverPadding(
-                        padding: EdgeInsets.symmetric(horizontal: 16),
+                      SliverPadding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
                         sliver: SliverToBoxAdapter(
-                          child: AppShimmer(
-                            child: CommentSkeleton(avatarSize: 36),
+                          child: AppSkeletonizer(
+                            enabled: true,
+                            child: Column(
+                              children: List.generate(
+                                2,
+                                (_) => Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  child: _buildBgmComment(
+                                    (
+                                      name: '用户名称占位符',
+                                      avatarUrl: '',
+                                      content: '这是一条用于自动骨架遮罩的占位剧评内容文本...',
+                                      images: const <String>[],
+                                      createdAt: 1700000000,
+                                      replies: const <_BgmReply>[],
+                                    ),
+                                    theme,
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       )

@@ -6,7 +6,6 @@ import 'package:baka/services/thread_service.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/comment/comment_card.dart';
 import 'package:baka/widgets/comment/comment_widget.dart';
-import 'package:baka/widgets/common/shimmer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher_string.dart';
@@ -340,12 +339,10 @@ class _ThreadPageState extends State<ThreadPage>
         height: 36,
         decoration: BoxDecoration(color: chipBg, shape: BoxShape.circle),
         child: _tab.isRefreshing
-            ? ShimmerCircle(
-                size: 18,
-                baseColor: theme.colorScheme.primary.withValues(alpha: 0.18),
-                highlightColor: theme.colorScheme.primary.withValues(
-                  alpha: 0.5,
-                ),
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
               )
             : Icon(Icons.refresh_rounded, size: 19, color: iconColor),
       ),

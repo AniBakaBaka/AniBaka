@@ -1,7 +1,6 @@
 import 'package:baka/storage/storage_config.dart';
 import 'package:baka/storage/storage_provider.dart';
 import 'package:baka/storage/webdav_storage_provider.dart';
-import 'package:baka/widgets/common/shimmer.dart';
 import 'package:flutter/material.dart';
 
 /// WebDAV 连接配置页面（新增/编辑）
@@ -172,7 +171,11 @@ class _StorageConfigPageState extends State<StorageConfigPage> {
               OutlinedButton.icon(
                 onPressed: _isTesting ? null : _testConnection,
                 icon: _isTesting
-                    ? const ShimmerCircle(size: 18)
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : const Icon(Icons.wifi_tethering_rounded, size: 20),
                 label: Text(_isTesting ? '测试中...' : '测试连接'),
               ),

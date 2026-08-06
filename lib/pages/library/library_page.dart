@@ -5,7 +5,7 @@ import 'package:baka/pages/player/player_page.dart';
 import 'package:baka/services/collection_service.dart';
 import 'package:baka/services/play_history_sync_service.dart';
 import 'package:baka/widgets/anime/post_card.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -208,7 +208,13 @@ class _LibraryPageState extends State<LibraryPage> {
             const SliverToBoxAdapter(
               child: Padding(
                 padding: EdgeInsets.all(16),
-                child: Center(child: ShimmerTextLine(width: 100, height: 12)),
+                child: Center(
+                  child: SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
               ),
             ),
           const SliverPadding(padding: EdgeInsets.only(bottom: 80)),
@@ -384,11 +390,23 @@ class _LibraryPageState extends State<LibraryPage> {
     });
   }
 
+  static final _dummyCollection = AnimeCollection(
+    status: 3,
+    postTitle: '动画名称占位符',
+    rating: 8,
+  );
+
   Widget _buildCollectionContent() {
     if (_isCollectionLoading && _collectionList.isEmpty) {
       return _buildGrid(
         _getGridCrossAxisCount(context) * 3,
-        (context, index) => const _LibraryCardSkeleton(),
+        (context, index) => AppSkeletonizer(
+          enabled: true,
+          child: _CollectionCard(
+            collection: _dummyCollection,
+            onTap: () {},
+          ),
+        ),
       );
     }
 
@@ -469,47 +487,7 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 }
 
-class _LibraryCardSkeleton extends StatelessWidget {
-  const _LibraryCardSkeleton();
 
-  @override
-  Widget build(BuildContext context) {
-    return const Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        AspectRatio(
-          aspectRatio: 2 / 3,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              ShimmerBox(borderRadius: BorderRadius.all(Radius.circular(12))),
-              Positioned(
-                top: 8,
-                left: 8,
-                child: ShimmerBox(
-                  width: 44,
-                  height: 20,
-                  borderRadius: BorderRadius.all(Radius.circular(6)),
-                ),
-              ),
-              Positioned(
-                top: 8,
-                right: 8,
-                child: ShimmerBox(
-                  width: 38,
-                  height: 20,
-                  borderRadius: BorderRadius.all(Radius.circular(6)),
-                ),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(height: 8),
-        ShimmerTextLine(height: 13, widthFactor: 0.88),
-      ],
-    );
-  }
-}
 
 class _HistoryCard extends StatelessWidget {
   final Map data;

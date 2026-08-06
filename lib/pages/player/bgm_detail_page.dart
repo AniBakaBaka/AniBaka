@@ -1,5 +1,5 @@
-﻿import 'package:baka/api/bgm.dart';
-import 'package:baka/widgets/common/shimmer.dart';
+import 'package:baka/api/bgm.dart';
+import 'package:baka/widgets/common/skeletonizer.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -140,7 +140,31 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
   }
 
   Widget _buildBody(ThemeData theme) {
-    if (_loading) return _buildSkeleton();
+    if (_loading) {
+      return AppSkeletonizer(
+        enabled: true,
+        child: ListView(
+          controller: widget.scrollController,
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
+          children: [
+            _buildHeader(theme),
+            _buildSectionTitle('简介'),
+            const Text(
+              '这是一段用于自动骨架遮罩的详细简介占位内容，展示动画故事背景与情节梗概，维持真实的页面渲染与尺寸。',
+            ),
+            _buildSectionTitle('标签'),
+            const Wrap(
+              spacing: 8,
+              children: [
+                Chip(label: Text('标签一')),
+                Chip(label: Text('标签二')),
+                Chip(label: Text('标签三')),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
     if (_error) return _buildError(theme);
 
     return ListView(
@@ -182,35 +206,6 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
     );
   }
 
-  Widget _buildSkeleton() {
-    return const Padding(
-      padding: EdgeInsets.fromLTRB(20, 24, 20, 0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ShimmerBox(
-            width: 100,
-            height: 150,
-            borderRadius: BorderRadius.all(Radius.circular(12)),
-          ),
-          SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ShimmerTextLine(width: 150, height: 24),
-                SizedBox(height: 8),
-                ShimmerTextLine(width: 100, height: 14),
-                SizedBox(height: 16),
-                ShimmerTextLine(width: 200, height: 14),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildError(ThemeData theme) {
     return Center(
       child: Column(
@@ -248,8 +243,11 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
                 height: 150,
                 fit: BoxFit.cover,
                 memCacheWidth: 300,
-                placeholder: (_, _) =>
-                    const ShimmerBox(width: 100, height: 150),
+                placeholder: (_, _) => Container(
+                  width: 100,
+                  height: 150,
+                  color: theme.colorScheme.surfaceContainerHighest,
+                ),
                 errorWidget: (_, _, _) => Container(
                   width: 100,
                   height: 150,

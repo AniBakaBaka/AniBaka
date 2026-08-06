@@ -5,7 +5,6 @@ import 'package:baka/services/navigation_service.dart';
 import 'package:baka/services/swiper_settings_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/reg_utils.dart';
-import 'package:baka/widgets/common/shimmer.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
@@ -217,10 +216,8 @@ class _SwiperBannerState extends State<SwiperBanner> {
                   useOldImageOnUrlChange: true,
                   fadeInDuration: Duration.zero,
                   fadeOutDuration: Duration.zero,
-                  placeholder: (_, _) => const ShimmerBox(
-                    width: double.infinity,
-                    height: double.infinity,
-                    baseColor: Color(0xFF121212),
+                  placeholder: (_, _) => const ColoredBox(
+                    color: Color(0xFF121212),
                   ),
                   errorWidget: (_, _, _) => const ColoredBox(
                     color: Color(0xFF121212),
