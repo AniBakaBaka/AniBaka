@@ -111,6 +111,7 @@ class WindowsPlayerLayout extends StatelessWidget {
                           bgmInfo: bgmInfo,
                           followNotifier: followNotifier,
                           cachedTags: cachedTags,
+                          danmakuController: danmakuController,
                           sourceName: sourceName,
                           lineName: lineName,
                           onSourceTap: onSourceTap,
@@ -118,6 +119,7 @@ class WindowsPlayerLayout extends StatelessWidget {
                           onShowDetail: onShowDetail,
                           isSearching: isSearching,
                         ),
+
                       ),
                       const SliverToBoxAdapter(
                         child: _DesktopBtProgressIndicator(),

@@ -13,7 +13,11 @@ import 'package:baka/pages/source/source_management_page.dart';
 import 'package:baka/pages/setting/app_settings_page.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
+import 'package:baka/widgets/danmaku/danmaku_list_sheet.dart';
 import 'package:baka/utils/platform_page_route.dart';
+
+
+
 
 /// 集中管理页面导航，解耦 Widget 对具体 Page 的直接依赖。
 class NavigationService {
@@ -59,7 +63,7 @@ class NavigationService {
     int? posIndex,
     bool popFirst = false,
     bool fade = false,
-    bool autoMatch = false,
+    bool autoMatch = true,
   }) {
     if (popFirst) Navigator.of(context).pop();
     final PageRoute<void> route = fade
@@ -117,10 +121,37 @@ class NavigationService {
   /// 显示弹幕设置对话框
   static Future<void> showDanmakuSettings(
     BuildContext context,
-    DanmakuController controller,
-  ) {
-    return DanmakuSettingsPage.show(context, controller);
+    DanmakuController controller, {
+    String? defaultTitle,
+    int? defaultEpisode,
+  }) {
+    return DanmakuSettingsPage.show(
+      context,
+      controller,
+      defaultTitle: defaultTitle,
+      defaultEpisode: defaultEpisode,
+    );
   }
+
+  /// 显示手动弹幕检索对话框（统一合并使用 DanmakuListSheet）
+  static Future<void> showDanmakuSearch(
+    BuildContext context,
+    DanmakuController controller, {
+    String? defaultTitle,
+    int? defaultEpisode,
+  }) {
+    return DanmakuListSheet.show(
+      context,
+      controller,
+      defaultTitle: defaultTitle,
+      defaultEpisode: defaultEpisode,
+      initialShowSearch: true,
+    );
+  }
+
+
+
+
 
   /// 显示字幕设置对话框
   static Future<void> showSubtitleSettings(

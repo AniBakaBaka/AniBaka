@@ -374,6 +374,7 @@ class PlaybackMediaInfo {
     this.title = '',
     this.episode = '',
     this.imageUrl = '',
+    this.logoUrl = '',
     this.episodeIndex = 0,
     this.totalEpisodes = 0,
   });
@@ -381,6 +382,7 @@ class PlaybackMediaInfo {
   final String title;
   final String episode;
   final String imageUrl;
+  final String logoUrl;
   final int episodeIndex;
   final int totalEpisodes;
 }

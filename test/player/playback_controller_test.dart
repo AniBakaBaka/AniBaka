@@ -431,4 +431,62 @@ void main() {
 
     await controller.dispose();
   });
+
+  test('seek after completion resumes playback', () async {
+    final backend = FakePlaybackBackend();
+    final controller = PlaybackController(backend: backend);
+    await controller.open('file:///tmp/test.mp4');
+    backend.emitDuration(const Duration(minutes: 24));
+    backend.emitPosition(const Duration(minutes: 24));
+    backend.emitPlaying(false);
+    backend.emitCompleted();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.core.value.playing, isFalse);
+
+    // 播完后拖动进度条：seek 落地并恢复播放（mpv keep-open 播完默认暂停）。
+    await controller.seek(const Duration(minutes: 5), fromSlider: true);
+    expect(backend.lastSeek, const Duration(minutes: 5));
+    expect(backend.isPlaying, isTrue);
+    expect(controller.core.value.playing, isTrue);
+
+    // 非 EOF 状态下 seek 不应改变播放状态。
+    backend.emitPlaying(false);
+    await controller.seek(const Duration(minutes: 10), fromSlider: true);
+    expect(backend.lastSeek, const Duration(minutes: 10));
+    expect(backend.isPlaying, isFalse);
+
+    await controller.dispose();
+  });
+
+  test('local media keeps index-based seeking without igndts/ignidx', () async {
+    final backend = FakePlaybackBackend();
+    final controller = PlaybackController(backend: backend);
+    await controller.initialize();
+
+    await controller.open('D:/videos/anime.mkv');
+    expect(
+      backend.nativeProperties['demuxer-lavf-o'],
+      isNot(contains('igndts')),
+      reason: '本地文件 seek 依赖索引与 DTS，不能套用网络流的忽略参数',
+    );
+    expect(
+      backend.nativeProperties['demuxer-lavf-o'],
+      isNot(contains('ignidx')),
+    );
+    expect(
+      backend.nativeProperties['demuxer-lavf-o'],
+      contains('protocol_whitelist'),
+    );
+
+    // 网络流仍保留原网络专用参数。
+    await controller.open('https://example.com/stream.m3u8');
+    expect(
+      backend.nativeProperties['demuxer-lavf-o'],
+      contains('igndts'),
+    );
+    expect(backend.nativeProperties['demuxer-lavf-o'], contains('ignidx'));
+    expect(backend.nativeProperties['demuxer-lavf-o'], contains('reconnect=1'));
+
+    await controller.dispose();
+  });
 }

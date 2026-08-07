@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:baka/instance.dart';
-import 'package:baka/pages/player/player_page.dart';
 import 'package:baka/pages/source/source_management_page.dart';
 import 'package:baka/services/search_service.dart';
+import 'package:baka/services/navigation_service.dart';
 import 'package:baka/source/source_registry.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/widgets/anime/post_card.dart';
@@ -714,13 +714,13 @@ class _SearchPageState extends State<SearchPage> {
                   'bgmImageUrl': data['bgmImageUrl'],
                 if (data['score'] != null) 'score': data['score'],
               };
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => PlayerPage(data: playerData),
-                ),
+              NavigationService.toPlayer(
+                context,
+                playerData,
+                autoMatch: true,
               );
             };
-          } else if (AdapterRegistry.isAdapterSource(source)) {
+          } else if (source != null && source.isNotEmpty) {
             onTap = () => _openSeries(data);
           }
 
@@ -740,8 +740,10 @@ class _SearchPageState extends State<SearchPage> {
       final playerData = await _searchService.buildPlayerData(item);
       if (!mounted) return;
       if (playerData != null) {
-        await Navigator.of(context).push(
-          MaterialPageRoute<void>(builder: (_) => PlayerPage(data: playerData)),
+        NavigationService.toPlayer(
+          context,
+          playerData,
+          autoMatch: false,
         );
         return;
       }

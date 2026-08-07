@@ -85,18 +85,7 @@ class AnimeDetailHeader extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: isWide ? 38 : 22,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: isWide ? -0.8 : -0.6,
-                  height: 1.2,
-                  color: isDark ? Colors.white : const Color(0xFF111111),
-                ),
-                maxLines: isWide ? 2 : 3,
-                overflow: TextOverflow.ellipsis,
-              ),
+              _buildTitleOrLogo(title, detail.logoUrl, isWide, isDark),
               if (alias.isNotEmpty && alias != title) ...[
                 SizedBox(height: isWide ? 12 : 6),
                 Text(
@@ -155,6 +144,50 @@ class AnimeDetailHeader extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+  Widget _buildTitleOrLogo(
+    String title,
+    String logoUrl,
+    bool isWide,
+    bool isDark,
+  ) {
+    if (logoUrl.isNotEmpty) {
+      return Container(
+        height: isWide ? 85 : 55,
+        alignment: Alignment.centerLeft,
+        child: CachedNetworkImage(
+          key: ValueKey(logoUrl),
+          imageUrl: logoUrl,
+          fit: BoxFit.contain,
+          alignment: Alignment.centerLeft,
+          errorWidget: (context, url, error) => Text(
+            title,
+            style: TextStyle(
+              fontSize: isWide ? 38 : 22,
+              fontWeight: FontWeight.w800,
+              letterSpacing: isWide ? -0.8 : -0.6,
+              height: 1.2,
+              color: isDark ? Colors.white : const Color(0xFF111111),
+            ),
+            maxLines: isWide ? 2 : 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      );
+    }
+
+    return Text(
+      title,
+      style: TextStyle(
+        fontSize: isWide ? 38 : 22,
+        fontWeight: FontWeight.w800,
+        letterSpacing: isWide ? -0.8 : -0.6,
+        height: 1.2,
+        color: isDark ? Colors.white : const Color(0xFF111111),
+      ),
+      maxLines: isWide ? 2 : 3,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }

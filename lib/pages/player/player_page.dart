@@ -10,6 +10,7 @@ import 'package:baka/pages/setting/player_settings_page.dart';
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/services/playback_session_coordinator.dart';
 import 'package:baka/services/player_service.dart';
+import 'package:baka/services/matching/match_memory_service.dart';
 
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
@@ -132,7 +133,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
 
     ctr.setMediaInfo(_svc.initialMediaInfo);
     _followNotifier.value = _svc.isFollow();
-    
+    ctr.core.addListener(_onPlaybackCoreChanged);
+
     final shouldAutoMatch = !_isLocalSource && widget.autoMatch;
     if (shouldAutoMatch) {
       _startHeadlessAutoMatch();
@@ -236,6 +238,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    ctr.core.removeListener(_onPlaybackCoreChanged);
     _autoMatchController?.cancelSearch();
     _autoMatchController?.dispose();
     unawaited(
@@ -385,6 +388,16 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
   final Set<String> _failedSourceKeys = {};
   bool _isAutoSwitchingSource = false;
 
+  void _onPlaybackCoreChanged() {
+    if (!mounted || _isAutoSwitchingSource) return;
+    if (ctr.core.value.failed) {
+      final msg = ctr.core.value.errorMessage;
+      _handlePlaybackInitializationFailure(
+        msg.isNotEmpty ? msg : '视频播放异常',
+      );
+    }
+  }
+
   Future<void> _handlePlaybackInitializationFailure(Object error) async {
     if (!mounted || _isAutoSwitchingSource) return;
     _isAutoSwitchingSource = true;
@@ -400,18 +413,31 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         _failedSourceKeys.add('$currentSourceKey|$currentSeriesId');
       }
 
+      // 清除历史无效匹配记忆，避免再次命中错源
+      final bgmId = BgmUtils.toInt(widget.data['bgmId']);
+      final title = widget.data['title']?.toString() ?? '';
+      if (title.isNotEmpty) {
+        await MatchMemoryService.remove(bgmId: bgmId, title: title);
+      }
+
       // 1. 尝试当前剧集的下一条线路
       final currentEp = _svc.currentVideoItem;
       if (currentEp != null && currUrl < currentEp.lineCount) {
+        showSnackBar('当前线路播放异常，正在自动为您切换线路 ${currUrl + 1}...');
         await changeUrl(currUrl + 1);
         return;
       }
 
-      // 2. 静默自动匹配备用源
+      // 2. 全自动自动匹配并无缝切换至下一个有效视频源
       final seedData = _svc.buildSourceSeedData();
       final controller =
           _autoMatchController ??
           VideoSourceSearchController.sharedFor(seedData: seedData);
+
+      if (controller.resultsNotifier.value.isEmpty &&
+          !controller.isSearchingNotifier.value) {
+        unawaited(controller.startSearch());
+      }
 
       final nextCandidateData = await controller.findNextPlayableCandidate(
         excludedKeys: _failedSourceKeys,
@@ -421,10 +447,17 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       if (!mounted) return;
 
       if (nextCandidateData != null) {
+        final nextSource =
+            nextCandidateData['sourceDisplayName'] ??
+            nextCandidateData['source'] ??
+            '下一个匹配源';
+        showSnackBar('当前视频源播放失败，已自动为您切换至：$nextSource');
         _svc.adoptPrefetchedPlayback(nextCandidateData);
         _bumpPageData();
         await initVideoController(_session.nextGeneration());
         return;
+      } else {
+        showSnackBar('所有可用匹配源均播放失败，请点击源名称手动搜索选择', isError: true);
       }
     } catch (e) {
       debugPrint('[PlayerPage] Auto fallback error: $e');
@@ -467,7 +500,11 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     return ListenableBuilder(
       listenable: _pageDataVersion,
       builder: (context, _) {
-        if (videoList.isEmpty &&
+        final source = widget.data['source']?.toString().trim();
+        final isPureBgmSubject =
+            source == null || source.isEmpty || source == 'bgm';
+
+        if (isPureBgmSubject &&
             !widget.autoMatch &&
             _autoMatchController == null) {
           return Instances.isTV
@@ -972,11 +1009,13 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
             cachedTags: _cachedTags,
             onFollowPressed: toggleFollow,
             onShowDetail: () => _showDetailNotifier.value = true,
+            danmakuController: danmakuController,
             sourceName: _currentSourceName,
             lineName: _currentLineName,
             onSourceTap: _openSourceSwitchSheet,
             isSearching: _autoMatchController != null,
           ),
+
 
           ActiveDownloadIndicator(taskIdPrefix: _taskIdPrefix),
           const MobileBtProgressIndicator(),

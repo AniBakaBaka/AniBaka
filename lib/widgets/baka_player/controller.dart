@@ -80,6 +80,7 @@ class PlaybackController {
   bool _listenersBound = false;
   bool _disposed = false;
   bool _hasPlaybackProgress = false;
+  bool _eofReached = false;
   int _openRetryCount = 0;
   int _openGeneration = 0;
   String? _lastOpenUri;
@@ -216,6 +217,7 @@ class PlaybackController {
       _backend.buffering.listen(_onBufferingChanged),
       _backend.errors.listen(_onError),
       _backend.completed.listen((completed) {
+        _eofReached = completed;
         if (!_disposed && completed) _completed.add(null);
       }),
       _backend.tracks.listen(_onTracksChanged),
@@ -438,7 +440,14 @@ class PlaybackController {
     if (overlay.value.skipState == SkipState.waiting) {
       _setSkipState(SkipState.idle);
     }
+    // 播放完成后（mpv keep-open 会暂停在结尾）再拖动进度条：seek 之后
+    // 后端仍处于暂停，必须显式恢复播放，否则再次拖拽没有效果。
+    final resumeAfterSeek = _eofReached;
     await _performSeek(target, updatePreview: !fromSlider);
+    if (resumeAfterSeek) {
+      _eofReached = false;
+      await play();
+    }
     if (!_seekEvents.isClosed) _seekEvents.add(target);
   }
 
@@ -928,6 +937,7 @@ class PlaybackController {
         hwdecMode: preferences.value.hwdecMode,
         videoRenderer: preferences.value.videoRenderer,
         lowMemoryMode: PlaybackSettingsService.getLowMemoryMode(),
+        mediaUri: _lastOpenUri,
       ),
       debugLabel: 'player',
     );
@@ -1029,6 +1039,7 @@ class PlaybackController {
     );
     _notifyToastChanged();
     _lastTimelineBucket = -1;
+    _eofReached = false;
   }
 
   Future<void> dispose() async {

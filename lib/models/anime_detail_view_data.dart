@@ -9,6 +9,7 @@ class AnimeDetailViewData {
     required this.summary,
     required this.coverUrl,
     required this.backgroundUrl,
+    required this.logoUrl,
     required this.tags,
     required this.genres,
     required this.infobox,
@@ -24,6 +25,7 @@ class AnimeDetailViewData {
   final String summary;
   final String coverUrl;
   final String backgroundUrl;
+  final String logoUrl;
   final List<String> tags;
   final List<String> genres;
   final List<Map<String, dynamic>> infobox;
@@ -55,8 +57,13 @@ class AnimeDetailViewData {
             .firstWhere((value) => value != title, orElse: () => '');
 
     final images = BgmUtils.asMap(anibaka?['images']);
-    final posters = _uniqueImages(images?['posters']);
-    final backdrops = _uniqueImages(images?['backdrops']);
+    final posters = _uniqueLogos(images?['posters']);
+    final backdrops = _uniqueLogos(images?['backdrops']);
+    final logos = _uniqueLogos(images?['logos'] ?? images?['logo']);
+    final logoUrl = _firstImage(logos) ??
+        BgmUtils.trimmed(anibaka?['logoUrl']) ??
+        BgmUtils.trimmed(anibaka?['logo']) ??
+        '';
     final anibakaPoster = _firstImage(posters);
     final cover =
         BgmUtils.resolveCoverImage(source, bgmInfo: bgmInfo) ??
@@ -106,6 +113,7 @@ class AnimeDetailViewData {
           '暂无简介',
       coverUrl: cover,
       backgroundUrl: _firstImage(backdrops) ?? cover,
+      logoUrl: logoUrl,
       tags: tags,
       genres: genres,
       infobox: _mergeInfobox(anibaka, bgm, enTitle, title),
@@ -123,14 +131,41 @@ class AnimeDetailViewData {
   static String? _firstImage(List<Map<String, dynamic>> images) =>
       images.isEmpty ? null : _imageUrl(images.first);
 
-  static List<Map<String, dynamic>> _uniqueImages(dynamic value) {
+  static List<Map<String, dynamic>> _uniqueLogos(dynamic value) {
+    final list = BgmUtils.asMapList(value);
+    if (list.isEmpty) return const [];
+
     final seen = <String>{};
-    return BgmUtils.asMapList(value)
-        .where((image) {
-          final url = _imageUrl(image);
-          return url != null && seen.add(url);
-        })
-        .toList(growable: false);
+    final uniqueList = <Map<String, dynamic>>[];
+
+    for (final item in list) {
+      final url = _imageUrl(item);
+      if (url != null && seen.add(url)) {
+        uniqueList.add(item);
+      }
+    }
+
+    uniqueList.sort((a, b) {
+      final langA = (a['lang'] ?? a['language'] ?? '').toString().toLowerCase();
+      final langB = (b['lang'] ?? b['language'] ?? '').toString().toLowerCase();
+      final urlA = (_imageUrl(a) ?? '').toLowerCase();
+      final urlB = (_imageUrl(b) ?? '').toLowerCase();
+
+      final scoreA = _getLogoLangScore(langA, urlA);
+      final scoreB = _getLogoLangScore(langB, urlB);
+      return scoreB.compareTo(scoreA);
+    });
+
+    return uniqueList;
+  }
+
+  static int _getLogoLangScore(String lang, String url) {
+    if (lang == 'zh' || lang == 'cn' || lang == 'zh-cn' || lang == 'zh-tw' || lang == 'zh-hk') return 100;
+    if (url.contains('/zh/') || url.contains('/cn/') || url.contains('_zh.') || url.contains('_cn.')) return 90;
+    if (lang == 'ja' || lang == 'jp' || lang == 'native') return 80;
+    if (url.contains('/ja/') || url.contains('/jp/') || url.contains('_ja.')) return 70;
+    if (lang == 'en' || url.contains('/en/') || url.contains('_en.')) return 10;
+    return 50;
   }
 
   static Iterable<String> _unique(Iterable<String?> values) sync* {

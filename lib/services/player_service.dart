@@ -181,8 +181,21 @@ class PlayerService {
     return seed;
   }
 
+  String get logoUrl {
+    final explicitLogo = data['logoUrl'] ?? data['logo'] ?? data['images']?['logo'];
+    if (explicitLogo != null && explicitLogo.toString().isNotEmpty) {
+      if (explicitLogo is List && explicitLogo.isNotEmpty) return explicitLogo.first.toString();
+      return explicitLogo.toString();
+    }
+    return '';
+  }
+
   PlaybackMediaInfo get initialMediaInfo =>
-      PlaybackMediaInfo(title: title, imageUrl: coverImageUrl ?? '');
+      PlaybackMediaInfo(
+        title: title,
+        imageUrl: coverImageUrl ?? '',
+        logoUrl: logoUrl,
+      );
 
   PlaybackMediaInfo get currentMediaInfo {
     final episodeTitle = bgmEpisodeTitle;
@@ -192,6 +205,7 @@ class PlayerService {
           ? episodeTitle!
           : currentEpisodeTitle,
       imageUrl: coverImageUrl ?? '',
+      logoUrl: logoUrl,
       episodeIndex: currPlayIndex,
       totalEpisodes: videoList.length,
     );

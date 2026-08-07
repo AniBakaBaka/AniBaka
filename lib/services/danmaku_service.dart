@@ -52,6 +52,37 @@ class DanmakuService {
     return parsed;
   }
 
+  static Future<List<DanmakuItem>> fetchDanmakuBySubjectAndEpisode({
+    required int subjectId,
+    required int episodeIndex,
+    String? title,
+  }) async {
+    final cacheKey = '$subjectId-$episodeIndex';
+    final cached = _readCache(cacheKey);
+    if (cached != null) return cached;
+
+    final subject = await BgmService.resolveSubject(
+      bgmId: subjectId.toString(),
+      title: title ?? '',
+      withDetail: true,
+    );
+    final searchTitles = subject?.searchTitles ??
+        (title != null && title.isNotEmpty
+            ? BgmUtils.buildSearchTitles([title])
+            : const []);
+
+    final raw = await _fetchFirstAvailableDanmaku(
+      subjectId,
+      episodeIndex,
+      searchTitles.isNotEmpty ? searchTitles : [''],
+    );
+    if (raw == null) return const [];
+    final parsed = await parseItems(raw);
+    if (parsed.isNotEmpty) _putCache(cacheKey, parsed);
+    return parsed;
+  }
+
+
   static List<DanmakuItem>? _readCache(String key) {
     final value = _cache.remove(key);
     if (value != null) _cache[key] = value;

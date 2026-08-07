@@ -90,7 +90,7 @@ class _TvSearchPageState extends State<TvSearchPage> {
     try {
       final playerData = await _svc.buildPlayerData(item);
       if (playerData != null && mounted) {
-        NavigationService.toPlayer(context, playerData);
+        NavigationService.toPlayer(context, playerData, autoMatch: false);
       }
     } catch (e) {
       debugPrint('Error opening series: $e');

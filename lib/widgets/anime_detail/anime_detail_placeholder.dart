@@ -76,7 +76,11 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   }
 
   void _startWatching() {
-    NavigationService.toPlayer(context, widget.data, autoMatch: true);
+    final playerData = Map<String, dynamic>.from(widget.data);
+    if (_detail.logoUrl.isNotEmpty) {
+      playerData['logoUrl'] = _detail.logoUrl;
+    }
+    NavigationService.toPlayer(context, playerData, autoMatch: true);
   }
 
   Future<void> _loadInitialData() async {

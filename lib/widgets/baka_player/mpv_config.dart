@@ -29,9 +29,22 @@ const playerProperties = <String, String>{
   'tls-verify': 'no',
   'user-agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-  'demuxer-lavf-o':
-      'reconnect=1,multiple_requests=1,retry_open=3,hls_wrap=0,hls_allow_cache=1,fflags=+igndts+ignidx,tls_verify=0',
 };
+
+/// 网络流（http/https）专用的 lavf 参数：断线重连、HLS 容错，以及
+/// 忽略索引/DTS 以绕过部分在线源的坏时间戳。仅适用于网络媒体。
+const networkDemuxerLavfOptions =
+    'reconnect=1,multiple_requests=1,retry_open=3,hls_wrap=0,hls_allow_cache=1,'
+    'fflags=+igndts+ignidx,tls_verify=0';
+
+/// 本地文件的 lavf 参数：保持 media_kit 默认的协议白名单与宽松解析。
+///
+/// 刻意不使用 `igndts+ignidx`：本地 MP4/MKV 的精确 seek 依赖样本索引与
+/// DTS（B 帧流的包排序），忽略后 seek 会定位到错误关键帧，甚至直接落到
+/// 文件末尾导致视频立即播完。
+const localDemuxerLavfOptions =
+    'seg_max_retry=5,strict=experimental,allowed_extensions=ALL,'
+    'protocol_whitelist=[file,http,https,tcp,udp,tls,data,crypto,ftp,rtp,rtsp,rtmp,srt]';
 
 const lowMemoryPlayerProperties = <String, String>{
   'cache-secs': '5',
@@ -56,12 +69,19 @@ Map<String, String> buildPlayerProperties({
   String videoRenderer = 'gpu',
   bool lowMemoryMode = false,
   bool? android,
+  String? mediaUri,
 }) {
+  final isNetwork =
+      mediaUri != null &&
+      (mediaUri.startsWith('http://') || mediaUri.startsWith('https://'));
   return <String, String>{
     ...playerProperties,
     if (lowMemoryMode) ...lowMemoryPlayerProperties,
     'hwdec': effectiveHwdec(hwdecMode, videoRenderer, android: android),
     ...buildVideoRendererProperties(videoRenderer, android: android),
+    'demuxer-lavf-o': isNetwork
+        ? networkDemuxerLavfOptions
+        : localDemuxerLavfOptions,
   };
 }
 

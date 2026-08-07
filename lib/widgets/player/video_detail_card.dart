@@ -8,8 +8,23 @@ import 'package:baka/utils/reg_utils.dart';
 import 'package:baka/widgets/common/scale_button.dart';
 import 'package:baka/widgets/player/bgm_follow_pill.dart';
 
+import 'package:baka/widgets/danmaku/controller.dart';
+import 'package:baka/widgets/danmaku/danmaku_list_sheet.dart';
+
 /// 播放页视频详情卡片 —— 标题、追番、meta 信息、标签。
 class VideoDetailCard extends StatelessWidget {
+  final Map detail;
+  final BgmInfo bgmInfo;
+  final ValueNotifier<bool> followNotifier;
+  final List<String> cachedTags;
+  final VoidCallback onFollowPressed;
+  final VoidCallback onShowDetail;
+  final DanmakuController? danmakuController;
+  final String? sourceName;
+  final String? lineName;
+  final VoidCallback? onSourceTap;
+  final bool isSearching;
+
   const VideoDetailCard({
     required this.detail,
     required this.bgmInfo,
@@ -17,23 +32,13 @@ class VideoDetailCard extends StatelessWidget {
     required this.cachedTags,
     required this.onFollowPressed,
     required this.onShowDetail,
+    this.danmakuController,
     this.sourceName,
     this.lineName,
     this.onSourceTap,
     this.isSearching = false,
     super.key,
   });
-
-  final Map detail;
-  final BgmInfo bgmInfo;
-  final ValueNotifier<bool> followNotifier;
-  final List<String> cachedTags;
-  final VoidCallback onFollowPressed;
-  final VoidCallback onShowDetail;
-  final String? sourceName;
-  final String? lineName;
-  final VoidCallback? onSourceTap;
-  final bool isSearching;
 
   @override
   Widget build(BuildContext context) {
@@ -111,6 +116,63 @@ class VideoDetailCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
+              if (danmakuController != null) ...[
+                ListenableBuilder(
+                  listenable: danmakuController!,
+                  builder: (context, _) {
+                    final count = danmakuController!.items.length;
+                    return ScaleButton(
+                      onTap: () => DanmakuListSheet.show(
+                        context,
+                        danmakuController!,
+                        defaultTitle: detail['title']?.toString(),
+                        defaultEpisode: (detail['episodeIndex'] is num)
+                            ? (detail['episodeIndex'] as num).toInt() + 1
+                            : null,
+                      ),
+
+
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme.cardColor,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: theme.dividerColor.withValues(alpha: 0.1),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.subtitles_outlined,
+                              size: 14,
+                              color: theme.textTheme.bodyMedium?.color?.withValues(
+                                alpha: 0.8,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              '弹幕 $count',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: theme.textTheme.bodyMedium?.color?.withValues(
+                                  alpha: 0.8,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(width: 8),
+              ],
               ScaleButton(
                 onTap: onShowDetail,
                 child: Container(
@@ -150,6 +212,7 @@ class VideoDetailCard extends StatelessWidget {
                   ),
                 ),
               ),
+
             ],
           ),
           if (cachedTags.isNotEmpty || sourceName != null) ...[
@@ -301,3 +364,4 @@ class _SourceChip extends StatelessWidget {
     );
   }
 }
+

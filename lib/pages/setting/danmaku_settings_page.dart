@@ -1,22 +1,39 @@
 import 'package:flutter/material.dart';
 import 'package:baka/services/danmaku_service.dart';
+import 'package:baka/services/navigation_service.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/player/settings_panel.dart';
 
+
 class DanmakuSettingsPage extends StatefulWidget {
   final DanmakuController controller;
-  const DanmakuSettingsPage({required this.controller, super.key});
+  final String? defaultTitle;
+  final int? defaultEpisode;
+
+  const DanmakuSettingsPage({
+    required this.controller,
+    this.defaultTitle,
+    this.defaultEpisode,
+    super.key,
+  });
 
   static Future<void> show(
     BuildContext context,
-    DanmakuController controller,
-  ) async {
+    DanmakuController controller, {
+    String? defaultTitle,
+    int? defaultEpisode,
+  }) async {
     await showPlayerSettingsPanel(
       context,
-      DanmakuSettingsPage(controller: controller),
+      DanmakuSettingsPage(
+        controller: controller,
+        defaultTitle: defaultTitle,
+        defaultEpisode: defaultEpisode,
+      ),
     );
   }
+
 
   @override
   State<DanmakuSettingsPage> createState() => _DanmakuSettingsPageState();
@@ -108,7 +125,82 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
             padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
+                const PanelSectionTitle('弹幕匹配'),
+                PanelSettingsGroup(
+                  backgroundColor: cardColor,
+                  children: [
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () {
+                          NavigationService.showDanmakuSearch(
+                            context,
+                            widget.controller,
+                            defaultTitle: widget.defaultTitle,
+                            defaultEpisode: widget.defaultEpisode,
+                          );
+                        },
+
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: primaryColor.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(
+                                  Icons.manage_search_rounded,
+                                  color: primaryColor,
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '手动弹幕检索',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    SizedBox(height: 2),
+                                    Text(
+                                      '弹幕匹配不准？手动检索并绑定弹幕库',
+                                      style: TextStyle(
+                                        color: Colors.white54,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(
+                                Icons.chevron_right_rounded,
+                                color: Colors.white38,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 24),
+
                 const PanelSectionTitle('弹幕外观'),
+
                 PanelSettingsGroup(
                   backgroundColor: cardColor,
                   children: [

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/utils/toast_utils.dart';
@@ -786,18 +787,16 @@ class _BakaPlayerState extends State<BakaPlayer> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
+                      _buildPlayerTitleOrLogo(
                         mediaInfo.title.isNotEmpty
                             ? mediaInfo.title
-                            : (widget.detail?['title'] ?? ''),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: isWide ? 20 : 16,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.3,
-                        ),
+                            : (widget.detail?['title']?.toString() ?? ''),
+                        mediaInfo.logoUrl.isNotEmpty
+                            ? mediaInfo.logoUrl
+                            : (widget.detail?['logoUrl']?.toString() ??
+                                widget.detail?['logo']?.toString() ??
+                                ''),
+                        isWide,
                       ),
                     ],
                   ),
@@ -932,6 +931,47 @@ class _BakaPlayerState extends State<BakaPlayer> {
     );
   }
 
+  Widget _buildPlayerTitleOrLogo(String title, String logoUrl, bool isWide) {
+    if (logoUrl.isNotEmpty) {
+      return Container(
+        constraints: BoxConstraints(
+          maxHeight: isWide ? 58 : 46,
+          maxWidth: 280,
+        ),
+        alignment: Alignment.centerLeft,
+        child: CachedNetworkImage(
+          key: ValueKey(logoUrl),
+          imageUrl: logoUrl,
+          fit: BoxFit.contain,
+          alignment: Alignment.centerLeft,
+          errorWidget: (context, url, error) => Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: isWide ? 20 : 16,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Text(
+      title,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: Colors.white,
+        fontSize: isWide ? 20 : 16,
+        fontWeight: FontWeight.bold,
+        letterSpacing: 0.3,
+      ),
+    );
+  }
+
   Widget? _buildEpisodeTitle(bool isWide) {
     if (!widget.full && !isWide) return null;
     if (widget.full && widget.onPickEpisode == null) return null;
@@ -1036,10 +1076,21 @@ class _BakaPlayerState extends State<BakaPlayer> {
                     borderRadius: BorderRadius.horizontal(
                       right: Radius.circular(isWide ? 22 : 18),
                     ),
-                    onTap: () => NavigationService.showDanmakuSettings(
-                      context,
-                      widget.controller.danmakuController,
-                    ),
+                    onTap: () {
+                      final mediaInfo = widget.controller.mediaInfo.value;
+                      final title =
+                          widget.detail?['title']?.toString() ?? mediaInfo.title;
+                      final epIndex =
+                          mediaInfo.episodeIndex >= 0 ? mediaInfo.episodeIndex + 1 : 1;
+                      NavigationService.showDanmakuSettings(
+                        context,
+                        widget.controller.danmakuController,
+                        defaultTitle: title,
+                        defaultEpisode: epIndex,
+                      );
+                    },
+
+
                     child: Padding(
                       padding: EdgeInsets.symmetric(
                         horizontal: isWide ? 12 : 10,

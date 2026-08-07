@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 /// 弹幕控制器：持有整集弹幕数据与配置。
 /// 时间轴以播放器媒体时间为准，由 [syncTime] 驱动，视图通过回调绑定。
-class DanmakuController {
+class DanmakuController extends ChangeNotifier {
   DanmakuController();
 
   DanmakuListener? _listener;
@@ -18,10 +18,23 @@ class DanmakuController {
     fontSize: DanmakuOption.defaultFontSize,
   );
 
+  double timeOffset = 0.0; // 弹幕时间偏移量（单位：秒，正值延后，负值提前）
+  String sourceProvider = 'dandanplay'; // 弹幕来源平台
+
   bool get running => _running;
   double get playbackRate => _playbackRate;
   DanmakuOption get option => _option;
   List<DanmakuItem> get items => _items;
+
+  void setTimeOffset(double offsetInSeconds) {
+    timeOffset = offsetInSeconds;
+    if (_lastPosition != null) {
+      syncTime(_lastPosition!);
+    }
+    notifyListeners();
+  }
+
+  Duration? _lastPosition;
 
   set playbackRate(double value) {
     final rate = value > 0 ? value : 1.0;
@@ -31,20 +44,34 @@ class DanmakuController {
   }
 
   /// 设置整集弹幕（须按 time 升序）
-  void setItems(List<DanmakuItem> items) {
+  void setItems(List<DanmakuItem> items, {String? provider}) {
     _items = items;
+    if (provider != null && provider.trim().isNotEmpty) {
+      sourceProvider = provider.trim();
+    } else {
+      sourceProvider = 'dandanplay';
+    }
     _listener?.onDanmakuItemsChanged();
+    notifyListeners();
   }
 
   /// 同步播放进度，视图以此为时间锚点（seek 亦由此感知）
   void syncTime(Duration position) {
-    _listener?.onDanmakuTimeSync(position);
+    _lastPosition = position;
+    if (timeOffset == 0) {
+      _listener?.onDanmakuTimeSync(position);
+    } else {
+      final offsetMs = (timeOffset * 1000).round();
+      final adjustedMs = (position.inMilliseconds - offsetMs).clamp(0, 86400000);
+      _listener?.onDanmakuTimeSync(Duration(milliseconds: adjustedMs));
+    }
   }
 
   /// 立即注入弹幕（如用户发送）
   void addItems(List<DanmakuItem> items) {
     if (items.isEmpty || !_running) return;
     _listener?.onDanmakuInject(items);
+    notifyListeners();
   }
 
   void pause() {
@@ -60,8 +87,11 @@ class DanmakuController {
   /// 清空数据与屏幕（切集时调用）
   void reset() {
     _items = const [];
+    sourceProvider = 'dandanplay';
     _listener?.onDanmakuReset();
+    notifyListeners();
   }
+
 
   void updateOption(DanmakuOption option) {
     final old = _option;

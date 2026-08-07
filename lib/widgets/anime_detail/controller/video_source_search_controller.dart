@@ -420,7 +420,7 @@ class VideoSourceSearchController {
 
     final searchFuture = _runPool(
       tasks,
-      4,
+      8,
       shouldStop: () => _autoMatched || !_alive(runId),
     );
     if (memoryFuture != null && await memoryFuture) {
@@ -453,7 +453,7 @@ class VideoSourceSearchController {
         episodeIndex: _ep,
         preferredLine: 1,
         probeDirect: true,
-      );
+      ).timeout(const Duration(milliseconds: 3500));
       if (!_alive(runId) || _autoMatched || _userSelected) return true;
       if (probe.status == SourceProbeStatus.direct && probe.data != null) {
         _autoMatched = true;
@@ -554,27 +554,23 @@ class VideoSourceSearchController {
     var failed = 0;
     var found = false;
 
-    for (var i = 0; i < keywords.length; i++) {
-      if (!_alive(runId) || _autoMatched) return;
-      if (i > 0 && _results.length >= 8) break;
-      attempted++;
-
-      List<Map<String, dynamic>>? raw;
+    Future<List<Map<String, dynamic>>?> tryKeyword(String kw) async {
       try {
-        raw = await load(keywords[i]);
-      } catch (_) {}
-      if (!_alive(runId) || _autoMatched) return;
-
-      if (raw == null) {
-        failed++;
-        continue;
+        return await load(kw);
+      } catch (_) {
+        return null;
       }
+    }
 
+    List<SearchResultItem> parseRaw(
+      List<Map<String, dynamic>> raw,
+      String kw,
+    ) {
       final seen = <String>{};
       final items = <SearchResultItem>[];
       for (final r in raw) {
         final data = Map<String, dynamic>.from(r)
-          ..['_searchKeyword'] = keywords[i];
+          ..['_searchKeyword'] = kw;
         final item = SearchResultItem(
           title: data['title']?.toString() ?? '',
           sourceType: sourceKey,
@@ -582,10 +578,54 @@ class VideoSourceSearchController {
         );
         if (seen.add(item.key)) items.add(item);
       }
-      if (items.isNotEmpty) {
-        found = true;
-        _appendResults(runId, items);
-        break;
+      return items;
+    }
+
+    // 核心优化：并行并发发起主标题与首个别名搜索
+    final coreKeywords = keywords.take(2).toList();
+    final extraKeywords = keywords.skip(2).toList();
+
+    if (coreKeywords.isNotEmpty) {
+      attempted += coreKeywords.length;
+      final results = await Future.wait(
+        coreKeywords.map((kw) => tryKeyword(kw)),
+      );
+      if (!_alive(runId) || _autoMatched) return;
+
+      for (var i = 0; i < coreKeywords.length; i++) {
+        final raw = results[i];
+        if (raw == null) {
+          failed++;
+          continue;
+        }
+        final items = parseRaw(raw, coreKeywords[i]);
+        if (items.isNotEmpty) {
+          found = true;
+          _appendResults(runId, items);
+          break;
+        }
+      }
+    }
+
+    if (!found && !_autoMatched && _alive(runId)) {
+      for (final kw in extraKeywords) {
+        if (!_alive(runId) || _autoMatched) return;
+        if (_results.length >= 8) break;
+        attempted++;
+
+        final raw = await tryKeyword(kw);
+        if (!_alive(runId) || _autoMatched) return;
+        if (raw == null) {
+          failed++;
+          continue;
+        }
+
+        final items = parseRaw(raw, kw);
+        if (items.isNotEmpty) {
+          found = true;
+          _appendResults(runId, items);
+          break;
+        }
       }
     }
 
@@ -611,19 +651,22 @@ class VideoSourceSearchController {
     if (!_alive(runId)) return;
     final context = _syncContext();
     var accepted = 0;
+    SearchResultItem? topConfidenceItem;
+
     for (final item in items) {
       if (_results.containsKey(item.key) || _results.length >= 100) break;
       final count = _sourceCounts[item.sourceType] ?? 0;
       if (count >= 20) continue;
 
-      // 直接复用 SourceMatchEngine 已有的评估置信度 score.confidence！
-      // 站内源保留；非站内源置信度小于 0.20 的无关噪声项目（如搜索《孤独摇滚》吐出《仙逆》）直接无情拦截排除。
       if (item.sourceType != 'internal') {
         final score = _rankCache[item.key] ??= _engine.score(
           item.matchCandidate,
           context,
         );
         if (score.confidence < 0.20) continue;
+        if (score.confidence >= 0.80 && topConfidenceItem == null) {
+          topConfidenceItem = item;
+        }
       }
 
       _results[item.key] = item;
@@ -633,7 +676,28 @@ class VideoSourceSearchController {
     if (accepted == 0) return;
 
     resultsNotifier.value = List.unmodifiable(_results.values);
+
     if (autoMatchMode && !_userSelected && !_autoMatched) {
+      if (topConfidenceItem != null) {
+        final highItem = topConfidenceItem;
+        unawaited(
+          ensureCandidatePlayable(
+            highItem,
+            episodeIndex: _ep,
+            preferredLine: 1,
+          ).then((probe) {
+            if (_alive(runId) &&
+                !_userSelected &&
+                !_autoMatched &&
+                probe.status == SourceProbeStatus.direct &&
+                probe.data != null) {
+              _autoMatched = true;
+              onMatchFound?.call(Map<String, dynamic>.from(probe.data!));
+              unawaited(persistMatchMemory(highItem, probe.data!));
+            }
+          }),
+        );
+      }
       unawaited(_scheduleAutoMatch(runId));
     }
   }
@@ -708,7 +772,7 @@ class VideoSourceSearchController {
       }
     }
 
-    final n = candidates.length < 2 ? candidates.length : 2;
+    final n = candidates.length < 4 ? candidates.length : 4;
     await Future.wait(List.generate(n, (_) => worker()));
   }
 
@@ -730,15 +794,17 @@ class VideoSourceSearchController {
     for (final rankedItem in ranked) {
       final item = _results[rankedItem.candidate.key];
       if (item == null) continue;
-      final probe = await ensureCandidatePlayable(
-        item,
-        episodeIndex: ep,
-        preferredLine: 1,
-      );
-      if (probe.status == SourceProbeStatus.direct && probe.data != null) {
-        unawaited(persistMatchMemory(item, probe.data!));
-        return Map<String, dynamic>.from(probe.data!);
-      }
+      try {
+        final probe = await ensureCandidatePlayable(
+          item,
+          episodeIndex: ep,
+          preferredLine: 1,
+        ).timeout(const Duration(milliseconds: 4500));
+        if (probe.status == SourceProbeStatus.direct && probe.data != null) {
+          unawaited(persistMatchMemory(item, probe.data!));
+          return Map<String, dynamic>.from(probe.data!);
+        }
+      } catch (_) {}
     }
     return null;
   }
@@ -918,7 +984,9 @@ class VideoSourceSearchController {
     candidateRevisionNotifier.value++;
 
     try {
-      final videoData = await resolveVideoData(probe.item);
+      final videoData = await resolveVideoData(
+        probe.item,
+      ).timeout(const Duration(milliseconds: 4500));
       final rawEpisodes = PlaybackEpisodeCatalog.rawEpisodesOf(
         videoData,
       ).map(PlaybackEpisode.parse).whereType<PlaybackEpisode>().toList();

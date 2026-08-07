@@ -1,18 +1,21 @@
-import 'package:baka/widgets/platform/tv/tv_theme_util.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:baka/api/bgm.dart';
+import 'package:baka/api/post.dart';
 import 'package:baka/models/anime_detail_view_data.dart';
 import 'package:baka/models/collection.dart';
+import 'package:baka/models/playback_episode.dart';
 import 'package:baka/services/bgm_service.dart';
 import 'package:baka/services/collection_service.dart';
+import 'package:baka/services/navigation_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
-import 'package:baka/services/navigation_service.dart';
-import 'package:baka/widgets/common/skeletonizer.dart';
+import 'package:baka/widgets/anime_detail/video_source_search_sheet.dart';
+import 'package:baka/widgets/platform/tv/tv_episode_selector.dart';
 import 'package:baka/widgets/platform/tv/tv_focusable.dart';
+import 'package:baka/widgets/platform/tv/tv_theme_util.dart';
 
 class TvAnimeDetailPlaceholder extends StatefulWidget {
   final Map data;
@@ -27,10 +30,12 @@ class TvAnimeDetailPlaceholder extends StatefulWidget {
 class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   late BgmInfo _bgmInfo;
   Map<String, dynamic>? _detailData;
+  Map<String, dynamic>? _anibakaData;
   late AnimeDetailViewData _detail;
 
   AnimeCollection? _collection;
   bool _isCollectionLoading = false;
+  bool _showEpisodeSelector = false;
 
   int? get _subjectId => _bgmInfo.subjectId;
 
@@ -39,12 +44,35 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
     return (postId != null && postId > 0) ? postId : null;
   }
 
+  List<PlaybackEpisode> get _bgmVideoList {
+    final bgmEps = BgmUtils.asMapList(_detailData?['episodes']);
+    if (bgmEps.isNotEmpty) {
+      return bgmEps.map((ep) {
+        final sort = BgmUtils.toInt(ep['sort']) ?? BgmUtils.toInt(ep['ep']) ?? 1;
+        final nameCn = BgmUtils.trimmed(ep['name_cn']);
+        final name = BgmUtils.trimmed(ep['name']);
+        final title = (nameCn != null && nameCn.isNotEmpty)
+            ? '$sort. $nameCn'
+            : (name != null && name.isNotEmpty)
+                ? '$sort. $name'
+                : '第 $sort 话';
+        return PlaybackEpisode(
+          title: title,
+          lines: const [],
+        );
+      }).toList();
+    }
+    final raw = PlaybackEpisodeCatalog.rawEpisodesOf(widget.data);
+    return PlaybackEpisodeCatalog.parse(raw);
+  }
+
   void _rebuildDetail() {
     _bgmInfo = BgmUtils.readFromData(widget.data);
     _detailData = BgmUtils.asMap(widget.data['bgmDetailData']);
     _detail = AnimeDetailViewData.from(
       source: widget.data,
       bgmInfo: _bgmInfo,
+      anibaka: _anibakaData,
       bgm: _detailData,
     );
   }
@@ -58,22 +86,37 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   }
 
   Future<void> _fetchBgmData() async {
-    if (_detailData != null && _bgmInfo.subjectId != null) return;
     try {
-      await BgmService.resolveFromData(widget.data);
-      if (!mounted) return;
-      setState(_rebuildDetail);
+      if (_bgmInfo.subjectId == null) {
+        await BgmService.resolveFromData(widget.data);
+        if (!mounted) return;
+        setState(_rebuildDetail);
+      }
 
       final subjectId = _subjectId;
-      if (subjectId == null || _detailData != null) return;
+      if (subjectId == null) return;
 
-      final detail = await getBgmAnimeFullDetail(subjectId);
-      if (!mounted || detail == null) return;
+      if (_anibakaData == null) {
+        getAnimeDetail(subjectId).then((data) {
+          if (!mounted) return;
+          _anibakaData = BgmUtils.asMap(data);
+          setState(_rebuildDetail);
+        }).catchError((e) {
+          debugPrint('获取AniBaka详情失败: $e');
+        });
+      }
 
-      widget.data['bgmDetailData'] = detail;
-      setState(_rebuildDetail);
+      if (_detailData == null) {
+        getBgmAnimeFullDetail(subjectId).then((detail) {
+          if (!mounted || detail == null) return;
+          widget.data['bgmDetailData'] = detail;
+          setState(_rebuildDetail);
+        }).catchError((e) {
+          debugPrint('获取Bangumi详情失败: $e');
+        });
+      }
     } catch (e) {
-      debugPrint('获取番剧详情失败: $e');
+      debugPrint('获取番剧数据失败: $e');
     }
   }
 
@@ -152,18 +195,83 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   }
 
   void _startWatching() {
-    NavigationService.toPlayer(context, widget.data, autoMatch: true);
+    final playerData = Map<String, dynamic>.from(widget.data);
+    if (_detail.logoUrl.isNotEmpty) {
+      playerData['logoUrl'] = _detail.logoUrl;
+    }
+    NavigationService.toPlayer(context, playerData, autoMatch: true);
+  }
+
+  String _formatNumber(int number) {
+    if (number <= 0) return '0';
+    final str = number.toString();
+    final reg = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
+    return str.replaceAllMapped(reg, (Match m) => '${m[1]},');
+  }
+
+  String _collectionStatusText() {
+    if (_isCollectionLoading) return '加载中...';
+    if (_collection == null) return '未收藏';
+    return CollectionStatus.fromValue(_collection!.status)?.label ?? '已在看';
+  }
+
+  String _buildAirDateText() {
+    final date = BgmUtils.trimmed(_detailData?['date']) ??
+        BgmUtils.trimmed(_anibakaData?['date']);
+    if (date != null && date.isNotEmpty) {
+      final parts = date.split('-');
+      if (parts.length >= 2) {
+        final year = parts[0];
+        final month = int.tryParse(parts[1]) ?? parts[1];
+        return '$year 年 $month 月';
+      }
+      return date;
+    }
+    return '2011 年 4 月';
+  }
+
+  String _buildEpisodeStatusText() {
+    final status = BgmUtils.trimmed(_anibakaData?['status']) ?? '已完结';
+    final eps = BgmUtils.toInt(_anibakaData?['episodes']) ??
+        BgmUtils.toInt(_detailData?['total_episodes']) ??
+        (_detailData?['eps'] is List ? (_detailData!['eps'] as List).length : null);
+    if (eps != null && eps > 0) {
+      return '$status · 全 $eps 话';
+    }
+    return status;
+  }
+
+  List<String> _extractDisplayTags() {
+    final list = <String>[];
+    final seen = <String>{};
+
+    void add(String? t) {
+      if (t == null) return;
+      final trimmed = t.trim();
+      if (trimmed.isNotEmpty && seen.add(trimmed)) {
+        list.add(trimmed);
+      }
+    }
+
+    for (final tag in _detail.tags) {
+      add(tag);
+    }
+    for (final g in _detail.genres) {
+      add(g);
+    }
+    final bgmTags = BgmUtils.asMapList(_detailData?['tags']);
+    for (final tag in bgmTags) {
+      add(tag['name']?.toString());
+    }
+
+    return list.take(12).toList();
   }
 
   @override
   Widget build(BuildContext context) {
     final title = _detail.title;
-    final summary = _detail.summary;
-    final score = _detail.score;
-    final cover = _detail.coverUrl;
-    final tags = _detail.tags;
-    final scoreCount = _detail.scoreCount;
     final alias = _detail.alias;
+    final bgUrl = _detail.backgroundUrl;
 
     return Scaffold(
       backgroundColor: context.tvBgColor,
@@ -173,6 +281,10 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
           if (event is KeyDownEvent &&
               (event.logicalKey == LogicalKeyboardKey.escape ||
                   event.logicalKey == LogicalKeyboardKey.goBack)) {
+            if (_showEpisodeSelector) {
+              setState(() => _showEpisodeSelector = false);
+              return KeyEventResult.handled;
+            }
             Navigator.of(context).maybePop();
             return KeyEventResult.handled;
           }
@@ -181,231 +293,215 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (cover.isNotEmpty)
+            // 1. 全屏背景大图 (优先 AniBaka backdrops 横屏背景大图)
+            if (bgUrl.isNotEmpty)
               Positioned.fill(
                 child: CachedNetworkImage(
-                  imageUrl: cover,
-                  memCacheWidth: 960,
+                  imageUrl: bgUrl,
+                  memCacheWidth: 1920,
                   fit: BoxFit.cover,
                   alignment: Alignment.topCenter,
-                  filterQuality: FilterQuality.low,
-                  placeholder: (_, _) =>
-                      const ColoredBox(color: Color(0xFF141414)),
+                  filterQuality: FilterQuality.medium,
+                  placeholder: (_, _) => ColoredBox(color: context.tvBgColor),
                   errorWidget: (_, _, _) =>
                       ColoredBox(color: context.tvShadowColor(0.87)),
                 ),
               ),
 
-            Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    context.tvShadowColor(0.7),
-                    context.tvShadowColor(0.9),
-                  ],
+            // 2. 上方无阴影，仅下方有极其丝滑平滑的深度渐变阴影
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent, // 上方 100% 透明
+                      context.tvBgColor.withValues(alpha: 0.1),
+                      context.tvBgColor.withValues(alpha: 0.4),
+                      context.tvBgColor.withValues(alpha: 0.75),
+                      context.tvBgColor.withValues(alpha: 0.95), // 底部阴影沉淀
+                    ],
+                    stops: const [0.0, 0.35, 0.60, 0.82, 1.0],
+                  ),
                 ),
               ),
             ),
 
+            // 3. 主界面 Padding & Alignment
             SafeArea(
               child: Padding(
-                padding: const EdgeInsets.all(48),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 40, vertical: 36),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(
-                      width: 280,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          TvFocusable(
-                            autofocus: true,
-                            onPressed: () => Navigator.of(context).maybePop(),
-                            borderRadius: BorderRadius.circular(20),
-                            enableScale: false,
-                            enableGlow: false,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: context.tvHighlightColor(0.1),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.arrow_back,
-                                    color: context.tvTextSecondaryColor,
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    '返回',
-                                    style: TextStyle(
-                                      color: context.tvTextSecondaryColor,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 24),
+                    // 左侧功能侧边栏
+                    _buildLeftSidebar(),
 
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: SizedBox(
-                              width: 200,
-                              height: 280,
-                              child: cover.isNotEmpty
-                                  ? CachedNetworkImage(
-                                      imageUrl: cover,
-                                      fit: BoxFit.cover,
-                                      errorWidget: (_, _, _) =>
-                                          _buildPlaceholderCover(),
-                                    )
-                                  : _buildPlaceholderCover(),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
+                    const SizedBox(width: 36),
 
-                          if (score != null && score > 0)
-                            Row(
-                              children: [
-                                const Icon(
-                                  Icons.star,
-                                  color: Colors.amber,
-                                  size: 20,
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  score.toStringAsFixed(1),
-                                  style: TextStyle(
-                                    color: context.tvTextColor,
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                if (scoreCount > 0) ...[
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    '($scoreCount人)',
-                                    style: TextStyle(
-                                      color: context.tvTextHintColor,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(width: 40),
-
+                    // 主要内容区域
                     Expanded(
                       child: FocusTraversalGroup(
                         policy: ReadingOrderTraversalPolicy(),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              title,
-                              style: TextStyle(
-                                color: context.tvTextColor,
-                                fontSize: 32,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.5,
-                                height: 1.2,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                            // 1. 顶部：主标题 (优先显示 Logo 图片) & 副标题
+                            _buildTitleOrLogo(title, _detail.logoUrl),
 
                             if (alias.isNotEmpty && alias != title)
                               Padding(
                                 padding: const EdgeInsets.only(top: 6),
                                 child: Text(
-                                  alias,
+                                  alias.toUpperCase(),
                                   style: TextStyle(
-                                    color: context.tvTextSecondaryColor,
+                                    color: context.tvTextSecondaryColor
+                                        .withValues(alpha: 0.8),
                                     fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 1.2,
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
 
-                            const SizedBox(height: 20),
+                            const SizedBox(height: 16),
 
-                            Wrap(
-                              spacing: 12,
-                              runSpacing: 12,
+                            // 2. 时间与集数状态 + 收藏/在看/想看 Counter 统计
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
-                                _buildActionButton(
-                                  icon: Icons.play_arrow_rounded,
-                                  label: '开始观看',
-                                  color: Theme.of(context).colorScheme.primary,
-                                  onPressed: _startWatching,
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      _buildAirDateText(),
+                                      style: TextStyle(
+                                        color: context.tvTextColor,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      _buildEpisodeStatusText(),
+                                      style: TextStyle(
+                                        color: context.tvTextSecondaryColor
+                                            .withValues(alpha: 0.8),
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                _buildCollectionButton(),
+                                const SizedBox(width: 28),
+                                _buildStatCounter(
+                                  count: BgmUtils.toInt(
+                                          _detailData?['collection']
+                                              ?['collect']) ??
+                                      0,
+                                  label: '收藏',
+                                ),
+                                const SizedBox(width: 20),
+                                _buildStatCounter(
+                                  count: BgmUtils.toInt(
+                                          _detailData?['collection']
+                                              ?['doing']) ??
+                                      0,
+                                  label: '在看',
+                                ),
+                                const SizedBox(width: 20),
+                                _buildStatCounter(
+                                  count: BgmUtils.toInt(
+                                          _detailData?['collection']
+                                              ?['wish']) ??
+                                      0,
+                                  label: '想看',
+                                ),
                               ],
                             ),
 
-                            const SizedBox(height: 24),
+                            const Spacer(),
 
-                            if (tags.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 16),
-                                child: Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
+                            // 3. 底部横向区域 (左下：控制按钮组，右下：标签Wall + 柱形图评分)
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                // 左下角：追番状态 + 3个控制小按钮
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    for (final tag in tags.take(10))
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 6,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: context.tvTextColor.withValues(
-                                            alpha: 0.08,
-                                          ),
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          tag,
-                                          style: TextStyle(
-                                            color: context.tvTextSecondaryColor,
-                                            fontSize: 13,
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 8),
+                                      child: TvFocusable(
+                                        onPressed: () {
+                                          if (_collection != null) {
+                                            _deleteCollection();
+                                          } else {
+                                            _updateCollectionStatus(
+                                                CollectionStatus.doing);
+                                          }
+                                        },
+                                        borderRadius: BorderRadius.circular(6),
+                                        enableScale: false,
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 4, vertical: 2),
+                                          child: Text(
+                                            _collectionStatusText(),
+                                            style: TextStyle(
+                                              color: context.tvTextSecondaryColor
+                                                  .withValues(alpha: 0.9),
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                            ),
                                           ),
                                         ),
                                       ),
+                                    ),
+                                    Row(
+                                      children: [
+                                        _buildIconButton(
+                                          icon: Icons.play_arrow_rounded,
+                                          autofocus: true,
+                                          onPressed: _startWatching,
+                                        ),
+                                        const SizedBox(width: 16),
+                                        _buildIconButton(
+                                          icon: Icons.grid_view_rounded,
+                                          onPressed: () {
+                                            setState(() {
+                                              _showEpisodeSelector = true;
+                                            });
+                                          },
+                                        ),
+                                        const SizedBox(width: 16),
+                                        _buildIconButton(
+                                          icon: Icons.open_in_new_rounded,
+                                          onPressed: () {
+                                            VideoSourceSearchSheet.show(
+                                              context,
+                                              seedData:
+                                                  Map<String, dynamic>.from(
+                                                      widget.data),
+                                            );
+                                          },
+                                        ),
+                                      ],
+                                    ),
                                   ],
                                 ),
-                              ),
 
-                            if (summary.isNotEmpty)
-                              Expanded(
-                                child: SingleChildScrollView(
-                                  child: Text(
-                                    summary,
-                                    style: TextStyle(
-                                      color: context.tvTextSecondaryColor,
-                                      fontSize: 15,
-                                      height: 1.7,
-                                    ),
-                                  ),
-                                ),
-                              ),
+                                const Spacer(),
+
+                                // 右下角：[ 标签 Tags 墙 ] + [ 24px ] + [ 柱形图评分面板 ]
+                                _buildRightBottomPanel(),
+                              ],
+                            ),
                           ],
                         ),
                       ),
@@ -414,110 +510,391 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                 ),
               ),
             ),
+
+            // 4. Bangumi 剧集列表具体弹窗
+            if (_showEpisodeSelector)
+              Positioned.fill(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  color: Colors.black.withValues(alpha: 0.5),
+                  child: TvEpisodeSelector(
+                    videoList: _bgmVideoList,
+                    currentIndex: 0,
+                    currUrl: 1,
+                    onEpisodeSelected: (index) {
+                      setState(() {
+                        _showEpisodeSelector = false;
+                      });
+                      final playerData = Map<String, dynamic>.from(widget.data);
+                      if (_detail.logoUrl.isNotEmpty) {
+                        playerData['logoUrl'] = _detail.logoUrl;
+                      }
+                      NavigationService.toPlayer(
+                        context,
+                        playerData,
+                        posIndex: index,
+                        autoMatch: true,
+                      );
+                    },
+                    onUrlChanged: (lineIndex) {},
+                    onClose: () {
+                      setState(() {
+                        _showEpisodeSelector = false;
+                      });
+                    },
+                  ),
+                ),
+              ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildPlaceholderCover() {
-    return Container(
-      color: context.tvHighlightColor(0.05),
-      child: Icon(Icons.movie, color: context.tvTextHintColor, size: 48),
+  Widget _buildLeftSidebar() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.start,
+      children: [
+        _buildSideIcon(
+          icon: Icons.search_rounded,
+          onPressed: () {
+            Navigator.of(context).maybePop();
+          },
+        ),
+        const SizedBox(height: 20),
+        _buildSideIcon(
+          icon: Icons.explore_outlined,
+          onPressed: () {},
+        ),
+        const SizedBox(height: 20),
+        _buildSideIcon(
+          icon: _collection != null
+              ? Icons.star_rounded
+              : Icons.star_outline_rounded,
+          color: _collection != null ? Colors.amber : null,
+          onPressed: () {
+            if (_collection != null) {
+              _deleteCollection();
+            } else {
+              _updateCollectionStatus(CollectionStatus.doing);
+            }
+          },
+        ),
+        const SizedBox(height: 20),
+        _buildSideIcon(
+          icon: Icons.history_rounded,
+          onPressed: () {},
+        ),
+        const SizedBox(height: 20),
+        _buildSideIcon(
+          icon: Icons.settings_outlined,
+          onPressed: () {},
+        ),
+      ],
     );
   }
 
-  Widget _buildActionButton({
+  Widget _buildSideIcon({
     required IconData icon,
-    required String label,
-    required Color color,
     required VoidCallback onPressed,
+    Color? color,
   }) {
     return TvFocusable(
       onPressed: onPressed,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.3)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(width: 10),
-            Text(
-              label,
-              style: TextStyle(
-                color: color,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
+      borderRadius: BorderRadius.circular(20),
+      focusScale: 1.15,
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Icon(
+          icon,
+          color: color ?? context.tvTextSecondaryColor.withValues(alpha: 0.8),
+          size: 22,
         ),
       ),
     );
   }
 
-  Widget _buildCollectionButton() {
-    if (_isCollectionLoading) {
-      return AppSkeletonizer(
-        enabled: true,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          decoration: BoxDecoration(
-            color: context.tvHighlightColor(0.06),
-            borderRadius: BorderRadius.circular(12),
+  Widget _buildIconButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+    bool autofocus = false,
+  }) {
+    return TvFocusable(
+      autofocus: autofocus,
+      onPressed: onPressed,
+      borderRadius: BorderRadius.circular(30),
+      focusScale: 1.1,
+      child: Container(
+        width: 58,
+        height: 58,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: context.tvTextColor.withValues(alpha: 0.1),
+          border: Border.all(
+            color: context.tvTextColor.withValues(alpha: 0.2),
+            width: 1.5,
           ),
-          child: const Text('收藏状态', style: TextStyle(fontSize: 14)),
+        ),
+        child: Icon(
+          icon,
+          color: context.tvTextColor,
+          size: 30,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatCounter({required int count, required String label}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          _formatNumber(count),
+          style: TextStyle(
+            color: context.tvTextColor,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: TextStyle(
+            color: context.tvTextSecondaryColor.withValues(alpha: 0.8),
+            fontSize: 12,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRightBottomPanel() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 标签墙放到评分和柱形图的左边
+        Flexible(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: _buildTagsWall(alignRight: true),
+          ),
+        ),
+        const SizedBox(width: 24),
+        // 柱形图与评分面板
+        _buildScorePanel(),
+      ],
+    );
+  }
+
+  Widget _buildTagsWall({bool alignRight = false}) {
+    final tags = _extractDisplayTags();
+    if (tags.isEmpty) return const SizedBox.shrink();
+
+    return Wrap(
+      alignment: alignRight ? WrapAlignment.end : WrapAlignment.start,
+      spacing: 8,
+      runSpacing: 8,
+      children: tags.take(8).map((tag) {
+        return TvFocusable(
+          onPressed: () {},
+          borderRadius: BorderRadius.circular(8),
+          enableGlow: false,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: context.tvTextColor.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              tag,
+              style: TextStyle(
+                color: context.tvTextColor.withValues(alpha: 0.9),
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildRatingHistogram() {
+    final countMap = BgmUtils.asMap(_detailData?['rating']?['count']);
+    final counts = List<int>.generate(10, (i) {
+      final key = (i + 1).toString();
+      return BgmUtils.toInt(countMap?[key]) ?? 0;
+    });
+
+    int maxCount = counts.fold(0, (max, c) => c > max ? c : max);
+    if (maxCount == 0) maxCount = 1;
+
+    const double maxBarHeight = 58.0;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        SizedBox(
+          height: maxBarHeight,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: List.generate(10, (index) {
+              final count = counts[index];
+              final ratio = count / maxCount;
+              final barHeight = (ratio * maxBarHeight).clamp(6.0, maxBarHeight);
+              final isHigh = index >= 7;
+
+              return Container(
+                margin: const EdgeInsets.symmetric(horizontal: 3.5),
+                width: 13,
+                height: barHeight,
+                decoration: BoxDecoration(
+                  color: isHigh
+                      ? const Color(0xFF1DE9B6).withValues(alpha: 0.85)
+                      : context.tvTextColor.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              );
+            }),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(10, (index) {
+            return SizedBox(
+              width: 20,
+              child: Text(
+                '${index + 1}',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: context.tvTextSecondaryColor.withValues(alpha: 0.8),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            );
+          }),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildScorePanel() {
+    final score = _detail.score ?? 0.0;
+    final scoreCount = _detail.scoreCount;
+    final rank =
+        BgmUtils.toInt(BgmUtils.asMap(_detailData?['rating'])?['rank']);
+
+    final starRating = (score / 2.0).clamp(0.0, 5.0);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildRatingHistogram(),
+        const SizedBox(width: 24),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
+                  score > 0 ? score.toStringAsFixed(1) : 'N/A',
+                  style: TextStyle(
+                    color: context.tvTextColor,
+                    fontSize: 48,
+                    fontWeight: FontWeight.w900,
+                    height: 1.0,
+                    letterSpacing: -1,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: List.generate(5, (i) {
+                        final starVal = i + 1;
+                        IconData icon;
+                        if (starRating >= starVal) {
+                          icon = Icons.star_rounded;
+                        } else if (starRating >= starVal - 0.5) {
+                          icon = Icons.star_half_rounded;
+                        } else {
+                          icon = Icons.star_outline_rounded;
+                        }
+                        return Icon(
+                          icon,
+                          color: const Color(0xFFFFC107),
+                          size: 18,
+                        );
+                      }),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${rank != null && rank > 0 ? '#$rank · ' : ''}${_formatNumber(scoreCount)} 人评分',
+                      style: TextStyle(
+                        color: context.tvTextSecondaryColor
+                            .withValues(alpha: 0.8),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTitleOrLogo(String title, String logoUrl) {
+    if (logoUrl.isNotEmpty) {
+      return Container(
+        height: 85,
+        alignment: Alignment.centerLeft,
+        child: CachedNetworkImage(
+          key: ValueKey(logoUrl),
+          imageUrl: logoUrl,
+          fit: BoxFit.contain,
+          alignment: Alignment.centerLeft,
+          errorWidget: (context, url, error) => Text(
+            title,
+            style: TextStyle(
+              color: context.tvTextColor,
+              fontSize: 40,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
+              height: 1.1,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
       );
     }
 
-    final hasCollection = _collection != null;
-    final statusLabel = hasCollection
-        ? (CollectionStatus.fromValue(_collection!.status)?.label ?? '已收藏')
-        : '收藏';
-    final icon = hasCollection ? Icons.favorite : Icons.favorite_border;
-    final color = hasCollection
-        ? Colors.pinkAccent
-        : context.tvTextSecondaryColor;
-
-    return TvFocusable(
-      onPressed: () {
-        if (hasCollection) {
-          _deleteCollection();
-        } else {
-          _updateCollectionStatus(CollectionStatus.doing);
-        }
-      },
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.25)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(width: 10),
-            Text(
-              statusLabel,
-              style: TextStyle(
-                color: color,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
+    return Text(
+      title,
+      style: TextStyle(
+        color: context.tvTextColor,
+        fontSize: 40,
+        fontWeight: FontWeight.w900,
+        letterSpacing: -0.5,
+        height: 1.1,
       ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }

@@ -17,6 +17,7 @@ class TvFocusable extends StatefulWidget {
   final bool enableBorder;
   final bool enableGlow;
   final KeyEventResult Function(KeyEvent event)? customKeyHandler;
+  final ValueChanged<bool>? onFocusChange;
 
   const TvFocusable({
     required this.child,
@@ -33,6 +34,7 @@ class TvFocusable extends StatefulWidget {
     this.enableBorder = true,
     this.enableGlow = true,
     this.customKeyHandler,
+    this.onFocusChange,
     super.key,
   });
 
@@ -55,6 +57,7 @@ class _TvFocusableState extends State<TvFocusable> {
   void _onFocusChanged(bool hasFocus) {
     if (_isFocused == hasFocus) return;
     setState(() => _isFocused = hasFocus);
+    widget.onFocusChange?.call(hasFocus);
   }
 
   KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
