@@ -1,6 +1,6 @@
 import 'dart:convert';
+import 'package:baka/instance.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 const String _subtitleSettingsKey = 'subtitle_settings';
 
@@ -142,22 +142,16 @@ class SubtitleConfig {
   }
 
   /// 从持久化加载
-  static Future<SubtitleConfig> load() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_subtitleSettingsKey);
-      if (raw != null) {
-        return SubtitleConfig.fromJson(jsonDecode(raw));
-      }
-    } catch (_) {}
-    return const SubtitleConfig();
+  static SubtitleConfig load() {
+    final raw = Instances.sp.getString(_subtitleSettingsKey);
+    return raw == null
+        ? const SubtitleConfig()
+        : SubtitleConfig.fromJson(jsonDecode(raw));
   }
 
   /// 持久化保存
-  Future<void> save() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_subtitleSettingsKey, jsonEncode(toJson()));
-  }
+  Future<void> save() =>
+      Instances.sp.setString(_subtitleSettingsKey, jsonEncode(toJson()));
 }
 
 extension SubtitleColorHex on Color {

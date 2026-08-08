@@ -3,20 +3,20 @@ import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:io';
 
-import 'package:archive/archive.dart';
+import 'package:archive/archive_io.dart';
 import 'package:baka/instance.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
-enum LogLevel {
+enum _LogLevel {
   debug('DEBUG', 500),
   info('INFO', 800),
   warning('WARN', 900),
   error('ERROR', 1000);
 
-  const LogLevel(this.label, this.developerLevel);
+  const _LogLevel(this.label, this.developerLevel);
 
   final String label;
   final int developerLevel;
@@ -28,7 +28,7 @@ class AppLogger {
   static const int _maxLogFileBytes = 2 * 1024 * 1024;
   static const int _maxLogFiles = 5;
   static const String _activeLogFileName = 'app.log';
-  static const LogLevel _minimumPersistedLevel = LogLevel.info;
+  static const _LogLevel _minimumPersistedLevel = _LogLevel.info;
 
   static final AppLogger instance = AppLogger._();
 
@@ -98,7 +98,7 @@ class AppLogger {
     Object? error,
     StackTrace? stackTrace,
   }) => _log(
-    LogLevel.debug,
+    _LogLevel.debug,
     message,
     tag: tag,
     error: error,
@@ -111,7 +111,7 @@ class AppLogger {
     Object? error,
     StackTrace? stackTrace,
   }) => _log(
-    LogLevel.info,
+    _LogLevel.info,
     message,
     tag: tag,
     error: error,
@@ -124,7 +124,7 @@ class AppLogger {
     Object? error,
     StackTrace? stackTrace,
   }) => _log(
-    LogLevel.warning,
+    _LogLevel.warning,
     message,
     tag: tag,
     error: error,
@@ -137,17 +137,17 @@ class AppLogger {
     Object? error,
     StackTrace? stackTrace,
   }) => _log(
-    LogLevel.error,
+    _LogLevel.error,
     message,
     tag: tag,
     error: error,
     stackTrace: stackTrace,
   );
 
-  Future<void> flush() => _writeQueue;
+  Future<void> _flush() => _writeQueue;
 
-  Future<List<File>> logFiles() async {
-    await flush();
+  Future<List<File>> _logFiles() async {
+    await _flush();
     final directory = _logDirectory;
     if (directory == null || !await directory.exists()) {
       return <File>[];
@@ -166,33 +166,28 @@ class AppLogger {
   }
 
   Future<LogArchive> createLogArchive() async {
-    final files = await logFiles();
-    final archive = Archive();
-    for (final file in files) {
-      if (!await file.exists()) continue;
-
-      final bytes = await file.readAsBytes();
-      archive.addFile(ArchiveFile(_fileName(file.path), bytes.length, bytes));
-    }
-
-    if (archive.files.isEmpty) {
-      final message = utf8.encode('No log files were found.');
-      archive.addFile(ArchiveFile('empty.log', message.length, message));
-    }
-
-    final archiveBytes = ZipEncoder().encode(archive);
-
+    final files = await _logFiles();
     final archiveFileName = _logArchiveFileName();
     final archiveFile = File(
       _joinPath(await _temporaryDirectoryPath(), archiveFileName),
     );
-    await archiveFile.writeAsBytes(archiveBytes, flush: true);
+    final encoder = ZipFileEncoder()..create(archiveFile.path);
+    if (files.isEmpty) {
+      encoder.addArchiveFile(
+        ArchiveFile.string('empty.log', 'No log files were found.'),
+      );
+    } else {
+      for (final file in files) {
+        await encoder.addFile(file, _fileName(file.path));
+      }
+    }
+    await encoder.close();
 
     return LogArchive(
       file: archiveFile,
       fileName: archiveFileName,
       logFileCount: files.length,
-      sizeBytes: archiveBytes.length,
+      sizeBytes: await archiveFile.length(),
     );
   }
 
@@ -272,7 +267,7 @@ class AppLogger {
   }
 
   void _log(
-    LogLevel level,
+    _LogLevel level,
     Object? message, {
     String? tag,
     Object? error,
@@ -319,7 +314,7 @@ class AppLogger {
 
   String _formatEntry({
     required DateTime timestamp,
-    required LogLevel level,
+    required _LogLevel level,
     required String message,
     required String? tag,
     required String? error,
@@ -357,19 +352,18 @@ class AppLogger {
     return buffer.toString();
   }
 
-  Future<void> _writeEntry(String entry, {required LogLevel level}) async {
-    final payload = '$entry\n';
-    final payloadBytes = utf8.encode(payload).length;
-    if (_currentLogFileBytes + payloadBytes >= _maxLogFileBytes) {
+  Future<void> _writeEntry(String entry, {required _LogLevel level}) async {
+    final payload = utf8.encode('$entry\n');
+    if (_currentLogFileBytes + payload.length >= _maxLogFileBytes) {
       await _rotateLogs();
     }
 
-    await _logFile!.writeAsString(
+    await _logFile!.writeAsBytes(
       payload,
       mode: FileMode.append,
-      flush: level.index >= LogLevel.error.index,
+      flush: level.index >= _LogLevel.error.index,
     );
-    _currentLogFileBytes += payloadBytes;
+    _currentLogFileBytes += payload.length;
   }
 
   Future<void> _rotateLogs() async {
@@ -405,7 +399,7 @@ class AppLogger {
         developer.log(
           'Failed to rotate logs',
           name: 'Baka.Logger',
-          level: LogLevel.warning.developerLevel,
+          level: _LogLevel.warning.developerLevel,
           error: error,
           stackTrace: stackTrace,
         );

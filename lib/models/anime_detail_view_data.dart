@@ -5,6 +5,7 @@ class AnimeDetailViewData {
 
   const AnimeDetailViewData({
     required this.title,
+    required this.bgmTitle,
     required this.alias,
     required this.summary,
     required this.coverUrl,
@@ -18,8 +19,14 @@ class AnimeDetailViewData {
     required this.scoreDistribution,
     required this.backdrops,
     required this.posters,
+    required this.status,
+    required this.collectCount,
+    required this.doingCount,
+    required this.wishCount,
     this.score,
     this.rank,
+    this.airDate,
+    this.episodeCount,
     this.imdbId,
     this.tmdbId,
     this.tvdbId,
@@ -27,6 +34,7 @@ class AnimeDetailViewData {
   });
 
   final String title;
+  final String bgmTitle;
   final String alias;
   final String summary;
   final String coverUrl;
@@ -42,24 +50,30 @@ class AnimeDetailViewData {
   /// Bangumi 1–10 分人数分布，下标 0 = 1 分。全 0 表示无数据。
   final List<int> scoreDistribution;
   final int? rank;
-  final List<Map<String, dynamic>> backdrops;
-  final List<Map<String, dynamic>> posters;
+  final List<String> backdrops;
+  final List<String> posters;
+  final String status;
+  final String? airDate;
+  final int? episodeCount;
+  final int collectCount;
+  final int doingCount;
+  final int wishCount;
   final String? imdbId;
   final String? tmdbId;
   final String? tvdbId;
   final int? bgmId;
 
   bool get hasScoreDistribution =>
-      scoreDistribution.length == 10 &&
-      scoreDistribution.any((c) => c > 0);
+      scoreDistribution.length == 10 && scoreDistribution.any((c) => c > 0);
 
   factory AnimeDetailViewData.from({
     required Map source,
     required BgmInfo bgmInfo,
     Map<String, dynamic>? anibaka,
     Map<String, dynamic>? bgm,
+    List<Map<String, dynamic>> characters = const [],
   }) {
-    final titles = BgmUtils.asMap(anibaka?['title']);
+    final titles = anibaka?['title'] as Map<String, dynamic>?;
     final nativeTitle = BgmUtils.trimmed(titles?['native']);
     final cnTitle = BgmUtils.trimmed(titles?['cn']);
     final enTitle = BgmUtils.trimmed(titles?['en']);
@@ -74,43 +88,40 @@ class AnimeDetailViewData {
             .whereType<String>()
             .firstWhere((value) => value != title, orElse: () => '');
 
-    final images = BgmUtils.asMap(anibaka?['images']);
-    final posters = _uniqueLogos(images?['posters']);
-    final backdrops = _uniqueLogos(images?['backdrops']);
-    final logos = _uniqueLogos(images?['logos'] ?? images?['logo']);
-    final logoUrl = _firstImage(logos) ??
+    final images = anibaka?['images'] as Map<String, dynamic>?;
+    final posters = _imageUrls(images?['posters']);
+    final backdrops = _imageUrls(images?['backdrops']);
+    final logos = _imageUrls(images?['logos'] ?? images?['logo']);
+    final logoUrl =
+        _first(logos) ??
         BgmUtils.trimmed(anibaka?['logoUrl']) ??
         BgmUtils.trimmed(anibaka?['logo']) ??
         '';
-    final anibakaPoster = _firstImage(posters);
+    final anibakaPoster = _first(posters);
     final cover =
         BgmUtils.resolveCoverImage(source, bgmInfo: bgmInfo) ??
         anibakaPoster ??
         '';
 
-    final genres = (anibaka?['genres'] is List)
-        ? (anibaka!['genres'] as List)
-              .map(BgmUtils.trimmed)
-              .whereType<String>()
-              .toList(growable: false)
-        : const <String>[];
+    final genres = (anibaka?['genres'] as List<dynamic>? ?? const [])
+        .cast<String>();
     // 完整标签列表（分类 + BGM tags + 源 tag），桌面端展示不再截断。
     final tags = _unique(
       genres
           .cast<String?>()
           .followedBy(
-            BgmUtils.asMapList(
-              bgm?['tags'],
-            ).map((tag) => BgmUtils.trimmed(tag['name'])),
+            (bgm?['tags'] as List<dynamic>? ?? const [])
+                .cast<Map<String, dynamic>>()
+                .map((tag) => BgmUtils.trimmed(tag['name'])),
           )
           .followedBy(
             source['tag']?.toString().split(_whitespaceRe) ?? const <String>[],
           ),
     ).toList(growable: false);
 
-    final ratings = BgmUtils.asMap(anibaka?['ratings']);
-    final anibakaRating = BgmUtils.asMap(ratings?['bgm']);
-    final bgmRating = BgmUtils.asMap(bgm?['rating']);
+    final ratings = anibaka?['ratings'] as Map<String, dynamic>?;
+    final anibakaRating = ratings?['bgm'] as Map<String, dynamic>?;
+    final bgmRating = bgm?['rating'] as Map<String, dynamic>?;
     final score =
         BgmUtils.toDouble(anibakaRating?['score']) ??
         BgmUtils.extractScore(bgm?['rating']) ??
@@ -123,21 +134,33 @@ class AnimeDetailViewData {
         BgmUtils.toInt(anibakaRating?['rank']) ??
         BgmUtils.toInt(bgmRating?['rank']);
     final scoreDistribution = _scoreDistribution(
-      BgmUtils.asMap(bgmRating?['count']) ??
-          BgmUtils.asMap(anibakaRating?['count']),
+      (bgmRating?['count'] ?? anibakaRating?['count']) as Map<String, dynamic>?,
     );
 
-    final ids = BgmUtils.asMap(anibaka?['ids']);
-    final imdbId = BgmUtils.trimmed(ids?['imdb_id']) ?? BgmUtils.trimmed(anibaka?['imdb_id']);
-    final tmdbId = BgmUtils.trimmed(ids?['tmdb_id']) ?? BgmUtils.trimmed(anibaka?['tmdb_id']);
-    final tvdbId = BgmUtils.trimmed(ids?['tvdb_id']) ?? BgmUtils.trimmed(anibaka?['tvdb_id']);
-    final bgmId = BgmUtils.toInt(anibaka?['bgm_id']) ??
+    final ids = anibaka?['ids'] as Map<String, dynamic>?;
+    final imdbId =
+        BgmUtils.trimmed(ids?['imdb_id']) ??
+        BgmUtils.trimmed(anibaka?['imdb_id']);
+    final tmdbId =
+        BgmUtils.trimmed(ids?['tmdb_id']) ??
+        BgmUtils.trimmed(anibaka?['tmdb_id']);
+    final tvdbId =
+        BgmUtils.trimmed(ids?['tvdb_id']) ??
+        BgmUtils.trimmed(anibaka?['tvdb_id']);
+    final bgmId =
+        BgmUtils.toInt(anibaka?['bgm_id']) ??
         BgmUtils.toInt(bgm?['id']) ??
         BgmUtils.toInt(source['bgmId']) ??
         BgmUtils.toInt(source['id']);
+    final bgmTitle =
+        BgmUtils.trimmed(bgm?['name_cn']) ??
+        BgmUtils.trimmed(bgm?['name']) ??
+        title;
+    final collection = bgm?['collection'] as Map<String, dynamic>?;
 
     return AnimeDetailViewData(
       title: title,
+      bgmTitle: bgmTitle,
       alias: alias,
       summary:
           BgmUtils.trimmed(anibaka?['overview']) ??
@@ -145,18 +168,28 @@ class AnimeDetailViewData {
           BgmUtils.trimmed(source['content']) ??
           '暂无简介',
       coverUrl: cover,
-      backgroundUrl: _firstImage(backdrops) ?? cover,
+      backgroundUrl: _first(backdrops) ?? cover,
       logoUrl: logoUrl,
       tags: tags,
       genres: genres,
       infobox: _mergeInfobox(anibaka, bgm, enTitle, title),
-      characters: BgmUtils.asMapList(bgm?['characters']),
+      characters: characters,
       score: score,
       scoreCount: scoreCount,
       scoreDistribution: scoreDistribution,
       rank: rank,
       backdrops: backdrops,
       posters: posters,
+      status: BgmUtils.trimmed(anibaka?['status']) ?? '',
+      airDate:
+          BgmUtils.trimmed(bgm?['date']) ?? BgmUtils.trimmed(anibaka?['date']),
+      episodeCount:
+          BgmUtils.toInt(anibaka?['episodes']) ??
+          BgmUtils.toInt(bgm?['total_episodes']) ??
+          BgmUtils.toInt(bgm?['eps']),
+      collectCount: BgmUtils.toInt(collection?['collect']) ?? 0,
+      doingCount: BgmUtils.toInt(collection?['doing']) ?? 0,
+      wishCount: BgmUtils.toInt(collection?['wish']) ?? 0,
       imdbId: imdbId,
       tmdbId: tmdbId,
       tvdbId: tvdbId,
@@ -175,45 +208,45 @@ class AnimeDetailViewData {
     }, growable: false);
   }
 
-  static String? _imageUrl(Map<String, dynamic>? image) =>
-      BgmUtils.trimmed(image?['url']) ?? BgmUtils.trimmed(image?['thumbnail']);
+  static String? _first(List<String> images) =>
+      images.isEmpty ? null : images.first;
 
-  static String? _firstImage(List<Map<String, dynamic>> images) =>
-      images.isEmpty ? null : _imageUrl(images.first);
-
-  static List<Map<String, dynamic>> _uniqueLogos(dynamic value) {
-    final list = BgmUtils.asMapList(value);
-    if (list.isEmpty) return const [];
-
+  static List<String> _imageUrls(dynamic value) {
+    if (value is! List) return const [];
     final seen = <String>{};
-    final uniqueList = <Map<String, dynamic>>[];
-
-    for (final item in list) {
-      final url = _imageUrl(item);
+    final ranked = <({String url, int score})>[];
+    for (final item in value.cast<Map<String, dynamic>>()) {
+      final url =
+          BgmUtils.trimmed(item['url']) ?? BgmUtils.trimmed(item['thumbnail']);
       if (url != null && seen.add(url)) {
-        uniqueList.add(item);
+        final lang = (item['lang'] ?? item['language'] ?? '')
+            .toString()
+            .toLowerCase();
+        ranked.add((url: url, score: _imageLanguageScore(lang, url)));
       }
     }
-
-    uniqueList.sort((a, b) {
-      final langA = (a['lang'] ?? a['language'] ?? '').toString().toLowerCase();
-      final langB = (b['lang'] ?? b['language'] ?? '').toString().toLowerCase();
-      final urlA = (_imageUrl(a) ?? '').toLowerCase();
-      final urlB = (_imageUrl(b) ?? '').toLowerCase();
-
-      final scoreA = _getLogoLangScore(langA, urlA);
-      final scoreB = _getLogoLangScore(langB, urlB);
-      return scoreB.compareTo(scoreA);
-    });
-
-    return uniqueList;
+    ranked.sort((a, b) => b.score.compareTo(a.score));
+    return [for (final image in ranked) image.url];
   }
 
-  static int _getLogoLangScore(String lang, String url) {
-    if (lang == 'zh' || lang == 'cn' || lang == 'zh-cn' || lang == 'zh-tw' || lang == 'zh-hk') return 100;
-    if (url.contains('/zh/') || url.contains('/cn/') || url.contains('_zh.') || url.contains('_cn.')) return 90;
+  static int _imageLanguageScore(String lang, String url) {
+    if (lang == 'zh' ||
+        lang == 'cn' ||
+        lang == 'zh-cn' ||
+        lang == 'zh-tw' ||
+        lang == 'zh-hk') {
+      return 100;
+    }
+    if (url.contains('/zh/') ||
+        url.contains('/cn/') ||
+        url.contains('_zh.') ||
+        url.contains('_cn.')) {
+      return 90;
+    }
     if (lang == 'ja' || lang == 'jp' || lang == 'native') return 80;
-    if (url.contains('/ja/') || url.contains('/jp/') || url.contains('_ja.')) return 70;
+    if (url.contains('/ja/') || url.contains('/jp/') || url.contains('_ja.')) {
+      return 70;
+    }
     if (lang == 'en' || url.contains('/en/') || url.contains('_en.')) return 10;
     return 50;
   }
@@ -246,7 +279,8 @@ class AnimeDetailViewData {
     add('播出日期', anibaka?['date']);
     final episodeCount = BgmUtils.toInt(anibaka?['episodes']);
     if (episodeCount != null && episodeCount > 0) add('集数', '$episodeCount 话');
-    final rating = BgmUtils.asMap(BgmUtils.asMap(anibaka?['ratings'])?['bgm']);
+    final ratings = anibaka?['ratings'] as Map<String, dynamic>?;
+    final rating = ratings?['bgm'] as Map<String, dynamic>?;
     final rank = BgmUtils.toInt(rating?['rank']);
     if (rank != null && rank > 0) add('排名', '#$rank');
     if (englishTitle != title) add('英文名', englishTitle);
@@ -262,7 +296,9 @@ class AnimeDetailViewData {
       'bgm',
     };
 
-    for (final item in BgmUtils.asMapList(bgm?['infobox'])) {
+    for (final item
+        in (bgm?['infobox'] as List<dynamic>? ?? const [])
+            .cast<Map<String, dynamic>>()) {
       final key = BgmUtils.trimmed(item['key']);
       if (key != null) {
         final lowerKey = key.toLowerCase();

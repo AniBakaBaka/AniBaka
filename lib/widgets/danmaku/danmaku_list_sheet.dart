@@ -159,29 +159,15 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
     setState(() => _loadingEpisodesSet.add(subjectId));
 
     try {
-      final detail =
-          getCachedBgmAnimeFullDetail(subjectId) ??
-          await getBgmAnimeFullDetail(subjectId);
-      final rawEpisodes = detail?['episodes'];
+      final rawEpisodes = await getBgmEpisodes(subjectId);
 
       final epNumbers = <int>[];
-      if (rawEpisodes is List && rawEpisodes.isNotEmpty) {
+      if (rawEpisodes.isNotEmpty) {
         for (final raw in rawEpisodes) {
-          if (raw is! Map) continue;
-          final type = BgmUtils.toInt(raw['type']) ?? 0;
-          if (type != 0) continue;
           final sort = BgmUtils.toDouble(raw['sort']) ?? 0;
           if (sort > 0) epNumbers.add(sort.round());
         }
         epNumbers.sort();
-      }
-
-      if (epNumbers.isEmpty) {
-        final totalEps = (detail?['eps'] is num) ? (detail!['eps'] as num).toInt() : 12;
-        final count = totalEps > 0 ? totalEps : 12;
-        for (var i = 1; i <= count; i++) {
-          epNumbers.add(i);
-        }
       }
 
       if (mounted) {
@@ -193,8 +179,9 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
     } catch (_) {
       if (mounted) {
         setState(() {
-          _episodesCache[subjectId] = List.generate(12, (i) => i + 1);
+          _episodesCache[subjectId] = const [];
           _loadingEpisodesSet.remove(subjectId);
+          _searchError = '剧集加载失败';
         });
       }
     }
@@ -295,7 +282,11 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                         color: primaryColor.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Icon(Icons.subtitles_rounded, color: primaryColor, size: 16),
+                      child: Icon(
+                        Icons.subtitles_rounded,
+                        color: primaryColor,
+                        size: 16,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     Text(
@@ -363,13 +354,16 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                                 ),
                                 const SizedBox(width: 6),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 1,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: primaryColor.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(
-                                    '自建服务器',
+                                    '自建服务器获取',
                                     style: TextStyle(
                                       color: primaryColor,
                                       fontSize: 9,
@@ -379,7 +373,10 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                                 ),
                                 const Spacer(),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: primaryColor.withValues(alpha: 0.12),
                                     borderRadius: BorderRadius.circular(6),
@@ -401,7 +398,9 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: colorScheme.onSurface.withValues(alpha: 0.7),
+                                color: colorScheme.onSurface.withValues(
+                                  alpha: 0.7,
+                                ),
                                 fontSize: 11,
                               ),
                             ),
@@ -428,7 +427,10 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                       },
                       borderRadius: BorderRadius.circular(8),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 5,
+                        ),
                         decoration: BoxDecoration(
                           color: _showSearch
                               ? primaryColor.withValues(alpha: 0.12)
@@ -444,7 +446,9 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
-                              _showSearch ? Icons.close_rounded : Icons.search_rounded,
+                              _showSearch
+                                  ? Icons.close_rounded
+                                  : Icons.search_rounded,
                               size: 14,
                               color: primaryColor,
                             ),
@@ -483,9 +487,25 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                               ),
                             ),
                           ),
-                        _buildOffsetPill('-0.5s', () => _adjustOffset(-0.5), colorScheme, primaryColor),
-                        _buildOffsetPill('重置', _resetOffset, colorScheme, primaryColor, isReset: true),
-                        _buildOffsetPill('+0.5s', () => _adjustOffset(0.5), colorScheme, primaryColor),
+                        _buildOffsetPill(
+                          '-0.5s',
+                          () => _adjustOffset(-0.5),
+                          colorScheme,
+                          primaryColor,
+                        ),
+                        _buildOffsetPill(
+                          '重置',
+                          _resetOffset,
+                          colorScheme,
+                          primaryColor,
+                          isReset: true,
+                        ),
+                        _buildOffsetPill(
+                          '+0.5s',
+                          () => _adjustOffset(0.5),
+                          colorScheme,
+                          primaryColor,
+                        ),
                       ],
                     ),
                   ],
@@ -507,7 +527,8 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
     final epNumbers = _selectedSubject != null
         ? (_episodesCache[_selectedSubject!.subjectId] ?? const [])
         : const <int>[];
-    final isLoadingEps = _selectedSubject != null &&
+    final isLoadingEps =
+        _selectedSubject != null &&
         _loadingEpisodesSet.contains(_selectedSubject!.subjectId);
 
     return Container(
@@ -537,13 +558,20 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.search_rounded, color: primaryColor.withValues(alpha: 0.7), size: 14),
+                      Icon(
+                        Icons.search_rounded,
+                        color: primaryColor.withValues(alpha: 0.7),
+                        size: 14,
+                      ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: TextField(
                           controller: _searchController,
                           focusNode: _searchFocusNode,
-                          style: TextStyle(color: colors.onSurface, fontSize: 11),
+                          style: TextStyle(
+                            color: colors.onSurface,
+                            fontSize: 11,
+                          ),
                           decoration: InputDecoration(
                             hintText: '输入番剧名称搜索...',
                             hintStyle: TextStyle(
@@ -563,7 +591,11 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                             _searchController.clear();
                             setState(() {});
                           },
-                          child: Icon(Icons.cancel, size: 13, color: colors.onSurface.withValues(alpha: 0.4)),
+                          child: Icon(
+                            Icons.cancel,
+                            size: 13,
+                            color: colors.onSurface.withValues(alpha: 0.4),
+                          ),
                         ),
                     ],
                   ),
@@ -573,20 +605,33 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
               SizedBox(
                 height: 32,
                 child: FilledButton(
-                  onPressed: _isSearching ? null : () => _doSearch(_searchController.text),
+                  onPressed: _isSearching
+                      ? null
+                      : () => _doSearch(_searchController.text),
                   style: FilledButton.styleFrom(
                     visualDensity: VisualDensity.compact,
                     backgroundColor: primaryColor,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
                     padding: const EdgeInsets.symmetric(horizontal: 10),
                   ),
                   child: _isSearching
                       ? const SizedBox(
                           width: 12,
                           height: 12,
-                          child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.white),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.5,
+                            color: Colors.white,
+                          ),
                         )
-                      : const Text('检索', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                      : const Text(
+                          '检索',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                 ),
               ),
             ],
@@ -594,7 +639,10 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
 
           if (_searchError != null) ...[
             const SizedBox(height: 6),
-            Text(_searchError!, style: const TextStyle(color: Colors.orangeAccent, fontSize: 10)),
+            Text(
+              _searchError!,
+              style: const TextStyle(color: Colors.orangeAccent, fontSize: 10),
+            ),
           ],
 
           if (_searchResults.isNotEmpty) ...[
@@ -607,7 +655,8 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                 itemCount: _searchResults.length,
                 itemBuilder: (context, index) {
                   final item = _searchResults[index];
-                  final isSelected = _selectedSubject?.subjectId == item.subjectId;
+                  final isSelected =
+                      _selectedSubject?.subjectId == item.subjectId;
                   final title = item.nameCn ?? item.name ?? '未知';
 
                   return Padding(
@@ -617,7 +666,10 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                       borderRadius: BorderRadius.circular(4),
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 150),
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: isSelected
@@ -637,7 +689,9 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                           style: TextStyle(
                             color: isSelected ? primaryColor : colors.onSurface,
                             fontSize: 10,
-                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            fontWeight: isSelected
+                                ? FontWeight.bold
+                                : FontWeight.normal,
                           ),
                         ),
                       ),
@@ -665,7 +719,10 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                   SizedBox(
                     width: 10,
                     height: 10,
-                    child: CircularProgressIndicator(strokeWidth: 1.5, color: primaryColor),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: primaryColor,
+                    ),
                   ),
               ],
             ),
@@ -675,7 +732,10 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
               child: epNumbers.isEmpty && !isLoadingEps
                   ? Text(
                       '暂无集数信息',
-                      style: TextStyle(color: colors.onSurface.withValues(alpha: 0.5), fontSize: 10),
+                      style: TextStyle(
+                        color: colors.onSurface.withValues(alpha: 0.5),
+                        fontSize: 10,
+                      ),
                     )
                   : ListView.builder(
                       scrollDirection: Axis.horizontal,
@@ -692,7 +752,9 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                             onTap: () => _loadDanmaku(_selectedSubject!, epNum),
                             borderRadius: BorderRadius.circular(4),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 7),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                              ),
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
                                 color: isCurrent
@@ -702,7 +764,9 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                                 border: Border.all(
                                   color: isCurrent
                                       ? primaryColor
-                                      : colors.outlineVariant.withValues(alpha: 0.3),
+                                      : colors.outlineVariant.withValues(
+                                          alpha: 0.3,
+                                        ),
                                 ),
                               ),
                               child: isLoadingThis
@@ -711,7 +775,9 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                                       height: 10,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 1.5,
-                                        color: isCurrent ? colors.onPrimary : primaryColor,
+                                        color: isCurrent
+                                            ? colors.onPrimary
+                                            : primaryColor,
                                       ),
                                     )
                                   : Text(
@@ -721,7 +787,9 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                                             ? colors.onPrimary
                                             : colors.onSurface,
                                         fontSize: 10,
-                                        fontWeight: isCurrent ? FontWeight.bold : FontWeight.w500,
+                                        fontWeight: isCurrent
+                                            ? FontWeight.bold
+                                            : FontWeight.w500,
                                       ),
                                     ),
                             ),
@@ -764,7 +832,9 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
           child: Text(
             label,
             style: TextStyle(
-              color: isReset ? colors.onSurface.withValues(alpha: 0.7) : primaryColor,
+              color: isReset
+                  ? colors.onSurface.withValues(alpha: 0.7)
+                  : primaryColor,
               fontSize: 9.5,
               fontWeight: FontWeight.w500,
             ),
@@ -773,5 +843,4 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
       ),
     );
   }
-
 }

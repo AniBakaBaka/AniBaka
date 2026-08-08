@@ -15,9 +15,10 @@ class MediaSessionService extends GetxService {
     : _audioHandler = audioHandler;
 
   PlaybackAudioHandler? _audioHandler;
-  PlaybackController? _controller;
   StreamSubscription<Duration>? _seekSubscription;
   Duration _lastDuration = Duration.zero;
+
+  PlaybackController? get _controller => _audioHandler?._controller;
 
   static Future<void> init() async {
     if (Get.isRegistered<MediaSessionService>()) return;
@@ -44,12 +45,13 @@ class MediaSessionService extends GetxService {
     VoidCallback? onNextEpisode,
     VoidCallback? onPreviousEpisode,
   }) {
+    final handler = _audioHandler;
+    if (handler == null) return;
     if (_controller == controller) return;
     detach();
-    _controller = controller;
-    _audioHandler?._controller = controller;
-    _audioHandler?._onNextEpisode = onNextEpisode;
-    _audioHandler?._onPreviousEpisode = onPreviousEpisode;
+    handler._controller = controller;
+    handler._onNextEpisode = onNextEpisode;
+    handler._onPreviousEpisode = onPreviousEpisode;
     _seekSubscription = controller.seekEvents.listen(
       (_) => _syncPlaybackState(),
     );
@@ -69,7 +71,6 @@ class MediaSessionService extends GetxService {
     _seekSubscription?.cancel();
     _seekSubscription = null;
     _audioHandler?._broadcastStopped();
-    _controller = null;
     _lastDuration = Duration.zero;
   }
 
@@ -107,12 +108,8 @@ class MediaSessionService extends GetxService {
     final duration = _controller?.timeline.value.duration ?? Duration.zero;
     if (duration > Duration.zero && duration != _lastDuration) {
       _lastDuration = duration;
-      _syncDuration(duration);
+      _audioHandler?._updateDuration(duration);
     }
-  }
-
-  void _syncDuration(Duration dur) {
-    _audioHandler?._updateDuration(dur);
   }
 
   void _syncMetadata() {

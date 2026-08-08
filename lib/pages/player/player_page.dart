@@ -8,6 +8,7 @@ import 'package:baka/pages/player/bgm_detail_page.dart';
 import 'package:baka/pages/player/dlna_page.dart';
 import 'package:baka/pages/setting/player_settings_page.dart';
 import 'package:baka/models/playback_episode.dart';
+import 'package:baka/services/danmaku_service.dart';
 import 'package:baka/services/playback_session_coordinator.dart';
 import 'package:baka/services/player_service.dart';
 import 'package:baka/services/matching/match_memory_service.dart';
@@ -86,6 +87,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
   final ValueNotifier<bool> _showDetailNotifier = ValueNotifier<bool>(false);
   final ValueNotifier<bool> _sortAscendingNotifier = ValueNotifier<bool>(true);
   final ValueNotifier<bool> _playerFullscreen = ValueNotifier<bool>(false);
+  int _playbackGeneration = 0;
 
   SystemUiOverlayStyle _exitStatusBarStyle = _lightStatusBarStyle;
 
@@ -105,7 +107,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
   String get _currentEpisodeTitle => _svc.currentEpisodeTitle;
   List<String>? get _sourceNames => _svc.sourceNames;
 
-  bool _isStale(int requestId) => !mounted || !_session.isCurrent(requestId);
+  int _nextPlaybackGeneration() => ++_playbackGeneration;
+  bool _isStale(int requestId) => !mounted || requestId != _playbackGeneration;
 
   VideoSourceSearchController? _autoMatchController;
 
@@ -161,7 +164,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         // 匹配成功：直接用预取媒体开播（等同手动点选后的路径）。
         _svc.adoptPrefetchedPlayback(resolvedData);
         _bumpPageData();
-        initVideoController(_session.nextGeneration());
+        initVideoController(_nextPlaybackGeneration());
         // 元数据后台补齐，不与匹配抢网。
         unawaited(_loadBgmMetaOnly());
       },
@@ -216,7 +219,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       final bgmFuture = _isLocalSource ? null : _svc.ensureBgmInfo();
       await _svc.loadDetail();
       if (videoList.isNotEmpty) {
-        await initVideoController(_session.generation);
+        await initVideoController(_playbackGeneration);
       }
       _bumpPageData();
       if (!_isLocalSource) {
@@ -399,15 +402,21 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       if (localPath != null) {
         final content = await _svc.readLocalDanmakuFile(localPath);
         if (!_isStale(requestId) && content != null) {
-          await _session.parseAndSetDanmakuItems(
-            BgmUtils.parseJsonList(content),
+          DanmakuService.startPlay(
+            controller: danmakuController,
+            items: await DanmakuService.parseItems(
+              BgmUtils.parseJsonList(content),
+            ),
           );
         }
       } else {
         final episodeIndex = currPlayIndex;
         final danmaku = await _svc.fetchDanmakuData(episodeIndex);
         if (!_isStale(requestId) && episodeIndex == currPlayIndex) {
-          _session.setDanmakuItems(danmaku);
+          DanmakuService.startPlay(
+            controller: danmakuController,
+            items: danmaku,
+          );
         }
       }
     } catch (e) {
@@ -424,9 +433,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     if (!mounted || _isAutoSwitchingSource) return;
     if (ctr.core.value.failed) {
       final msg = ctr.core.value.errorMessage;
-      _handlePlaybackInitializationFailure(
-        msg.isNotEmpty ? msg : '视频播放异常',
-      );
+      _handlePlaybackInitializationFailure(msg.isNotEmpty ? msg : '视频播放异常');
     }
   }
 
@@ -487,7 +494,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         showSnackBar('当前视频源播放失败，已自动为您切换至：$nextSource');
         _svc.adoptPrefetchedPlayback(nextCandidateData);
         _bumpPageData();
-        await initVideoController(_session.nextGeneration());
+        await initVideoController(_nextPlaybackGeneration());
         return;
       } else {
         showSnackBar('所有可用匹配源均播放失败，请点击源名称手动搜索选择', isError: true);
@@ -508,7 +515,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         selection.lineIndex == currUrl) {
       return;
     }
-    final currentRequestId = _session.nextGeneration();
+    final currentRequestId = _nextPlaybackGeneration();
     await _session.saveAndResetForSwitch();
     if (_isStale(currentRequestId)) return;
     // 期间状态只可能被并发切换改变，而并发切换已被上面的 stale 检查拦截
@@ -1048,7 +1055,6 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
             onSourceTap: _openSourceSwitchSheet,
             isSearching: _autoMatchController != null,
           ),
-
 
           ActiveDownloadIndicator(taskIdPrefix: _taskIdPrefix),
           const MobileBtProgressIndicator(),

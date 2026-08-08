@@ -100,7 +100,10 @@ void main() {
 
   test('normalizes hwdec modes including the Android TV default', () {
     expect(PlaybackSettingsService.normalizeHwdecMode('auto'), 'auto');
-    expect(PlaybackSettingsService.normalizeHwdecMode('auto-safe'), 'auto-safe');
+    expect(
+      PlaybackSettingsService.normalizeHwdecMode('auto-safe'),
+      'auto-safe',
+    );
     expect(
       PlaybackSettingsService.normalizeHwdecMode('mediacodec-copy'),
       'mediacodec-copy',
@@ -168,7 +171,7 @@ void main() {
       });
       Instances.sp = await SharedPreferences.getInstance();
 
-      final preferences = await PlaybackSettingsService.loadAll();
+      final preferences = PlaybackSettingsService.loadAll();
 
       expect(preferences.videoEnhancementMode, VideoEnhancementMode.high);
       expect(preferences.lastVideoEnhancementMode, VideoEnhancementMode.high);
@@ -182,7 +185,7 @@ void main() {
     });
     Instances.sp = await SharedPreferences.getInstance();
 
-    final preferences = await PlaybackSettingsService.loadAll();
+    final preferences = PlaybackSettingsService.loadAll();
 
     expect(preferences.videoEnhancementMode, VideoEnhancementMode.off);
     expect(preferences.lastVideoEnhancementMode, VideoEnhancementMode.ultra);

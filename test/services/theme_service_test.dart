@@ -1,5 +1,5 @@
 import 'package:baka/instance.dart';
-import 'package:baka/services/theme_service.dart';
+import 'package:baka/services/settings_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 

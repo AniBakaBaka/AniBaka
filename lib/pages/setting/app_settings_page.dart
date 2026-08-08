@@ -3,8 +3,8 @@ import 'package:baka/api/post.dart';
 import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:get/get.dart';
-import 'package:baka/services/cache_manager.dart';
-import 'package:baka/services/theme_service.dart';
+import 'package:baka/services/app_storage.dart';
+import 'package:baka/services/settings_service.dart';
 import 'package:baka/utils/app_logger.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
@@ -46,10 +46,10 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
   }
 
   Future<void> _loadCacheSize() async {
-    final size = await CacheManagerService.instance.getCacheSize();
+    final size = await AppStorage.getCacheSize();
     if (mounted) {
       setState(() {
-        _cacheSize = CacheManagerService.formatSize(size);
+        _cacheSize = AppStorage.formatSize(size);
       });
     }
   }
@@ -65,7 +65,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
 
     if (action == DialogAction.confirm) {
       setState(() => _isClearing = true);
-      final success = await CacheManagerService.instance.clearAllCache();
+      final success = await AppStorage.clearAllCache();
       if (mounted) {
         setState(() => _isClearing = false);
         if (success) {

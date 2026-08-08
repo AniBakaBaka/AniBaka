@@ -8,6 +8,13 @@ class BgmService {
   static const _scoreCacheDuration = Duration(days: 7);
   static const _memoryCacheLimit = 64;
 
+  /// 分数缓存在 Hive 中持久化 7 天（写时间 TTL 改为读时间 TTL，
+  /// 旧格式条目缺少 timestamp 会被视为未命中后自动重写）。
+  static final TtlCache _scoreCache = TtlCache(
+    AppStorage.bgmCacheBox,
+    ttl: _scoreCacheDuration,
+  );
+
   // Map 保持插入顺序；命中时移动到末尾，形成一个轻量 LRU。
   static final Map<String, Future<BgmSubjectInfo?>> _titleCache = {};
   static final Map<String, Future<List<BgmSubjectInfo>>> _searchCache = {};
@@ -38,16 +45,10 @@ class BgmService {
   ) async {
     if (subjectId <= 0 || episodeIndex < 0) return null;
 
-    final detail =
-        getCachedBgmAnimeFullDetail(subjectId) ??
-        await getBgmAnimeFullDetail(subjectId);
-    final rawEpisodes = detail?['episodes'];
-    if (rawEpisodes is! List) return null;
+    final rawEpisodes = await getBgmEpisodes(subjectId);
 
     final episodes = <({double sort, int? id, String name})>[];
     for (final raw in rawEpisodes) {
-      if (raw is! Map || (BgmUtils.toInt(raw['type']) ?? 0) != 0) continue;
-
       final nameCn = raw['name_cn']?.toString() ?? '';
       episodes.add((
         sort: BgmUtils.toDouble(raw['sort']) ?? 0,
@@ -107,13 +108,10 @@ class BgmService {
       subjectId: subject.subjectId,
       imageUrl: subject.imageUrl,
     );
-    await AppStorage.bgmCacheBox.put(cacheKey, {
+    await _scoreCache.write(cacheKey, {
       'score': info.score,
       'subjectId': info.subjectId,
       'imageUrl': info.imageUrl,
-      'expiry':
-          DateTime.now().millisecondsSinceEpoch +
-          _scoreCacheDuration.inMilliseconds,
     });
     return info;
   }
@@ -158,8 +156,7 @@ class BgmService {
     final key = query.cacheKey;
     try {
       return await _remember(_searchCache, key, () async {
-        final response = await searchBgmAnime(query.original);
-        return _parseSearchResults(response.data);
+        return _parseSearchResults(await searchBgmAnime(query.original));
       });
     } catch (error) {
       _searchCache.remove(key);
@@ -210,12 +207,8 @@ class BgmService {
   static Future<BgmSubjectInfo?> _detail(int subjectId) async {
     try {
       final subject = await _remember(_detailCache, subjectId, () async {
-        final detail =
-            getCachedBgmAnimeFullDetail(subjectId) ??
-            await getBgmAnimeFullDetail(subjectId);
-        return detail == null
-            ? null
-            : _subjectFromMap(detail, id: subjectId, hasDetail: true);
+        final detail = await getBgmSubject(subjectId);
+        return _subjectFromMap(detail, id: subjectId, hasDetail: true);
       });
       if (subject == null) _detailCache.remove(subjectId);
       return subject;
@@ -226,14 +219,11 @@ class BgmService {
     }
   }
 
-  static List<BgmSubjectInfo> _parseSearchResults(dynamic responseData) {
-    final data = BgmUtils.parseJsonMap(responseData);
-    final items = data?['data'] ?? data?['items'] ?? data?['list'];
-    if (items is! List) return const [];
-
+  static List<BgmSubjectInfo> _parseSearchResults(
+    List<Map<String, dynamic>> items,
+  ) {
     final subjects = <BgmSubjectInfo>[];
     for (final item in items) {
-      if (item is! Map) continue;
       final subject = _subjectFromMap(item);
       if (subject != null) subjects.add(subject);
     }
@@ -272,14 +262,8 @@ class BgmService {
   }
 
   static BgmInfo? _readCachedScore(String cacheKey) {
-    final data = AppStorage.bgmCacheBox.get(cacheKey);
+    final data = _scoreCache.read(cacheKey);
     if (data is! Map) return null;
-
-    final expiry = BgmUtils.toInt(data['expiry']) ?? 0;
-    if (expiry <= DateTime.now().millisecondsSinceEpoch) {
-      AppStorage.bgmCacheBox.delete(cacheKey);
-      return null;
-    }
     return BgmInfo(
       score: BgmUtils.toDouble(data['score']),
       subjectId: BgmUtils.toInt(data['subjectId']),

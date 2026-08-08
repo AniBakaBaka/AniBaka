@@ -1,5 +1,3 @@
-import 'package:baka/utils/bgm_utils.dart';
-
 /// 播放历史数据模型
 class PlayHistory {
   final int? id;
@@ -87,6 +85,9 @@ class PlayHistoryListResponse {
 
   factory PlayHistoryListResponse.fromJson(Map<String, dynamic> json) =>
       PlayHistoryListResponse(
-        list: BgmUtils.mapList(json['list'], PlayHistory.fromJson),
+        list: (json['list'] as List<dynamic>)
+            .cast<Map<String, dynamic>>()
+            .map(PlayHistory.fromJson)
+            .toList(growable: false),
       );
 }

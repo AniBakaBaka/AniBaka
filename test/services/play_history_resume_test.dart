@@ -47,6 +47,11 @@ void main() {
 
     expect(resume?.episodeIndex, 6);
     expect(resume?.lineIndex, 1);
+    final stored = AppStorage.playHistoryBox.get('resume')!.single as Map;
+    expect(stored.keys, containsAll(['bgmId', 'index', 'url', 'watchTime']));
+    expect(stored, isNot(contains('content')));
+    expect(stored, isNot(contains('image')));
+    expect(stored, isNot(contains('tag')));
   });
 
   test('uses existing history as a migration fallback', () async {

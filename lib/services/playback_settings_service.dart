@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:baka/instance.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/models/subtitle_config.dart';
-import 'package:baka/services/low_memory_mode_service.dart';
 import 'package:baka/widgets/baka_player/mpv_config.dart';
+import 'package:flutter/painting.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 播放器设置持久化服务。
@@ -14,11 +14,9 @@ class PlaybackSettingsService {
   PlaybackSettingsService._();
 
   static const _defaultDanmakuOffKey = 'player_defaultDanmakuOff';
-  static const _defaultSubtitleOffKey = 'player_defaultSubtitleOff';
   static const _defaultPlaybackSpeedKey = 'player_defaultPlaybackSpeed';
   static const _clearCacheOnExitKey = 'app_clearCacheOnExit';
   static const _lowMemoryModeKey = 'app_lowMemoryMode';
-  static const _enableBtDownloadKey = 'player_enableBtDownload';
   static const _rememberLastPositionKey = 'player_rememberLastPosition';
   static const _autoFullscreenKey = 'player_autoFullscreen';
   static const _enableSkipOpEdKey = 'player_enableSkipOpEd';
@@ -157,30 +155,6 @@ class PlaybackSettingsService {
 
   static SharedPreferences get _prefs => Instances.sp;
 
-  static bool getDefaultDanmakuOff() =>
-      _prefs.getBool(_defaultDanmakuOffKey) ?? false;
-
-  static Future<void> setDefaultDanmakuOff(bool value) =>
-      _prefs.setBool(_defaultDanmakuOffKey, value);
-
-  static double getDefaultPlaybackSpeed() =>
-      normalizePlaybackSpeed(_prefs.getDouble(_defaultPlaybackSpeedKey));
-
-  static Future<void> setDefaultPlaybackSpeed(double speed) =>
-      _prefs.setDouble(_defaultPlaybackSpeedKey, normalizePlaybackSpeed(speed));
-
-  static bool getDefaultSubtitleOff() =>
-      _prefs.getBool(_defaultSubtitleOffKey) ?? false;
-
-  static Future<void> setDefaultSubtitleOff(bool value) =>
-      _prefs.setBool(_defaultSubtitleOffKey, value);
-
-  static bool getEnableBtDownload() =>
-      _prefs.getBool(_enableBtDownloadKey) ?? true;
-
-  static Future<void> setEnableBtDownload(bool value) =>
-      _prefs.setBool(_enableBtDownloadKey, value);
-
   static bool getClearCacheOnExit() =>
       _prefs.getBool(_clearCacheOnExitKey) ?? false;
 
@@ -189,24 +163,36 @@ class PlaybackSettingsService {
 
   static bool getLowMemoryMode() => _prefs.getBool(_lowMemoryModeKey) ?? false;
 
-  static Future<void> setLowMemoryMode(bool value) async {
-    await _prefs.setBool(_lowMemoryModeKey, value);
-    LowMemoryModeService.apply(value);
+  /// 低内存模式的解码图片内存预算。
+  ///
+  /// 正常值在首次调用时从 Flutter 捕获而不是硬编码，这样关闭低内存模式
+  /// 可以精确恢复当前引擎版本提供的预算。
+  static const lowMemoryImageCount = 80;
+  static const lowMemoryImageBytes = 32 * 1024 * 1024;
+  static int? _normalImageCount;
+  static int? _normalImageBytes;
+
+  static void applyLowMemoryMode(bool enabled) {
+    final cache = PaintingBinding.instance.imageCache;
+    _normalImageCount ??= cache.maximumSize;
+    _normalImageBytes ??= cache.maximumSizeBytes;
+
+    cache.maximumSize = enabled ? lowMemoryImageCount : _normalImageCount!;
+    cache.maximumSizeBytes = enabled ? lowMemoryImageBytes : _normalImageBytes!;
+
+    if (enabled) {
+      // 丢弃只被 Flutter live-image 追踪保留的条目；仍在显示的图片
+      // 会通过 widget 监听器保持存活。
+      cache.clearLiveImages();
+    }
   }
 
-  static String getHwdecMode() =>
-      normalizeHwdecMode(_prefs.getString(_hwdecModeKey));
+  static Future<void> setLowMemoryMode(bool value) async {
+    await _prefs.setBool(_lowMemoryModeKey, value);
+    applyLowMemoryMode(value);
+  }
 
-  static Future<void> setHwdecMode(String mode) =>
-      _prefs.setString(_hwdecModeKey, normalizeHwdecMode(mode));
-
-  static String getVideoRenderer() =>
-      normalizeVideoRenderer(_prefs.getString(_videoRendererKey));
-
-  static Future<void> setVideoRenderer(String renderer) =>
-      _prefs.setString(_videoRendererKey, normalizeVideoRenderer(renderer));
-
-  static Future<PlaybackPreferences> loadAll() async {
+  static PlaybackPreferences loadAll() {
     final sp = _prefs;
     final enhancementMode = _loadEnhancementMode(sp);
     final storedLastMode = VideoEnhancementMode.fromStorage(
@@ -239,7 +225,7 @@ class PlaybackSettingsService {
       videoEnhancementMode: enhancementMode,
       lastVideoEnhancementMode: lastEnhancementMode,
       showSubtitle: sp.getBool(_showSubtitleKey) ?? true,
-      subtitleConfig: await SubtitleConfig.load(),
+      subtitleConfig: SubtitleConfig.load(),
       hwdecMode: normalizeHwdecMode(sp.getString(_hwdecModeKey)),
       videoRenderer: normalizeVideoRenderer(sp.getString(_videoRendererKey)),
     );

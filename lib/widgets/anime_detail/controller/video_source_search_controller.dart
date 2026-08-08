@@ -6,7 +6,7 @@ import 'package:baka/source/source_registry.dart';
 import 'package:baka/source/video_url_extractor.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/models/playback_episode.dart';
-import 'package:baka/services/alias_storage_service.dart';
+import 'package:baka/services/settings_service.dart';
 import 'package:baka/services/matching/auto_match_strategy.dart';
 import 'package:baka/services/matching/match_memory_service.dart';
 import 'package:baka/services/matching/media_readiness.dart';

@@ -124,7 +124,7 @@ class PlaybackController {
   }
 
   Future<void> _initialize() async {
-    final loaded = await PlaybackSettingsService.loadAll();
+    final loaded = PlaybackSettingsService.loadAll();
     if (_disposed) return;
     _persistedPreferences = loaded;
     preferences.value = loaded;

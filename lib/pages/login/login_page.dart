@@ -8,7 +8,7 @@ import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/pages/setting/bangumi_sync_page.dart';
 import 'package:baka/services/bangumi_sync_service.dart';
-import 'package:baka/services/login_service.dart';
+import 'package:baka/services/network_service.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/common/scale_button.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';

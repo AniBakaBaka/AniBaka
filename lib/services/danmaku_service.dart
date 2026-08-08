@@ -66,7 +66,8 @@ class DanmakuService {
       title: title ?? '',
       withDetail: true,
     );
-    final searchTitles = subject?.searchTitles ??
+    final searchTitles =
+        subject?.searchTitles ??
         (title != null && title.isNotEmpty
             ? BgmUtils.buildSearchTitles([title])
             : const []);
@@ -81,7 +82,6 @@ class DanmakuService {
     if (parsed.isNotEmpty) _putCache(cacheKey, parsed);
     return parsed;
   }
-
 
   static List<DanmakuItem>? _readCache(String key) {
     final value = _cache.remove(key);
@@ -140,22 +140,17 @@ class DanmakuService {
     return compute(_parseDanmakuItems, rawItems);
   }
 
-  static Future<DanmakuOption> loadSettings([
-    DanmakuController? controller,
-  ]) async {
+  static Future<void> loadSettings(DanmakuController controller) async {
     final preferences = await SharedPreferences.getInstance();
     final option = _parseOption(
       BgmUtils.parseJsonMap(preferences.getString(_settingsKey)) ?? const {},
     );
-    if (controller != null) {
-      controller.blockWords = BgmUtils.parseJsonList(
-        preferences.getString(_blockWordsKey),
-      ).map((value) => value.toString()).toList(growable: false);
-      controller.blockRepeat = preferences.getBool(_blockRepeatKey) ?? false;
-      controller.blockColor = preferences.getBool(_blockColorKey) ?? false;
-      controller.updateOption(option);
-    }
-    return option;
+    controller.blockWords = BgmUtils.parseJsonList(
+      preferences.getString(_blockWordsKey),
+    ).map((value) => value.toString()).toList();
+    controller.blockRepeat = preferences.getBool(_blockRepeatKey) ?? false;
+    controller.blockColor = preferences.getBool(_blockColorKey) ?? false;
+    controller.updateOption(option);
   }
 
   static DanmakuOption _parseOption(Map<String, dynamic> settings) {
@@ -173,14 +168,10 @@ class DanmakuService {
     );
   }
 
-  static Future<void> saveSettings(
-    DanmakuOption option, {
-    Iterable<String>? blockWords,
-    bool? blockRepeat,
-    bool? blockColor,
-  }) async {
+  static Future<void> saveSettings(DanmakuController controller) async {
+    final option = controller.option;
     final preferences = await SharedPreferences.getInstance();
-    final writes = <Future<bool>>[
+    await Future.wait([
       preferences.setString(
         _settingsKey,
         jsonEncode({
@@ -194,13 +185,10 @@ class DanmakuService {
           'strokeWidth': option.strokeWidth,
         }),
       ),
-      if (blockWords != null)
-        preferences.setString(_blockWordsKey, jsonEncode(blockWords.toList())),
-      if (blockRepeat != null)
-        preferences.setBool(_blockRepeatKey, blockRepeat),
-      if (blockColor != null) preferences.setBool(_blockColorKey, blockColor),
-    ];
-    await Future.wait(writes);
+      preferences.setString(_blockWordsKey, jsonEncode(controller.blockWords)),
+      preferences.setBool(_blockRepeatKey, controller.blockRepeat),
+      preferences.setBool(_blockColorKey, controller.blockColor),
+    ]);
   }
 
   static void startPlay({

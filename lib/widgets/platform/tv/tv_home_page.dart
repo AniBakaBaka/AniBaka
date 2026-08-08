@@ -32,6 +32,8 @@ class TvHomePage extends StatefulWidget {
 }
 
 class _TvHomePageState extends State<TvHomePage> {
+  static const _detailCacheLimit = 24;
+
   int _selectedNavIndex = 2;
   Map? _focusedItem;
   final ScrollController _scrollController = ScrollController();
@@ -39,6 +41,7 @@ class _TvHomePageState extends State<TvHomePage> {
   String? _exhaustedTag;
 
   final Map<int, AnimeDetailViewData> _detailCache = {};
+  final Set<int> _loadingDetails = {};
 
   @override
   void initState() {
@@ -85,32 +88,41 @@ class _TvHomePageState extends State<TvHomePage> {
     final rawId = item['bgmId'] ?? item['id'];
     final subjectId = BgmUtils.toInt(rawId);
     if (subjectId == null || subjectId <= 0) return;
-    if (_detailCache.containsKey(subjectId)) return;
+    if (_detailCache.containsKey(subjectId) ||
+        !_loadingDetails.add(subjectId)) {
+      return;
+    }
 
     final bgmInfo = BgmInfo(
       score: BgmUtils.toDouble(item['score']),
       subjectId: subjectId,
     );
 
-    Future.wait([
-      getBgmAnimeFullDetail(subjectId),
-      getAnimeDetail(subjectId),
-    ]).then((results) {
-      if (!mounted) return;
-      final detailData =
-          results[0] is Map ? results[0] as Map<String, dynamic> : null;
-      final anibakaData =
-          results[1] is Map ? results[1] as Map<String, dynamic> : null;
-      final detail = AnimeDetailViewData.from(
-        source: item,
-        bgmInfo: bgmInfo,
-        anibaka: anibakaData,
-        bgm: detailData,
-      );
-      setState(() {
-        _detailCache[subjectId] = detail;
-      });
-    }).catchError((_) {});
+    final bgmFuture = getBgmSubject(subjectId);
+    final anibakaFuture = getAnimeDetail(subjectId);
+    () async {
+      try {
+        final detailData = await bgmFuture;
+        final anibakaData = await anibakaFuture;
+        if (!mounted) return;
+        final detail = AnimeDetailViewData.from(
+          source: item,
+          bgmInfo: bgmInfo,
+          anibaka: anibakaData,
+          bgm: detailData,
+        );
+        setState(() {
+          if (_detailCache.length >= _detailCacheLimit) {
+            _detailCache.remove(_detailCache.keys.first);
+          }
+          _detailCache[subjectId] = detail;
+        });
+      } catch (_) {
+        // 首页保留已有卡片数据，详情预载失败不替换可见内容。
+      } finally {
+        _loadingDetails.remove(subjectId);
+      }
+    }();
   }
 
   @override
@@ -154,36 +166,17 @@ class _TvHomePageState extends State<TvHomePage> {
     return Column(
       mainAxisAlignment: MainAxisAlignment.start,
       children: [
-        _buildSideIcon(
-          icon: Icons.person_outline_rounded,
-          index: 0,
-        ),
+        _buildSideIcon(icon: Icons.person_outline_rounded, index: 0),
         const SizedBox(height: 20),
-        _buildSideIcon(
-          icon: Icons.search_rounded,
-          index: 1,
-        ),
+        _buildSideIcon(icon: Icons.search_rounded, index: 1),
         const SizedBox(height: 20),
-        _buildSideIcon(
-          icon: Icons.explore_outlined,
-          index: 2,
-          autofocus: true,
-        ),
+        _buildSideIcon(icon: Icons.explore_outlined, index: 2, autofocus: true),
         const SizedBox(height: 20),
-        _buildSideIcon(
-          icon: Icons.star_outline_rounded,
-          index: 3,
-        ),
+        _buildSideIcon(icon: Icons.star_outline_rounded, index: 3),
         const SizedBox(height: 20),
-        _buildSideIcon(
-          icon: Icons.history_rounded,
-          index: 4,
-        ),
+        _buildSideIcon(icon: Icons.history_rounded, index: 4),
         const SizedBox(height: 20),
-        _buildSideIcon(
-          icon: Icons.settings_outlined,
-          index: 5,
-        ),
+        _buildSideIcon(icon: Icons.settings_outlined, index: 5),
       ],
     );
   }
@@ -223,8 +216,8 @@ class _TvHomePageState extends State<TvHomePage> {
     return ValueListenableBuilder<List<dynamic>>(
       valueListenable: widget.svc.feed,
       builder: (context, items, _) {
-        final currentFocused = _focusedItem ??
-            (items.isNotEmpty ? items.first as Map : null);
+        final currentFocused =
+            _focusedItem ?? (items.isNotEmpty ? items.first as Map : null);
 
         if (currentFocused != null) {
           _loadAnimeDetail(currentFocused);
@@ -265,11 +258,11 @@ class _TvHomePageState extends State<TvHomePage> {
                               physics: const NeverScrollableScrollPhysics(),
                               gridDelegate:
                                   const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 7,
-                                crossAxisSpacing: 14,
-                                mainAxisSpacing: 16,
-                                childAspectRatio: 1 / 1.45,
-                              ),
+                                    crossAxisCount: 7,
+                                    crossAxisSpacing: 14,
+                                    mainAxisSpacing: 16,
+                                    childAspectRatio: 1 / 1.45,
+                                  ),
                               itemCount: 14,
                               itemBuilder: (context, index) => Container(
                                 decoration: BoxDecoration(
@@ -283,37 +276,37 @@ class _TvHomePageState extends State<TvHomePage> {
                       : SliverGrid(
                           gridDelegate:
                               const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 7,
-                            crossAxisSpacing: 14,
-                            mainAxisSpacing: 16,
-                            childAspectRatio: 1 / 1.45,
-                          ),
-                          delegate: SliverChildBuilderDelegate(
-                            (context, index) {
-                              final item = items[index] as Map;
-                              final isFocused = (currentFocused == item);
+                                crossAxisCount: 7,
+                                crossAxisSpacing: 14,
+                                mainAxisSpacing: 16,
+                                childAspectRatio: 1 / 1.45,
+                              ),
+                          delegate: SliverChildBuilderDelegate((
+                            context,
+                            index,
+                          ) {
+                            final item = items[index] as Map;
+                            final isFocused = (currentFocused == item);
 
-                              return _TvPosterCard(
-                                key: ValueKey(
-                                  'waterfall_${item['bgmId'] ?? item['id'] ?? index}',
-                                ),
-                                data: item,
-                                isSelected: isFocused,
-                                autofocus: index == 0,
-                                onFocused: () {
-                                  if (_focusedItem != item) {
-                                    setState(() {
-                                      _focusedItem = item;
-                                    });
-                                  }
-                                  if (index >= items.length - 7) {
-                                    _loadMore();
-                                  }
-                                },
-                              );
-                            },
-                            childCount: items.length,
-                          ),
+                            return _TvPosterCard(
+                              key: ValueKey(
+                                'waterfall_${item['bgmId'] ?? item['id'] ?? index}',
+                              ),
+                              data: item,
+                              isSelected: isFocused,
+                              autofocus: index == 0,
+                              onFocused: () {
+                                if (_focusedItem != item) {
+                                  setState(() {
+                                    _focusedItem = item;
+                                  });
+                                }
+                                if (index >= items.length - 7) {
+                                  _loadMore();
+                                }
+                              },
+                            );
+                          }, childCount: items.length),
                         ),
 
                   if (_loadingMore)
@@ -426,8 +419,9 @@ class _TvHomePageState extends State<TvHomePage> {
                           maxLines: 4,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: context.tvTextSecondaryColor
-                                .withValues(alpha: 0.9),
+                            color: context.tvTextSecondaryColor.withValues(
+                              alpha: 0.9,
+                            ),
                             fontSize: 15,
                             height: 1.5,
                           ),
@@ -452,8 +446,9 @@ class _TvHomePageState extends State<TvHomePage> {
                           Text(
                             '/10',
                             style: TextStyle(
-                              color:
-                                  const Color(0xFFFFB300).withValues(alpha: 0.7),
+                              color: const Color(
+                                0xFFFFB300,
+                              ).withValues(alpha: 0.7),
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
                             ),
@@ -479,10 +474,7 @@ class _TvHomePageState extends State<TvHomePage> {
                   ),
                 ),
 
-                const Expanded(
-                  flex: 5,
-                  child: SizedBox.expand(),
-                ),
+                const Expanded(flex: 5, child: SizedBox.expand()),
               ],
             ),
           ),
@@ -540,14 +532,23 @@ class _TvHomePageState extends State<TvHomePage> {
       mainAxisSize: MainAxisSize.min,
       children: List.generate(5, (index) {
         if (index < fullStars) {
-          return const Icon(Icons.star_rounded,
-              color: Color(0xFFFFB300), size: 20);
+          return const Icon(
+            Icons.star_rounded,
+            color: Color(0xFFFFB300),
+            size: 20,
+          );
         } else if (index == fullStars && hasHalf) {
-          return const Icon(Icons.star_half_rounded,
-              color: Color(0xFFFFB300), size: 20);
+          return const Icon(
+            Icons.star_half_rounded,
+            color: Color(0xFFFFB300),
+            size: 20,
+          );
         } else {
-          return const Icon(Icons.star_outline_rounded,
-              color: Color(0xFFFFB300), size: 20);
+          return const Icon(
+            Icons.star_outline_rounded,
+            color: Color(0xFFFFB300),
+            size: 20,
+          );
         }
       }),
     );
@@ -563,7 +564,10 @@ class _TvHomePageState extends State<TvHomePage> {
   String _getSummaryText(Map? item) {
     if (item == null) return '';
     final summary =
-        item['summary'] ?? item['content'] ?? item['desc'] ?? item['description'];
+        item['summary'] ??
+        item['content'] ??
+        item['desc'] ??
+        item['description'];
     if (summary != null && summary.toString().isNotEmpty) {
       final raw = summary.toString();
       final cut = raw.indexOf('>');
@@ -575,7 +579,8 @@ class _TvHomePageState extends State<TvHomePage> {
 
   String _getBackdropUrl(Map? item) {
     if (item == null) return '';
-    final explicitBackdrop = item['backgroundUrl'] ??
+    final explicitBackdrop =
+        item['backgroundUrl'] ??
         item['backdrop'] ??
         item['images']?['backdrops'];
     if (explicitBackdrop != null && explicitBackdrop.toString().isNotEmpty) {
@@ -635,14 +640,16 @@ class _TvPosterCard extends StatelessWidget {
           border: isSelected
               ? Border.all(color: primaryColor, width: 2.5)
               : Border.all(
-                  color: Colors.white.withValues(alpha: 0.1), width: 1),
+                  color: Colors.white.withValues(alpha: 0.1),
+                  width: 1,
+                ),
           boxShadow: isSelected
               ? [
                   BoxShadow(
                     color: primaryColor.withValues(alpha: 0.4),
                     blurRadius: 16,
                     spreadRadius: 2,
-                  )
+                  ),
                 ]
               : null,
         ),

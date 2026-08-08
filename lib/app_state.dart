@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:baka/instance.dart';
-import 'package:baka/services/theme_service.dart';
+import 'package:baka/services/settings_service.dart';
 import 'package:baka/theme.dart';
 
 /// 应用级共享状态：会话、主界面壳和主题。

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:baka/instance.dart';
-import 'package:baka/services/cache_manager.dart';
+import 'package:baka/services/app_storage.dart';
 import 'package:baka/services/mine_service.dart';
 import 'package:baka/services/navigation_service.dart';
 import 'package:baka/services/version_service.dart';
@@ -35,10 +35,10 @@ class _TvSettingsPageState extends State<TvSettingsPage> {
   }
 
   Future<void> _loadCacheSize() async {
-    final size = await CacheManagerService.instance.getCacheSize();
+    final size = await AppStorage.getCacheSize();
     if (mounted) {
       setState(() {
-        _cacheSize = CacheManagerService.formatSize(size);
+        _cacheSize = AppStorage.formatSize(size);
       });
     }
   }
@@ -47,7 +47,7 @@ class _TvSettingsPageState extends State<TvSettingsPage> {
     if (_isClearingCache) return;
     HapticFeedback.mediumImpact();
     setState(() => _isClearingCache = true);
-    final success = await CacheManagerService.instance.clearAllCache();
+    final success = await AppStorage.clearAllCache();
     if (mounted) {
       setState(() => _isClearingCache = false);
       if (success) {

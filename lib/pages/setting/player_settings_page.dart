@@ -5,7 +5,7 @@ import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/player/settings_panel.dart';
 
-class PlayerSettingsPage extends StatefulWidget {
+class PlayerSettingsPage extends StatelessWidget {
   final PlaybackController controller;
 
   const PlayerSettingsPage({required this.controller, super.key});
@@ -23,13 +23,8 @@ class PlayerSettingsPage extends StatefulWidget {
     );
   }
 
-  @override
-  State<PlayerSettingsPage> createState() => _PlayerSettingsPageState();
-}
-
-class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
   Future<void> _resetToDefaults() async {
-    await widget.controller.resetPreferences();
+    await controller.resetPreferences();
     showSnackBar('已重置为默认设置');
   }
 
@@ -37,8 +32,8 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
     PlaybackPreferences Function(PlaybackPreferences current) change, {
     bool persist = true,
   }) {
-    return widget.controller.updatePreferences(
-      change(widget.controller.preferences.value),
+    return controller.updatePreferences(
+      change(controller.preferences.value),
       persist: persist,
     );
   }
@@ -48,7 +43,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
     final cardColor = Colors.white.withValues(alpha: 0.05);
 
     return ValueListenableBuilder<PlaybackPreferences>(
-      valueListenable: widget.controller.preferences,
+      valueListenable: controller.preferences,
       builder: (context, preferences, _) => PanelContainer(
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
@@ -110,9 +105,8 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                       PanelSelectTile(
                         title: '视频渲染器',
                         value: preferences.videoRenderer,
-                        options:
-                            PlaybackSettingsService
-                                .videoRendererLabelsForPlatform,
+                        options: PlaybackSettingsService
+                            .videoRendererLabelsForPlatform,
                         onChanged: (value) => _update(
                           (current) => current.copyWith(videoRenderer: value),
                         ),

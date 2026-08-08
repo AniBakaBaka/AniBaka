@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:baka/instance.dart';
 
 import 'package:baka/services/navigation_service.dart';
-import 'package:baka/services/swiper_settings_service.dart';
+import 'package:baka/services/settings_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/reg_utils.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';

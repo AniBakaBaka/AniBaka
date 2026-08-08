@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:bitsdojo_window/bitsdojo_window.dart';
-import 'package:baka/services/cache_manager.dart';
+import 'package:baka/services/app_storage.dart';
 import 'package:baka/services/playback_settings_service.dart';
 
 class WindowsTitleBar extends StatelessWidget {
@@ -51,7 +51,7 @@ class WindowsTitleBar extends StatelessWidget {
                   icon: Icons.close,
                   onPressed: () async {
                     if (PlaybackSettingsService.getClearCacheOnExit()) {
-                      await CacheManagerService.instance.clearAllCache();
+                      await AppStorage.clearAllCache();
                     }
                     appWindow.close();
                   },

@@ -45,6 +45,9 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   late BgmInfo _bgmInfo;
   Map<String, dynamic>? _detailData;
   Map<String, dynamic>? _anibakaData;
+  List<Map<String, dynamic>> _characters = const [];
+  bool _charactersLoading = false;
+  bool _charactersLoaded = false;
   late AnimeDetailViewData _detail;
 
   int? get _subjectId => _bgmInfo.subjectId;
@@ -57,11 +60,16 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   void _rebuildDetail() {
     _bgmInfo = BgmUtils.readFromData(widget.data);
     _detailData = BgmUtils.asMap(widget.data['bgmDetailData']);
+    if (!_charactersLoaded) {
+      _characters = BgmUtils.asMapList(_detailData?['characters']);
+      _charactersLoaded = _characters.isNotEmpty;
+    }
     _detail = AnimeDetailViewData.from(
       source: widget.data,
       bgmInfo: _bgmInfo,
       anibaka: _anibakaData,
       bgm: _detailData,
+      characters: _characters,
     );
   }
 
@@ -108,35 +116,41 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     // Phase 2: 并发启动所有请求，各自独立更新 UI
     // AniBaka 自有 API（含 overview）
     if (_anibakaData == null) {
-      getAnimeDetail(bgmId).then((data) {
-        if (!mounted) return;
-        _anibakaData = BgmUtils.asMap(data);
-        _rebuildDetail();
-        setState(() {});
-      }).catchError((_) {});
+      getAnimeDetail(bgmId)
+          .then((data) {
+            if (!mounted) return;
+            _anibakaData = BgmUtils.asMap(data);
+            _rebuildDetail();
+            setState(() {});
+          })
+          .catchError((_) {});
     }
 
-    // BGM 主条目 API（含 summary + characters）
+    // BGM 主条目；角色数据只在用户打开角色页时请求。
     if (_detailData == null) {
-      getBgmAnimePageDetail(bgmId).then((data) {
-        if (!mounted) return;
-        _detailData = BgmUtils.asMap(data);
-        if (_detailData != null) widget.data['bgmDetailData'] = _detailData;
-        _rebuildDetail();
-        setState(() {});
-      }).catchError((_) {});
+      getBgmSubject(bgmId)
+          .then((data) {
+            if (!mounted) return;
+            _detailData = data;
+            widget.data['bgmDetailData'] = data;
+            _rebuildDetail();
+            setState(() {});
+          })
+          .catchError((_) {});
     }
 
     // Phase 3: 收藏状态独立加载
-    CollectionService.getByBgmId(bgmId).then((collection) {
-      if (!mounted) return;
-      setState(() {
-        _collection = collection;
-        _isCollectionLoading = false;
-      });
-    }).catchError((_) {
-      if (mounted) setState(() => _isCollectionLoading = false);
-    });
+    CollectionService.getByBgmId(bgmId)
+        .then((collection) {
+          if (!mounted) return;
+          setState(() {
+            _collection = collection;
+            _isCollectionLoading = false;
+          });
+        })
+        .catchError((_) {
+          if (mounted) setState(() => _isCollectionLoading = false);
+        });
   }
 
   AnimeCollection _buildCollection(int statusValue) {
@@ -147,12 +161,27 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
       postTitle: widget.data['title']?.toString() ?? '',
       postCover: _detail.coverUrl,
       bgmImage: _bgmInfo.imageUrl,
-      bgmTitle:
-          _detailData?['name_cn']?.toString() ??
-          _detailData?['name']?.toString() ??
-          widget.data['title']?.toString() ??
-          '',
+      bgmTitle: _detail.bgmTitle,
     );
+  }
+
+  Future<void> _loadCharacters() async {
+    final subjectId = _subjectId;
+    if (subjectId == null || _charactersLoaded || _charactersLoading) return;
+    setState(() => _charactersLoading = true);
+    try {
+      final characters = await getBgmCharacters(subjectId);
+      if (!mounted) return;
+      setState(() {
+        _characters = characters;
+        _charactersLoaded = true;
+        _charactersLoading = false;
+        _rebuildDetail();
+      });
+    } catch (error) {
+      debugPrint('获取Bangumi角色失败: $error');
+      if (mounted) setState(() => _charactersLoading = false);
+    }
   }
 
   Future<void> _updateCollectionStatus(CollectionStatus status) async {
@@ -343,6 +372,11 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                       dividerColor: Colors.transparent,
                       splashFactory: NoSplash.splashFactory,
                       overlayColor: WidgetStateProperty.all(Colors.transparent),
+                      onTap: (index) {
+                        if (tabs[index].$1 == '角色') {
+                          unawaited(_loadCharacters());
+                        }
+                      },
                       tabs: [for (final tab in tabs) Tab(text: tab.$1)],
                     );
 
@@ -424,9 +458,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                         flex: 2,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            summary,
-                          ],
+                          children: [summary],
                         ),
                       ),
                       if (_detail.infobox.isNotEmpty) ...[
@@ -515,7 +547,9 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     tabs.add((
       '角色',
       (_) => _wrapTabContent(
-        _detail.characters.isEmpty
+        _charactersLoading
+            ? const Center(child: CircularProgressIndicator())
+            : _detail.characters.isEmpty
             ? _buildEmptySection('暂无角色信息')
             : CharactersSection(
                 characters: _detail.characters,
@@ -556,8 +590,6 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     );
   }
 
-
-
   Widget _buildEmptySection(String message) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 48),
@@ -566,8 +598,6 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
       ),
     );
   }
-
-
 
   Widget _buildGenresSection(List<String> genres) {
     return Padding(
@@ -616,8 +646,6 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     );
   }
 
-
-
   Widget _buildGalleryTab() {
     final backdrops = _detail.backdrops;
     final posters = _detail.posters;
@@ -643,11 +671,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                     child: Text('剧照 / 背景图', style: sectionStyle),
                   );
                 }
-                final backdrop = backdrops[index - 1];
-                final url =
-                    BgmUtils.trimmed(backdrop['url']) ??
-                    BgmUtils.trimmed(backdrop['thumbnail']) ??
-                    '';
+                final url = backdrops[index - 1];
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 16),
                   child: AspectRatio(
@@ -661,7 +685,9 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                         placeholder: (context, url) => Container(
                           width: double.infinity,
                           height: double.infinity,
-                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.surfaceContainerHighest,
                         ),
                         errorWidget: (context, url, error) =>
                             const SizedBox.shrink(),
@@ -693,11 +719,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                       itemExtent: 162,
                       itemCount: posters.length,
                       itemBuilder: (context, index) {
-                        final poster = posters[index];
-                        final url =
-                            BgmUtils.trimmed(poster['url']) ??
-                            BgmUtils.trimmed(poster['thumbnail']) ??
-                            '';
+                        final url = posters[index];
                         return Align(
                           alignment: Alignment.centerLeft,
                           child: ClipRRect(
@@ -711,7 +733,9 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                               placeholder: (context, url) => Container(
                                 width: 150,
                                 height: 220,
-                                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHighest,
                               ),
                               errorWidget: (context, url, error) =>
                                   const SizedBox.shrink(),
@@ -827,11 +851,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                 ),
               ),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: externalLinks,
-              ),
+              Wrap(spacing: 10, runSpacing: 10, children: externalLinks),
             ],
           ],
         ),
@@ -840,7 +860,8 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   }
 
   List<Widget> _buildExternalLinks() {
-    final bgmId = _detail.bgmId ??
+    final bgmId =
+        _detail.bgmId ??
         _subjectId ??
         BgmUtils.toInt(widget.data['bgmId']) ??
         BgmUtils.toInt(widget.data['id']);
@@ -874,14 +895,13 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardBg = isDark
-        ? const Color(0xFF2C2C2E)
-        : const Color(0xFFF2F2F7);
+    final cardBg = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7);
     final borderColor = isDark
         ? Colors.white.withValues(alpha: 0.12)
         : const Color(0xFFE5E5EA);
-    final textColor =
-        isDark ? Colors.white.withValues(alpha: 0.9) : const Color(0xFF1C1C1E);
+    final textColor = isDark
+        ? Colors.white.withValues(alpha: 0.9)
+        : const Color(0xFF1C1C1E);
     final iconColor = isDark ? Colors.white70 : const Color(0xFF636366);
 
     return links.map((link) {
@@ -896,19 +916,12 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
           decoration: BoxDecoration(
             color: cardBg,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: borderColor,
-              width: 1,
-            ),
+            border: Border.all(color: borderColor, width: 1),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.link_rounded,
-                size: 16,
-                color: iconColor,
-              ),
+              Icon(Icons.link_rounded, size: 16, color: iconColor),
               const SizedBox(width: 6),
               Text(
                 label,

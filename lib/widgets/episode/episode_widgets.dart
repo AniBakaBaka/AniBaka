@@ -242,7 +242,7 @@ Widget buildHorizontalEpisodeList({
             index: index,
             rawTitle: videoList[index].title,
             isSelected: index == currPlayIndex,
-            isWatched: VideoUtils.isEpisodeWatched(videoId, index),
+            isWatched: PlayerService.isEpisodeWatched(videoId, index),
             onTap: () => onEpisodeChanged(index),
           ),
         );

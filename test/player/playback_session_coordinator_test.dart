@@ -17,27 +17,7 @@ void main() {
     Instances.sp = await SharedPreferences.getInstance();
   });
 
-  test('generation invalidates stale requests immediately', () async {
-    final backend = FakePlaybackBackend();
-    final controller = PlaybackController(backend: backend);
-    final coordinator = PlaybackSessionCoordinator(
-      controller: controller,
-      danmakuController: DanmakuController(),
-      content: _RecordingPlayerService(),
-      onNextEpisode: () {},
-      onPreviousEpisode: () {},
-      mediaSession: MediaSessionService(),
-    );
-
-    final original = coordinator.generation;
-    final current = coordinator.nextGeneration();
-    expect(coordinator.isCurrent(original), isFalse);
-    expect(coordinator.isCurrent(current), isTrue);
-    await controller.dispose();
-  });
-
   test('progress is throttled to 30 seconds and saved at boundaries', () async {
-    var now = DateTime(2024);
     final backend = FakePlaybackBackend();
     final controller = PlaybackController(backend: backend);
     final content = _RecordingPlayerService();
@@ -48,17 +28,14 @@ void main() {
       onNextEpisode: () {},
       onPreviousEpisode: () {},
       mediaSession: MediaSessionService(),
-      now: () => now,
     );
     await coordinator.start();
     backend.emitDuration(const Duration(minutes: 10));
 
-    now = now.add(const Duration(seconds: 29));
     backend.emitPosition(const Duration(seconds: 29));
     await Future<void>.delayed(Duration.zero);
     expect(content.savedPositions, isEmpty);
 
-    now = now.add(const Duration(seconds: 1));
     backend.emitPosition(const Duration(seconds: 30));
     await Future<void>.delayed(Duration.zero);
     expect(content.savedPositions, [const Duration(seconds: 30)]);
@@ -74,6 +51,10 @@ void main() {
     await coordinator.dispose();
     expect(content.savedPositions.last, const Duration(seconds: 50));
     expect(content.historyWrites, 2);
+    expect(content.savedPositions, [
+      const Duration(seconds: 30),
+      const Duration(seconds: 50),
+    ]);
     await controller.dispose();
   });
 }

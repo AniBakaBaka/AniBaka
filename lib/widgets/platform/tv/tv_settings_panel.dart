@@ -30,26 +30,23 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
   PlaybackController get _ctrl => widget.controller;
   DanmakuController get _danmaku => widget.danmakuController;
 
-  late DanmakuOption _option;
   late double _speed;
   bool _optionChanged = false;
 
   @override
   void initState() {
     super.initState();
-    _option = _danmaku.option;
     _speed = _ctrl.core.value.playbackRate;
   }
 
   @override
   void dispose() {
-    if (_optionChanged) DanmakuService.saveSettings(_option);
+    if (_optionChanged) DanmakuService.saveSettings(_danmaku);
     super.dispose();
   }
 
   void _setDanmakuOption(DanmakuOption option) {
-    setState(() => _option = option);
-    _danmaku.updateOption(option);
+    setState(() => _danmaku.updateOption(option));
     _optionChanged = true;
   }
 
@@ -67,6 +64,7 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
 
   @override
   Widget build(BuildContext context) {
+    final option = _danmaku.option;
     return FocusScope(
       autofocus: true,
       child: Focus(
@@ -131,26 +129,26 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
                   _TvSliderItem(
                     icon: Icons.format_size,
                     title: '弹幕字号',
-                    value: _option.fontSize,
+                    value: option.fontSize,
                     min: 10,
                     max: 36,
                     step: 2,
-                    displayValue: '${_option.fontSize.toInt()}',
+                    displayValue: '${option.fontSize.toInt()}',
                     onChanged: (value) =>
-                        _setDanmakuOption(_option.copyWith(fontSize: value)),
+                        _setDanmakuOption(option.copyWith(fontSize: value)),
                   ),
                   const SizedBox(height: 8),
 
                   _TvSliderItem(
                     icon: Icons.opacity,
                     title: '弹幕透明度',
-                    value: _option.opacity,
+                    value: option.opacity,
                     min: 0.1,
                     max: 1.0,
                     step: 0.1,
-                    displayValue: '${(_option.opacity * 100).toInt()}%',
+                    displayValue: '${(option.opacity * 100).toInt()}%',
                     onChanged: (value) => _setDanmakuOption(
-                      _option.copyWith(
+                      option.copyWith(
                         opacity: double.parse(value.toStringAsFixed(1)),
                       ),
                     ),
@@ -160,13 +158,13 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
                   _TvSliderItem(
                     icon: Icons.crop_free,
                     title: '弹幕区域',
-                    value: _option.area,
+                    value: option.area,
                     min: 0.25,
                     max: 1.0,
                     step: 0.25,
-                    displayValue: '${(_option.area * 100).toInt()}%',
+                    displayValue: '${(option.area * 100).toInt()}%',
                     onChanged: (value) => _setDanmakuOption(
-                      _option.copyWith(
+                      option.copyWith(
                         area: double.parse(value.toStringAsFixed(2)),
                       ),
                     ),
@@ -176,9 +174,9 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
                   _buildToggleItem(
                     icon: Icons.vertical_align_top,
                     title: '隐藏顶部弹幕',
-                    value: _option.hideTop,
+                    value: option.hideTop,
                     onToggle: () => _setDanmakuOption(
-                      _option.copyWith(hideTop: !_option.hideTop),
+                      option.copyWith(hideTop: !option.hideTop),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -186,9 +184,9 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
                   _buildToggleItem(
                     icon: Icons.vertical_align_bottom,
                     title: '隐藏底部弹幕',
-                    value: _option.hideBottom,
+                    value: option.hideBottom,
                     onToggle: () => _setDanmakuOption(
-                      _option.copyWith(hideBottom: !_option.hideBottom),
+                      option.copyWith(hideBottom: !option.hideBottom),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -196,9 +194,9 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
                   _buildToggleItem(
                     icon: Icons.swap_horiz,
                     title: '隐藏滚动弹幕',
-                    value: _option.hideScroll,
+                    value: option.hideScroll,
                     onToggle: () => _setDanmakuOption(
-                      _option.copyWith(hideScroll: !_option.hideScroll),
+                      option.copyWith(hideScroll: !option.hideScroll),
                     ),
                   ),
 
@@ -287,11 +285,12 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
                           .indexOf(preferences.videoRenderer)
                           .toDouble(),
                       min: 0,
-                      max: (PlaybackSettingsService
-                                  .videoRendererOptionsForPlatform
-                                  .length -
-                              1)
-                          .toDouble(),
+                      max:
+                          (PlaybackSettingsService
+                                      .videoRendererOptionsForPlatform
+                                      .length -
+                                  1)
+                              .toDouble(),
                       step: 1,
                       displayValue:
                           PlaybackSettingsService

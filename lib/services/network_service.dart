@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
 
 import 'package:baka/api/api_config.dart';
+import 'package:baka/api/post.dart';
 import 'package:baka/app_state.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:flutter/foundation.dart';
@@ -202,4 +205,145 @@ class NetUtils {
 dynamic getUserInfo() {
   final u = Instances.sp.getString('userinfo');
   return u != null ? jsonDecode(u) : {'id': 0};
+}
+
+/// 登录 / 注册业务服务。
+///
+/// 与 [NetUtils] 同属认证与网络域：登录成功后通过 [NetUtils.saveTokenResponse]
+/// 落盘 token，再刷新 [AppState] 中的会话状态。
+class LoginService {
+  AppState get _appState => Get.find<AppState>();
+
+  /// 执行登录流程
+  Future<({bool success, String message})> performLogin({
+    required String name,
+    required String pwd,
+  }) async {
+    try {
+      final response = await login({
+        'name': name.trim(),
+        'pwd': pwd,
+        'platform': 'app',
+      });
+
+      final res = jsonDecode(response.data);
+      if (res['code'] != 200) {
+        return (
+          success: false,
+          message: res['msg']?.toString() ?? '登录失败，请检查账号密码',
+        );
+      }
+
+      await NetUtils.saveTokenResponse(Map<String, dynamic>.from(res));
+      await Instances.sp.setString('userinfo', jsonEncode(res['user']));
+      _appState.triggerLoginRefresh();
+
+      return (success: true, message: '登录成功');
+    } catch (e) {
+      debugPrint('登录错误: $e');
+      return (success: false, message: '登录失败，请检查网络');
+    }
+  }
+
+  /// 执行注册流程
+  Future<({bool success, String message})> performRegister({
+    required String name,
+    required String pwd,
+    required String qq,
+  }) async {
+    try {
+      final response = await register({
+        'name': name.trim(),
+        'pwd': pwd,
+        'qq': qq.trim(),
+      });
+
+      final res = jsonDecode(response.data);
+      final bool ok = res['code'] == 200;
+      final String msg = res['msg']?.toString() ?? (ok ? '注册成功' : '注册失败');
+
+      return (success: ok, message: msg);
+    } catch (e) {
+      debugPrint('注册错误: $e');
+      return (success: false, message: '注册失败，请检查网络');
+    }
+  }
+}
+
+/// 日活统计上报（fire-and-forget，失败静默）。
+class DauTracker {
+  static const String _baseUrl = 'https://dau.anibaka.com';
+  static const String _deviceIdKey = 'device_unique_id';
+  static const String _installIdPrefix = 'install_';
+  static const Duration _timeout = Duration(seconds: 10);
+
+  static final RegExp _idRegex = RegExp(r'^install_[a-z]+_[0-9a-f]{32}$');
+  static String? _cachedId;
+  static Future<String>? _initFuture;
+
+  static Future<void> track() async {
+    try {
+      final userId = await _getOrCreateDeviceId();
+      if (userId.isEmpty) return;
+
+      final uri = Uri.parse(
+        _baseUrl,
+      ).replace(path: '/track', queryParameters: {'id': userId});
+
+      final client = http.Client();
+      try {
+        await client.get(uri).timeout(_timeout);
+      } finally {
+        client.close();
+      }
+    } catch (_) {
+      // 静默处理，不影响用户体验
+    }
+  }
+
+  // 用 Future 缓存防止并发竞态
+  static Future<String> _getOrCreateDeviceId() {
+    _initFuture ??= _resolveDeviceId();
+    return _initFuture!;
+  }
+
+  static Future<String> _resolveDeviceId() async {
+    if (_cachedId != null) return _cachedId!;
+
+    final stored = Instances.sp.getString(_deviceIdKey);
+    if (_isValidInstallId(stored)) {
+      _cachedId = stored!;
+      return _cachedId!;
+    }
+
+    final deviceId = _generateInstallId();
+    if (deviceId.isNotEmpty) {
+      await Instances.sp.setString(_deviceIdKey, deviceId);
+      _cachedId = deviceId;
+    }
+    return deviceId;
+  }
+
+  static bool _isValidInstallId(String? value) {
+    return value != null && _idRegex.hasMatch(value);
+  }
+
+  static String _generateInstallId() {
+    final random = Random.secure();
+    final buffer = StringBuffer('$_installIdPrefix${_platformTag()}_');
+    for (var i = 0; i < 16; i++) {
+      final byte = random.nextInt(256);
+      buffer.write(byte.toRadixString(16).padLeft(2, '0'));
+    }
+    return buffer.toString();
+  }
+
+  static String _platformTag() {
+    if (Platform.isAndroid) return 'android';
+    if (Platform.isIOS) return 'ios';
+    if (Platform.isWindows) return 'windows';
+    if (Platform.isLinux) return 'linux';
+    if (Platform.isMacOS) return 'macos';
+    return 'unknown';
+  }
 }

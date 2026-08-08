@@ -504,10 +504,8 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
       index: index,
       rawTitle: rawTitle,
       isSelected: index == widget.currentIndex,
-      isWatched: VideoUtils.isEpisodeWatched(widget.videoId, index),
+      isWatched: PlayerService.isEpisodeWatched(widget.videoId, index),
       textColor: textColor,
-      // 只走返回值一条通道。以前同时调 onEpisodeChanged 又 pop(index)，
-      // 调用方两边都接，导致点一集把整条换集流水线跑两遍。
       onTap: () => Navigator.pop(context, index),
     );
   }

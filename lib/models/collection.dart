@@ -86,7 +86,7 @@ class AnimeCollection {
       epTotal: BgmUtils.toInt(json['ep_total']),
       epWatched: BgmUtils.toInt(json['ep_watched']),
       tags: json['tags']?.toString(),
-      isPrivate: BgmUtils.toBool(json['is_private']),
+      isPrivate: json['is_private'] as bool? ?? false,
       postTitle: json['post_title']?.toString(),
       postCover: json['post_cover']?.toString(),
       bgmRating: BgmUtils.toDouble(json['bgm_rating']),
@@ -130,7 +130,10 @@ class CollectionListResponse {
 
   factory CollectionListResponse.fromJson(Map<String, dynamic> json) {
     return CollectionListResponse(
-      list: BgmUtils.mapList(json['list'], AnimeCollection.fromJson),
+      list: (json['list'] as List<dynamic>)
+          .cast<Map<String, dynamic>>()
+          .map(AnimeCollection.fromJson)
+          .toList(growable: false),
       total: BgmUtils.toInt(json['total']) ?? 0,
       page: BgmUtils.toInt(json['page']) ?? 1,
       pageSize: BgmUtils.toInt(json['page_size']) ?? 20,

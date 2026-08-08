@@ -5,7 +5,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/services/bangumi_sync_service.dart';
-import 'package:baka/services/theme_service.dart';
+import 'package:baka/services/settings_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/reg_utils.dart';
 import 'package:get/get.dart';

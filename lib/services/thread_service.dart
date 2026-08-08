@@ -37,8 +37,13 @@ class ThreadTab {
 /// 避免「每次把 pageSize 加大再整表重拉」的 O(n²) 网络与处理开销。
 class ThreadService {
   static const int pageSize = 20;
-  static const int cacheExpiryMs = 3600 * 1000; // 1h
   static const Duration loadThrottle = Duration(milliseconds: 400);
+
+  /// 评论缓存 1 小时（首页缓存忽略过期，供冷启动快速填充）。
+  static final TtlCache _commentsCache = TtlCache(
+    AppStorage.threadCommentsBox,
+    ttl: const Duration(hours: 1),
+  );
 
   static const channels = <ThreadChannel>[
     ThreadChannel('#茶馆', 6),
@@ -54,24 +59,16 @@ class ThreadService {
   );
 
   List? _readCache(int pid, {bool ignoreExpiry = true}) {
-    final raw = AppStorage.threadCommentsBox.get('comments_$pid');
-    if (raw is! Map) return null;
-    if (!ignoreExpiry) {
-      final ts = raw['timestamp'] as int? ?? 0;
-      if (DateTime.now().millisecondsSinceEpoch - ts >= cacheExpiryMs) {
-        return null;
-      }
-    }
-    final data = raw['data'];
+    final data = _commentsCache.read(
+      'comments_$pid',
+      allowExpired: ignoreExpiry,
+    );
     return data is List ? data : null;
   }
 
   Future<void> _writeCache(int pid, List comments) async {
     try {
-      await AppStorage.threadCommentsBox.put('comments_$pid', {
-        'data': comments,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      });
+      await _commentsCache.write('comments_$pid', comments);
     } catch (e) {
       debugPrint('保存评论缓存失败: $e');
     }

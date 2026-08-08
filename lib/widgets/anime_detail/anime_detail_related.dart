@@ -22,21 +22,9 @@ class AnimeDetailRelatedSection extends StatefulWidget {
 }
 
 class _AnimeDetailRelatedSectionState extends State<AnimeDetailRelatedSection> {
-  static const _cacheLimit = 32;
-  static final Map<int, Future<List<Map<String, dynamic>>>> _cache = {};
-  late final Future<List<Map<String, dynamic>>> _items = _loadCached(
+  late final Future<List<Map<String, dynamic>>> _items = _load(
     widget.subjectId,
   );
-
-  static Future<List<Map<String, dynamic>>> _loadCached(int subjectId) {
-    final cached = _cache.remove(subjectId);
-    if (cached != null) {
-      _cache[subjectId] = cached;
-      return cached;
-    }
-    if (_cache.length >= _cacheLimit) _cache.remove(_cache.keys.first);
-    return _cache[subjectId] = _load(subjectId);
-  }
 
   static Future<List<Map<String, dynamic>>> _load(int subjectId) async {
     try {
@@ -44,8 +32,8 @@ class _AnimeDetailRelatedSectionState extends State<AnimeDetailRelatedSection> {
       final items = <Map<String, dynamic>>[];
       final ids = <int>{};
 
-      for (final raw in BgmUtils.parseJsonList(response.data)) {
-        if (raw is! Map || BgmUtils.toInt(raw['type']) != 2) continue;
+      for (final raw in response) {
+        if (BgmUtils.toInt(raw['type']) != 2) continue;
         final id = BgmUtils.toInt(raw['id']);
         final title =
             BgmUtils.trimmed(raw['name_cn']) ?? BgmUtils.trimmed(raw['name']);
@@ -70,7 +58,6 @@ class _AnimeDetailRelatedSectionState extends State<AnimeDetailRelatedSection> {
       }
       return items;
     } catch (_) {
-      _cache.remove(subjectId);
       rethrow;
     }
   }
@@ -94,10 +81,10 @@ class _AnimeDetailRelatedSectionState extends State<AnimeDetailRelatedSection> {
                 enabled: true,
                 child: SizedBox(
                   width: 140,
-                  child: PostCard(
-                    const {'title': '相关动画标题占位', 'image': ''},
-                    onTap: () {},
-                  ),
+                  child: PostCard(const {
+                    'title': '相关动画标题占位',
+                    'image': '',
+                  }, onTap: () {}),
                 ),
               ),
             ),

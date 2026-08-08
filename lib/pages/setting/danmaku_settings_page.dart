@@ -5,7 +5,6 @@ import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/player/settings_panel.dart';
 
-
 class DanmakuSettingsPage extends StatefulWidget {
   final DanmakuController controller;
   final String? defaultTitle;
@@ -34,28 +33,14 @@ class DanmakuSettingsPage extends StatefulWidget {
     );
   }
 
-
   @override
   State<DanmakuSettingsPage> createState() => _DanmakuSettingsPageState();
 }
 
 class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
-  late DanmakuOption _option;
-  late List<String> _blockWords;
-  late bool _blockRepeat;
-  late bool _blockColor;
   bool _isAppearanceExpanded = false;
 
   final TextEditingController _wordController = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _option = widget.controller.option;
-    _blockWords = List<String>.from(widget.controller.blockWords);
-    _blockRepeat = widget.controller.blockRepeat;
-    _blockColor = widget.controller.blockColor;
-  }
 
   @override
   void dispose() {
@@ -63,51 +48,35 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
     super.dispose();
   }
 
-  Future<void> _saveSettings({bool applyOption = false}) {
-    if (applyOption) widget.controller.updateOption(_option);
-    widget.controller.blockWords = List<String>.unmodifiable(_blockWords);
-    widget.controller.blockRepeat = _blockRepeat;
-    widget.controller.blockColor = _blockColor;
-    return DanmakuService.saveSettings(
-      _option,
-      blockWords: _blockWords,
-      blockRepeat: _blockRepeat,
-      blockColor: _blockColor,
-    );
-  }
+  Future<void> _saveSettings() =>
+      DanmakuService.saveSettings(widget.controller);
 
-  void _updateOption(
-    DanmakuOption newOpt, {
-    bool apply = true,
-    bool persist = false,
-  }) {
-    setState(() => _option = newOpt);
-    if (apply) widget.controller.updateOption(newOpt);
+  void _updateOption(DanmakuOption newOpt, {bool persist = false}) {
+    setState(() => widget.controller.updateOption(newOpt));
     if (persist) _saveSettings();
   }
 
   void _resetSettings() {
     final option = DanmakuOption(fontSize: DanmakuOption.defaultFontSize);
     setState(() {
-      _option = option;
-      _blockWords.clear();
-      _blockRepeat = false;
-      _blockColor = false;
+      widget.controller.updateOption(option);
+      widget.controller.blockWords.clear();
+      widget.controller.blockRepeat = false;
+      widget.controller.blockColor = false;
     });
-    widget.controller.updateOption(option);
     _saveSettings();
     showSnackBar('已恢复默认设置');
   }
 
   void _addBlockWord(String word) {
     final t = word.trim();
-    if (t.isEmpty || _blockWords.contains(t)) return;
-    setState(() => _blockWords.add(t));
+    if (t.isEmpty || widget.controller.blockWords.contains(t)) return;
+    setState(() => widget.controller.blockWords.add(t));
     _saveSettings();
   }
 
   void _removeBlockWord(String word) {
-    setState(() => _blockWords.remove(word));
+    setState(() => widget.controller.blockWords.remove(word));
     _saveSettings();
   }
 
@@ -116,6 +85,8 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
     final theme = Theme.of(context);
     final primaryColor = theme.colorScheme.primary;
     final cardColor = Colors.white.withValues(alpha: 0.05);
+    final option = widget.controller.option;
+    final blockWords = widget.controller.blockWords;
 
     return PanelContainer(
       child: CustomScrollView(
@@ -206,73 +177,62 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                   children: [
                     PanelSliderTile(
                       title: '显示区域',
-                      value: _option.area,
-                      valueLabel: '${(_option.area * 100).round()}%',
+                      value: option.area,
+                      valueLabel: '${(option.area * 100).round()}%',
                       min: 0.1,
                       max: 1.0,
                       divisions: 9,
-                      onChanged: (v) => _updateOption(
-                        _option.copyWith(area: v),
-                        apply: false,
-                      ),
-                      onChangeEnd: (_) => _saveSettings(applyOption: true),
+                      onChanged: (v) => _updateOption(option.copyWith(area: v)),
+                      onChangeEnd: (_) => _saveSettings(),
                     ),
                     const PanelDivider(),
                     PanelSliderTile(
                       title: '透明度',
-                      value: _option.opacity,
-                      valueLabel: '${(_option.opacity * 100).round()}%',
+                      value: option.opacity,
+                      valueLabel: '${(option.opacity * 100).round()}%',
                       min: 0.1,
                       max: 1.0,
                       divisions: 9,
-                      onChanged: (v) => _updateOption(
-                        _option.copyWith(opacity: v),
-                        apply: false,
-                      ),
-                      onChangeEnd: (_) => _saveSettings(applyOption: true),
+                      onChanged: (v) =>
+                          _updateOption(option.copyWith(opacity: v)),
+                      onChangeEnd: (_) => _saveSettings(),
                     ),
                     if (_isAppearanceExpanded) ...[
                       const PanelDivider(),
                       PanelSliderTile(
                         title: '字体大小',
-                        value: _option.fontSize,
-                        valueLabel: '${_option.fontSize.round()}',
+                        value: option.fontSize,
+                        valueLabel: '${option.fontSize.round()}',
                         min: 12,
                         max: 36,
                         divisions: 12,
-                        onChanged: (v) => _updateOption(
-                          _option.copyWith(fontSize: v),
-                          apply: false,
-                        ),
-                        onChangeEnd: (_) => _saveSettings(applyOption: true),
+                        onChanged: (v) =>
+                            _updateOption(option.copyWith(fontSize: v)),
+                        onChangeEnd: (_) => _saveSettings(),
                       ),
                       const PanelDivider(),
                       PanelSliderTile(
                         title: '描边宽度',
-                        value: _option.strokeWidth,
-                        valueLabel: _option.strokeWidth.toStringAsFixed(1),
+                        value: option.strokeWidth,
+                        valueLabel: option.strokeWidth.toStringAsFixed(1),
                         min: 0,
                         max: 5,
                         divisions: 10,
-                        onChanged: (v) => _updateOption(
-                          _option.copyWith(strokeWidth: v),
-                          apply: false,
-                        ),
-                        onChangeEnd: (_) => _saveSettings(applyOption: true),
+                        onChanged: (v) =>
+                            _updateOption(option.copyWith(strokeWidth: v)),
+                        onChangeEnd: (_) => _saveSettings(),
                       ),
                       const PanelDivider(),
                       PanelSliderTile(
                         title: '弹幕速度',
-                        value: 20.0 - _option.duration,
-                        valueLabel: '${_option.duration.toStringAsFixed(1)}s',
+                        value: 20.0 - option.duration,
+                        valueLabel: '${option.duration.toStringAsFixed(1)}s',
                         min: 5.0,
                         max: 15.0,
                         divisions: 10,
-                        onChanged: (v) => _updateOption(
-                          _option.copyWith(duration: 20.0 - v),
-                          apply: false,
-                        ),
-                        onChangeEnd: (_) => _saveSettings(applyOption: true),
+                        onChanged: (v) =>
+                            _updateOption(option.copyWith(duration: 20.0 - v)),
+                        onChangeEnd: (_) => _saveSettings(),
                       ),
                     ],
                     const PanelDivider(),
@@ -316,11 +276,11 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                               _buildTypeToggleBtn(
                                 icon: Icons.arrow_forward_rounded,
                                 label: '滚动',
-                                isActive: !_option.hideScroll,
+                                isActive: !option.hideScroll,
                                 activeColor: primaryColor,
                                 onTap: () => _updateOption(
-                                  _option.copyWith(
-                                    hideScroll: !_option.hideScroll,
+                                  option.copyWith(
+                                    hideScroll: !option.hideScroll,
                                   ),
                                   persist: true,
                                 ),
@@ -328,21 +288,21 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                               _buildTypeToggleBtn(
                                 icon: Icons.vertical_align_top_rounded,
                                 label: '顶部',
-                                isActive: !_option.hideTop,
+                                isActive: !option.hideTop,
                                 activeColor: primaryColor,
                                 onTap: () => _updateOption(
-                                  _option.copyWith(hideTop: !_option.hideTop),
+                                  option.copyWith(hideTop: !option.hideTop),
                                   persist: true,
                                 ),
                               ),
                               _buildTypeToggleBtn(
                                 icon: Icons.vertical_align_bottom_rounded,
                                 label: '底部',
-                                isActive: !_option.hideBottom,
+                                isActive: !option.hideBottom,
                                 activeColor: primaryColor,
                                 onTap: () => _updateOption(
-                                  _option.copyWith(
-                                    hideBottom: !_option.hideBottom,
+                                  option.copyWith(
+                                    hideBottom: !option.hideBottom,
                                   ),
                                   persist: true,
                                 ),
@@ -350,20 +310,26 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                               _buildTypeToggleBtn(
                                 icon: Icons.filter_list_rounded,
                                 label: '去重',
-                                isActive: _blockRepeat,
+                                isActive: widget.controller.blockRepeat,
                                 activeColor: primaryColor,
                                 onTap: () {
-                                  setState(() => _blockRepeat = !_blockRepeat);
+                                  setState(() {
+                                    widget.controller.blockRepeat =
+                                        !widget.controller.blockRepeat;
+                                  });
                                   _saveSettings();
                                 },
                               ),
                               _buildTypeToggleBtn(
                                 icon: Icons.palette_outlined,
                                 label: '屏蔽彩色',
-                                isActive: _blockColor,
+                                isActive: widget.controller.blockColor,
                                 activeColor: primaryColor,
                                 onTap: () {
-                                  setState(() => _blockColor = !_blockColor);
+                                  setState(() {
+                                    widget.controller.blockColor =
+                                        !widget.controller.blockColor;
+                                  });
                                   _saveSettings();
                                 },
                               ),
@@ -448,7 +414,7 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                               ),
                             ],
                           ),
-                          if (_blockWords.isNotEmpty) ...[
+                          if (blockWords.isNotEmpty) ...[
                             const SizedBox(height: 12),
                             Container(
                               width: double.infinity,
@@ -460,7 +426,7 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                               child: Wrap(
                                 spacing: 8,
                                 runSpacing: 8,
-                                children: _blockWords
+                                children: blockWords
                                     .map(
                                       (w) => InkWell(
                                         onTap: () => _removeBlockWord(w),

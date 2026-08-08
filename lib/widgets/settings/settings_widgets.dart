@@ -110,6 +110,109 @@ class SettingsGroup extends StatelessWidget {
   }
 }
 
+class _SettingsRow extends StatelessWidget {
+  const _SettingsRow({
+    required this.title,
+    required this.icon,
+    required this.trailing,
+    this.iconWidget,
+    this.subtitle,
+    this.onTap,
+    this.showDivider = true,
+    this.verticalPadding = 16,
+  });
+
+  final String title;
+  final IconData icon;
+  final Widget? iconWidget;
+  final String? subtitle;
+  final Widget trailing;
+  final VoidCallback? onTap;
+  final bool showDivider;
+  final double verticalPadding;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final foreground = isDark ? Colors.white : Colors.black;
+
+    return InkWell(
+      onTap: onTap == null
+          ? null
+          : () {
+              HapticFeedback.lightImpact();
+              onTap!();
+            },
+      highlightColor: foreground.withValues(alpha: isDark ? 0.05 : 0.03),
+      splashColor: Colors.transparent,
+      child: Column(
+        children: [
+          Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: verticalPadding,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: foreground.withValues(alpha: isDark ? 0.05 : 0.03),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child:
+                      iconWidget ??
+                      Icon(
+                        icon,
+                        size: 18,
+                        color: isDark ? Colors.white70 : Colors.black87,
+                      ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                          color: foreground,
+                        ),
+                      ),
+                      if (subtitle != null) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          subtitle!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.35,
+                            color: foreground.withValues(alpha: 0.54),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                trailing,
+              ],
+            ),
+          ),
+          if (showDivider)
+            Divider(
+              height: 1,
+              thickness: 0.5,
+              indent: 56,
+              color: colors.onSurface.withValues(alpha: isDark ? 0.1 : 0.05),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class SettingsTile extends StatelessWidget {
   final String title;
   final String value;
@@ -131,76 +234,32 @@ class SettingsTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? Colors.white : Colors.black;
     final subtitleColor = isDark ? Colors.white54 : Colors.black54;
-    final iconColor = isDark ? Colors.white70 : Colors.black87;
-
-    return InkWell(
-      onTap: onTap != null
-          ? () {
-              HapticFeedback.lightImpact();
-              onTap!();
-            }
-          : null,
-      highlightColor: isDark
-          ? Colors.white.withValues(alpha: 0.05)
-          : Colors.black.withValues(alpha: 0.03),
-      splashColor: Colors.transparent,
-      child: Column(
+    return _SettingsRow(
+      title: title,
+      icon: icon,
+      iconWidget: iconWidget,
+      onTap: onTap,
+      showDivider: showDivider,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.05)
-                        : Colors.black.withValues(alpha: 0.03),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: iconWidget ?? Icon(icon, size: 18, color: iconColor),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                      color: textColor,
-                    ),
-                  ),
-                ),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 150),
-                  child: Text(
-                    value,
-                    style: TextStyle(fontSize: 14, color: subtitleColor),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.end,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  size: 18,
-                  color: isDark ? Colors.white24 : Colors.black26,
-                ),
-              ],
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 150),
+            child: Text(
+              value,
+              style: TextStyle(fontSize: 14, color: subtitleColor),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
             ),
           ),
-          if (showDivider)
-            Divider(
-              height: 1,
-              thickness: 0.5,
-              indent: 56,
-              color: isDark
-                  ? Colors.white10
-                  : Colors.black.withValues(alpha: 0.05),
-            ),
+          const SizedBox(width: 8),
+          Icon(
+            Icons.chevron_right_rounded,
+            size: 18,
+            color: isDark ? Colors.white24 : Colors.black26,
+          ),
         ],
       ),
     );
@@ -227,9 +286,6 @@ class SettingsSwitchTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? Colors.white : Colors.black;
-    final iconColor = isDark ? Colors.white70 : Colors.black87;
     final activeColor = Theme.of(context).colorScheme.primary;
 
     void handleChanged(bool next) {
@@ -237,73 +293,17 @@ class SettingsSwitchTile extends StatelessWidget {
       onChanged(next);
     }
 
-    return InkWell(
-      onTap: () => handleChanged(!value),
-      highlightColor: isDark
-          ? Colors.white.withValues(alpha: 0.05)
-          : Colors.black.withValues(alpha: 0.03),
-      splashColor: Colors.transparent,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.05)
-                        : Colors.black.withValues(alpha: 0.03),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(icon, size: 18, color: iconColor),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                          color: textColor,
-                        ),
-                      ),
-                      if (subtitle != null) ...[
-                        const SizedBox(height: 3),
-                        Text(
-                          subtitle!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            height: 1.35,
-                            color: isDark ? Colors.white54 : Colors.black54,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                Switch.adaptive(
-                  value: value,
-                  onChanged: handleChanged,
-                  activeTrackColor: activeColor,
-                ),
-              ],
-            ),
-          ),
-          if (showDivider)
-            Divider(
-              height: 1,
-              thickness: 0.5,
-              indent: 56,
-              color: isDark
-                  ? Colors.white10
-                  : Colors.black.withValues(alpha: 0.05),
-            ),
-        ],
+    return _SettingsRow(
+      title: title,
+      subtitle: subtitle,
+      icon: icon,
+      onTap: () => onChanged(!value),
+      showDivider: showDivider,
+      verticalPadding: 12,
+      trailing: Switch.adaptive(
+        value: value,
+        onChanged: handleChanged,
+        activeTrackColor: activeColor,
       ),
     );
   }

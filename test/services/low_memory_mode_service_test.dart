@@ -1,4 +1,4 @@
-import 'package:baka/services/low_memory_mode_service.dart';
+import 'package:baka/services/playback_settings_service.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -10,16 +10,22 @@ void main() {
   final normalImageBytes = cache.maximumSizeBytes;
 
   tearDown(() {
-    LowMemoryModeService.apply(false);
+    PlaybackSettingsService.applyLowMemoryMode(false);
   });
 
   test('low memory mode applies and restores the decoded image budget', () {
-    LowMemoryModeService.apply(true);
+    PlaybackSettingsService.applyLowMemoryMode(true);
 
-    expect(cache.maximumSize, LowMemoryModeService.lowMemoryImageCount);
-    expect(cache.maximumSizeBytes, LowMemoryModeService.lowMemoryImageBytes);
+    expect(
+      cache.maximumSize,
+      PlaybackSettingsService.lowMemoryImageCount,
+    );
+    expect(
+      cache.maximumSizeBytes,
+      PlaybackSettingsService.lowMemoryImageBytes,
+    );
 
-    LowMemoryModeService.apply(false);
+    PlaybackSettingsService.applyLowMemoryMode(false);
 
     expect(cache.maximumSize, normalImageCount);
     expect(cache.maximumSizeBytes, normalImageBytes);

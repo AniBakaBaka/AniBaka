@@ -82,4 +82,29 @@ void main() {
     expect(detail.hasScoreDistribution, isTrue);
     expect(detail.scoreDistribution, [1, 0, 2, 3, 5, 10, 20, 30, 20, 9]);
   });
+
+  test('shares characters and keeps only image URLs in the view snapshot', () {
+    final characters = <Map<String, dynamic>>[
+      {'id': 1, 'name': '角色'},
+    ];
+    final detail = AnimeDetailViewData.from(
+      source: const <String, dynamic>{'title': 'Example'},
+      bgmInfo: const BgmInfo(),
+      characters: characters,
+      anibaka: const <String, dynamic>{
+        'images': {
+          'posters': [
+            {
+              'url': 'https://example.test/poster.jpg',
+              'lang': 'zh',
+              'source': 'tmdb',
+            },
+          ],
+        },
+      },
+    );
+
+    expect(identical(detail.characters, characters), isTrue);
+    expect(detail.posters, ['https://example.test/poster.jpg']);
+  });
 }

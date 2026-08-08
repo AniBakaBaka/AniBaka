@@ -1,130 +1,63 @@
-import 'package:baka/utils/bgm_utils.dart';
+import 'dart:convert';
+
 import 'package:baka/services/network_service.dart';
 
 const String _bgmApiBase = 'https://bgm.anibaka.com';
 const String _bgmNextBase = 'https://p1.anibaka.com';
-const Duration _bgmSessionCacheTtl = Duration(minutes: 15);
+const Duration _bgmCacheTtl = Duration(minutes: 5);
 
-final Map<int, _CachedBgmResponse<Map<String, dynamic>>> _fullDetailCache =
-    <int, _CachedBgmResponse<Map<String, dynamic>>>{};
-final Map<int, Future<Map<String, dynamic>?>> _fullDetailInFlight =
-    <int, Future<Map<String, dynamic>?>>{};
-final Map<int, Future<Map<String, dynamic>?>> _pageDetailCache = {};
-final Map<String, _CachedBgmResponse<String>> _subjectCommentsCache =
-    <String, _CachedBgmResponse<String>>{};
-final Map<String, _CachedBgmResponse<String>> _episodeCommentsCache =
-    <String, _CachedBgmResponse<String>>{};
+final _subjectCache = _MemoryCache<int, Map<String, dynamic>>(64);
+final _episodeCache = _MemoryCache<int, List<Map<String, dynamic>>>(8);
+final _relatedCache = _MemoryCache<int, List<Map<String, dynamic>>>(16);
+final _subjectCommentsCache = _MemoryCache<String, String>(16);
+final _episodeCommentsCache = _MemoryCache<int, String>(16);
 
-Future<Response> searchBgmAnime(String title) {
-  return _post('$_bgmApiBase/v0/search/subjects?limit=10&offset=0', {
-    'keyword': title,
-    'sort': 'match',
-    'filter': {
-      'type': [2],
+Future<List<Map<String, dynamic>>> searchBgmAnime(String title) async {
+  final response = await _post(
+    '$_bgmApiBase/v0/search/subjects?limit=10&offset=0',
+    {
+      'keyword': title,
+      'sort': 'match',
+      'filter': {
+        'type': [2],
+      },
     },
+  );
+  return _mapList(_jsonMap(response.data)['data']);
+}
+
+Future<Map<String, dynamic>> getBgmSubject(int subjectId) {
+  return _subjectCache.get(
+    subjectId,
+    () async =>
+        _jsonMap((await _get('$_bgmApiBase/v0/subjects/$subjectId')).data),
+  );
+}
+
+Future<List<Map<String, dynamic>>> getBgmEpisodes(int subjectId) {
+  return _episodeCache.get(subjectId, () async {
+    final response = await _get(
+      '$_bgmApiBase/v0/episodes?subject_id=$subjectId&type=0&limit=200',
+    );
+    return _mapList(_jsonMap(response.data)['data']);
   });
 }
 
-Map<String, dynamic>? getCachedBgmAnimeFullDetail(int subjectId) {
-  final cached = _fullDetailCache[subjectId];
-  if (cached != null && !cached.isExpired) {
-    return cached.data;
-  }
-  return null;
+/// 角色响应通常远大于条目本身，只由角色页按需读取，不驻留全局缓存。
+Future<List<Map<String, dynamic>>> getBgmCharacters(int subjectId) async {
+  final response = await _get('$_bgmApiBase/v0/subjects/$subjectId/characters');
+  return _mapList(jsonDecode(response.data));
 }
 
-Future<Map<String, dynamic>?> getBgmAnimeFullDetail(int subjectId) async {
-  final cached = _fullDetailCache[subjectId];
-  if (cached != null && !cached.isExpired) {
-    return cached.data;
-  }
-
-  final inFlight = _fullDetailInFlight[subjectId];
-  if (inFlight != null) {
-    return inFlight;
-  }
-
-  final future = _loadBgmAnimeFullDetail(subjectId);
-  _fullDetailInFlight[subjectId] = future;
-  try {
-    return await future;
-  } finally {
-    _fullDetailInFlight.remove(subjectId);
-  }
-}
-
-/// 详情页的轻量补充数据：不下载已不展示的剧集列表。
-Future<Map<String, dynamic>?> getBgmAnimePageDetail(int subjectId) async {
-  final future = _pageDetailCache[subjectId] ??= _loadBgmAnimePageDetail(
+Future<List<Map<String, dynamic>>> getBgmRelatedSubjects(int subjectId) {
+  return _relatedCache.get(
     subjectId,
+    () async => _mapList(
+      jsonDecode(
+        (await _get('$_bgmApiBase/v0/subjects/$subjectId/subjects')).data,
+      ),
+    ),
   );
-  try {
-    final data = await future;
-    if (data == null) _pageDetailCache.remove(subjectId);
-    return data;
-  } catch (_) {
-    _pageDetailCache.remove(subjectId);
-    return null;
-  }
-}
-
-Future<Map<String, dynamic>?> _loadBgmAnimePageDetail(int subjectId) async {
-  // 先请求主条目（含 summary），角色列表并发但不阻塞主数据返回
-  final subjectFuture = _get(
-    '$_bgmApiBase/v0/subjects/$subjectId?responseGroup=large',
-  );
-  final charFuture = _get(
-    '$_bgmApiBase/v0/subjects/$subjectId/characters',
-  );
-
-  final subjectResponse = await subjectFuture;
-  final data = BgmUtils.parseJsonMap(subjectResponse.data);
-  if (data == null) return null;
-
-  // 角色数据：尝试在短超时内获取，超时则留空后续懒加载
-  try {
-    final charResponse = await charFuture.timeout(
-      const Duration(seconds: 4),
-    );
-    data['characters'] = BgmUtils.parseJsonList(charResponse.data);
-  } catch (_) {
-    data['characters'] = <Map<String, dynamic>>[];
-  }
-  return data;
-}
-
-Future<Map<String, dynamic>?> _loadBgmAnimeFullDetail(int subjectId) async {
-  final baseResponse = await _get(
-    '$_bgmApiBase/v0/subjects/$subjectId?responseGroup=large',
-  );
-  final baseData = BgmUtils.parseJsonMap(baseResponse.data);
-  if (baseData == null) return null;
-
-  final tags = baseData['tags'];
-  if (tags is List) {
-    tags.sort((a, b) {
-      final aCount = (a is Map ? a['count'] : null);
-      final bCount = (b is Map ? b['count'] : null);
-      return ((bCount is num ? bCount.toInt() : 0)).compareTo(
-        aCount is num ? aCount.toInt() : 0,
-      );
-    });
-  }
-
-  final responses = await Future.wait([
-    _get('$_bgmApiBase/v0/subjects/$subjectId/characters'),
-    _get('$_bgmApiBase/v0/episodes?subject_id=$subjectId'),
-  ]);
-
-  baseData['characters'] = BgmUtils.parseJsonList(responses[0].data);
-  baseData['episodes'] = BgmUtils.parseJsonList(responses[1].data);
-
-  _fullDetailCache[subjectId] = _CachedBgmResponse(baseData);
-  return baseData;
-}
-
-Future<Response> getBgmRelatedSubjects(int subjectId) {
-  return _get('$_bgmApiBase/v0/subjects/$subjectId/subjects');
 }
 
 Future<Response> getTrendingSubjects({
@@ -151,30 +84,24 @@ Future<Response> getBgmSubjectComments(
   int offset = 0,
 }) {
   final cacheKey = '$subjectId:$limit:$offset';
-  final cached = _subjectCommentsCache[cacheKey];
-  if (cached != null && !cached.isExpired) {
-    return Future.value(Response(cached.data));
-  }
-
-  return _get(
-    '$_bgmNextBase/p1/subjects/$subjectId/comments?limit=$limit&offset=$offset',
-  ).then((response) {
-    _subjectCommentsCache[cacheKey] = _CachedBgmResponse(response.data);
-    return response;
-  });
+  return _subjectCommentsCache
+      .get(
+        cacheKey,
+        () async => (await _get(
+          '$_bgmNextBase/p1/subjects/$subjectId/comments?limit=$limit&offset=$offset',
+        )).data,
+      )
+      .then(Response.new);
 }
 
 Future<Response> getBgmEpisodeComments(int episodeId) {
-  final cacheKey = episodeId.toString();
-  final cached = _episodeCommentsCache[cacheKey];
-  if (cached != null && !cached.isExpired) {
-    return Future.value(Response(cached.data));
-  }
-
-  return _get('$_bgmNextBase/p1/episodes/$episodeId/comments').then((response) {
-    _episodeCommentsCache[cacheKey] = _CachedBgmResponse(response.data);
-    return response;
-  });
+  return _episodeCommentsCache
+      .get(
+        episodeId,
+        () async =>
+            (await _get('$_bgmNextBase/p1/episodes/$episodeId/comments')).data,
+      )
+      .then(Response.new);
 }
 
 Future<Response> getBgmCharacterInfo(int characterId) {
@@ -220,12 +147,38 @@ Future<Response> _post(String url, Map<String, dynamic> body) async {
   return await NetUtils.post(url, body) as Response;
 }
 
-class _CachedBgmResponse<T> {
-  final T data;
-  final DateTime cachedAt;
+Map<String, dynamic> _jsonMap(String source) =>
+    jsonDecode(source) as Map<String, dynamic>;
 
-  _CachedBgmResponse(this.data) : cachedAt = DateTime.now();
+List<Map<String, dynamic>> _mapList(Object? value) =>
+    (value as List<dynamic>).cast<Map<String, dynamic>>();
 
-  bool get isExpired =>
-      DateTime.now().difference(cachedAt) > _bgmSessionCacheTtl;
+class _MemoryCache<K, V> {
+  _MemoryCache(this.limit);
+
+  final int limit;
+  final Map<K, ({DateTime expiresAt, Future<V> value})> _entries = {};
+
+  Future<V> get(K key, Future<V> Function() load) {
+    final now = DateTime.now();
+    final cached = _entries.remove(key);
+    if (cached != null && now.isBefore(cached.expiresAt)) {
+      _entries[key] = cached;
+      return cached.value;
+    }
+
+    if (_entries.length >= limit) _entries.remove(_entries.keys.first);
+    final value = _load(key, load);
+    _entries[key] = (expiresAt: now.add(_bgmCacheTtl), value: value);
+    return value;
+  }
+
+  Future<V> _load(K key, Future<V> Function() load) async {
+    try {
+      return await load();
+    } catch (_) {
+      _entries.remove(key);
+      rethrow;
+    }
+  }
 }

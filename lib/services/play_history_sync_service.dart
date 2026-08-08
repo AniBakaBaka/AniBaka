@@ -36,6 +36,7 @@ class PlayHistorySyncService {
     'score',
     'info',
   };
+  static const _resumeSnapshotKeys = <String>{'id', 'title', 'bgmId', 'source'};
 
   static String _uniqueKey(dynamic id, dynamic bgmId, [dynamic episodeId]) {
     final bgm = BgmUtils.toInt(bgmId);
@@ -64,18 +65,18 @@ class PlayHistorySyncService {
 
   static int _watchTime(Map record) => record['watchTime'] as int? ?? 0;
 
-  static List<Map<String, dynamic>> _readList(String key) {
-    if (!Hive.isBoxOpen(AppStorage.playHistoryBoxName)) {
-      return <Map<String, dynamic>>[];
-    }
+  static Iterable<Map> _storedRecords(String key) sync* {
+    if (!Hive.isBoxOpen(AppStorage.playHistoryBoxName)) return;
     final stored = AppStorage.playHistoryBox.get(key);
-    if (stored is! List) return <Map<String, dynamic>>[];
-    final result = <Map<String, dynamic>>[];
+    if (stored is! List) return;
     for (final item in stored) {
-      if (item is Map) result.add(Map<String, dynamic>.from(item));
+      if (item is Map) yield item;
     }
-    return result;
   }
+
+  static List<Map<String, dynamic>> _readList(String key) => [
+    for (final item in _storedRecords(key)) Map<String, dynamic>.from(item),
+  ];
 
   static bool _sameAnime(Map left, Map right) {
     final leftBgmId = BgmUtils.toInt(left['bgmId']);
@@ -107,9 +108,12 @@ class PlayHistorySyncService {
         leftSource == rightSource;
   }
 
-  static Map<String, dynamic> _snapshot(Map videoData) {
+  static Map<String, dynamic> _snapshot(
+    Map videoData, [
+    Set<String> keys = _snapshotKeys,
+  ]) {
     final out = <String, dynamic>{};
-    for (final key in _snapshotKeys) {
+    for (final key in keys) {
       final value = videoData[key];
       if (value != null) out[key] = value;
     }
@@ -191,31 +195,37 @@ class PlayHistorySyncService {
     return _readList(_historyKey);
   }
 
+  static ({int episodeIndex, int lineIndex})? _findResumeSelection(
+    Map videoData,
+    Iterable<Map> records,
+  ) {
+    for (final record in records) {
+      if (!_sameAnime(videoData, record)) continue;
+      final episodeIndex = BgmUtils.toInt(record['index']);
+      if (episodeIndex == null || episodeIndex < 0) continue;
+      final source = videoData['source']?.toString() ?? '';
+      final rememberedSource = record['source']?.toString() ?? '';
+      final sameSource =
+          source.isEmpty ||
+          rememberedSource.isEmpty ||
+          source == rememberedSource;
+      final lineIndex = sameSource ? BgmUtils.toInt(record['url']) ?? 1 : 1;
+      return (
+        episodeIndex: episodeIndex,
+        lineIndex: lineIndex > 0 ? lineIndex : 1,
+      );
+    }
+    return null;
+  }
+
   /// Returns the most recently opened episode for this anime.
   ///
   /// Older installs transparently fall back to their latest history entry.
   static ({int episodeIndex, int lineIndex})? getResumeSelection(
     Map videoData,
   ) {
-    for (final records in [_readList(_resumeKey), getHistoryList()]) {
-      for (final record in records) {
-        if (!_sameAnime(videoData, record)) continue;
-        final episodeIndex = BgmUtils.toInt(record['index']);
-        if (episodeIndex == null || episodeIndex < 0) continue;
-        final source = videoData['source']?.toString() ?? '';
-        final rememberedSource = record['source']?.toString() ?? '';
-        final sameSource =
-            source.isEmpty ||
-            rememberedSource.isEmpty ||
-            source == rememberedSource;
-        final lineIndex = sameSource ? BgmUtils.toInt(record['url']) ?? 1 : 1;
-        return (
-          episodeIndex: episodeIndex,
-          lineIndex: lineIndex > 0 ? lineIndex : 1,
-        );
-      }
-    }
-    return null;
+    return _findResumeSelection(videoData, _storedRecords(_resumeKey)) ??
+        _findResumeSelection(videoData, _storedRecords(_historyKey));
   }
 
   /// Remembers episode selection immediately after playback opens.
@@ -227,15 +237,15 @@ class PlayHistorySyncService {
     if (episodeIndex < 0 || !Hive.isBoxOpen(AppStorage.playHistoryBoxName)) {
       return;
     }
-    final record = _snapshot(videoData)
+    final record = _snapshot(videoData, _resumeSnapshotKeys)
       ..['index'] = episodeIndex
       ..['url'] = urlIndex > 0 ? urlIndex : 1
       ..['watchTime'] = DateTime.now().millisecondsSinceEpoch;
 
     final next = <Map<String, dynamic>>[record];
-    for (final item in _readList(_resumeKey)) {
+    for (final item in _storedRecords(_resumeKey)) {
       if (_sameAnime(record, item)) continue;
-      next.add(item);
+      next.add(Map<String, dynamic>.from(item));
       if (next.length >= _maxHistoryCount) break;
     }
     await AppStorage.playHistoryBox.put(_resumeKey, next);
@@ -289,9 +299,9 @@ class PlayHistorySyncService {
       // Single O(n) pass: new record first, drop same-key duplicates, cap size.
       final key = _localKey(record);
       final next = <Map<String, dynamic>>[record];
-      for (final item in getHistoryList()) {
+      for (final item in _storedRecords(_historyKey)) {
         if (_localKey(item) == key) continue;
-        next.add(item);
+        next.add(Map<String, dynamic>.from(item));
         if (next.length >= _maxHistoryCount) break;
       }
       await _persist(next);

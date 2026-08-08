@@ -197,11 +197,8 @@ class BangumiCollectionRecord {
       status: BgmUtils.toInt(json['type']) ?? CollectionStatus.wish.value,
       rating: BgmUtils.toInt(json['rate']) ?? 0,
       episodeWatched: BgmUtils.toInt(json['ep_status']) ?? 0,
-      tags: BgmUtils.parseJsonList(json['tags'])
-          .map((tag) => tag.toString())
-          .where((tag) => tag.isNotEmpty)
-          .toList(growable: false),
-      isPrivate: BgmUtils.toBool(json['private']),
+      tags: (json['tags'] as List<dynamic>).cast<String>(),
+      isPrivate: json['private'] as bool,
       title: nameCn.isNotEmpty ? nameCn : name,
       comment: _nonEmpty(json['comment']),
       episodeTotal: BgmUtils.toInt(subject?['eps']),

@@ -25,6 +25,8 @@ class _KeepAliveAdapter extends AdapterBase {
   Future<({String url, Map<String, String> httpHeaders})> resolvePlaybackMedia(
     String episodeId, {
     bool skipValidation = false,
+    int maxAttempts = 2,
+    Duration? reachTimeout,
   }) async => (
     url: episodeId == 'good' ? 'https://example.com/good.mp4' : '',
     httpHeaders: const <String, String>{},

@@ -20,7 +20,7 @@ class BgmSubjectInfo {
   final List<String> aliases;
   final bool hasDetail;
 
-  late final List<String> searchTitles = BgmUtils.buildSubjectSearchTitles([
+  late final List<String> searchTitles = BgmUtils.buildSearchTitles([
     nameCn,
     name,
     ...aliases,
@@ -92,24 +92,6 @@ class BgmUtils {
     return null;
   }
 
-  /// JSON 数组 → 模型列表。已经是 `Map<String, dynamic>` 的条目直接透传，
-  /// 只有类型不精确时才复制；非 Map 条目跳过。
-  static List<T> mapList<T>(
-    dynamic raw,
-    T Function(Map<String, dynamic> json) fromJson,
-  ) {
-    if (raw is! List) return const [];
-    final out = <T>[];
-    for (final item in raw) {
-      if (item is Map<String, dynamic>) {
-        out.add(fromJson(item));
-      } else if (item is Map) {
-        out.add(fromJson(Map<String, dynamic>.from(item)));
-      }
-    }
-    return out;
-  }
-
   static List<Map<String, dynamic>> asMapList(dynamic value) {
     if (value is! List) return const [];
     final out = <Map<String, dynamic>>[];
@@ -134,20 +116,6 @@ class BgmUtils {
     if (value is double) return value;
     if (value is num) return value.toDouble();
     if (value is String) return double.tryParse(value);
-    return null;
-  }
-
-  static bool toBool(dynamic value, {bool orElse = false}) {
-    if (value is bool) return value;
-    if (value is num) return value != 0;
-    if (value is String) return value == '1' || value.toLowerCase() == 'true';
-    return orElse;
-  }
-
-  static DateTime? toDateTime(dynamic value) {
-    if (value is DateTime) return value;
-    if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
-    if (value is String && value.isNotEmpty) return DateTime.tryParse(value);
     return null;
   }
 
@@ -203,7 +171,7 @@ class BgmUtils {
   static String bgmImageProxyUrl(String url, {int width = 360}) {
     if (url.isEmpty) return url;
     if (url.contains('wsrv.nl')) return url;
-    var formatted = _normalizeBgmImageSource(url);
+    final formatted = _normalizeBgmImageSource(url);
     if (formatted.isEmpty) return '';
     return Uri.https('wsrv.nl', '/', {
       'url': formatted,
@@ -229,9 +197,7 @@ class BgmUtils {
     if (_wpPhotonHostRe.hasMatch(uri.host) && uri.pathSegments.isNotEmpty) {
       final originHost = uri.pathSegments.first;
       final restSegments = uri.pathSegments.skip(1).toList();
-      final path = restSegments.isEmpty
-          ? '/'
-          : '/${restSegments.join('/')}';
+      final path = restSegments.isEmpty ? '/' : '/${restSegments.join('/')}';
       return Uri(
         scheme: 'https',
         host: originHost,
@@ -247,11 +213,13 @@ class BgmUtils {
   ///
   /// Prefer a Chinese backdrop when the API provides multiple TMDB variants.
   static String? pickAniBakaTmdbBackdrop(Map<String, dynamic>? detail) {
-    final images = asMap(detail?['images']);
-    final candidates = asMapList(images?['backdrops']);
+    final images = detail?['images'];
+    if (images is! Map) return null;
+    final candidates = images['backdrops'];
+    if (candidates is! List) return null;
     Map<String, dynamic>? fallback;
 
-    for (final candidate in candidates) {
+    for (final candidate in candidates.cast<Map<String, dynamic>>()) {
       if (trimmed(candidate['source'])?.toLowerCase() != 'tmdb') continue;
       fallback ??= candidate;
       if (trimmed(candidate['lang'])?.toLowerCase() == 'zh') {
@@ -464,94 +432,46 @@ class BgmUtils {
     return buffer.toString();
   }
 
-  /// 去重压缩标题列表：按归一化结果去重，保留首个原始写法（空白折叠为单空格）。
-  static List<String> compactTitles(Iterable<String?> titles) {
-    final values = <String>[];
-    final seen = <String>{};
-    for (final raw in titles) {
-      final title = trimmed(raw)?.replaceAll(_spaceRe, ' ');
-      if (title == null) continue;
-      final key = normalizeTitle(title);
-      if (key.isNotEmpty && seen.add(key)) values.add(title);
-    }
-    return values;
-  }
-
   /// 为每个标题派生搜索变体（原文 / 去季号 / 去尾括号 / 纯中文），按归一化去重。
   static List<String> buildSearchTitles(Iterable<String?> titles) {
     final values = <String>[];
     final seen = <String>{};
-    for (final raw in titles) {
-      final title = trimmed(raw)?.replaceAll(_spaceRe, ' ');
-      if (title == null) continue;
-      _mergeVariants(_variantsOf(title), seen, values);
-    }
-    return values;
-  }
 
-  /// compactTitles + buildSearchTitles 的单趟融合：主标题键已见过的标题
-  /// 整个跳过（等价于先 compact 再展开——变体键不参与主键判重）。
-  static List<String> buildSubjectSearchTitles(Iterable<String?> titles) {
-    final values = <String>[];
-    final mainSeen = <String>{};
-    final seen = <String>{};
-    for (final raw in titles) {
-      final title = trimmed(raw)?.replaceAll(_spaceRe, ' ');
-      if (title == null) continue;
-      final variants = _variantsOf(title);
-      final mainKey = variants.first.$2;
-      if (mainKey.isEmpty || !mainSeen.add(mainKey)) continue;
-      _mergeVariants(variants, seen, values);
-    }
-    return values;
-  }
-
-  static void _mergeVariants(
-    List<(String, String)> variants,
-    Set<String> seen,
-    List<String> values,
-  ) {
-    for (final (value, key) in variants) {
+    void add(String value, String key) {
       if (key.isNotEmpty && seen.add(key)) values.add(value);
     }
-  }
 
-  static const _variantCacheLimit = 512;
-  static final _variantCache = <String, List<(String, String)>>{};
+    for (final raw in titles) {
+      final title = trimmed(raw)?.replaceAll(_spaceRe, ' ');
+      if (title == null) continue;
 
-  /// 标题（空白已折叠）→ [(候选写法, 归一化键)]，首元素恒为主标题对。
-  /// 每个变体的归一化只算一次；纯函数，配有界记忆化——同一 subject 在
-  /// 多轮搜索中反复展开时命中缓存零计算。
-  static List<(String, String)> _variantsOf(String title) {
-    final cached = _variantCache[title];
-    if (cached != null) return cached;
+      final base = RegUtils.extractBaseTitle(title);
+      add(title, keepTitleUnits(base));
 
-    final base = RegUtils.extractBaseTitle(title);
-    final pairs = [(title, keepTitleUnits(base))];
-    // 去季号变体只在堆叠后缀（extractBaseTitle 非幂等）时才产出新键。
-    final base2 = RegUtils.extractBaseTitle(base);
-    if (base2 != base) pairs.add((base, keepTitleUnits(base2)));
-    // 无尾括号时剥括号只会产出与原文相同的串，去重后必被丢弃。
-    if (_endsWithBracket(title)) {
-      final stripped = title.replaceFirst(_trailingBracketRe, '');
-      if (stripped.isNotEmpty) {
-        pairs.add((stripped, keepTitleUnits(RegUtils.extractBaseTitle(stripped))));
+      final base2 = RegUtils.extractBaseTitle(base);
+      if (base2 != base) add(base, keepTitleUnits(base2));
+
+      if (_endsWithBracket(title)) {
+        final stripped = title.replaceFirst(_trailingBracketRe, '');
+        if (stripped.isNotEmpty) {
+          add(stripped, keepTitleUnits(RegUtils.extractBaseTitle(stripped)));
+        }
+      }
+
+      final zh = chineseOnly(title);
+      if (zh.isNotEmpty) {
+        add(zh, keepTitleUnits(RegUtils.extractBaseTitle(zh)));
       }
     }
-    final zh = chineseOnly(title);
-    if (zh.isNotEmpty) pairs.add((zh, keepTitleUnits(RegUtils.extractBaseTitle(zh))));
-
-    if (_variantCache.length >= _variantCacheLimit) {
-      _variantCache.remove(_variantCache.keys.first);
-    }
-    return _variantCache[title] = pairs;
+    return values;
   }
-
-  static final Set<int> _closingBrackets = ')]）】'.codeUnits.toSet();
 
   static bool _endsWithBracket(String title) {
     final tail = title.trimRight();
-    return tail.isNotEmpty &&
-        _closingBrackets.contains(tail.codeUnitAt(tail.length - 1));
+    if (tail.isEmpty) return false;
+    return switch (tail.codeUnitAt(tail.length - 1)) {
+      0x29 || 0x5D || 0xFF09 || 0x3011 => true,
+      _ => false,
+    };
   }
 }

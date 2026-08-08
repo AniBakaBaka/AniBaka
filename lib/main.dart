@@ -11,10 +11,8 @@ import 'package:baka/pages/player/player_page.dart';
 import 'package:baka/pages/schedule/update_schedule_page.dart';
 import 'package:baka/pages/thread/thread_page.dart';
 import 'package:baka/services/app_storage.dart';
-import 'package:baka/services/cache_manager.dart';
-import 'package:baka/services/dau_tracker.dart';
 import 'package:baka/services/media_session_service.dart';
-import 'package:baka/services/low_memory_mode_service.dart';
+import 'package:baka/services/network_service.dart';
 import 'package:baka/services/playback_settings_service.dart';
 import 'package:baka/services/source_adapter_service.dart';
 import 'package:baka/services/system_proxy_service.dart';
@@ -43,7 +41,9 @@ Future<void> _bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemProxyService.initialize();
   await Instances.init();
-  LowMemoryModeService.apply(PlaybackSettingsService.getLowMemoryMode());
+  PlaybackSettingsService.applyLowMemoryMode(
+    PlaybackSettingsService.getLowMemoryMode(),
+  );
   await AppLogger.instance.init();
   AppLogger.instance.info('Application bootstrap started', tag: 'Bootstrap');
 
@@ -305,7 +305,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     if (_hasClearedCacheOnExit) return;
     _hasClearedCacheOnExit = true;
     if (PlaybackSettingsService.getClearCacheOnExit()) {
-      await CacheManagerService.instance.clearAllCache();
+      await AppStorage.clearAllCache();
     }
   }
 
@@ -420,8 +420,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   offset: _appState.isBottomNavVisible.value
                       ? Offset.zero
                       : const Offset(0, 1),
-                  // AnimatedSlide 只平移绘制，不隐藏语义节点：
-                  // 隐藏时要把 tab 从无障碍树里摘掉，避免读屏聚焦到屏外控件。
                   child: ExcludeSemantics(
                     excluding: !_appState.isBottomNavVisible.value,
                     child: AppBottomNavigation(

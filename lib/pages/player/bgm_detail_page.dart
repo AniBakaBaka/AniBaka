@@ -82,9 +82,8 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
   Future<void> _fetchDetail() async {
     setState(() => _error = false);
     try {
-      final detail = await getBgmAnimeFullDetail(widget.subjectId!);
+      final detail = await getBgmSubject(widget.subjectId!);
       if (!mounted) return;
-      if (detail == null) throw Exception('无数据');
       setState(() {
         final rating = detail['rating'] as Map?;
         _collection = detail['collection'] as Map?;

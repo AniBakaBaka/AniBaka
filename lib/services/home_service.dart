@@ -9,7 +9,12 @@ import 'package:baka/utils/bgm_utils.dart';
 /// 首页的数据与请求状态。各板块独立通知 UI，网络结果缓存 24 小时。
 class HomeDataService {
   static const List<int> rankDays = [1000, 90, 30, 2];
-  static const int _cacheTtlMs = 24 * 60 * 60 * 1000;
+
+  /// 首页各板块网络结果缓存 24 小时。
+  static final TtlCache _homeCache = TtlCache(
+    AppStorage.homeCacheBox,
+    ttl: const Duration(hours: 24),
+  );
 
   static const String recommendTag = '推荐';
   static const String latestTag = '最新';
@@ -350,10 +355,7 @@ class HomeDataService {
 
     return _requests[key] ??= loader()
         .then((data) {
-          AppStorage.homeCacheBox.put(key, {
-            'data': data,
-            'timestamp': DateTime.now().millisecondsSinceEpoch,
-          });
+          _homeCache.write(key, data);
           return data;
         })
         .whenComplete(() {
@@ -363,14 +365,8 @@ class HomeDataService {
         });
   }
 
-  static dynamic _readCache(String key, {bool allowExpired = false}) {
-    final cached = AppStorage.homeCacheBox.get(key);
-    if (cached is! Map || cached['timestamp'] is! int) return null;
-
-    final age =
-        DateTime.now().millisecondsSinceEpoch - (cached['timestamp'] as int);
-    return allowExpired || age < _cacheTtlMs ? cached['data'] : null;
-  }
+  static dynamic _readCache(String key, {bool allowExpired = false}) =>
+      _homeCache.read(key, allowExpired: allowExpired);
 
   static List<dynamic> _listOf(dynamic value) =>
       value is List ? value : <dynamic>[];

@@ -17,9 +17,7 @@ class PlaybackSessionCoordinator {
     required this.onNextEpisode,
     required this.onPreviousEpisode,
     MediaSessionService? mediaSession,
-    DateTime Function()? now,
-  }) : _mediaSession = mediaSession,
-       _now = now ?? DateTime.now;
+  }) : _mediaSession = mediaSession;
 
   static const _progressThrottle = Duration(seconds: 30);
 
@@ -29,19 +27,14 @@ class PlaybackSessionCoordinator {
   final VoidCallback onNextEpisode;
   final VoidCallback onPreviousEpisode;
   final MediaSessionService? _mediaSession;
-  final DateTime Function() _now;
 
   StreamSubscription<void>? _completedSubscription;
   StreamSubscription<Duration>? _seekSubscription;
-  DateTime _lastProgressSave = DateTime.fromMillisecondsSinceEpoch(0);
-  int _generation = 0;
+  int _lastCheckpointPositionMs = 0;
+  int _lastPersistedPositionMs = -1;
   bool _started = false;
   bool _disposed = false;
   MediaSessionService? _attachedMediaSession;
-
-  int get generation => _generation;
-  int nextGeneration() => ++_generation;
-  bool isCurrent(int generation) => !_disposed && generation == _generation;
 
   Future<void> start() async {
     if (_started || _disposed) return;
@@ -53,12 +46,16 @@ class PlaybackSessionCoordinator {
     ]);
     if (_disposed) return;
 
-    _lastProgressSave = _now();
+    _lastCheckpointPositionMs =
+        controller.timeline.value.position.inMilliseconds;
     controller.timeline.addListener(_onTimelineChanged);
     _completedSubscription = controller.completed.listen(
       (_) => onNextEpisode(),
     );
-    _seekSubscription = controller.seekEvents.listen((_) => saveProgress());
+    _seekSubscription = controller.seekEvents.listen((position) {
+      _lastCheckpointPositionMs = position.inMilliseconds;
+      unawaited(saveProgress());
+    });
 
     final mediaSession = _mediaSession ?? Get.find<MediaSessionService>();
     mediaSession.attach(
@@ -69,25 +66,27 @@ class PlaybackSessionCoordinator {
     _attachedMediaSession = mediaSession;
   }
 
-  void setDanmakuItems(List<DanmakuItem> items) {
-    DanmakuService.startPlay(controller: danmakuController, items: items);
-  }
-
-  Future<void> parseAndSetDanmakuItems(List<dynamic> rawItems) async {
-    setDanmakuItems(await DanmakuService.parseItems(rawItems));
-  }
-
   void _onTimelineChanged() {
-    final now = _now();
-    if (now.difference(_lastProgressSave) < _progressThrottle) return;
-    _lastProgressSave = now;
+    final positionMs = controller.timeline.value.position.inMilliseconds;
+    if (positionMs >= _lastCheckpointPositionMs &&
+        positionMs - _lastCheckpointPositionMs <
+            _progressThrottle.inMilliseconds) {
+      return;
+    }
+    _lastCheckpointPositionMs = positionMs;
     unawaited(saveProgress());
   }
 
-  Future<void> saveProgress() => content.saveProgress(
-    controller.timeline.value.position,
-    controller.preferences.value.rememberLastPosition,
-  );
+  Future<void> saveProgress() {
+    final position = controller.timeline.value.position;
+    final positionMs = position.inMilliseconds;
+    if (!controller.preferences.value.rememberLastPosition ||
+        positionMs == _lastPersistedPositionMs) {
+      return Future.value();
+    }
+    _lastPersistedPositionMs = positionMs;
+    return content.saveProgress(position, true);
+  }
 
   void _saveHistory() {
     final timeline = controller.timeline.value;

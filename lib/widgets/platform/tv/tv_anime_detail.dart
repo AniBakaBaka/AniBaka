@@ -31,6 +31,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   late BgmInfo _bgmInfo;
   Map<String, dynamic>? _detailData;
   Map<String, dynamic>? _anibakaData;
+  List<Map<String, dynamic>> _bgmEpisodes = const [];
   late AnimeDetailViewData _detail;
 
   AnimeCollection? _collection;
@@ -45,21 +46,18 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   }
 
   List<PlaybackEpisode> get _bgmVideoList {
-    final bgmEps = BgmUtils.asMapList(_detailData?['episodes']);
-    if (bgmEps.isNotEmpty) {
-      return bgmEps.map((ep) {
-        final sort = BgmUtils.toInt(ep['sort']) ?? BgmUtils.toInt(ep['ep']) ?? 1;
+    if (_bgmEpisodes.isNotEmpty) {
+      return _bgmEpisodes.map((ep) {
+        final sort =
+            BgmUtils.toInt(ep['sort']) ?? BgmUtils.toInt(ep['ep']) ?? 1;
         final nameCn = BgmUtils.trimmed(ep['name_cn']);
         final name = BgmUtils.trimmed(ep['name']);
         final title = (nameCn != null && nameCn.isNotEmpty)
             ? '$sort. $nameCn'
             : (name != null && name.isNotEmpty)
-                ? '$sort. $name'
-                : '第 $sort 话';
-        return PlaybackEpisode(
-          title: title,
-          lines: const [],
-        );
+            ? '$sort. $name'
+            : '第 $sort 话';
+        return PlaybackEpisode(title: title, lines: const []);
       }).toList();
     }
     final raw = PlaybackEpisodeCatalog.rawEpisodesOf(widget.data);
@@ -69,6 +67,9 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   void _rebuildDetail() {
     _bgmInfo = BgmUtils.readFromData(widget.data);
     _detailData = BgmUtils.asMap(widget.data['bgmDetailData']);
+    if (_bgmEpisodes.isEmpty) {
+      _bgmEpisodes = BgmUtils.asMapList(_detailData?['episodes']);
+    }
     _detail = AnimeDetailViewData.from(
       source: widget.data,
       bgmInfo: _bgmInfo,
@@ -97,23 +98,38 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
       if (subjectId == null) return;
 
       if (_anibakaData == null) {
-        getAnimeDetail(subjectId).then((data) {
-          if (!mounted) return;
-          _anibakaData = BgmUtils.asMap(data);
-          setState(_rebuildDetail);
-        }).catchError((e) {
-          debugPrint('获取AniBaka详情失败: $e');
-        });
+        getAnimeDetail(subjectId)
+            .then((data) {
+              if (!mounted) return;
+              _anibakaData = BgmUtils.asMap(data);
+              setState(_rebuildDetail);
+            })
+            .catchError((e) {
+              debugPrint('获取AniBaka详情失败: $e');
+            });
       }
 
       if (_detailData == null) {
-        getBgmAnimeFullDetail(subjectId).then((detail) {
-          if (!mounted || detail == null) return;
-          widget.data['bgmDetailData'] = detail;
-          setState(_rebuildDetail);
-        }).catchError((e) {
-          debugPrint('获取Bangumi详情失败: $e');
-        });
+        getBgmSubject(subjectId)
+            .then((detail) {
+              if (!mounted) return;
+              widget.data['bgmDetailData'] = detail;
+              setState(_rebuildDetail);
+            })
+            .catchError((e) {
+              debugPrint('获取Bangumi详情失败: $e');
+            });
+      }
+
+      if (_bgmEpisodes.isEmpty) {
+        getBgmEpisodes(subjectId)
+            .then((episodes) {
+              if (!mounted) return;
+              setState(() => _bgmEpisodes = episodes);
+            })
+            .catchError((e) {
+              debugPrint('获取Bangumi剧集失败: $e');
+            });
       }
     } catch (e) {
       debugPrint('获取番剧数据失败: $e');
@@ -216,8 +232,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   }
 
   String _buildAirDateText() {
-    final date = BgmUtils.trimmed(_detailData?['date']) ??
-        BgmUtils.trimmed(_anibakaData?['date']);
+    final date = _detail.airDate;
     if (date != null && date.isNotEmpty) {
       final parts = date.split('-');
       if (parts.length >= 2) {
@@ -227,16 +242,14 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
       }
       return date;
     }
-    return '2011 年 4 月';
+    return '';
   }
 
   String _buildEpisodeStatusText() {
-    final status = BgmUtils.trimmed(_anibakaData?['status']) ?? '已完结';
-    final eps = BgmUtils.toInt(_anibakaData?['episodes']) ??
-        BgmUtils.toInt(_detailData?['total_episodes']) ??
-        (_detailData?['eps'] is List ? (_detailData!['eps'] as List).length : null);
+    final status = _detail.status;
+    final eps = _detail.episodeCount;
     if (eps != null && eps > 0) {
-      return '$status · 全 $eps 话';
+      return status.isEmpty ? '全 $eps 话' : '$status · 全 $eps 话';
     }
     return status;
   }
@@ -259,11 +272,6 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
     for (final g in _detail.genres) {
       add(g);
     }
-    final bgmTags = BgmUtils.asMapList(_detailData?['tags']);
-    for (final tag in bgmTags) {
-      add(tag['name']?.toString());
-    }
-
     return list.take(12).toList();
   }
 
@@ -329,7 +337,9 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
             SafeArea(
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 40, vertical: 36),
+                  horizontal: 40,
+                  vertical: 36,
+                ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -392,26 +402,17 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                                 ),
                                 const SizedBox(width: 28),
                                 _buildStatCounter(
-                                  count: BgmUtils.toInt(
-                                          _detailData?['collection']
-                                              ?['collect']) ??
-                                      0,
+                                  count: _detail.collectCount,
                                   label: '收藏',
                                 ),
                                 const SizedBox(width: 20),
                                 _buildStatCounter(
-                                  count: BgmUtils.toInt(
-                                          _detailData?['collection']
-                                              ?['doing']) ??
-                                      0,
+                                  count: _detail.doingCount,
                                   label: '在看',
                                 ),
                                 const SizedBox(width: 20),
                                 _buildStatCounter(
-                                  count: BgmUtils.toInt(
-                                          _detailData?['collection']
-                                              ?['wish']) ??
-                                      0,
+                                  count: _detail.wishCount,
                                   label: '想看',
                                 ),
                               ],
@@ -434,18 +435,22 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                                             _deleteCollection();
                                           } else {
                                             _updateCollectionStatus(
-                                                CollectionStatus.doing);
+                                              CollectionStatus.doing,
+                                            );
                                           }
                                         },
                                         borderRadius: BorderRadius.circular(6),
                                         enableScale: false,
                                         child: Padding(
                                           padding: const EdgeInsets.symmetric(
-                                              horizontal: 4, vertical: 2),
+                                            horizontal: 4,
+                                            vertical: 2,
+                                          ),
                                           child: Text(
                                             _collectionStatusText(),
                                             style: TextStyle(
-                                              color: context.tvTextSecondaryColor
+                                              color: context
+                                                  .tvTextSecondaryColor
                                                   .withValues(alpha: 0.9),
                                               fontSize: 14,
                                               fontWeight: FontWeight.w500,
@@ -478,7 +483,8 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                                               context,
                                               seedData:
                                                   Map<String, dynamic>.from(
-                                                      widget.data),
+                                                    widget.data,
+                                                  ),
                                             );
                                           },
                                         ),
@@ -554,10 +560,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
           },
         ),
         const SizedBox(height: 20),
-        _buildSideIcon(
-          icon: Icons.explore_outlined,
-          onPressed: () {},
-        ),
+        _buildSideIcon(icon: Icons.explore_outlined, onPressed: () {}),
         const SizedBox(height: 20),
         _buildSideIcon(
           icon: _collection != null
@@ -573,15 +576,9 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
           },
         ),
         const SizedBox(height: 20),
-        _buildSideIcon(
-          icon: Icons.history_rounded,
-          onPressed: () {},
-        ),
+        _buildSideIcon(icon: Icons.history_rounded, onPressed: () {}),
         const SizedBox(height: 20),
-        _buildSideIcon(
-          icon: Icons.settings_outlined,
-          onPressed: () {},
-        ),
+        _buildSideIcon(icon: Icons.settings_outlined, onPressed: () {}),
       ],
     );
   }
@@ -627,11 +624,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
             width: 1.5,
           ),
         ),
-        child: Icon(
-          icon,
-          color: context.tvTextColor,
-          size: 30,
-        ),
+        child: Icon(icon, color: context.tvTextColor, size: 30),
       ),
     );
   }
@@ -712,11 +705,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   }
 
   Widget _buildRatingHistogram() {
-    final countMap = BgmUtils.asMap(_detailData?['rating']?['count']);
-    final counts = List<int>.generate(10, (i) {
-      final key = (i + 1).toString();
-      return BgmUtils.toInt(countMap?[key]) ?? 0;
-    });
+    final counts = _detail.scoreDistribution;
 
     int maxCount = counts.fold(0, (max, c) => c > max ? c : max);
     if (maxCount == 0) maxCount = 1;
@@ -777,8 +766,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   Widget _buildScorePanel() {
     final score = _detail.score ?? 0.0;
     final scoreCount = _detail.scoreCount;
-    final rank =
-        BgmUtils.toInt(BgmUtils.asMap(_detailData?['rating'])?['rank']);
+    final rank = _detail.rank;
 
     final starRating = (score / 2.0).clamp(0.0, 5.0);
 
@@ -832,8 +820,9 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                     Text(
                       '${rank != null && rank > 0 ? '#$rank · ' : ''}${_formatNumber(scoreCount)} 人评分',
                       style: TextStyle(
-                        color: context.tvTextSecondaryColor
-                            .withValues(alpha: 0.8),
+                        color: context.tvTextSecondaryColor.withValues(
+                          alpha: 0.8,
+                        ),
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),

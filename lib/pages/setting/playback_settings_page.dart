@@ -1,4 +1,5 @@
 import 'package:baka/services/playback_settings_service.dart';
+import 'package:baka/models/playback_state.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:baka/widgets/settings/settings_widgets.dart';
@@ -11,15 +12,9 @@ class PlaybackSettingsPage extends StatefulWidget {
 }
 
 class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
-  bool _defaultDanmakuOff = PlaybackSettingsService.getDefaultDanmakuOff();
-  bool _defaultSubtitleOff = PlaybackSettingsService.getDefaultSubtitleOff();
+  PlaybackPreferences _preferences = PlaybackSettingsService.loadAll();
   bool _clearCacheOnExit = PlaybackSettingsService.getClearCacheOnExit();
   bool _lowMemoryMode = PlaybackSettingsService.getLowMemoryMode();
-  bool _enableBtDownload = PlaybackSettingsService.getEnableBtDownload();
-  double _defaultPlaybackSpeed =
-      PlaybackSettingsService.getDefaultPlaybackSpeed();
-  String _hwdecMode = PlaybackSettingsService.getHwdecMode();
-  String _videoRenderer = PlaybackSettingsService.getVideoRenderer();
 
   static const _hwdecDescriptions = <String, String>{
     'auto': '自动选择最佳硬件解码器',
@@ -31,14 +26,19 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
   static const _rendererDescriptions = <String, String>{
     'gpu': 'GPU 渲染器，兼容性最好',
     'gpu-next': '新一代 GPU 渲染器，画质更好但要求更高',
-    'mediacodec_embed':
-        'Android 专用：解码帧直写 Surface，绕过 GPU 合成，适合部分电视黑屏但有声',
+    'mediacodec_embed': 'Android 专用：解码帧直写 Surface，绕过 GPU 合成，适合部分电视黑屏但有声',
   };
 
   /// 就地改字段 + 落盘，取代每个开关各写一个四行的 `_setXxx` 方法。
   Future<void> _apply(VoidCallback assign, Future<void> Function() persist) {
     setState(assign);
     return persist();
+  }
+
+  Future<void> _updatePreferences(PlaybackPreferences next) {
+    final previous = _preferences;
+    setState(() => _preferences = next);
+    return PlaybackSettingsService.saveChanges(previous, next);
   }
 
   /// 通用单选底部弹窗：三份逐行同构的 `_showXxxSheet` 收敛成一个。
@@ -121,12 +121,12 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                     SettingsTile(
                       title: '默认播放速度',
                       value: PlaybackSettingsService.formatPlaybackSpeed(
-                        _defaultPlaybackSpeed,
+                        _preferences.defaultPlaybackSpeed,
                       ),
                       icon: Icons.speed_rounded,
                       onTap: () => _pickOption<double>(
                         title: '默认播放速度',
-                        current: _defaultPlaybackSpeed,
+                        current: _preferences.defaultPlaybackSpeed,
                         options: PlaybackSettingsService.playbackSpeedOptions,
                         labelOf: PlaybackSettingsService.formatPlaybackSpeed,
                         onSelected: (speed) {
@@ -134,50 +134,42 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                               PlaybackSettingsService.normalizePlaybackSpeed(
                                 speed,
                               );
-                          return _apply(
-                            () => _defaultPlaybackSpeed = value,
-                            () =>
-                                PlaybackSettingsService.setDefaultPlaybackSpeed(
-                                  value,
-                                ),
+                          return _updatePreferences(
+                            _preferences.copyWith(defaultPlaybackSpeed: value),
                           );
                         },
                       ),
                     ),
                     SettingsSwitchTile(
                       title: '默认关闭弹幕',
-                      value: _defaultDanmakuOff,
+                      value: _preferences.defaultDanmakuOff,
                       icon: Icons.subtitles_off_rounded,
-                      onChanged: (value) => _apply(
-                        () => _defaultDanmakuOff = value,
-                        () =>
-                            PlaybackSettingsService.setDefaultDanmakuOff(value),
+                      onChanged: (value) => _updatePreferences(
+                        _preferences.copyWith(defaultDanmakuOff: value),
                       ),
                     ),
                     SettingsSwitchTile(
                       title: '默认关闭内嵌字幕',
-                      value: _defaultSubtitleOff,
+                      value: !_preferences.showSubtitle,
                       icon: Icons.closed_caption_off_rounded,
-                      onChanged: (value) => _apply(
-                        () => _defaultSubtitleOff = value,
-                        () => PlaybackSettingsService.setDefaultSubtitleOff(
-                          value,
-                        ),
+                      onChanged: (value) => _updatePreferences(
+                        _preferences.copyWith(showSubtitle: !value),
                       ),
                     ),
                     SettingsTile(
                       title: '硬件解码',
                       value:
                           PlaybackSettingsService
-                              .hwdecModeLabelsForPlatform[_hwdecMode] ??
-                          PlaybackSettingsService
-                              .hwdecModeLabels[_hwdecMode] ??
+                              .hwdecModeLabelsForPlatform[_preferences
+                              .hwdecMode] ??
+                          PlaybackSettingsService.hwdecModeLabels[_preferences
+                              .hwdecMode] ??
                           '自动',
                       icon: Icons.memory_rounded,
                       onTap: () => _pickOption<String>(
                         title: '硬件解码模式',
                         intro: '如果遇到视频黑屏、花屏或卡顿，可尝试切换解码模式',
-                        current: _hwdecMode,
+                        current: _preferences.hwdecMode,
                         options:
                             PlaybackSettingsService.hwdecModeOptionsForPlatform,
                         labelOf: (mode) =>
@@ -188,9 +180,8 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                         onSelected: (mode) {
                           final value =
                               PlaybackSettingsService.normalizeHwdecMode(mode);
-                          return _apply(
-                            () => _hwdecMode = value,
-                            () => PlaybackSettingsService.setHwdecMode(value),
+                          return _updatePreferences(
+                            _preferences.copyWith(hwdecMode: value),
                           );
                         },
                       ),
@@ -199,17 +190,18 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                       title: '视频渲染器',
                       value:
                           PlaybackSettingsService
-                              .videoRendererLabels[_videoRenderer] ??
+                              .videoRendererLabels[_preferences
+                              .videoRenderer] ??
                           '自动',
                       icon: Icons.monitor_rounded,
                       onTap: () => _pickOption<String>(
                         title: '视频渲染器',
-                        intro: 'gpu 为 GPU 渲染器；若电视播放黑屏但有声音，'
+                        intro:
+                            'gpu 为 GPU 渲染器；若电视播放黑屏但有声音，'
                             '可切换到 mediacodec_embed',
-                        current: _videoRenderer,
-                        options:
-                            PlaybackSettingsService
-                                .videoRendererOptionsForPlatform,
+                        current: _preferences.videoRenderer,
+                        options: PlaybackSettingsService
+                            .videoRendererOptionsForPlatform,
                         labelOf: (renderer) =>
                             PlaybackSettingsService
                                 .videoRendererLabels[renderer] ??
@@ -221,30 +213,11 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                               PlaybackSettingsService.normalizeVideoRenderer(
                                 renderer,
                               );
-                          return _apply(
-                            () => _videoRenderer = value,
-                            () =>
-                                PlaybackSettingsService.setVideoRenderer(value),
+                          return _updatePreferences(
+                            _preferences.copyWith(videoRenderer: value),
                           );
                         },
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                const SettingsSectionHeader('下载引擎'),
-                SettingsGroup(
-                  children: [
-                    SettingsSwitchTile(
-                      title: '启用BT种子下载',
-                      value: _enableBtDownload,
-                      icon: Icons.download_rounded,
-                      onChanged: (value) => _apply(
-                        () => _enableBtDownload = value,
-                        () =>
-                            PlaybackSettingsService.setEnableBtDownload(value),
-                      ),
-                      showDivider: false,
                     ),
                   ],
                 ),

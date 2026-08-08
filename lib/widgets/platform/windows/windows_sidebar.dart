@@ -2,7 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/services/mine_service.dart';
 import 'package:baka/services/navigation_service.dart';
-import 'package:baka/services/theme_service.dart';
+import 'package:baka/services/settings_service.dart';
 import 'package:flutter/material.dart';
 
 class WindowsSidebar extends StatefulWidget {
