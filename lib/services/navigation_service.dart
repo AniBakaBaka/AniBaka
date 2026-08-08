@@ -16,9 +16,6 @@ import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:baka/widgets/danmaku/danmaku_list_sheet.dart';
 import 'package:baka/utils/platform_page_route.dart';
 
-
-
-
 /// 集中管理页面导航，解耦 Widget 对具体 Page 的直接依赖。
 class NavigationService {
   NavigationService._();
@@ -52,7 +49,9 @@ class NavigationService {
   }) {
     Navigator.pushAndRemoveUntil(
       context,
-      _slideRoute(PlayerPage(data: data, posIndex: posIndex, autoMatch: autoMatch)),
+      _slideRoute(
+        PlayerPage(data: data, posIndex: posIndex, autoMatch: autoMatch),
+      ),
       (route) => route.isFirst,
     );
   }
@@ -65,16 +64,23 @@ class NavigationService {
     bool fade = false,
     bool autoMatch = true,
   }) {
-    if (popFirst) Navigator.of(context).pop();
+    final navigator = Navigator.of(context);
+    if (popFirst) navigator.pop();
     final PageRoute<void> route = fade
         ? platformPageRoute<void>(
-            builder: (_) => PlayerPage(data: data, posIndex: posIndex, autoMatch: autoMatch),
+            builder: (_) => PlayerPage(
+              data: data,
+              posIndex: posIndex,
+              autoMatch: autoMatch,
+            ),
             transitionsBuilder: (_, anim, _, child) =>
                 FadeTransition(opacity: anim, child: child),
             transitionDuration: const Duration(milliseconds: 300),
           )
-        : _slideRoute(PlayerPage(data: data, posIndex: posIndex, autoMatch: autoMatch));
-    Navigator.push(context, route);
+        : _slideRoute(
+            PlayerPage(data: data, posIndex: posIndex, autoMatch: autoMatch),
+          );
+    navigator.push(route);
   }
 
   /// 导航到搜索页面
@@ -148,10 +154,6 @@ class NavigationService {
       initialShowSearch: true,
     );
   }
-
-
-
-
 
   /// 显示字幕设置对话框
   static Future<void> showSubtitleSettings(

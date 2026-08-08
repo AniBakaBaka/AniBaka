@@ -1,5 +1,3 @@
-import 'dart:collection';
-
 import 'package:flutter/foundation.dart';
 
 @immutable
@@ -39,11 +37,7 @@ class PlaybackEpisode {
       if (end > start) lines.add(value.substring(start, end));
       start = end + 1;
     }
-    return PlaybackEpisode(
-      title: value.substring(0, titleEnd),
-      // 视图而非拷贝：底层列表是本地变量，不会外泄。
-      lines: UnmodifiableListView(lines),
-    );
+    return PlaybackEpisode(title: value.substring(0, titleEnd), lines: lines);
   }
 
   static bool _isBlank(String value) {
@@ -56,6 +50,20 @@ class PlaybackEpisode {
 
 class PlaybackEpisodeCatalog {
   PlaybackEpisodeCatalog._();
+
+  /// Returns the shared typed catalog when present. Backend payloads using the
+  /// legacy string format are parsed only once at this boundary.
+  static List<PlaybackEpisode> episodesOf(
+    Map data, {
+    bool mergeDuplicateTitles = false,
+  }) {
+    final rawList = data['videoList'];
+    if (rawList is List<PlaybackEpisode>) return rawList;
+    return parse(
+      rawEpisodesOf(data),
+      mergeDuplicateTitles: mergeDuplicateTitles,
+    );
+  }
 
   /// 单趟扫描 `videos` 串的非空行边界，返回行数；[sink] 为 null 时只计数不分配，
   /// 返回 true 表示已取到所需内容、提前中止扫描。
@@ -92,7 +100,11 @@ class PlaybackEpisodeCatalog {
     if (rawList is List) {
       final out = <String>[];
       for (final item in rawList) {
-        if (_isUsableEntry(item)) out.add(item as String);
+        if (item is PlaybackEpisode) {
+          out.add(item.serialize());
+        } else if (_isUsableEntry(item)) {
+          out.add(item as String);
+        }
       }
       if (out.isNotEmpty) return out;
     }
@@ -116,6 +128,11 @@ class PlaybackEpisodeCatalog {
     if (rawList is List) {
       var seen = 0;
       for (final item in rawList) {
+        if (item is PlaybackEpisode) {
+          if (seen == index) return item;
+          seen++;
+          continue;
+        }
         if (!_isUsableEntry(item)) continue;
         if (seen == index) return PlaybackEpisode.parse(item as String);
         seen++;
@@ -143,7 +160,7 @@ class PlaybackEpisodeCatalog {
     if (rawList is List) {
       var count = 0;
       for (final item in rawList) {
-        if (_isUsableEntry(item)) count++;
+        if (item is PlaybackEpisode || _isUsableEntry(item)) count++;
       }
       if (count > 0) return count;
     }
@@ -162,7 +179,7 @@ class PlaybackEpisodeCatalog {
         final episode = PlaybackEpisode.parse(value);
         if (episode != null) episodes.add(episode);
       }
-      return UnmodifiableListView(episodes);
+      return episodes;
     }
 
     // 惰性合并：目录标题几乎全唯一，首现直接收录解析结果；
@@ -181,19 +198,19 @@ class PlaybackEpisodeCatalog {
         slotOf[key] = episodes.length;
         episodes.add(episode);
       } else {
-        (merged[slot] ??= List<String>.of(episodes[slot].lines)).addAll(
-          episode.lines,
-        );
+        (merged[slot] ??= List<String>.of(
+          episodes[slot].lines,
+        )).addAll(episode.lines);
       }
     }
 
     for (final entry in merged.entries) {
       episodes[entry.key] = PlaybackEpisode(
         title: episodes[entry.key].title,
-        lines: UnmodifiableListView(entry.value),
+        lines: entry.value,
       );
     }
-    return UnmodifiableListView(episodes);
+    return episodes;
   }
 
   /// 可见集数索引。空查询时按需正序/倒序直接生成，不再多复制一次 `reversed`。

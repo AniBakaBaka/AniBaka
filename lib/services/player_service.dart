@@ -244,12 +244,9 @@ class PlayerService {
     int? preferredLineIndex,
   }) {
     videoList = nextVideoList;
-    final serialized = nextVideoList
-        .map((episode) => episode.serialize())
-        .toList(growable: false);
-    // 移除过期的 videos 串，避免 videoList 为空时回落到旧数据
+    // Adapter data stays typed for its whole in-memory lifetime.
     data.remove('videos');
-    data['videoList'] = serialized;
+    data['videoList'] = nextVideoList;
     if (sourceNames != null) {
       this.sourceNames = sourceNames;
       data['sourceNames'] = sourceNames;
@@ -312,10 +309,7 @@ class PlayerService {
         1;
 
     syncVideoData(
-      PlaybackEpisodeCatalog.parse(
-        PlaybackEpisodeCatalog.rawEpisodesOf(data),
-        mergeDuplicateTitles: true,
-      ),
+      PlaybackEpisodeCatalog.episodesOf(data, mergeDuplicateTitles: true),
       sourceNames: _parseSourceNames(data['sourceNames']),
       preferredEpisodeIndex: initialEpisodeIndex,
       preferredLineIndex: initialLineIndex,
@@ -326,10 +320,7 @@ class PlayerService {
     if (source == null || source.isEmpty) return null;
     if (_adapterSource == source) return _adapter;
 
-    _adapter = SourceAdapterService.instance.createAdapterFor(
-      source,
-      item: data,
-    );
+    _adapter = SourceAdapterService.instance.adapterFor(source);
     _adapterSource = source;
     return _adapter;
   }
@@ -345,19 +336,9 @@ class PlayerService {
 
     if (videoList.isEmpty || sourceNames == null) {
       final seriesUrl = data['seriesUrl'] ?? data['id'].toString();
-      final sources = await adapter.getSources(seriesUrl.toString());
-      if (sources.isEmpty) throw Exception('无法获取剧集信息');
-      final episodes = PlaybackEpisodeCatalog.parse(
-        buildAdapterVideoList(sources),
-      );
-      if (episodes.isEmpty) throw Exception('无法获取剧集信息');
-      syncVideoData(
-        episodes,
-        sourceNames: [
-          for (var i = 0; i < sources.length; i++)
-            sources[i].sourceName ?? '线路${i + 1}',
-        ],
-      );
+      final catalog = await adapter.getPlaybackCatalog(seriesUrl.toString());
+      if (catalog.isEmpty) throw Exception('无法获取剧集信息');
+      syncVideoData(catalog.episodes, sourceNames: catalog.sourceNames);
     }
 
     return adapter;
@@ -464,8 +445,8 @@ class PlayerService {
       }
     }
 
-    final episodes = PlaybackEpisodeCatalog.parse(
-      PlaybackEpisodeCatalog.rawEpisodesOf(data),
+    final episodes = PlaybackEpisodeCatalog.episodesOf(
+      data,
       mergeDuplicateTitles: true,
     );
     if (episodes.isNotEmpty) {

@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 
 import 'package:baka/source/source_registry.dart';
 import 'package:baka/services/search_service.dart';
-import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/services/navigation_service.dart';
 import 'package:baka/widgets/platform/tv/tv_focusable.dart';
 import 'package:baka/widgets/platform/tv/tv_theme_util.dart';
@@ -142,7 +141,9 @@ class _TvSearchPageState extends State<TvSearchPage> {
                         decoration: BoxDecoration(
                           color: context.tvHighlightColor(0.06),
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: context.tvHighlightColor(0.1)),
+                          border: Border.all(
+                            color: context.tvHighlightColor(0.1),
+                          ),
                         ),
                         child: Row(
                           children: [
@@ -182,7 +183,9 @@ class _TvSearchPageState extends State<TvSearchPage> {
                             ValueListenableBuilder<TextEditingValue>(
                               valueListenable: _searchController,
                               builder: (_, value, _) {
-                                if (value.text.isEmpty) return const SizedBox.shrink();
+                                if (value.text.isEmpty) {
+                                  return const SizedBox.shrink();
+                                }
                                 return TvFocusable(
                                   onPressed: () {
                                     _searchController.clear();
@@ -224,9 +227,7 @@ class _TvSearchPageState extends State<TvSearchPage> {
                     ),
 
                     const SizedBox(height: 24),
-                    Expanded(
-                      child: _buildRecentHistoryView(),
-                    ),
+                    Expanded(child: _buildRecentHistoryView()),
                   ],
                 ),
               ),
@@ -349,11 +350,7 @@ class _TvSearchPageState extends State<TvSearchPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            Icons.search_rounded,
-            color: context.tvTextHintColor,
-            size: 64,
-          ),
+          Icon(Icons.search_rounded, color: context.tvTextHintColor, size: 64),
           const SizedBox(height: 16),
           Text(
             '搜索你想看的番剧',
@@ -366,10 +363,7 @@ class _TvSearchPageState extends State<TvSearchPage> {
           const SizedBox(height: 8),
           Text(
             '左侧选择好搜索源，输入剧名或角色',
-            style: TextStyle(
-              color: context.tvTextHintColor,
-              fontSize: 13,
-            ),
+            style: TextStyle(color: context.tvTextHintColor, fontSize: 13),
           ),
         ],
       ),
@@ -402,7 +396,7 @@ class _TvSearchPageState extends State<TvSearchPage> {
           );
         }
 
-        return ValueListenableBuilder<List<dynamic>>(
+        return ValueListenableBuilder<List<Map<String, dynamic>>>(
           valueListenable: _svc.resultsNotifier,
           builder: (_, results, _) {
             if (results.isEmpty) {
@@ -454,14 +448,16 @@ class _TvSearchPageState extends State<TvSearchPage> {
                     policy: ReadingOrderTraversalPolicy(),
                     child: GridView.builder(
                       physics: const BouncingScrollPhysics(),
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 4,
-                        childAspectRatio: 0.55,
-                        crossAxisSpacing: 16,
-                        mainAxisSpacing: 24,
-                      ),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 4,
+                            childAspectRatio: 0.55,
+                            crossAxisSpacing: 16,
+                            mainAxisSpacing: 24,
+                          ),
                       itemCount: results.length,
-                      itemBuilder: (context, index) => _buildResultCard(results[index]),
+                      itemBuilder: (context, index) =>
+                          _buildResultCard(results[index]),
                     ),
                   ),
                 ),
@@ -473,39 +469,30 @@ class _TvSearchPageState extends State<TvSearchPage> {
     );
   }
 
-  Widget _buildResultCard(dynamic item) {
+  Widget _buildResultCard(Map<String, dynamic> item) {
     String title;
     String? imageUrl;
     String sourceName;
     double? score;
     VoidCallback onPressed;
 
-    if (item is BgmSubjectInfo) {
-      title = item.nameCn?.isNotEmpty == true ? item.nameCn! : item.name ?? '未知';
-      imageUrl = item.imageUrl;
+    final sourceKey = item['source']?.toString();
+    if (sourceKey == 'bgm') {
+      title = item['title'] as String;
+      imageUrl = item['bgmImageUrl'] as String?;
       sourceName = 'BGM';
-      score = item.score;
-      final data = <String, dynamic>{
-        'title': title,
-        'bgmId': item.subjectId,
-        if (item.imageUrl != null) 'bgmImageUrl': item.imageUrl,
-        if (item.score != null) 'score': item.score,
-      };
-      onPressed = () => NavigationService.toPlayer(context, data);
-    } else if (item is Map &&
-        !AdapterRegistry.isAdapterSource(item['source']?.toString())) {
-      title = item['title']?.toString() ?? '未知';
-      imageUrl = item['image']?.toString();
+      score = item['score'] as double?;
+      onPressed = () => NavigationService.toPlayer(context, item);
+    } else if (!AdapterRegistry.isAdapterSource(sourceKey)) {
+      title = item['title'] as String;
+      imageUrl = item['image'] as String?;
       sourceName = '站内';
       onPressed = () => navigateToDetail(context, item);
     } else {
-      final sourceKey = item is Map ? item['source']?.toString() : null;
-      title = item['title']?.toString() ?? '未知';
-      imageUrl = item['image']?.toString();
-      sourceName = (item is Map && item['sourceDisplayName'] != null)
-          ? item['sourceDisplayName'].toString()
-          : sourceKey ?? 'Custom';
-      onPressed = () => _openSeries(Map<String, dynamic>.from(item as Map));
+      title = item['title'] as String;
+      imageUrl = item['image'] as String?;
+      sourceName = item['sourceDisplayName'] as String;
+      onPressed = () => _openSeries(item);
     }
 
     return _TvSearchResultCard(
@@ -552,7 +539,10 @@ class _TvSearchResultCard extends StatelessWidget {
                     top: 8,
                     right: 8,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         color: context.tvShadowColor(0.8),
                         borderRadius: BorderRadius.circular(6),
@@ -572,7 +562,10 @@ class _TvSearchResultCard extends StatelessWidget {
                       bottom: 8,
                       left: 8,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 3,
+                        ),
                         decoration: BoxDecoration(
                           color: context.tvShadowColor(0.8),
                           borderRadius: BorderRadius.circular(6),

@@ -226,7 +226,7 @@ class VideoSourceSearchController {
   final activeAutoAliasesNotifier = ValueNotifier<Set<String>>({});
   final candidateRevisionNotifier = ValueNotifier(0);
 
-  final _adapter = SourceAdapterService();
+  final _adapter = SourceAdapterService.instance;
   final _engine = const SourceMatchEngine();
   Future<void>? _adapterInitFuture;
 
@@ -313,7 +313,6 @@ class VideoSourceSearchController {
     if (_disposed) return;
     _disposed = true;
     _runId++;
-    _adapter.dispose();
     isSearchingNotifier.dispose();
     resultsNotifier.dispose();
     progressNotifier.dispose();
@@ -462,7 +461,7 @@ class VideoSourceSearchController {
           runId: runId,
           keywords: keywords,
           sourceKey: s.key,
-          load: (kw) => _adapter.searchBuiltin(kw, s, skipBgmEnhancement: true),
+          load: (kw) => _adapter.search(s.key, kw, skipBgmEnhancement: true),
           errorMsg: '${s.displayName} 搜索失败',
         ),
       for (final s in custom)
@@ -470,7 +469,11 @@ class VideoSourceSearchController {
           runId: runId,
           keywords: keywords,
           sourceKey: AdapterRegistry.customSourceKey(s.id),
-          load: (kw) => _adapter.searchCustom(kw, s, skipBgmEnhancement: true),
+          load: (kw) => _adapter.search(
+            AdapterRegistry.customSourceKey(s.id),
+            kw,
+            skipBgmEnhancement: true,
+          ),
           errorMsg: '${s.name} 搜索失败',
         ),
     ];
@@ -590,7 +593,7 @@ class VideoSourceSearchController {
     _autoMatched = true;
     _probeQueue.clear();
     _recordAutoMatchDuration();
-    onMatchFound?.call(Map<String, dynamic>.from(data));
+    onMatchFound?.call(data);
     unawaited(persistMatchMemory(item, data));
     _completeAutoMatchGate(true);
     return true;
@@ -691,15 +694,11 @@ class VideoSourceSearchController {
       }
     }
 
-    List<SearchResultItem> parseRaw(
-      List<Map<String, dynamic>> raw,
-      String kw,
-    ) {
+    List<SearchResultItem> parseRaw(List<Map<String, dynamic>> raw, String kw) {
       final seen = <String>{};
       final items = <SearchResultItem>[];
       for (final r in raw) {
-        final data = Map<String, dynamic>.from(r)
-          ..['_searchKeyword'] = kw;
+        final data = r..['_searchKeyword'] = kw;
         final item = SearchResultItem(
           title: data['title']?.toString() ?? '',
           sourceType: sourceKey,
@@ -1041,7 +1040,8 @@ class VideoSourceSearchController {
       _enqueueAutoProbe(
         runId,
         item,
-        priority: (_rankCache[item.key]?.confidence ?? 0) >=
+        priority:
+            (_rankCache[item.key]?.confidence ?? 0) >=
             AutoMatchStrategy.priorityProbeConfidence,
       );
     }
@@ -1344,10 +1344,7 @@ class VideoSourceSearchController {
       final videoData = await resolveVideoData(
         probe.item,
       ).timeout(catalogTimeout);
-      final rawEpisodes = PlaybackEpisodeCatalog.rawEpisodesOf(videoData)
-          .map(PlaybackEpisode.parse)
-          .whereType<PlaybackEpisode>()
-          .toList();
+      final rawEpisodes = PlaybackEpisodeCatalog.episodesOf(videoData);
 
       if (rawEpisodes.isEmpty) {
         probe.status = SourceProbeStatus.failed;
@@ -1368,10 +1365,8 @@ class VideoSourceSearchController {
           : 1;
       probe.resolvedLineIndex = lineIndex;
 
-      final episodesData = rawEpisodes.map((e) => e.serialize()).toList();
-      final readyData = Map<String, dynamic>.from(videoData)
-        ..['videoList'] = episodesData
-        ..['episodes'] = episodesData
+      final readyData = videoData
+        ..['videoList'] = rawEpisodes
         ..['currPlayIndex'] = epIndex
         ..['currUrl'] = lineIndex;
 
@@ -1416,10 +1411,7 @@ class VideoSourceSearchController {
     candidateRevisionNotifier.value++;
 
     try {
-      final rawEpisodes = PlaybackEpisodeCatalog.rawEpisodesOf(data)
-          .map(PlaybackEpisode.parse)
-          .whereType<PlaybackEpisode>()
-          .toList();
+      final rawEpisodes = PlaybackEpisodeCatalog.episodesOf(data);
       if (rawEpisodes.isEmpty) {
         probe.status = SourceProbeStatus.failed;
         probe.error = '未找到可播放剧集';
@@ -1468,8 +1460,7 @@ class VideoSourceSearchController {
     int preferredLineIndex, {
     bool raceMode = false,
   }) async {
-    final sourceKey =
-        readyData['source']?.toString() ?? probe.item.sourceType;
+    final sourceKey = readyData['source']?.toString() ?? probe.item.sourceType;
     final lineCount = episodeItem.lines.length;
     if (lineCount <= 0) {
       probe.status = SourceProbeStatus.failed;
@@ -1530,7 +1521,6 @@ class VideoSourceSearchController {
       try {
         final media = await _resolveLineMedia(
           sourceKey: sourceKey,
-          itemData: probe.item.data,
           lineToken: token,
           raceMode: raceMode,
         ).timeout(lineTimeout);
@@ -1575,12 +1565,11 @@ class VideoSourceSearchController {
 
   Future<({String url, Map<String, String> httpHeaders})> _resolveLineMedia({
     required String sourceKey,
-    required Map<String, dynamic> itemData,
     required String lineToken,
     bool raceMode = false,
   }) async {
     final kind = MediaReadiness.classify(lineToken);
-    final adapter = _adapter.adapterFor(sourceKey, itemData);
+    final adapter = _adapter.adapterFor(sourceKey);
     final reachTimeout = raceMode
         ? _reachTimeout
         : const Duration(milliseconds: 2500);
@@ -1591,9 +1580,8 @@ class VideoSourceSearchController {
     }
 
     if (kind == MediaTokenKind.directMedia) {
-      final headers = <String, String>{
-        ...?adapter?.mediaValidationHeaders,
-      }..removeWhere((_, v) => v.isEmpty);
+      final headers = <String, String>{...?adapter?.mediaValidationHeaders}
+        ..removeWhere((_, v) => v.isEmpty);
       if (VideoUrlExtractor.isSignedCdnUrl(lineToken)) {
         headers.removeWhere((k, _) => k.toLowerCase() == 'referer');
       }
@@ -1607,14 +1595,15 @@ class VideoSourceSearchController {
       if (!reachable) {
         return (url: '', httpHeaders: const <String, String>{});
       }
-      return (url: lineToken, httpHeaders: Map<String, String>.from(headers));
+      return (url: lineToken, httpHeaders: headers);
     }
 
     // 必须校验：不可达则返回空，上层换线/换源，绝不预取死链。
-    return _adapter.resolvePlaybackMedia(
-      sourceKey,
+    if (adapter == null) {
+      return (url: '', httpHeaders: const <String, String>{});
+    }
+    return adapter.resolvePlaybackMedia(
       lineToken,
-      item: itemData,
       skipValidation: false,
       maxAttempts: maxAttempts,
       reachTimeout: reachTimeout,
@@ -1664,15 +1653,9 @@ class VideoSourceSearchController {
   Future<Map<String, dynamic>> _doResolveVideoData(
     SearchResultItem item,
   ) async {
-    Map<String, dynamic> videoData;
-    if (item.sourceType == 'internal') {
-      videoData = Map<String, dynamic>.from(item.data);
-    } else {
-      final built = await _adapter.buildPlayerData(item.data);
-      videoData = built != null
-          ? Map<String, dynamic>.from(built)
-          : Map<String, dynamic>.from(item.data);
-    }
+    final videoData = item.sourceType == 'internal'
+        ? item.data
+        : await _adapter.buildPlayerData(item.data) ?? item.data;
     videoData['source'] = item.sourceType;
     videoData['sourceDisplayName'] =
         item.data['sourceDisplayName'] ?? _sourceDisplayName(item.sourceType);

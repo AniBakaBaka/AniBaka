@@ -416,15 +416,13 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
                                 ? config!.iconUrl
                                 : hub?.item.iconUrl,
                             baseUrl: config?.baseUrl,
-                            enabled: _catalog.isBuiltinEnabled(
-                              source.key,
-                            ),
+                            enabled: _catalog.isBuiltinEnabled(source.key),
                             size: 26,
                             radius: 6,
                           );
                         },
                         titleOf: (source) => source.displayName,
-                        subtitleOf: (source) => source.statusLabel ?? '',
+                        subtitleOf: (source) => source.statusLabel,
                         onReorder: (oldIndex, newIndex) async {
                           await _catalog.reorderBuiltinSource(
                             oldIndex,
@@ -621,8 +619,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
                 subtitle:
                     Uri.tryParse(config?.baseUrl ?? '')?.host ??
                     config?.baseUrl ??
-                    source.statusLabel ??
-                    '',
+                    source.statusLabel,
                 badge: rule == null
                     ? '内置'
                     : '内置 · v${rule.item.displayVersion}',

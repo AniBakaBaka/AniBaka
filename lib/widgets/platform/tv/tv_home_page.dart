@@ -16,32 +16,25 @@ import 'package:baka/widgets/platform/tv/tv_settings_page.dart';
 import 'package:baka/widgets/platform/tv/tv_theme_util.dart';
 
 class TvHomePage extends StatefulWidget {
-  const TvHomePage({
-    required this.svc,
-    required this.onSearchTap,
-    required this.onMyPageTap,
-    super.key,
-  });
+  const TvHomePage({required this.svc, super.key});
 
   final HomeDataService svc;
-  final VoidCallback onSearchTap;
-  final VoidCallback onMyPageTap;
 
   @override
   State<TvHomePage> createState() => _TvHomePageState();
 }
 
 class _TvHomePageState extends State<TvHomePage> {
-  static const _detailCacheLimit = 24;
-
-  int _selectedNavIndex = 2;
+  _TvSection _selectedSection = _TvSection.home;
   Map? _focusedItem;
   final ScrollController _scrollController = ScrollController();
   bool _loadingMore = false;
   String? _exhaustedTag;
 
-  final Map<int, AnimeDetailViewData> _detailCache = {};
-  final Set<int> _loadingDetails = {};
+  int? _detailSubjectId;
+  int? _loadingDetailSubjectId;
+  int _detailRequest = 0;
+  AnimeDetailViewData? _focusedDetail;
 
   @override
   void initState() {
@@ -85,26 +78,27 @@ class _TvHomePageState extends State<TvHomePage> {
 
   /// 异步自动预载与详情页完全一致的 AniBaka API 详细数据
   void _loadAnimeDetail(Map item) {
-    final rawId = item['bgmId'] ?? item['id'];
-    final subjectId = BgmUtils.toInt(rawId);
+    final subjectId = BgmUtils.toInt(item['bgmId']);
     if (subjectId == null || subjectId <= 0) return;
-    if (_detailCache.containsKey(subjectId) ||
-        !_loadingDetails.add(subjectId)) {
+    if (_detailSubjectId == subjectId || _loadingDetailSubjectId == subjectId) {
       return;
     }
+
+    _loadingDetailSubjectId = subjectId;
+    final request = ++_detailRequest;
 
     final bgmInfo = BgmInfo(
       score: BgmUtils.toDouble(item['score']),
       subjectId: subjectId,
     );
 
-    final bgmFuture = getBgmSubject(subjectId);
-    final anibakaFuture = getAnimeDetail(subjectId);
     () async {
       try {
+        final bgmFuture = getBgmSubject(subjectId);
+        final anibakaFuture = getAnimeDetail(subjectId);
         final detailData = await bgmFuture;
         final anibakaData = await anibakaFuture;
-        if (!mounted) return;
+        if (!mounted || request != _detailRequest) return;
         final detail = AnimeDetailViewData.from(
           source: item,
           bgmInfo: bgmInfo,
@@ -112,15 +106,15 @@ class _TvHomePageState extends State<TvHomePage> {
           bgm: detailData,
         );
         setState(() {
-          if (_detailCache.length >= _detailCacheLimit) {
-            _detailCache.remove(_detailCache.keys.first);
-          }
-          _detailCache[subjectId] = detail;
+          _detailSubjectId = subjectId;
+          _focusedDetail = detail;
         });
-      } catch (_) {
-        // 首页保留已有卡片数据，详情预载失败不替换可见内容。
+      } catch (error) {
+        debugPrint('TV 首页详情加载失败: $error');
       } finally {
-        _loadingDetails.remove(subjectId);
+        if (request == _detailRequest) {
+          _loadingDetailSubjectId = null;
+        }
       }
     }();
   }
@@ -142,18 +136,7 @@ class _TvHomePageState extends State<TvHomePage> {
 
               const SizedBox(width: 24),
 
-              Expanded(
-                child: IndexedStack(
-                  index: _selectedNavIndex,
-                  children: [
-                    const TvMyPage(),
-                    const TvSearchPage(),
-                    _buildFixedHeaderWaterfallView(),
-                    const TvFavoritesPage(),
-                    const TvSettingsPage(),
-                  ],
-                ),
-              ),
+              Expanded(child: _buildSelectedPage()),
             ],
           ),
         ),
@@ -166,35 +149,52 @@ class _TvHomePageState extends State<TvHomePage> {
     return Column(
       mainAxisAlignment: MainAxisAlignment.start,
       children: [
-        _buildSideIcon(icon: Icons.person_outline_rounded, index: 0),
+        _buildSideIcon(
+          icon: Icons.person_outline_rounded,
+          section: _TvSection.mine,
+        ),
         const SizedBox(height: 20),
-        _buildSideIcon(icon: Icons.search_rounded, index: 1),
+        _buildSideIcon(icon: Icons.search_rounded, section: _TvSection.search),
         const SizedBox(height: 20),
-        _buildSideIcon(icon: Icons.explore_outlined, index: 2, autofocus: true),
+        _buildSideIcon(
+          icon: Icons.explore_outlined,
+          section: _TvSection.home,
+          autofocus: true,
+        ),
         const SizedBox(height: 20),
-        _buildSideIcon(icon: Icons.star_outline_rounded, index: 3),
+        _buildSideIcon(
+          icon: Icons.star_outline_rounded,
+          section: _TvSection.favorites,
+        ),
         const SizedBox(height: 20),
-        _buildSideIcon(icon: Icons.history_rounded, index: 4),
-        const SizedBox(height: 20),
-        _buildSideIcon(icon: Icons.settings_outlined, index: 5),
+        _buildSideIcon(
+          icon: Icons.settings_outlined,
+          section: _TvSection.settings,
+        ),
       ],
     );
   }
 
+  Widget _buildSelectedPage() => switch (_selectedSection) {
+    _TvSection.mine => const TvMyPage(),
+    _TvSection.search => const TvSearchPage(),
+    _TvSection.home => _buildFixedHeaderWaterfallView(),
+    _TvSection.favorites => const TvFavoritesPage(),
+    _TvSection.settings => const TvSettingsPage(),
+  };
+
   Widget _buildSideIcon({
     required IconData icon,
-    required int index,
+    required _TvSection section,
     bool autofocus = false,
   }) {
-    final isSelected = _selectedNavIndex == index;
+    final isSelected = _selectedSection == section;
     final primaryColor = Theme.of(context).colorScheme.primary;
 
     return TvFocusable(
       autofocus: autofocus,
       onPressed: () {
-        setState(() {
-          _selectedNavIndex = index;
-        });
+        if (!isSelected) setState(() => _selectedSection = section);
       },
       borderRadius: BorderRadius.circular(20),
       focusScale: 1.15,
@@ -223,9 +223,8 @@ class _TvHomePageState extends State<TvHomePage> {
           _loadAnimeDetail(currentFocused);
         }
 
-        final rawId = currentFocused?['bgmId'] ?? currentFocused?['id'];
-        final subjectId = BgmUtils.toInt(rawId);
-        final detail = subjectId != null ? _detailCache[subjectId] : null;
+        final subjectId = BgmUtils.toInt(currentFocused?['bgmId']);
+        final detail = subjectId == _detailSubjectId ? _focusedDetail : null;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -342,15 +341,18 @@ class _TvHomePageState extends State<TvHomePage> {
   Widget _buildFixedHeroHeader(Map? item, AnimeDetailViewData? detail) {
     if (item == null && detail == null) return const SizedBox.shrink();
 
-    final title = detail?.title ?? item?['title']?.toString() ?? '你的名字。';
-    final scoreNum = detail?.score ?? _getScoreNumber(item);
+    final title = detail?.title ?? item?['title']?.toString() ?? '';
+    final scoreNum = detail?.score ?? BgmUtils.toDouble(item?['score']) ?? 0;
     final scoreText = scoreNum.toStringAsFixed(1);
-    final summary = (detail?.summary != null && detail!.summary.isNotEmpty)
-        ? detail.summary
-        : _getSummaryText(item);
-    final backdropUrl = detail?.backgroundUrl ?? _getBackdropUrl(item);
-    final logoUrl = detail?.logoUrl ?? _getLogoUrl(item);
-    final rankNum = item?['rank'] ?? item?['ranking'] ?? 1;
+    final summary = detail?.summary ?? item?['summary']?.toString() ?? '';
+    final backdropUrl =
+        detail?.backgroundUrl ??
+        item?['backdropUrl']?.toString() ??
+        item?['bgmImageUrl']?.toString() ??
+        item?['content']?.toString() ??
+        '';
+    final logoUrl = detail?.logoUrl ?? item?['logoUrl']?.toString() ?? '';
+    final rankNum = BgmUtils.toInt(item?['rank']) ?? 0;
 
     return SizedBox(
       height: 370,
@@ -457,17 +459,18 @@ class _TvHomePageState extends State<TvHomePage> {
 
                           _buildStarRating(scoreNum),
 
-                          const SizedBox(width: 28),
-
-                          Text(
-                            'Bangumi #$rankNum',
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.primary,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 0.5,
+                          if (rankNum > 0) ...[
+                            const SizedBox(width: 28),
+                            Text(
+                              'Bangumi #$rankNum',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.primary,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.5,
+                              ),
                             ),
-                          ),
+                          ],
                         ],
                       ),
                     ],
@@ -553,59 +556,9 @@ class _TvHomePageState extends State<TvHomePage> {
       }),
     );
   }
-
-  double _getScoreNumber(Map? item) {
-    if (item == null) return 8.1;
-    final score = item['score'] ?? item['rating']?['score'];
-    final num = BgmUtils.toDouble(score);
-    return (num != null && num > 0) ? num : 8.1;
-  }
-
-  String _getSummaryText(Map? item) {
-    if (item == null) return '';
-    final summary =
-        item['summary'] ??
-        item['content'] ??
-        item['desc'] ??
-        item['description'];
-    if (summary != null && summary.toString().isNotEmpty) {
-      final raw = summary.toString();
-      final cut = raw.indexOf('>');
-      final clean = cut != -1 ? raw.substring(cut + 1).trim() : raw.trim();
-      return clean;
-    }
-    return '';
-  }
-
-  String _getBackdropUrl(Map? item) {
-    if (item == null) return '';
-    final explicitBackdrop =
-        item['backgroundUrl'] ??
-        item['backdrop'] ??
-        item['images']?['backdrops'];
-    if (explicitBackdrop != null && explicitBackdrop.toString().isNotEmpty) {
-      if (explicitBackdrop is List && explicitBackdrop.isNotEmpty) {
-        return explicitBackdrop.first.toString();
-      }
-      return explicitBackdrop.toString();
-    }
-
-    final resolved = BgmUtils.resolveCoverImage(item);
-    if (resolved != null && resolved.isNotEmpty) return resolved;
-
-    return item['cover']?.toString() ?? '';
-  }
-
-  String _getLogoUrl(Map? item) {
-    if (item == null) return '';
-    final logo = item['logoUrl'] ?? item['logo'] ?? item['images']?['logo'];
-    if (logo != null && logo.toString().isNotEmpty) {
-      if (logo is List && logo.isNotEmpty) return logo.first.toString();
-      return logo.toString();
-    }
-    return '';
-  }
 }
+
+enum _TvSection { mine, search, home, favorites, settings }
 
 class _TvPosterCard extends StatelessWidget {
   const _TvPosterCard({

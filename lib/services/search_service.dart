@@ -19,8 +19,8 @@ class SearchService {
 
   static const String _isVerticalLayoutKey = 'search_is_vertical_layout';
 
-  final ValueNotifier<List<dynamic>> resultsNotifier =
-      ValueNotifier<List<dynamic>>(const []);
+  final ValueNotifier<List<Map<String, dynamic>>> resultsNotifier =
+      ValueNotifier<List<Map<String, dynamic>>>(const []);
   final ValueNotifier<int> selectedSourceIndexNotifier = ValueNotifier<int>(0);
   final ValueNotifier<String> keywordNotifier = ValueNotifier<String>('');
   final ValueNotifier<List<String>> searchHistoryNotifier =
@@ -29,10 +29,12 @@ class SearchService {
   final ValueNotifier<bool> isLoadingNotifier = ValueNotifier<bool>(false);
   final ValueNotifier<List<String>> sourceLabelsNotifier =
       ValueNotifier<List<String>>(const ['BGM']);
-  final ValueNotifier<bool> isVerticalLayoutNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> isVerticalLayoutNotifier = ValueNotifier<bool>(
+    false,
+  );
 
-  List<dynamic> get results => resultsNotifier.value;
-  set results(List<dynamic> v) => resultsNotifier.value = v;
+  List<Map<String, dynamic>> get results => resultsNotifier.value;
+  set results(List<Map<String, dynamic>> v) => resultsNotifier.value = v;
 
   int get selectedSourceIndex => selectedSourceIndexNotifier.value;
   set selectedSourceIndex(int v) => selectedSourceIndexNotifier.value = v;
@@ -60,9 +62,8 @@ class SearchService {
   int activeSearchId = 0;
   bool _disposed = false;
 
-  /// Per-page instance so Cookie / request state stays isolated from the
-  /// global [SourceAdapterService.instance] used by management UI.
-  final SourceAdapterService _sourceAdapterService = SourceAdapterService();
+  final SourceAdapterService _sourceAdapterService =
+      SourceAdapterService.instance;
   List<CustomSourceConfig> customSources = [];
   List<AdapterDescriptor> builtinAdapterSources = [];
   SharedPreferences? _prefs;
@@ -112,7 +113,7 @@ class SearchService {
 
   bool isActiveSearch(int searchId) => searchId == activeSearchId;
 
-  Future<List<dynamic>> executeSearch(String searchKey) async {
+  Future<List<Map<String, dynamic>>> executeSearch(String searchKey) async {
     if (_disposed) return const [];
     final query = searchKey.trim();
     if (query.isEmpty) return const [];
@@ -123,7 +124,7 @@ class SearchService {
     return searchResults;
   }
 
-  Future<List<dynamic>> _resolveSearch(String query) {
+  Future<List<Map<String, dynamic>>> _resolveSearch(String query) {
     if (_isGvKey(query)) return _searchByGv(query);
     return _searchSelectedSource(query);
   }
@@ -131,28 +132,51 @@ class SearchService {
   bool _isGvKey(String query) =>
       query.length > gvMinLength && query.startsWith('gv');
 
-  Future<List<dynamic>> _searchByGv(String query) async {
+  Future<List<Map<String, dynamic>>> _searchByGv(String query) async {
     final gv = int.tryParse(query.substring(2));
     if (gv == null) return const [];
 
-    final detail = jsonDecode((await getPostDetail(gv)).data)['data'];
-    return detail == null ? const [] : <dynamic>[detail];
+    final response = jsonDecode((await getPostDetail(gv)).data);
+    final detail = response['data'] as Map<String, dynamic>?;
+    return detail == null ? const [] : [detail];
   }
 
-  Future<List<dynamic>> _searchSelectedSource(String searchKey) async {
+  Future<List<Map<String, dynamic>>> _searchSelectedSource(
+    String searchKey,
+  ) async {
     try {
       if (selectedSourceIndex == 0) {
         final subjects = await BgmService.searchSubjects(searchKey);
-        return subjects.map(_withReliablePoster).toList(growable: false);
+        return [
+          for (final subject in subjects)
+            <String, dynamic>{
+              'source': 'bgm',
+              'title': subject.nameCn?.isNotEmpty == true
+                  ? subject.nameCn
+                  : subject.name ?? '未知标题',
+              'subtitle':
+                  subject.nameCn?.isNotEmpty == true &&
+                      subject.name?.isNotEmpty == true &&
+                      subject.name != subject.nameCn
+                  ? subject.name
+                  : subject.summary ?? noDescriptionText,
+              'content': BgmUtils.bgmCoverProxyUrl(subject.subjectId),
+              'bgmImageUrl': BgmUtils.bgmCoverProxyUrl(subject.subjectId),
+              'bgmId': subject.subjectId,
+              '_heroTag': 'bgm_cover_${subject.subjectId}',
+              if (subject.score != null) 'score': subject.score,
+            },
+        ];
       }
 
       final builtinIndex = selectedSourceIndex - 1;
       if (builtinIndex >= 0 && builtinIndex < builtinAdapterSources.length) {
-        return _sourceAdapterService.searchBuiltin(
+        final results = await _sourceAdapterService.search(
+          builtinAdapterSources[builtinIndex].key,
           searchKey,
-          builtinAdapterSources[builtinIndex],
           fallbackDescription: noDescriptionText,
         );
+        return _prepareAdapterResults(results);
       }
 
       final customIndex = builtinIndex - builtinAdapterSources.length;
@@ -160,29 +184,28 @@ class SearchService {
         return const [];
       }
 
-      return _sourceAdapterService.searchCustom(
+      final results = await _sourceAdapterService.search(
+        AdapterRegistry.customSourceKey(customSources[customIndex].id),
         searchKey,
-        customSources[customIndex],
         fallbackDescription: noDescriptionText,
         skipBgmEnhancement: true,
       );
+      return _prepareAdapterResults(results);
     } catch (error) {
       debugPrint('Search failed for $selectedSourceLabel: $error');
       return const [];
     }
   }
 
-  BgmSubjectInfo _withReliablePoster(BgmSubjectInfo subject) {
-    return BgmSubjectInfo(
-      subjectId: subject.subjectId,
-      name: subject.name,
-      nameCn: subject.nameCn,
-      summary: subject.summary,
-      imageUrl: BgmUtils.bgmCoverProxyUrl(subject.subjectId),
-      score: subject.score,
-      aliases: subject.aliases,
-      hasDetail: subject.hasDetail,
-    );
+  List<Map<String, dynamic>> _prepareAdapterResults(
+    List<Map<String, dynamic>> results,
+  ) {
+    for (final data in results) {
+      data['content'] = data['image'];
+      data['subtitle'] = data['description'];
+      data['tag'] = data['sourceDisplayName'];
+    }
+    return results;
   }
 
   Future<Map<String, dynamic>?> buildPlayerData(Map<String, dynamic> item) =>
@@ -241,7 +264,6 @@ class SearchService {
     if (_disposed) return;
     _disposed = true;
     activeSearchId++;
-    _sourceAdapterService.dispose();
     resultsNotifier.dispose();
     selectedSourceIndexNotifier.dispose();
     keywordNotifier.dispose();
@@ -249,5 +271,6 @@ class SearchService {
     showResultsNotifier.dispose();
     isLoadingNotifier.dispose();
     sourceLabelsNotifier.dispose();
+    isVerticalLayoutNotifier.dispose();
   }
 }

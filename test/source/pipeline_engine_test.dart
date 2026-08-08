@@ -613,7 +613,7 @@ void main() {
       'https://example.com/index.php/ajax/suggest?mid=1&wd=x&limit=20':
           '{"list":[]}',
       'https://example.com/ajax/suggest?mid=1&wd=x&limit=20':
-          '{"list":[{"id":"7","name":"fallback"}]}',
+          '{"list":[{"id":"7","name":"x fallback"}]}',
     });
     final rule = SourceRule.fromJson({
       'format': kSourceRuleFormatV2,
@@ -1033,25 +1033,21 @@ void main() {
     expect(PipelineSourceAdapter(rule).useSystemProxy, isFalse);
   });
 
-  test('Cycani validates direct media during auto-match', () {
-    SourceRule rule(String id) => SourceRule.fromJson({
+  test('auto-match validation is declared by the rule', () {
+    SourceRule rule(bool validates) => SourceRule.fromJson({
       'format': kSourceRuleFormatV2,
-      'id': id,
-      'name': id,
+      'id': 'source',
+      'name': 'source',
       'baseUrl': 'https://example.com',
       'search': const [],
       'detail': const [],
-      'play': const [],
+      'play': [
+        {'op': 'videoUrl', 'validateAutoMatchedUrls': validates},
+      ],
     });
 
-    expect(
-      PipelineSourceAdapter(rule('cycani')).validateAutoMatchedUrls,
-      isTrue,
-    );
-    expect(
-      PipelineSourceAdapter(rule('other')).validateAutoMatchedUrls,
-      isFalse,
-    );
+    expect(PipelineSourceAdapter(rule(true)).validateAutoMatchedUrls, isTrue);
+    expect(PipelineSourceAdapter(rule(false)).validateAutoMatchedUrls, isFalse);
   });
 
   test('Cycani uses HTTP search before the WebView fallback', () async {
@@ -1068,7 +1064,7 @@ void main() {
     final results = await interp.runSearch(rule, host, 'x');
 
     expect(results.single.name, 'HTTP x result');
-    expect(results.single.seriesId, 'https://example.com/bangumi/3049.html');
+    expect(results.single.seriesId, 'https://example.com/anime/3049');
     expect(host.fetched, hasLength(1));
   });
 
@@ -1078,16 +1074,17 @@ void main() {
           as Map<String, dynamic>,
     );
     final host = FakeHost({
-      'https://example.com/api/videos/3049/sections?player_code=cychub&page=1&page_size=100': jsonEncode({
-        'code': 0,
-        'msg': '',
-        'data': {
-          'list': [
-            {'id': 1001, 'title': '第01集'},
-            {'id': 1002, 'title': '第02集'},
-          ],
-        },
-      }),
+      'https://example.com/api/videos/3049/sections?player_code=cychub&page=1&page_size=100':
+          jsonEncode({
+            'code': 0,
+            'msg': '',
+            'data': {
+              'list': [
+                {'id': 1001, 'title': '第01集'},
+                {'id': 1002, 'title': '第02集'},
+              ],
+            },
+          }),
     });
 
     final sources = await interp.runDetail(
@@ -1099,11 +1096,12 @@ void main() {
     expect(sources, hasLength(1));
     expect(sources.first.episodes, hasLength(2));
     expect(sources.first.episodes.first.name, '第01集');
-    expect(sources.first.episodes.first.episodeId, '/api/sections/1001/play-url');
+    expect(
+      sources.first.episodes.first.episodeId,
+      '/api/sections/1001/play-url',
+    );
     expect(host.fetched, hasLength(1));
   });
-
-
 
   test('custom source persistence keeps directConnection', () {
     final config = CustomSourceConfig.fromJson({

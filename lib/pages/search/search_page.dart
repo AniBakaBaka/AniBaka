@@ -4,8 +4,6 @@ import 'package:baka/instance.dart';
 import 'package:baka/pages/source/source_management_page.dart';
 import 'package:baka/services/search_service.dart';
 import 'package:baka/services/navigation_service.dart';
-import 'package:baka/source/source_registry.dart';
-import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/widgets/anime/post_card.dart';
 import 'package:flutter/material.dart';
 
@@ -21,12 +19,9 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   static const _debounceDuration = Duration(milliseconds: 300);
-  static const _unknownTitle = '未知标题';
-  static const _noDescription = '暂无描述';
-
   final _searchController = TextEditingController();
   final _inFlightSearches =
-      <({int source, String query}), Future<List<dynamic>>>{};
+      <({int source, String query}), Future<List<Map<String, dynamic>>>>{};
   late final SearchService _searchService;
   Timer? _debounce;
 
@@ -94,9 +89,9 @@ class _SearchPageState extends State<SearchPage> {
     );
 
     try {
-      final rawResults = await request;
+      final results = await request;
       if (!mounted || !_searchService.isActiveSearch(searchId)) return;
-      _searchService.results = _normalizeResults(rawResults);
+      _searchService.results = results;
     } catch (error) {
       debugPrint('Search error for "$query": $error');
       if (!mounted || !_searchService.isActiveSearch(searchId)) return;
@@ -109,61 +104,6 @@ class _SearchPageState extends State<SearchPage> {
         _searchService.isLoading = false;
       }
     }
-  }
-
-  List<Map<String, dynamic>> _normalizeResults(List<dynamic> rawResults) {
-    final results = <Map<String, dynamic>>[];
-
-    for (final item in rawResults) {
-      if (item is BgmSubjectInfo) {
-        final chineseTitle = item.nameCn?.trim();
-        final originalTitle = item.name?.trim();
-        final title = chineseTitle?.isNotEmpty == true
-            ? chineseTitle!
-            : originalTitle?.isNotEmpty == true
-            ? originalTitle!
-            : _unknownTitle;
-        final subtitle =
-            chineseTitle?.isNotEmpty == true &&
-                originalTitle?.isNotEmpty == true &&
-                originalTitle != chineseTitle
-            ? originalTitle!
-            : item.summary ?? _noDescription;
-        final heroTag = 'bgm_cover_${item.subjectId}';
-
-        results.add({
-          'source': 'bgm',
-          'title': title,
-          'subtitle': subtitle,
-          'content': item.imageUrl,
-          'bgmId': item.subjectId,
-          'bgmImageUrl': item.imageUrl,
-          '_heroTag': heroTag,
-          if (item.score != null) 'score': item.score,
-        });
-        continue;
-      }
-
-      if (item is! Map) continue;
-      final data = Map<String, dynamic>.from(item);
-      final source = data['source']?.toString();
-
-      if (AdapterRegistry.isAdapterSource(source)) {
-        if (data['content']?.toString().isNotEmpty != true) {
-          data['content'] = data['image'];
-        }
-        if (data['subtitle']?.toString().isNotEmpty != true) {
-          data['subtitle'] = data['description'] ?? _noDescription;
-        }
-        if (data['tag']?.toString().isNotEmpty != true) {
-          data['tag'] = data['sourceDisplayName'] ?? source ?? '自定义源';
-        }
-      }
-
-      results.add(data);
-    }
-
-    return List.unmodifiable(results);
   }
 
   @override
@@ -184,8 +124,7 @@ class _SearchPageState extends State<SearchPage> {
                         _buildVerticalSourceSidebar(),
                         Expanded(
                           child: ValueListenableBuilder<bool>(
-                            valueListenable:
-                                _searchService.showResultsNotifier,
+                            valueListenable: _searchService.showResultsNotifier,
                             builder: (context, showResults, _) {
                               if (!showResults) {
                                 return ValueListenableBuilder<List<String>>(
@@ -195,7 +134,10 @@ class _SearchPageState extends State<SearchPage> {
                                     return CustomScrollView(
                                       physics: const BouncingScrollPhysics(),
                                       slivers: [
-                                        _buildHistory(history, isVertical: true),
+                                        _buildHistory(
+                                          history,
+                                          isVertical: true,
+                                        ),
                                       ],
                                     );
                                   },
@@ -212,14 +154,19 @@ class _SearchPageState extends State<SearchPage> {
                                     );
                                   }
 
-                                  return ValueListenableBuilder<List<dynamic>>(
+                                  return ValueListenableBuilder<
+                                    List<Map<String, dynamic>>
+                                  >(
                                     valueListenable:
                                         _searchService.resultsNotifier,
                                     builder: (context, results, _) {
                                       return CustomScrollView(
                                         physics: const BouncingScrollPhysics(),
                                         slivers: [
-                                          _buildResults(results, isVertical: true),
+                                          _buildResults(
+                                            results,
+                                            isVertical: true,
+                                          ),
                                           const SliverToBoxAdapter(
                                             child: SizedBox(height: 40),
                                           ),
@@ -249,7 +196,8 @@ class _SearchPageState extends State<SearchPage> {
                     if (!showResults) {
                       return ValueListenableBuilder<List<String>>(
                         valueListenable: _searchService.searchHistoryNotifier,
-                        builder: (context, history, _) => _buildHistory(history),
+                        builder: (context, history, _) =>
+                            _buildHistory(history),
                       );
                     }
 
@@ -262,11 +210,15 @@ class _SearchPageState extends State<SearchPage> {
                             if (isLoading) {
                               return const SliverFillRemaining(
                                 hasScrollBody: false,
-                                child: Center(child: CircularProgressIndicator()),
+                                child: Center(
+                                  child: CircularProgressIndicator(),
+                                ),
                               );
                             }
 
-                            return ValueListenableBuilder<List<dynamic>>(
+                            return ValueListenableBuilder<
+                              List<Map<String, dynamic>>
+                            >(
                               valueListenable: _searchService.resultsNotifier,
                               builder: (context, results, _) =>
                                   _buildResults(results),
@@ -299,9 +251,7 @@ class _SearchPageState extends State<SearchPage> {
         decoration: BoxDecoration(
           color: theme.cardColor,
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: theme.dividerColor.withValues(alpha: 0.1),
-          ),
+          border: Border.all(color: theme.dividerColor.withValues(alpha: 0.1)),
         ),
         child: Row(
           children: [
@@ -355,8 +305,9 @@ class _SearchPageState extends State<SearchPage> {
                   ),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
-                  color:
-                      isVertical ? theme.colorScheme.primary : theme.hintColor,
+                  color: isVertical
+                      ? theme.colorScheme.primary
+                      : theme.hintColor,
                   onPressed: () {
                     _searchService.isVerticalLayout = !isVertical;
                   },
@@ -414,9 +365,7 @@ class _SearchPageState extends State<SearchPage> {
     _debounce?.cancel();
     _searchService.activeSearchId++;
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => const SourceManagementPage(),
-      ),
+      MaterialPageRoute<void>(builder: (_) => const SourceManagementPage()),
     );
     if (!mounted) return;
 
@@ -441,8 +390,9 @@ class _SearchPageState extends State<SearchPage> {
             return Container(
               width: sidebarWidth,
               decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerLow
-                    .withValues(alpha: 0.4),
+                color: theme.colorScheme.surfaceContainerLow.withValues(
+                  alpha: 0.4,
+                ),
                 border: Border(
                   right: BorderSide(
                     color: theme.dividerColor.withValues(alpha: 0.08),
@@ -451,80 +401,79 @@ class _SearchPageState extends State<SearchPage> {
               ),
               child: ListView.builder(
                 physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.symmetric(
-                  vertical: 6,
-                  horizontal: 4,
-                ),
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                 itemCount: sources.length,
                 itemBuilder: (context, index) {
-                        final isSelected = selectedSource == index;
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(8),
-                            onTap: () {
-                              _searchService.selectedSourceIndex = index;
-                              if (_searchService.keyword.trim().isNotEmpty) {
-                                _search(_searchService.keyword);
-                              }
-                            },
-                            child: AnimatedContainer(
+                  final isSelected = selectedSource == index;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () {
+                        _searchService.selectedSourceIndex = index;
+                        if (_searchService.keyword.trim().isNotEmpty) {
+                          _search(_searchService.keyword);
+                        }
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? theme.colorScheme.primaryContainer.withValues(
+                                  alpha: 0.65,
+                                )
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isSelected
+                                ? theme.colorScheme.primary.withValues(
+                                    alpha: 0.35,
+                                  )
+                                : Colors.transparent,
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            AnimatedContainer(
                               duration: const Duration(milliseconds: 180),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 7,
+                              width: 3,
+                              height: isSelected ? 14 : 0,
+                              margin: EdgeInsets.only(
+                                right: isSelected ? 5 : 0,
                               ),
                               decoration: BoxDecoration(
-                                color: isSelected
-                                    ? theme.colorScheme.primaryContainer
-                                        .withValues(alpha: 0.65)
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: isSelected
-                                      ? theme.colorScheme.primary
-                                          .withValues(alpha: 0.35)
-                                      : Colors.transparent,
-                                  width: 1,
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  AnimatedContainer(
-                                    duration: const Duration(milliseconds: 180),
-                                    width: 3,
-                                    height: isSelected ? 14 : 0,
-                                    margin: EdgeInsets.only(
-                                      right: isSelected ? 5 : 0,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: theme.colorScheme.primary,
-                                      borderRadius: BorderRadius.circular(1.5),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: Text(
-                                      sources[index],
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: isSelected
-                                            ? FontWeight.w600
-                                            : FontWeight.normal,
-                                        color: isSelected
-                                            ? theme.colorScheme.primary
-                                            : theme.textTheme.bodyMedium?.color,
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                                color: theme.colorScheme.primary,
+                                borderRadius: BorderRadius.circular(1.5),
                               ),
                             ),
-                          ),
-                        );
-                      },
+                            Expanded(
+                              child: Text(
+                                sources[index],
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: isSelected
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
+                                  color: isSelected
+                                      ? theme.colorScheme.primary
+                                      : theme.textTheme.bodyMedium?.color,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
+                  );
+                },
+              ),
             );
           },
         );
@@ -651,7 +600,10 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  Widget _buildResults(List<dynamic> results, {bool isVertical = false}) {
+  Widget _buildResults(
+    List<Map<String, dynamic>> results, {
+    bool isVertical = false,
+  }) {
     if (results.isEmpty) {
       return const SliverFillRemaining(
         hasScrollBody: false,
@@ -700,7 +652,7 @@ class _SearchPageState extends State<SearchPage> {
           mainAxisSpacing: mainSpacing,
         ),
         delegate: SliverChildBuilderDelegate((context, index) {
-          final data = results[index] as Map<String, dynamic>;
+          final data = results[index];
           final source = data['source']?.toString();
           VoidCallback? onTap;
 
@@ -714,11 +666,7 @@ class _SearchPageState extends State<SearchPage> {
                   'bgmImageUrl': data['bgmImageUrl'],
                 if (data['score'] != null) 'score': data['score'],
               };
-              NavigationService.toPlayer(
-                context,
-                playerData,
-                autoMatch: true,
-              );
+              NavigationService.toPlayer(context, playerData, autoMatch: true);
             };
           } else if (source != null && source.isNotEmpty) {
             onTap = () => _openSeries(data);
@@ -740,11 +688,7 @@ class _SearchPageState extends State<SearchPage> {
       final playerData = await _searchService.buildPlayerData(item);
       if (!mounted) return;
       if (playerData != null) {
-        NavigationService.toPlayer(
-          context,
-          playerData,
-          autoMatch: false,
-        );
+        NavigationService.toPlayer(context, playerData, autoMatch: false);
         return;
       }
 

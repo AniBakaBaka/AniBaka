@@ -45,18 +45,9 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
   Map<String, Uri> _hlsProxyTargets = const {};
   Map<String, String> _hlsProxyHeaders = const {};
   late final _playFeatures = _inspectPlayFeatures(rule.play);
-  // 遗留规则兼容 shim（与下方 validateAutoMatchedUrls 的 cycani 特判同类）：
-  // 早期已安装副本的 play 步骤缺失这些 flag，且遗留规则 play 可能为空列表，
-  // 无法经 RuleMigrator 注入，只能按 id 兜底。新规则应在步骤里显式声明。
-  late final bool _followsEmbeddedPlayer =
-      rule.id == '4kcz' || _playFeatures.followsEmbeddedPlayer;
-  late final bool _materializesHls =
-      rule.id == 'ani_pekolove' || _playFeatures.materializesHls;
-  // xifanacg 早期已安装副本（Rule Hub rev < 2）缺失 resolveMediaRedirects flag；
-  // 该源的 apn.moedot.net 媒体链会 302 到 wo.cn 下载域，后者拒绝携带
-  // xifanacg Referer 的请求（400），必须经 RemoteMediaRedirectResolver 预解析。
-  late final bool _resolvesMediaRedirects =
-      rule.id == 'xifanacg' || _playFeatures.resolvesMediaRedirects;
+  bool get _followsEmbeddedPlayer => _playFeatures.followsEmbeddedPlayer;
+  bool get _materializesHls => _playFeatures.materializesHls;
+  bool get _resolvesMediaRedirects => _playFeatures.resolvesMediaRedirects;
   // 同一页面 HTML 常被连续多个 select/searchList/episodes 步骤解析；
   // 按 identity 缓存最近一次的 DOM，避免重复全量解析（消费方均只读）。
   String? _lastParsedHtml;
@@ -96,10 +87,8 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
   @override
   bool get validatesOwnUrls => _playFeatures.validatesWithCookies;
 
-  // cycani 内置副本经 BundledRuleStore 直载 assets 规则，不经过
-  // RuleMigrator.ruleForConfig 的 flag 注入，故保留按 id 特判。
   @override
-  bool get validateAutoMatchedUrls => rule.id == 'cycani';
+  bool get validateAutoMatchedUrls => _playFeatures.validateAutoMatchedUrls;
 
   @override
   void dispose() {
@@ -119,79 +108,44 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
 
   @override
   Future<List<Series>> search(
-    String bangumiName,
-    String searchKeyword, {
+    String query, {
     bool enhanceWithBgm = true,
   }) async {
     try {
-      final unique = <String, Series>{};
-      if (bangumiName.isNotEmpty) {
-        for (final series in await _interpreter.runSearch(
-          rule,
-          this,
-          bangumiName,
-        )) {
-          unique[series.seriesId] = series;
-        }
-      }
-      if (searchKeyword.isNotEmpty && searchKeyword != bangumiName) {
-        for (final series in await _interpreter.runSearch(
-          rule,
-          this,
-          searchKeyword,
-        )) {
-          unique[series.seriesId] = series;
-        }
-      }
-      final series = unique.values.toList(growable: false);
-      if (!enhanceWithBgm) return series;
-      try {
-        return await _enhanceWithBgmInfo(series);
-      } catch (e) {
-        debugPrint('$name BGM enhancement failed: $e');
-        return series;
-      }
-    } catch (e) {
-      debugPrint('$name 搜索失败: $e');
-      return [];
+      final series = await _interpreter.runSearch(rule, this, query);
+      if (enhanceWithBgm) await _enhanceWithBgmInfo(series);
+      return series;
     } finally {
       _dropParseCache();
     }
   }
 
-  Future<List<Series>> _enhanceWithBgmInfo(
+  Future<void> _enhanceWithBgmInfo(
     List<Series> seriesList, {
     int concurrency = 5,
   }) async {
-    final results = List<Series>.of(seriesList, growable: false);
     for (var i = 0; i < seriesList.length; i += concurrency) {
       final end = (i + concurrency).clamp(0, seriesList.length);
-      final enhanced = await Future.wait(
-        List<Future<Series>>.generate(end - i, (offset) async {
+      await Future.wait(
+        List<Future<void>>.generate(end - i, (offset) async {
           final series = seriesList[i + offset];
           try {
             final subject = await BgmService.resolveSubject(title: series.name);
-            return Series(
-              series.seriesId,
-              series.name,
-              image: subject?.imageUrl ?? series.image,
-              description: subject?.summary ?? series.description ?? '暂无简介',
-              bgmId: subject?.subjectId ?? series.bgmId,
-              score: subject?.score ?? series.score,
-            );
-          } catch (_) {
-            return series;
-          }
+            series.image = subject?.imageUrl ?? series.image;
+            series.description =
+                subject?.summary ?? series.description ?? '暂无简介';
+            series.bgmId = subject?.subjectId ?? series.bgmId;
+            series.score = subject?.score ?? series.score;
+          } catch (_) {}
         }, growable: false),
       );
-      results.setRange(i, end, enhanced);
     }
-    return results;
   }
 
   @override
-  Future<List<Source>> getSources(String seriesId) => _interpreter
+  Future<PlaybackCatalog> getPlaybackCatalog(String seriesId) => _interpreter
       .runDetail(rule, this, seriesId)
+      .then(PlaybackCatalog.fromSources)
       .whenComplete(_dropParseCache);
 
   @override
@@ -655,6 +609,7 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
     bool usesDynamicMetadata,
     bool usesCookies,
     bool validatesWithCookies,
+    bool validateAutoMatchedUrls,
     bool materializesHls,
     bool resolvesMediaRedirects,
     bool followsEmbeddedPlayer,
@@ -664,6 +619,7 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
     var usesDynamicMetadata = false;
     var usesCookies = false;
     var validatesWithCookies = false;
+    var validateAutoMatchedUrls = false;
     var materializesHls = false;
     var resolvesMediaRedirects = false;
     var followsEmbeddedPlayer = false;
@@ -676,6 +632,7 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
         }
         if (step.op == 'anime1Play') usesCookies = true;
         validatesWithCookies |= step.flag('validateWithCookies');
+        validateAutoMatchedUrls |= step.flag('validateAutoMatchedUrls');
         materializesHls |= step.flag('materializeHls');
         resolvesMediaRedirects |= step.flag('resolveMediaRedirects');
         followsEmbeddedPlayer |= step.flag('followEmbeddedPlayer');
@@ -693,6 +650,7 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
       usesDynamicMetadata: usesDynamicMetadata,
       usesCookies: usesCookies,
       validatesWithCookies: validatesWithCookies,
+      validateAutoMatchedUrls: validateAutoMatchedUrls,
       materializesHls: materializesHls,
       resolvesMediaRedirects: resolvesMediaRedirects,
       followsEmbeddedPlayer: followsEmbeddedPlayer,

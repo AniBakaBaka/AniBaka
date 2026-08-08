@@ -61,12 +61,8 @@ abstract class AdapterBase {
     _dio = null;
   }
 
-  Future<List<Series>> search(
-    String bangumiName,
-    String searchKeyword, {
-    bool enhanceWithBgm = true,
-  });
-  Future<List<Source>> getSources(String seriesId);
+  Future<List<Series>> search(String query, {bool enhanceWithBgm = true});
+  Future<PlaybackCatalog> getPlaybackCatalog(String seriesId);
 
   Future<String> getDownloadUrl(String episodeId);
 
@@ -141,10 +137,7 @@ abstract class AdapterBase {
   ///
   /// 与「URL 形态像 m3u8」不同：很多源会吐出 403/空壳 CDN 地址，
   /// 形态合法但播放器打不开——此类必须判为不可达。
-  Future<bool> isPlaybackUrlReachable(
-    String url, {
-    Duration? timeout,
-  }) async {
+  Future<bool> isPlaybackUrlReachable(String url, {Duration? timeout}) async {
     final value = url.trim();
     if (value.isEmpty) return false;
     final lower = value.toLowerCase();
@@ -211,10 +204,7 @@ abstract class AdapterBase {
     ),
   );
 
-  Future<bool> _isDirectUrlBlocked(
-    String url, {
-    Duration? timeout,
-  }) async {
+  Future<bool> _isDirectUrlBlocked(String url, {Duration? timeout}) async {
     if (!url.startsWith('http')) return true;
     // 非视频形态（HTML 页等）直接视为不可播，避免误当直链。
     if (!VideoUrlExtractor.isVideoUrl(url) &&
@@ -287,7 +277,7 @@ abstract class AdapterBase {
             .get(
               url,
               options: Options(
-                headers: {...headers, 'Range': 'bytes=0-1023'},
+                headers: {...headers, 'Range': 'bytes=0-0'},
                 responseType: ResponseType.bytes,
                 receiveTimeout: getTimeout,
                 sendTimeout: getTimeout,

@@ -313,7 +313,7 @@ class _CustomSourceEditPageState extends State<CustomSourceEditPage> {
     _runTest(_TestStage.search, (adapter) async {
       final keyword = _testKeywordController.text.trim();
       if (keyword.isEmpty) throw const FormatException('请输入测试关键词');
-      final results = await adapter.search('', keyword);
+      final results = await adapter.search(keyword);
       if (results.isEmpty) return '⚠️ 未找到搜索结果';
 
       _testSeriesUrl = results.first.seriesId;
@@ -329,22 +329,13 @@ class _CustomSourceEditPageState extends State<CustomSourceEditPage> {
     final seriesUrl = _testSeriesUrl;
     if (seriesUrl == null) return;
     _runTest(_TestStage.episodes, (adapter) async {
-      final sources = await adapter.getSources(seriesUrl);
-      if (sources.isEmpty) return '⚠️ 未提取到播放线路';
+      final catalog = await adapter.getPlaybackCatalog(seriesUrl);
+      if (catalog.isEmpty) return '⚠️ 未提取到播放线路';
 
-      for (final source in sources) {
-        if (source.episodes.isNotEmpty) {
-          _testEpisodeUrl = source.episodes.first.episodeId;
-          break;
-        }
-      }
-      final preview = sources
-          .map(
-            (source) =>
-                '${source.sourceName ?? '默认线路'}：${source.episodes.length} 集',
-          )
-          .join('\n');
-      return '✅ 找到 ${sources.length} 条播放线路\n\n$preview';
+      _testEpisodeUrl = catalog.episodes.first.lines.first;
+      final preview = catalog.sourceNames.join('\n');
+      return '✅ 找到 ${catalog.sourceNames.length} 条播放线路，'
+          '${catalog.episodes.length} 集\n\n$preview';
     });
   }
 

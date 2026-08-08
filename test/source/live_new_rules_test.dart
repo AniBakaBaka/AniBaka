@@ -81,7 +81,7 @@ Future<void> _probe(
   }
   final adapter = PipelineSourceAdapter(rule);
   var series = <dynamic>[];
-  series = await adapter.search('', keyword, enhanceWithBgm: false);
+  series = await adapter.search(keyword, enhanceWithBgm: false);
   // ignore: avoid_print
   print('[$file] search "$keyword" -> ${series.length} 条');
   for (final s in series.take(3)) {
@@ -348,7 +348,7 @@ void main() {
         final source = sources.firstWhere(
           (source) => source.episodes.isNotEmpty,
         );
-        final episodeId = source.episodes.first.episodeId as String;
+        final episodeId = source.episodes.first.episodeId;
         final media = await adapter.resolvePlaybackMedia(episodeId);
         // ignore: avoid_print
         print('[lm6 ecvod] $episodeId -> ${media.url}');

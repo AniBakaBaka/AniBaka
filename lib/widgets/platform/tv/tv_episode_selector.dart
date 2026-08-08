@@ -13,8 +13,8 @@ class TvEpisodeSelector extends StatefulWidget {
   final int currentIndex;
   final int currUrl;
   final List<String>? sourceNames;
-  final Function(int) onEpisodeSelected;
-  final Function(int) onUrlChanged;
+  final ValueChanged<int> onEpisodeSelected;
+  final ValueChanged<int>? onUrlChanged;
   final VoidCallback onClose;
   final int? bgmId;
   final int? tmdbId;
@@ -25,8 +25,8 @@ class TvEpisodeSelector extends StatefulWidget {
     required this.currentIndex,
     required this.currUrl,
     required this.onEpisodeSelected,
-    required this.onUrlChanged,
     required this.onClose,
+    this.onUrlChanged,
     this.sourceNames,
     this.bgmId,
     this.tmdbId,
@@ -39,6 +39,7 @@ class TvEpisodeSelector extends StatefulWidget {
 }
 
 class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
+  static const _stillsCacheLimit = 5;
   int _tabIndex = 0; // 0: 选集, 1: 线路
   late int _focusedIndex;
   final ScrollController _horizontalScrollController = ScrollController();
@@ -112,7 +113,7 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
     if (!_sortAscending) {
       targetIndex = _episodeIndexes.length - targetIndex - 1;
     }
-    final cardWidth = (110.0 * 16 / 9) + 14.0; // 16:9 card width + spacing
+    const cardWidth = (110.0 * 16 / 9) + 14.0; // 16:9 card width + spacing
     final targetOffset = (targetIndex * cardWidth - 80.0).clamp(
       0.0,
       _horizontalScrollController.position.maxScrollExtent,
@@ -124,44 +125,40 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
     );
   }
 
-  /// 共享从单一数据源获取剧照，绝不重复拉取
+  /// 只保留当前集及相邻集；相邻预取不能递归扩散到整季。
   void _fetchEpisodeDetails(int episodeIndex) {
+    _loadEpisodeDetails(episodeIndex);
+    _loadEpisodeDetails(episodeIndex - 1);
+    _loadEpisodeDetails(episodeIndex + 1);
+  }
+
+  Future<void> _loadEpisodeDetails(int episodeIndex) async {
     if (episodeIndex < 0 || episodeIndex >= widget.videoList.length) return;
     if (_stillsCache.containsKey(episodeIndex) ||
-        _loadingEpisodes.contains(episodeIndex)) {
+        !_loadingEpisodes.add(episodeIndex)) {
       return;
     }
 
-    _loadingEpisodes.add(episodeIndex);
-    final epNum = episodeIndex + 1;
-
-    getEpisodeStills(
-      bgmId: widget.bgmId,
-      tmdbId: widget.tmdbId,
-      tvdbId: widget.tvdbId,
-      season: 1,
-      episode: epNum,
-    ).then((data) {
-      if (mounted) {
-        _loadingEpisodes.remove(episodeIndex);
-        if (data != null) {
-          setState(() {
-            _stillsCache[episodeIndex] = data;
-          });
+    try {
+      final data = await getEpisodeStills(
+        bgmId: widget.bgmId,
+        tmdbId: widget.tmdbId,
+        tvdbId: widget.tvdbId,
+        season: 1,
+        episode: episodeIndex + 1,
+      );
+      if (!mounted || data == null) return;
+      setState(() {
+        if (_stillsCache.length >= _stillsCacheLimit) {
+          _stillsCache.remove(_stillsCache.keys.first);
         }
-      }
-    }).catchError((_) {
+        _stillsCache[episodeIndex] = data;
+      });
+    } catch (error) {
+      debugPrint('获取 TV 剧集剧照失败: $error');
+    } finally {
       if (mounted) {
         _loadingEpisodes.remove(episodeIndex);
-      }
-    });
-
-    for (final nextEp in [episodeIndex - 1, episodeIndex + 1]) {
-      if (nextEp >= 0 &&
-          nextEp < widget.videoList.length &&
-          !_stillsCache.containsKey(nextEp) &&
-          !_loadingEpisodes.contains(nextEp)) {
-        _fetchEpisodeDetails(nextEp);
       }
     }
   }
@@ -212,26 +209,14 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                Colors.black.withValues(alpha: 0.35),
-                Colors.black.withValues(alpha: 0.85),
-                Colors.black.withValues(alpha: 0.96),
+                Colors.transparent,
+                Colors.black.withValues(alpha: 0.15),
+                Colors.black.withValues(alpha: 0.55),
+                Colors.black.withValues(alpha: 0.78),
               ],
-              stops: const [0.0, 0.45, 1.0],
+              stops: const [0.0, 0.55, 0.85, 1.0],
             ),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            border: Border(
-              top: BorderSide(
-                color: primaryColor.withValues(alpha: 0.4),
-                width: 1.5,
-              ),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.6),
-                blurRadius: 36,
-                offset: const Offset(0, -10),
-              ),
-            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -259,14 +244,16 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
   Widget _buildFocusedDetailsHeader(Color primaryColor, bool showLineTab) {
     final epItem =
         (_focusedIndex >= 0 && _focusedIndex < widget.videoList.length)
-            ? widget.videoList[_focusedIndex]
-            : null;
+        ? widget.videoList[_focusedIndex]
+        : null;
     final stillData = _stillsCache[_focusedIndex];
 
     final stillUrl = _getEpisodeStillUrl(_focusedIndex);
 
-    final name = BgmUtils.trimmed(stillData?['name']) ?? epItem?.title ?? '剧集详情';
-    final overview = BgmUtils.trimmed(stillData?['overview']) ??
+    final name =
+        BgmUtils.trimmed(stillData?['name']) ?? epItem?.title ?? '剧集详情';
+    final overview =
+        BgmUtils.trimmed(stillData?['overview']) ??
         (epItem != null ? '第 ${_focusedIndex + 1} 集' : '');
     final airDate = BgmUtils.trimmed(stillData?['air_date']);
     final isPlaying = _focusedIndex == widget.currentIndex;
@@ -349,11 +336,13 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
                         ),
                         decoration: BoxDecoration(
                           color: Colors.green.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(6),
+                          borderRadius: const BorderRadius.all(
+                            Radius.circular(6),
+                          ),
                         ),
-                        child: Row(
+                        child: const Row(
                           mainAxisSize: MainAxisSize.min,
-                          children: const [
+                          children: [
                             Icon(
                               Icons.play_circle_fill,
                               color: Colors.greenAccent,
@@ -556,16 +545,17 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
                                   placeholder: (context, url) => Container(
                                     color: context.tvHighlightColor(0.05),
                                   ),
-                                  errorWidget: (context, url, error) => Container(
-                                    color: context.tvHighlightColor(0.08),
-                                    child: Center(
-                                      child: Icon(
-                                        Icons.play_circle_outline,
-                                        color: context.tvTextHintColor,
-                                        size: 32,
+                                  errorWidget: (context, url, error) =>
+                                      Container(
+                                        color: context.tvHighlightColor(0.08),
+                                        child: Center(
+                                          child: Icon(
+                                            Icons.play_circle_outline,
+                                            color: context.tvTextHintColor,
+                                            size: 32,
+                                          ),
+                                        ),
                                       ),
-                                    ),
-                                  ),
                                 )
                               : Container(
                                   color: context.tvHighlightColor(0.08),
@@ -687,7 +677,8 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
       itemBuilder: (context, index) {
         final lineIndex = index + 1;
         final isSelected = lineIndex == widget.currUrl;
-        final lineName = (widget.sourceNames != null &&
+        final lineName =
+            (widget.sourceNames != null &&
                 lineIndex > 0 &&
                 lineIndex <= widget.sourceNames!.length)
             ? widget.sourceNames![lineIndex - 1]
@@ -697,7 +688,7 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
           padding: const EdgeInsets.only(right: 14),
           child: TvFocusable(
             autofocus: isSelected,
-            onPressed: () => widget.onUrlChanged(lineIndex),
+            onPressed: () => widget.onUrlChanged?.call(lineIndex),
             borderRadius: BorderRadius.circular(12),
             focusScale: 1.04,
             enableGlow: false,
@@ -732,7 +723,9 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
                     style: TextStyle(
                       color: isSelected ? primaryColor : context.tvTextColor,
                       fontSize: 15,
-                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                      fontWeight: isSelected
+                          ? FontWeight.w700
+                          : FontWeight.w500,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,

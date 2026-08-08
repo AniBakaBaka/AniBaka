@@ -33,12 +33,12 @@ class _KeepAliveAdapter extends AdapterBase {
   );
 
   @override
-  Future<List<Source>> getSources(String seriesId) async => const [];
+  Future<PlaybackCatalog> getPlaybackCatalog(String seriesId) async =>
+      PlaybackCatalog.empty;
 
   @override
   Future<List<Series>> search(
-    String bangumiName,
-    String searchKeyword, {
+    String query, {
     bool enhanceWithBgm = true,
   }) async => const [];
 
@@ -77,7 +77,7 @@ void main() {
       expect(service.currPlayIndex, 1);
       expect(service.currUrl, 1);
       expect(service.currentVideoItem, isA<PlaybackEpisode>());
-      expect(data['videoList'], ['01. 正片\$line-a\$line-b', '02. 下一集\$line-c']);
+      expect(data['videoList'], same(episodes));
     },
   );
 

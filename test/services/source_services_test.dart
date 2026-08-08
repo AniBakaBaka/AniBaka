@@ -6,6 +6,7 @@ import 'package:baka/models/rule_hub.dart';
 import 'package:baka/services/app_storage.dart';
 import 'package:baka/services/source/rule_repository_service.dart';
 import 'package:baka/services/source_adapter_service.dart';
+import 'package:baka/source/source_registry.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -50,19 +51,21 @@ void main() {
     );
     expect(await service.addCustomSource(source), isTrue);
 
-    final searchService = SourceAdapterService();
-    final first = searchService.getCustomAdapter(source);
+    final first = service.adapterFor(
+      AdapterRegistry.customSourceKey(source.id),
+    );
     expect(first, isNotNull);
 
     final updated = source.copyWith(name: 'Updated Cache Test');
     expect(await service.updateCustomSource(updated), isTrue);
 
-    final second = searchService.getCustomAdapter(source);
+    final second = service.adapterFor(
+      AdapterRegistry.customSourceKey(source.id),
+    );
     expect(second, isNotNull);
     expect(second, isNot(same(first)));
     expect(second!.name, 'Updated Cache Test');
 
-    searchService.dispose();
     expect(await service.deleteCustomSource(source.id), isTrue);
   });
 
@@ -136,7 +139,7 @@ void main() {
       expect(initial[current]!.status, InstallStatus.upToDate);
       expect(initial[newer]!.status, InstallStatus.updateAvailable);
 
-      final previousAdapter = service.getBuiltinAdapter('akianime');
+      final previousAdapter = service.adapterFor('akianime');
       final result = await RuleRepositoryService.instance.install(
         newer,
         indexUrl: 'https://rules.example/index.json',
@@ -145,7 +148,9 @@ void main() {
       expect(result, RuleInstallResult.updated);
       expect(SourceCatalog.instance.customSourceById('akianime'), isNull);
       expect(
-        SourceCatalog.instance.customSources.where((source) => source.id == 'akianime'),
+        SourceCatalog.instance.customSources.where(
+          (source) => source.id == 'akianime',
+        ),
         isEmpty,
       );
       expect(
@@ -156,7 +161,7 @@ void main() {
         SourceCatalog.instance.builtinSourceById('akianime')?.iconUrl,
         'https://updated.akianime.example/icon.png',
       );
-      final updatedAdapter = service.getBuiltinAdapter('akianime');
+      final updatedAdapter = service.adapterFor('akianime');
       expect(updatedAdapter, isNot(same(previousAdapter)));
       expect(updatedAdapter?.baseUrl, 'https://updated.akianime.example');
       expect(

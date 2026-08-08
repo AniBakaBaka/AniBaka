@@ -17,12 +17,12 @@ class _DirectUrlAdapter extends AdapterBase {
   Future<String> getDownloadUrl(String episodeId) async => mediaUrl;
 
   @override
-  Future<List<Source>> getSources(String seriesId) async => const [];
+  Future<PlaybackCatalog> getPlaybackCatalog(String seriesId) async =>
+      PlaybackCatalog.empty;
 
   @override
   Future<List<Series>> search(
-    String bangumiName,
-    String searchKeyword, {
+    String query, {
     bool enhanceWithBgm = true,
   }) async => const [];
 }

@@ -1,10 +1,10 @@
 class Series {
   final String name;
   final String seriesId;
-  final String? description;
-  final String? image;
-  final int? bgmId;
-  final double? score;
+  String? description;
+  String? image;
+  int? bgmId;
+  double? score;
 
   Series(
     this.seriesId,
@@ -14,7 +14,4 @@ class Series {
     this.bgmId,
     this.score,
   });
-
-  @override
-  String toString() => 'Name: $name\nId: $seriesId\nDescription: $description';
 }

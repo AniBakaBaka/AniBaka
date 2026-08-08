@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:baka/source/adapter_base.dart';
-import 'package:baka/source/models/series.dart';
 import 'package:baka/source/source_registry.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/custom_source_config.dart';
@@ -18,11 +17,11 @@ import 'package:baka/source/store/rule_migrator.dart';
 ///
 /// 只读的源配置查询请直连 [SourceCatalog.instance]；本服务保留会牵动
 /// 适配器缓存失效的变更操作（增删改源、导入、重置）。
-/// 适配器按服务实例缓存，以隔离 Cookie 和请求状态。
+/// 所有调用方共享一个适配器 LRU，避免重复缓存 Cookie、DOM 和请求连接。
 class SourceAdapterService {
-  SourceAdapterService();
+  SourceAdapterService._();
 
-  static final SourceAdapterService instance = SourceAdapterService();
+  static final SourceAdapterService instance = SourceAdapterService._();
   static const int _maxCachedAdapters = 24;
 
   final SourceCatalog _catalog = SourceCatalog.instance;
@@ -33,13 +32,6 @@ class SourceAdapterService {
 
   Future<void> init() async {
     await Future.wait<void>([BundledRuleStore.load(), _catalog.init()]);
-  }
-
-  void dispose() {
-    for (final entry in _adapterCache.values) {
-      entry.adapter.dispose();
-    }
-    _adapterCache.clear();
   }
 
   Future<bool> addCustomSource(CustomSourceConfig source) async {
@@ -90,20 +82,12 @@ class SourceAdapterService {
     return reset;
   }
 
-  AdapterBase? createAdapterFor(
-    String source, {
-    CustomSourceConfig? config,
-    Map? item,
-  }) {
+  AdapterBase? _createAdapterFor(String source) {
     if (AdapterRegistry.isCustomSource(source)) {
       final sourceId = source.substring(
         AdapterRegistry.customSourcePrefix.length,
       );
-      var resolved = _catalog.customSourceById(sourceId) ?? config;
-      if (resolved == null) {
-        final sourceConfig = item?['sourceConfig'];
-        if (sourceConfig is CustomSourceConfig) resolved = sourceConfig;
-      }
+      final resolved = _catalog.customSourceById(sourceId);
       if (resolved == null) return null;
       return PipelineSourceAdapter(RuleMigrator.ruleForConfig(resolved));
     }
@@ -114,73 +98,54 @@ class SourceAdapterService {
         : PipelineSourceAdapter(RuleMigrator.ruleForConfig(override));
   }
 
-  AdapterBase? getBuiltinAdapter(String key) {
+  AdapterBase? _builtinAdapter(String key) {
     final override = _catalog.builtinOverrideById(key);
     return _getOrCreateAdapter(
       key,
       revision: override?.updatedAt,
-      create: () => createAdapterFor(key),
+      create: () => _createAdapterFor(key),
     );
   }
 
-  AdapterBase? getCustomAdapter(CustomSourceConfig config) {
-    final activeConfig = _catalog.customSourceById(config.id) ?? config;
-    final sourceKey = AdapterRegistry.customSourceKey(activeConfig.id);
+  AdapterBase? _customAdapter(String id) {
+    final config = _catalog.customSourceById(id);
+    if (config == null) return null;
+    final sourceKey = AdapterRegistry.customSourceKey(id);
 
     return _getOrCreateAdapter(
       sourceKey,
-      revision: activeConfig.updatedAt,
-      create: () => createAdapterFor(sourceKey, config: activeConfig),
+      revision: config.updatedAt,
+      create: () => _createAdapterFor(sourceKey),
     );
   }
 
-  Future<List<Map<String, dynamic>>> searchBuiltin(
-    String query,
-    AdapterDescriptor descriptor, {
+  Future<List<Map<String, dynamic>>> search(
+    String sourceKey,
+    String query, {
     String fallbackDescription = '',
     bool skipBgmEnhancement = false,
-  }) => _search(
-    adapter: getBuiltinAdapter(descriptor.key),
-    query: query,
-    enhanceWithBgm: !skipBgmEnhancement,
-    buildResult: (series) => descriptor.buildSearchResult(
-      series,
-      fallbackDescription: fallbackDescription,
-    ),
-  );
-
-  Future<List<Map<String, dynamic>>> searchCustom(
-    String query,
-    CustomSourceConfig config, {
-    String fallbackDescription = '',
-    bool skipBgmEnhancement = false,
-  }) {
-    final activeConfig = _catalog.customSourceById(config.id) ?? config;
-    return _search(
-      adapter: getCustomAdapter(activeConfig),
-      query: query,
-      enhanceWithBgm: !skipBgmEnhancement,
-      buildResult: (series) => buildCustomSourceSearchResult(
-        activeConfig,
-        series,
-        fallbackDescription: fallbackDescription,
-      ),
-    );
-  }
-
-  Future<List<Map<String, dynamic>>> _search({
-    required AdapterBase? adapter,
-    required String query,
-    required bool enhanceWithBgm,
-    required Map<String, dynamic> Function(Series) buildResult,
   }) async {
-    if (adapter == null) return const <Map<String, dynamic>>[];
+    final adapter = adapterFor(sourceKey);
+    if (adapter == null) throw StateError('视频源不可用: $sourceKey');
+    final displayName = _displayName(sourceKey);
     final results = await adapter.search(
-      '',
       query,
-      enhanceWithBgm: enhanceWithBgm,
+      enhanceWithBgm: !skipBgmEnhancement,
     );
-    return results.map(buildResult).toList(growable: false);
+    return [
+      for (final series in results)
+        <String, dynamic>{
+          'title': series.name,
+          'seriesId': series.seriesId,
+          'description': series.description ?? fallbackDescription,
+          'image': series.image,
+          'source': sourceKey,
+          'sourceDisplayName': displayName,
+          if (series.bgmId != null) 'bgmId': series.bgmId,
+          if (series.score != null) 'score': series.score,
+          if (series.image?.isNotEmpty ?? false) 'bgmImageUrl': series.image,
+        },
+    ];
   }
 
   Future<Map<String, dynamic>?> buildPlayerData(
@@ -189,80 +154,57 @@ class SourceAdapterService {
     final sourceKey = item['source']?.toString();
     if (sourceKey == null || sourceKey.isEmpty) return null;
 
-    if (AdapterRegistry.isCustomSource(sourceKey)) {
-      final config = _resolveCustomSourceConfig(sourceKey, item);
-      if (config == null) return null;
-      final adapter = getCustomAdapter(config);
-      if (adapter == null) return null;
-      return buildCustomSourcePlayerData(
-        config: config,
-        adapter: adapter,
-        item: item,
-      );
-    }
+    final adapter = adapterFor(sourceKey);
+    if (adapter == null) throw StateError('视频源不可用: $sourceKey');
+    final seriesId = item['seriesId'] as String;
+    final catalog = await adapter.getPlaybackCatalog(seriesId);
+    if (catalog.isEmpty) return null;
 
     final descriptor = AdapterRegistry.descriptorFor(sourceKey);
-    if (descriptor == null) return null;
-    final adapter = getBuiltinAdapter(descriptor.key);
-    if (adapter == null) return null;
-    return descriptor.buildPlayerData(adapter: adapter, item: item);
+    final custom = AdapterRegistry.isCustomSource(sourceKey)
+        ? _catalog.customSourceById(
+            sourceKey.substring(AdapterRegistry.customSourcePrefix.length),
+          )
+        : null;
+    final displayName = descriptor?.displayName ?? custom!.name;
+    item
+      ..['id'] =
+          descriptor?.resolveNumericId(seriesId) ?? stableSourceId(seriesId)
+      ..['seriesUrl'] = seriesId
+      ..['currPlayIndex'] = 0
+      ..['currUrl'] = 1
+      ..['sourceDisplayName'] = displayName
+      ..['sort'] = '番剧'
+      ..['content'] = custom == null || custom.description.isEmpty
+          ? '来源: $displayName'
+          : custom.description
+      ..['tag'] = displayName
+      ..['videoList'] = catalog.episodes
+      ..['sourceNames'] = catalog.sourceNames;
+    return item;
   }
 
   /// 按 source key 取（或创建）缓存中的适配器实例。
   ///
   /// 与 [buildPlayerData] 共用同一 LRU 缓存，保证搜索/探针阶段的 Cookie
   /// 与后续 `resolvePlaybackMedia` 一致。
-  AdapterBase? adapterFor(String sourceKey, [Map<String, dynamic>? item]) {
+  AdapterBase? adapterFor(String sourceKey) {
     if (sourceKey.isEmpty || sourceKey == 'internal') return null;
 
     if (AdapterRegistry.isCustomSource(sourceKey)) {
-      final config = _resolveCustomSourceConfig(sourceKey, item ?? const {});
-      if (config == null) return null;
-      return getCustomAdapter(config);
+      return _customAdapter(
+        sourceKey.substring(AdapterRegistry.customSourcePrefix.length),
+      );
     }
 
-    return getBuiltinAdapter(sourceKey);
+    return _builtinAdapter(sourceKey);
   }
 
-  /// 解析指定源某条线路 token 的真实播放地址与请求头。
-  ///
-  /// 默认 [skipValidation]=false：自动匹配/即点即播必须确认媒体可达，
-  /// 避免把 403 空壳 m3u8 当成成功结果预取进播放器。
-  Future<({String url, Map<String, String> httpHeaders})> resolvePlaybackMedia(
-    String sourceKey,
-    String episodeToken, {
-    Map<String, dynamic>? item,
-    bool skipValidation = false,
-    int maxAttempts = 2,
-    Duration? reachTimeout,
-  }) async {
-    final adapter = adapterFor(sourceKey, item);
-    if (adapter == null) {
-      return (url: '', httpHeaders: const <String, String>{});
-    }
-    return adapter.resolvePlaybackMedia(
-      episodeToken,
-      skipValidation: skipValidation,
-      maxAttempts: maxAttempts,
-      reachTimeout: reachTimeout,
-    );
-  }
-
-  CustomSourceConfig? _resolveCustomSourceConfig(
-    String sourceKey,
-    Map<String, dynamic> item,
-  ) {
-    final sourceId = sourceKey.substring(
-      AdapterRegistry.customSourcePrefix.length,
-    );
-    final current = _catalog.customSourceById(sourceId);
-    if (current != null) return current;
-
-    final sourceConfig = item['sourceConfig'];
-    if (sourceConfig is CustomSourceConfig) {
-      return _catalog.customSourceById(sourceConfig.id) ?? sourceConfig;
-    }
-    return null;
+  String _displayName(String sourceKey) {
+    final builtin = AdapterRegistry.descriptorFor(sourceKey);
+    if (builtin != null) return builtin.displayName;
+    final id = sourceKey.substring(AdapterRegistry.customSourcePrefix.length);
+    return _catalog.customSourceById(id)!.name;
   }
 
   AdapterBase? _getOrCreateAdapter(
@@ -505,7 +447,9 @@ class SourceCatalog extends ChangeNotifier {
 
     final rule = BundledRuleStore.ruleFor(key);
     if (rule == null) return null;
-    return _bundledConfigCache[key] = CustomSourceConfig.fromJson(rule.toJson());
+    return _bundledConfigCache[key] = CustomSourceConfig.fromJson(
+      rule.toJson(),
+    );
   }
 
   Future<bool> updateBuiltinSource(

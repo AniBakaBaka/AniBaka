@@ -84,6 +84,8 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
   bool _routeRefreshScheduled = false;
 
   bool get _isSelecting => _selectingKey != null;
+  bool get _isFromPlayer =>
+      widget.currentSource != null || widget.searchController != null;
 
   @override
   void initState() {
@@ -260,9 +262,13 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
         ..['currUrl'] = lineIndex;
       await _controller.persistMatchMemory(origin.item, selectionData);
       if (mounted) {
-        Navigator.of(
-          context,
-        ).pop(SourceSwitchSelection(data: selectionData, lineIndex: lineIndex));
+        if (_isFromPlayer) {
+          Navigator.of(context).pop(
+            SourceSwitchSelection(data: selectionData, lineIndex: lineIndex),
+          );
+        } else {
+          _navigateToPlayer(selectionData);
+        }
       }
     } finally {
       if (mounted) setState(() => _selectingKey = null);
@@ -338,9 +344,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
         ).showSnackBar(const SnackBar(content: Text('打开失败: 无法解析播放地址')));
         return;
       }
-      final isFromPlayer =
-          widget.currentSource != null || widget.searchController != null;
-      if (isFromPlayer && Navigator.of(context).canPop()) {
+      if (_isFromPlayer && Navigator.of(context).canPop()) {
         final line =
             BgmUtils.toInt(videoData['currUrl']) ?? widget.currentLineIndex;
         Navigator.of(

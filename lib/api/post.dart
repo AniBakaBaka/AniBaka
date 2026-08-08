@@ -76,13 +76,17 @@ Future updateCommentUv(dynamic cid, dynamic name) {
   return NetUtils.post('$host/comment/uv?cid=$cid&name=$name', {});
 }
 
+const _animeDetailCacheLimit = 32;
+const _episodeStillsCacheLimit = 48;
+
 final Map<int, Future<Map<String, dynamic>?>> _animeDetailRequests = {};
 
-Future<Map<String, dynamic>?> getAnimeDetail(int bgmId) =>
-    _animeDetailRequests[bgmId] ??= _loadAnimeDetail(bgmId).then((data) {
-      if (data == null) _animeDetailRequests.remove(bgmId);
-      return data;
-    });
+Future<Map<String, dynamic>?> getAnimeDetail(int bgmId) => _cachedRequest(
+  _animeDetailRequests,
+  bgmId,
+  _animeDetailCacheLimit,
+  () => _loadAnimeDetail(bgmId),
+);
 
 Future<Map<String, dynamic>?> _loadAnimeDetail(int bgmId) async {
   try {
@@ -112,16 +116,40 @@ Future<Map<String, dynamic>?> getEpisodeStills({
   int episode = 1,
 }) {
   final cacheKey = 'b:${bgmId}_t:${tmdbId}_v:${tvdbId}_s:${season}_e:$episode';
-  return _episodeStillsRequests[cacheKey] ??= _loadEpisodeStills(
-    bgmId: bgmId,
-    tmdbId: tmdbId,
-    tvdbId: tvdbId,
-    season: season,
-    episode: episode,
-  ).then((data) {
-    if (data == null) _episodeStillsRequests.remove(cacheKey);
-    return data;
+  return _cachedRequest(
+    _episodeStillsRequests,
+    cacheKey,
+    _episodeStillsCacheLimit,
+    () => _loadEpisodeStills(
+      bgmId: bgmId,
+      tmdbId: tmdbId,
+      tvdbId: tvdbId,
+      season: season,
+      episode: episode,
+    ),
+  );
+}
+
+Future<V?> _cachedRequest<K, V>(
+  Map<K, Future<V?>> cache,
+  K key,
+  int limit,
+  Future<V?> Function() load,
+) {
+  final cached = cache.remove(key);
+  if (cached != null) {
+    cache[key] = cached;
+    return cached;
+  }
+  if (cache.length >= limit) cache.remove(cache.keys.first);
+
+  late final Future<V?> request;
+  request = load().then((value) {
+    if (value == null && identical(cache[key], request)) cache.remove(key);
+    return value;
   });
+  cache[key] = request;
+  return request;
 }
 
 Future<Map<String, dynamic>?> _loadEpisodeStills({
@@ -157,4 +185,3 @@ Future<Map<String, dynamic>?> _loadEpisodeStills({
     return null;
   }
 }
-

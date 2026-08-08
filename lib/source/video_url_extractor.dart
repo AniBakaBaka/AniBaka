@@ -40,7 +40,7 @@ class VideoUrlExtractor {
   );
 
   static final _cdnSignedRegex = RegExp(
-    r'(?:/video/tos/|/tos-cn-v-|sign\.bytetos|sign\.byteimg|bytefcdn|bot-workflow-sign\.byteimg\.com|xhscdn\.com|douyinvod\.com|bytedance|byteimg\.com/(?:tos-|x-signature)|[?&]verify=\d{9,}|x-amz-signature=|x-amz-algorithm=|x-amz-credential=|groupvideo\.photo\.qq\.com|photo\.qq\.com|dis_k=|dis_t=)',
+    r'(?:/video/tos/|/tos-cn-v-|sign\.bytetos|sign\.byteimg|bytefcdn|bot-workflow-sign\.byteimg\.com|xhscdn\.com|douyinvod\.com|bytedance|byteimg\.com/(?:tos-|x-signature)|[?&]verify=\d{9,}|x-amz-signature=|x-amz-algorithm=|x-amz-credential=|groupvideo\.photo\.qq\.com|photo\.qq\.com|dis_k=|dis_t=|ctyunxs\.cn|AWSAccessKeyId=)',
     caseSensitive: false,
   );
 

@@ -28,11 +28,10 @@ class TvAnimeDetailPlaceholder extends StatefulWidget {
 }
 
 class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
+  late final Map<String, dynamic> _data;
   late BgmInfo _bgmInfo;
-  Map<String, dynamic>? _detailData;
-  Map<String, dynamic>? _anibakaData;
-  List<Map<String, dynamic>> _bgmEpisodes = const [];
   late AnimeDetailViewData _detail;
+  late List<PlaybackEpisode> _videoList;
 
   AnimeCollection? _collection;
   bool _isCollectionLoading = false;
@@ -41,47 +40,26 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   int? get _subjectId => _bgmInfo.subjectId;
 
   int? get _validPostId {
-    final postId = BgmUtils.toInt(widget.data['id']);
+    final postId = BgmUtils.toInt(_data['id']);
     return (postId != null && postId > 0) ? postId : null;
   }
 
-  List<PlaybackEpisode> get _bgmVideoList {
-    if (_bgmEpisodes.isNotEmpty) {
-      return _bgmEpisodes.map((ep) {
-        final sort =
-            BgmUtils.toInt(ep['sort']) ?? BgmUtils.toInt(ep['ep']) ?? 1;
-        final nameCn = BgmUtils.trimmed(ep['name_cn']);
-        final name = BgmUtils.trimmed(ep['name']);
-        final title = (nameCn != null && nameCn.isNotEmpty)
-            ? '$sort. $nameCn'
-            : (name != null && name.isNotEmpty)
-            ? '$sort. $name'
-            : '第 $sort 话';
-        return PlaybackEpisode(title: title, lines: const []);
-      }).toList();
-    }
-    final raw = PlaybackEpisodeCatalog.rawEpisodesOf(widget.data);
-    return PlaybackEpisodeCatalog.parse(raw);
-  }
-
-  void _rebuildDetail() {
-    _bgmInfo = BgmUtils.readFromData(widget.data);
-    _detailData = BgmUtils.asMap(widget.data['bgmDetailData']);
-    if (_bgmEpisodes.isEmpty) {
-      _bgmEpisodes = BgmUtils.asMapList(_detailData?['episodes']);
-    }
+  void _initializeDetail() {
+    _bgmInfo = BgmUtils.readFromData(_data);
+    final bgm = (_data['bgmDetailData'] as Map?)?.cast<String, dynamic>();
     _detail = AnimeDetailViewData.from(
-      source: widget.data,
+      source: _data,
       bgmInfo: _bgmInfo,
-      anibaka: _anibakaData,
-      bgm: _detailData,
+      bgm: bgm,
     );
+    _videoList = PlaybackEpisodeCatalog.episodesOf(_data);
   }
 
   @override
   void initState() {
     super.initState();
-    _rebuildDetail();
+    _data = widget.data.cast<String, dynamic>();
+    _initializeDetail();
     _fetchBgmData();
     _fetchCollectionStatus();
   }
@@ -89,48 +67,42 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   Future<void> _fetchBgmData() async {
     try {
       if (_bgmInfo.subjectId == null) {
-        await BgmService.resolveFromData(widget.data);
-        if (!mounted) return;
-        setState(_rebuildDetail);
+        _bgmInfo = await BgmService.resolveFromData(_data);
       }
 
       final subjectId = _subjectId;
       if (subjectId == null) return;
 
-      if (_anibakaData == null) {
-        getAnimeDetail(subjectId)
-            .then((data) {
-              if (!mounted) return;
-              _anibakaData = BgmUtils.asMap(data);
-              setState(_rebuildDetail);
-            })
-            .catchError((e) {
-              debugPrint('获取AniBaka详情失败: $e');
-            });
-      }
+      final bgmFuture = getBgmSubject(subjectId);
+      final anibakaFuture = getAnimeDetail(subjectId);
+      final episodesFuture = getBgmEpisodes(subjectId);
+      final bgm = await bgmFuture;
+      final anibaka = await anibakaFuture;
+      final episodes = await episodesFuture;
+      if (!mounted) return;
 
-      if (_detailData == null) {
-        getBgmSubject(subjectId)
-            .then((detail) {
-              if (!mounted) return;
-              widget.data['bgmDetailData'] = detail;
-              setState(_rebuildDetail);
-            })
-            .catchError((e) {
-              debugPrint('获取Bangumi详情失败: $e');
-            });
+      final detail = AnimeDetailViewData.from(
+        source: _data,
+        bgmInfo: _bgmInfo,
+        anibaka: anibaka,
+        bgm: bgm,
+      );
+      final videoList = <PlaybackEpisode>[];
+      for (final episode in episodes) {
+        final nameCn = episode['name_cn'] as String;
+        final name = nameCn.isEmpty ? episode['name'] as String : nameCn;
+        videoList.add(
+          PlaybackEpisode(
+            title: '${episode['sort'] as num}. $name',
+            lines: const [],
+          ),
+        );
       }
-
-      if (_bgmEpisodes.isEmpty) {
-        getBgmEpisodes(subjectId)
-            .then((episodes) {
-              if (!mounted) return;
-              setState(() => _bgmEpisodes = episodes);
-            })
-            .catchError((e) {
-              debugPrint('获取Bangumi剧集失败: $e');
-            });
-      }
+      if (detail.logoUrl.isNotEmpty) _data['logoUrl'] = detail.logoUrl;
+      setState(() {
+        _detail = detail;
+        if (videoList.isNotEmpty) _videoList = videoList;
+      });
     } catch (e) {
       debugPrint('获取番剧数据失败: $e');
     }
@@ -211,11 +183,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   }
 
   void _startWatching() {
-    final playerData = Map<String, dynamic>.from(widget.data);
-    if (_detail.logoUrl.isNotEmpty) {
-      playerData['logoUrl'] = _detail.logoUrl;
-    }
-    NavigationService.toPlayer(context, playerData, autoMatch: true);
+    NavigationService.toPlayer(context, _data, autoMatch: true);
   }
 
   String _formatNumber(int number) {
@@ -252,27 +220,6 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
       return status.isEmpty ? '全 $eps 话' : '$status · 全 $eps 话';
     }
     return status;
-  }
-
-  List<String> _extractDisplayTags() {
-    final list = <String>[];
-    final seen = <String>{};
-
-    void add(String? t) {
-      if (t == null) return;
-      final trimmed = t.trim();
-      if (trimmed.isNotEmpty && seen.add(trimmed)) {
-        list.add(trimmed);
-      }
-    }
-
-    for (final tag in _detail.tags) {
-      add(tag);
-    }
-    for (final g in _detail.genres) {
-      add(g);
-    }
-    return list.take(12).toList();
   }
 
   @override
@@ -481,10 +428,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                                           onPressed: () {
                                             VideoSourceSearchSheet.show(
                                               context,
-                                              seedData:
-                                                  Map<String, dynamic>.from(
-                                                    widget.data,
-                                                  ),
+                                              seedData: _data,
                                             );
                                           },
                                         ),
@@ -513,7 +457,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                   duration: const Duration(milliseconds: 200),
                   color: Colors.black.withValues(alpha: 0.5),
                   child: TvEpisodeSelector(
-                    videoList: _bgmVideoList,
+                    videoList: _videoList,
                     currentIndex: 0,
                     currUrl: 1,
                     bgmId: _subjectId ?? _detail.bgmId,
@@ -523,18 +467,13 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                       setState(() {
                         _showEpisodeSelector = false;
                       });
-                      final playerData = Map<String, dynamic>.from(widget.data);
-                      if (_detail.logoUrl.isNotEmpty) {
-                        playerData['logoUrl'] = _detail.logoUrl;
-                      }
                       NavigationService.toPlayer(
                         context,
-                        playerData,
+                        _data,
                         posIndex: index,
                         autoMatch: true,
                       );
                     },
-                    onUrlChanged: (lineIndex) {},
                     onClose: () {
                       setState(() {
                         _showEpisodeSelector = false;
@@ -554,13 +493,11 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
       mainAxisAlignment: MainAxisAlignment.start,
       children: [
         _buildSideIcon(
-          icon: Icons.search_rounded,
+          icon: Icons.arrow_back_rounded,
           onPressed: () {
             Navigator.of(context).maybePop();
           },
         ),
-        const SizedBox(height: 20),
-        _buildSideIcon(icon: Icons.explore_outlined, onPressed: () {}),
         const SizedBox(height: 20),
         _buildSideIcon(
           icon: _collection != null
@@ -575,10 +512,6 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
             }
           },
         ),
-        const SizedBox(height: 20),
-        _buildSideIcon(icon: Icons.history_rounded, onPressed: () {}),
-        const SizedBox(height: 20),
-        _buildSideIcon(icon: Icons.settings_outlined, onPressed: () {}),
       ],
     );
   }
@@ -672,7 +605,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   }
 
   Widget _buildTagsWall({bool alignRight = false}) {
-    final tags = _extractDisplayTags();
+    final tags = _detail.tags;
     if (tags.isEmpty) return const SizedBox.shrink();
 
     return Wrap(
@@ -680,23 +613,18 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
       spacing: 8,
       runSpacing: 8,
       children: tags.take(8).map((tag) {
-        return TvFocusable(
-          onPressed: () {},
-          borderRadius: BorderRadius.circular(8),
-          enableGlow: false,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: context.tvTextColor.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              tag,
-              style: TextStyle(
-                color: context.tvTextColor.withValues(alpha: 0.9),
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: context.tvTextColor.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            tag,
+            style: TextStyle(
+              color: context.tvTextColor.withValues(alpha: 0.9),
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
             ),
           ),
         );

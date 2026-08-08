@@ -12,8 +12,6 @@ import 'package:baka/widgets/home/rank_section.dart';
 import 'package:baka/widgets/home/swiper_banner.dart';
 import 'package:baka/widgets/search/tag_filter_sheet.dart';
 import 'package:baka/widgets/platform/tv/tv_home_page.dart';
-import 'package:baka/widgets/platform/tv/tv_my_page.dart';
-import 'package:baka/widgets/platform/tv/tv_search_page.dart';
 import 'package:baka/widgets/platform/windows/windows_home_page.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -89,11 +87,7 @@ class _HomePageState extends State<HomePage>
   @override
   Widget build(BuildContext context) {
     if (Instances.isTV) {
-      return TvHomePage(
-        svc: _svc,
-        onSearchTap: () => _push(const TvSearchPage()),
-        onMyPageTap: () => _push(const TvMyPage()),
-      );
+      return TvHomePage(svc: _svc);
     }
     if (Instances.isWindows) {
       return WindowsHomePage(svc: _svc, onRefresh: _refresh);
@@ -139,8 +133,12 @@ class _HomePageState extends State<HomePage>
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           decoration: BoxDecoration(
             color: isDark
-                ? const Color(0xFF1B1B1F).withValues(alpha: reduceVisualEffects ? 0.96 : 0.84)
-                : Colors.white.withValues(alpha: reduceVisualEffects ? 0.98 : 0.88),
+                ? const Color(
+                    0xFF1B1B1F,
+                  ).withValues(alpha: reduceVisualEffects ? 0.96 : 0.84)
+                : Colors.white.withValues(
+                    alpha: reduceVisualEffects ? 0.98 : 0.88,
+                  ),
             borderRadius: BorderRadius.circular(100),
             border: Border.all(
               color: isDark
