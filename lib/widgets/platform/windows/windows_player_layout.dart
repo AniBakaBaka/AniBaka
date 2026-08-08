@@ -439,7 +439,6 @@ class _PlayerSidebar extends StatelessWidget {
   }
 }
 
-/// 简介区域
 class _DescriptionSection extends StatelessWidget {
   final String content;
 
@@ -487,7 +486,6 @@ class _DescriptionSection extends StatelessWidget {
   }
 }
 
-/// 桌面播放器标题栏组件（Windows/macOS 通用）
 class _DesktopPlayerTitleBar extends StatelessWidget {
   final String title;
 
@@ -571,7 +569,6 @@ class _DesktopPlayerTitleBar extends StatelessWidget {
   }
 }
 
-/// 桌面端 BT 下载进度指示器
 class _DesktopBtProgressIndicator extends StatelessWidget {
   const _DesktopBtProgressIndicator();
 

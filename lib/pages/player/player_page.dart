@@ -150,20 +150,47 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       targetEpisodeIndex: currPlayIndex,
       onMatchFound: (resolvedData) {
         if (!mounted) return;
+        final elapsed = _autoMatchController?.lastAutoMatchDuration;
+        if (elapsed != null) {
+          debugPrint(
+            '[Player] auto-match ready in ${elapsed.inMilliseconds}ms',
+          );
+        }
         _autoMatchController?.cancelSearch();
         _autoMatchController = null;
+        // 匹配成功：直接用预取媒体开播（等同手动点选后的路径）。
         _svc.adoptPrefetchedPlayback(resolvedData);
         _bumpPageData();
         initVideoController(_session.nextGeneration());
+        // 元数据后台补齐，不与匹配抢网。
+        unawaited(_loadBgmMetaOnly());
       },
       onMatchFailed: () {
         if (!mounted) return;
         _autoMatchController = null;
+        // 仅失败时才走原片 loadDetail，避免匹配阶段双倍带宽。
         _loadInitialData();
       },
     );
+    // 关键：匹配进行中不调用 loadDetail/initVideo，避免与探针抢带宽。
     _autoMatchController?.startSearch();
-    _loadInitialData();
+    unawaited(_loadBgmMetaOnly());
+  }
+
+  /// 自动匹配期间只拉 BGM 展示信息，不解析播放地址。
+  Future<void> _loadBgmMetaOnly() async {
+    if (_isLocalSource || !mounted) return;
+    try {
+      await _svc.ensureBgmInfo();
+      if (!mounted) return;
+      await _svc.ensureBgmDetail();
+      if (!mounted) return;
+      _updateCachedTagsFromBgm();
+      ctr.setMediaInfo(_svc.currentMediaInfo);
+      _bumpPageData();
+    } catch (e) {
+      debugPrint('加载 BGM 元数据失败: $e');
+    }
   }
 
   void _playNextEpisode() {
@@ -322,7 +349,10 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
           adapter,
           episodeId,
         );
-        if (media.url.isEmpty) throw Exception('Unable to resolve media url');
+        if (media.url.isEmpty) {
+          _svc.clearPrefetchedPlaybackMedia();
+          throw Exception('Unable to resolve media url');
+        }
         if (_isStale(requestId)) return;
 
         final keepAliveGeneration = await _svc.startAdapterPlaybackKeepAlive(
@@ -346,6 +376,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
             httpHeaders: playbackMedia.httpHeaders,
           );
         } catch (_) {
+          // 预取/解析出的地址打不开：清掉，后续失败处理会换线/换源重解析。
+          _svc.clearPrefetchedPlaybackMedia();
           _svc.stopAdapterPlaybackKeepAlive(keepAliveGeneration);
           rethrow;
         }
@@ -413,14 +445,15 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         _failedSourceKeys.add('$currentSourceKey|$currentSeriesId');
       }
 
-      // 清除历史无效匹配记忆，避免再次命中错源
+      // 清除历史无效匹配记忆 + 失效预取，避免再次命中死链
+      _svc.clearPrefetchedPlaybackMedia();
       final bgmId = BgmUtils.toInt(widget.data['bgmId']);
       final title = widget.data['title']?.toString() ?? '';
       if (title.isNotEmpty) {
         await MatchMemoryService.remove(bgmId: bgmId, title: title);
       }
 
-      // 1. 尝试当前剧集的下一条线路
+      // 1. 尝试当前剧集的下一条线路（重新解析并校验，不复用死预取）
       final currentEp = _svc.currentVideoItem;
       if (currentEp != null && currUrl < currentEp.lineCount) {
         showSnackBar('当前线路播放异常，正在自动为您切换线路 ${currUrl + 1}...');

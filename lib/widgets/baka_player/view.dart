@@ -440,7 +440,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
   }
 
   Widget _buildDanmaku() {
-    // 弹幕仅在全屏模式下显示
     if (widget.danmuWidget == null || !widget.full) {
       return const SizedBox.shrink();
     }
@@ -539,21 +538,18 @@ class _BakaPlayerState extends State<BakaPlayer> {
     final controller = widget.controller;
 
     if (event is KeyDownEvent || event is KeyRepeatEvent) {
-      // ESC键退出全屏
       if (event.logicalKey == LogicalKeyboardKey.escape) {
         if (widget.full) {
           _triggerFullScreen();
           return KeyEventResult.handled;
         }
       }
-      // 左方向键快退
       else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
         final timeline = controller.timeline.value;
         final newPosition = timeline.position - _seekStep;
         controller.seek(newPosition.clamp(Duration.zero, timeline.duration));
         return KeyEventResult.handled;
       }
-      // 右方向键快进，长按则加速
       else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
         _doubleSpeedTimer ??= Timer(_longPressDelay, () {
           if (!controller.overlay.value.doubleSpeed) {
@@ -562,7 +558,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
         });
         return KeyEventResult.handled;
       }
-      // 上方向键增加音量
       else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
         if (Instances.isTV) {
           return KeyEventResult.ignored;
@@ -574,7 +569,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
         _setVerticalLevel(_VerticalControl.volume, newVolume);
         return KeyEventResult.handled;
       }
-      // 下方向键减少音量
       else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
         if (Instances.isTV) {
           return KeyEventResult.ignored;
@@ -586,7 +580,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
         _setVerticalLevel(_VerticalControl.volume, newVolume);
         return KeyEventResult.handled;
       }
-      // 空格键切换播放/暂停
       else if (event.logicalKey == LogicalKeyboardKey.space) {
         widget.controller.togglePlayback();
         return KeyEventResult.handled;
@@ -761,7 +754,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
     final controller = widget.controller;
     return Row(
       children: [
-        // 返回按钮（退出全屏）
         _buildCapsule(
           child: SizedBox(
             width: isWide ? 48 : 40,
@@ -778,7 +770,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
           ),
         ),
         SizedBox(width: isWide ? 16 : 12),
-        // 标题信息（全屏时显示）
         Expanded(
           child: widget.full
               ? ValueListenableBuilder<PlaybackMediaInfo>(
@@ -794,8 +785,8 @@ class _BakaPlayerState extends State<BakaPlayer> {
                         mediaInfo.logoUrl.isNotEmpty
                             ? mediaInfo.logoUrl
                             : (widget.detail?['logoUrl']?.toString() ??
-                                widget.detail?['logo']?.toString() ??
-                                ''),
+                                  widget.detail?['logo']?.toString() ??
+                                  ''),
                         isWide,
                       ),
                     ],
@@ -803,7 +794,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
                 )
               : const SizedBox.shrink(),
         ),
-        // 右侧操作按钮（字幕、画面比例、倍速等）
         ListenableBuilder(
           listenable: Listenable.merge([
             controller.core,
@@ -934,10 +924,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
   Widget _buildPlayerTitleOrLogo(String title, String logoUrl, bool isWide) {
     if (logoUrl.isNotEmpty) {
       return Container(
-        constraints: BoxConstraints(
-          maxHeight: isWide ? 58 : 46,
-          maxWidth: 280,
-        ),
+        constraints: BoxConstraints(maxHeight: isWide ? 58 : 46, maxWidth: 280),
         alignment: Alignment.centerLeft,
         child: CachedNetworkImage(
           key: ValueKey(logoUrl),
@@ -1045,7 +1032,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // 弹幕输入框入口
                 InkWell(
                   onTap: () {
                     controller.setDanmakuInputVisible(true);
@@ -1065,7 +1051,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
                     ),
                   ),
                 ),
-                // 弹幕设置按钮
                 if (overlay.showDanmaku) ...[
                   Container(
                     width: 1,
@@ -1079,9 +1064,11 @@ class _BakaPlayerState extends State<BakaPlayer> {
                     onTap: () {
                       final mediaInfo = widget.controller.mediaInfo.value;
                       final title =
-                          widget.detail?['title']?.toString() ?? mediaInfo.title;
-                      final epIndex =
-                          mediaInfo.episodeIndex >= 0 ? mediaInfo.episodeIndex + 1 : 1;
+                          widget.detail?['title']?.toString() ??
+                          mediaInfo.title;
+                      final epIndex = mediaInfo.episodeIndex >= 0
+                          ? mediaInfo.episodeIndex + 1
+                          : 1;
                       NavigationService.showDanmakuSettings(
                         context,
                         widget.controller.danmakuController,
@@ -1089,7 +1076,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
                         defaultEpisode: epIndex,
                       );
                     },
-
 
                     child: Padding(
                       padding: EdgeInsets.symmetric(

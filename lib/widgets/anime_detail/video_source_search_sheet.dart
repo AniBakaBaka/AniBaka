@@ -325,14 +325,27 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
   Future<void> _openVideo(SearchResultItem item) async {
     _controller.markUserSelected();
     try {
-      final videoData = await _controller.resolveVideoData(item);
+      // 完整解析到可播媒体并写入预取，进入播放器后即点即播。
+      final videoData = await _controller.prepareForPlayback(
+        item,
+        episodeIndex: widget.currentEpisodeIndex,
+        preferredLine: widget.currentLineIndex,
+      );
       if (!mounted) return;
+      if (videoData == null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('打开失败: 无法解析播放地址')));
+        return;
+      }
       final isFromPlayer =
           widget.currentSource != null || widget.searchController != null;
       if (isFromPlayer && Navigator.of(context).canPop()) {
+        final line =
+            BgmUtils.toInt(videoData['currUrl']) ?? widget.currentLineIndex;
         Navigator.of(
           context,
-        ).pop(SourceSwitchSelection(data: videoData, lineIndex: 1));
+        ).pop(SourceSwitchSelection(data: videoData, lineIndex: line));
         return;
       }
       _navigateToPlayer(videoData);
@@ -1124,7 +1137,6 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     ),
   );
 
-  // ===== 核心复用 Tile 组件 =====
   Widget _buildTile({
     required String title,
     required bool isDark,
@@ -1223,12 +1235,12 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
 
     final (statusLabel, statusIcon, statusColor) = switch (group.status) {
       SourceProbeStatus.direct => (
-        '已验证',
+        '可即播',
         Icons.check_circle_rounded,
         colors.primary,
       ),
       SourceProbeStatus.playable => (
-        '可播放',
+        '待取链',
         Icons.play_circle_fill_rounded,
         colors.tertiary,
       ),

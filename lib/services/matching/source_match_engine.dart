@@ -100,8 +100,17 @@ class SourceMatchScore {
   /// 供 UI 展示的整数分。
   int get score => (confidence * 100).round();
 
+  /// 结果刚到时立刻发起「目录 + 媒体」探针（竞速优先）。
   bool get shouldProbeImmediately =>
-      confidence >= 0.75 && !seasonConflict && !severeEpisodeConflict;
+      confidence >= 0.70 && !seasonConflict && !severeEpisodeConflict;
+
+  /// 全源搜索结束后的兜底探针阈值（略放宽，仍拒绝季/集硬冲突）。
+  bool get shouldProbeOnFinalPass =>
+      confidence >= 0.60 && !seasonConflict && !severeEpisodeConflict;
+
+  /// 标题极高置信：优先插队探测。
+  bool get isHighConfidenceTitle =>
+      confidence >= 0.82 && !seasonConflict && !severeEpisodeConflict;
 }
 
 /// 候选源排序：标题相似度为主，季度/集数/类型做有界修正。
@@ -147,27 +156,34 @@ class SourceMatchEngine {
       completed: context.bgmCompleted,
     );
 
-    // 标题主导；相似度极低时强行惩罚，结构化信号做修正。
-    var confidence = similarity * 0.85;
-    if (similarity < 0.40) {
-      confidence *= 0.5;
+    // 标题主导；精确命中额外加权，低相似度强惩罚。
+    var confidence = similarity * 0.88;
+    if (similarity >= 0.98) {
+      confidence += 0.08;
+    } else if (similarity >= 0.90) {
+      confidence += 0.04;
+    } else if (similarity < 0.40) {
+      confidence *= 0.45;
     }
 
     if (qSeason != null && cSeason != null) {
-      confidence += cSeason == qSeason ? 0.08 : -0.20;
+      confidence += cSeason == qSeason ? 0.10 : -0.22;
+    } else if (qSeason != null && cSeason == null && similarity >= 0.85) {
+      // 候选无季号但标题很像：轻微加分，避免被有错误季号的条目挤掉。
+      confidence += 0.02;
     }
 
     if (expected != null && expected > 0 && actual != null && actual > 0) {
       final diff = (actual - expected).abs();
       if (diff == 0) {
-        confidence += 0.05;
+        confidence += 0.06;
       } else if (diff == 1) {
-        confidence += 0.02;
+        confidence += 0.03;
       } else if (actual > expected + _tol(expected, 0.35, 3)) {
-        confidence -= 0.05;
+        confidence -= 0.06;
       } else if (context.bgmCompleted &&
           actual < expected - _tol(expected, 0.25, 2)) {
-        confidence -= 0.03;
+        confidence -= 0.04;
       }
     }
 
@@ -175,16 +191,16 @@ class SourceMatchEngine {
     if (candidate.isMovieLike) {
       final eps = expected ?? 0;
       if (eps >= 6 && (actual ?? 1) <= 2) {
-        confidence -= 0.06;
+        confidence -= 0.08;
       } else if (eps > 0 && eps <= 2) {
-        confidence += 0.03;
+        confidence += 0.04;
       }
     }
 
     if (candidate.sourceType == context.currentSource) confidence += 0.02;
 
-    if (seasonConflict) confidence = confidence.clamp(0.0, 0.30);
-    if (severeEpisodeConflict) confidence = confidence.clamp(0.0, 0.35);
+    if (seasonConflict) confidence = confidence.clamp(0.0, 0.28);
+    if (severeEpisodeConflict) confidence = confidence.clamp(0.0, 0.32);
 
     return SourceMatchScore(
       candidate: candidate,

@@ -80,7 +80,7 @@ _BgmComment? _parseBgmComment(Object? value) {
   return (
     name: user?['nickname']?.toString() ?? '匿名',
     avatarUrl: BgmUtils.bgmImageProxyUrl(
-      (user?['avatar'] as Map?)?['small']?.toString() ?? '',
+      BgmUtils.pickAvatarUrl(user?['avatar']),
       width: 120,
     ),
     content: content,
@@ -149,6 +149,15 @@ class CommentAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final baseColor = AppShimmer.defaultBaseColor(Theme.of(context));
+    final fallback = ColoredBox(
+      color: baseColor,
+      child: Icon(Icons.person_rounded, size: size * 0.58),
+    );
+    if (url.isEmpty) {
+      return ClipOval(
+        child: SizedBox(width: size, height: size, child: fallback),
+      );
+    }
     return ClipOval(
       child: CachedNetworkImage(
         imageUrl: url,
@@ -158,10 +167,7 @@ class CommentAvatar extends StatelessWidget {
         fit: BoxFit.cover,
         fadeInDuration: Duration.zero,
         placeholder: (_, _) => ColoredBox(color: baseColor),
-        errorWidget: (_, _, _) => ColoredBox(
-          color: baseColor,
-          child: Icon(Icons.person_rounded, size: size * 0.58),
-        ),
+        errorWidget: (_, _, _) => fallback,
       ),
     );
   }

@@ -13,6 +13,10 @@ import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/anime/post_card.dart';
 import 'package:baka/services/navigation_service.dart';
 
+import 'dart:async';
+import 'package:url_launcher/url_launcher_string.dart';
+import 'package:baka/widgets/common/scale_button.dart';
+
 import 'package:baka/widgets/anime_detail/collection_sheet.dart';
 import 'package:baka/widgets/anime_detail/character_detail_sheet.dart';
 import 'package:baka/widgets/anime_detail/anime_detail_header.dart';
@@ -419,10 +423,9 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                       Expanded(
                         flex: 2,
                         child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             summary,
-                            const SizedBox(height: 24),
-                            genresSection,
                           ],
                         ),
                       ),
@@ -465,6 +468,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                     ],
                   )
                 : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       summary,
                       const SizedBox(height: 24),
@@ -611,6 +615,8 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
       ),
     );
   }
+
+
 
   Widget _buildGalleryTab() {
     final backdrops = _detail.backdrops;
@@ -780,35 +786,144 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   }
 
   Widget _buildSummarySection(String summary) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '剧情简介',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-              color: _textColor,
-              letterSpacing: -0.4,
+    final externalLinks = _buildExternalLinks();
+    return SizedBox(
+      width: double.infinity,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '剧情简介',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: _textColor,
+                letterSpacing: -0.4,
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          SelectableText(
-            summary,
-            style: TextStyle(
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? Colors.white.withValues(alpha: 0.8)
-                  : const Color(0xFF3A3A3C),
-              fontSize: 15,
-              height: 1.65,
-              letterSpacing: 0.2,
+            const SizedBox(height: 12),
+            SelectableText(
+              summary,
+              style: TextStyle(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white.withValues(alpha: 0.8)
+                    : const Color(0xFF3A3A3C),
+                fontSize: 15,
+                height: 1.65,
+                letterSpacing: 0.2,
+              ),
             ),
-          ),
-        ],
+            if (externalLinks.isNotEmpty) ...[
+              const SizedBox(height: 24),
+              Text(
+                '外部链接',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: _textColor,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: externalLinks,
+              ),
+            ],
+          ],
+        ),
       ),
     );
+  }
+
+  List<Widget> _buildExternalLinks() {
+    final bgmId = _detail.bgmId ??
+        _subjectId ??
+        BgmUtils.toInt(widget.data['bgmId']) ??
+        BgmUtils.toInt(widget.data['id']);
+    final imdbId = _detail.imdbId;
+    final tmdbId = _detail.tmdbId;
+    final tvdbId = _detail.tvdbId;
+
+    final links = <(String label, String url)>[];
+
+    if (bgmId != null && bgmId > 0) {
+      links.add(('Bangumi', 'https://bgm.tv/subject/$bgmId'));
+    }
+
+    if (imdbId != null && imdbId.isNotEmpty) {
+      final formattedImdb = imdbId.startsWith('tt') ? imdbId : 'tt$imdbId';
+      links.add(('IMDb', 'https://www.imdb.com/title/$formattedImdb/'));
+    }
+
+    if (tmdbId != null && tmdbId.isNotEmpty) {
+      final tmdbUrl = tmdbId.contains('/')
+          ? 'https://www.themoviedb.org/$tmdbId'
+          : 'https://www.themoviedb.org/tv/$tmdbId';
+      links.add(('TMDB', tmdbUrl));
+    }
+
+    if (tvdbId != null && tvdbId.isNotEmpty) {
+      final tvdbUrl = (tvdbId.contains('/') || tvdbId.startsWith('series/'))
+          ? 'https://thetvdb.com/$tvdbId'
+          : 'https://thetvdb.com/dereferer/series/$tvdbId';
+      links.add(('TVDB', tvdbUrl));
+    }
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardBg = isDark
+        ? const Color(0xFF2C2C2E)
+        : const Color(0xFFF2F2F7);
+    final borderColor = isDark
+        ? Colors.white.withValues(alpha: 0.12)
+        : const Color(0xFFE5E5EA);
+    final textColor =
+        isDark ? Colors.white.withValues(alpha: 0.9) : const Color(0xFF1C1C1E);
+    final iconColor = isDark ? Colors.white70 : const Color(0xFF636366);
+
+    return links.map((link) {
+      final (label, url) = link;
+      return ScaleButton(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          unawaited(launchUrlString(url, mode: LaunchMode.externalApplication));
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: borderColor,
+              width: 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.link_rounded,
+                size: 16,
+                color: iconColor,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }).toList();
   }
 
   String _formatInfoboxValue(dynamic value) {

@@ -137,7 +137,6 @@ class _AppBottomNavigationState extends State<AppBottomNavigation> {
                           ),
                           child: Stack(
                             children: [
-                              // 滑块指示器
                               AnimatedAlign(
                                 duration: reduceMotion || _dragIndex != null
                                     ? Duration.zero
@@ -170,7 +169,6 @@ class _AppBottomNavigationState extends State<AppBottomNavigation> {
                                   ),
                                 ),
                               ),
-                              // Item 列表
                               Row(
                                 children: List.generate(widget.items.length, (i) {
                                   final selected = highlightedIndex == i;

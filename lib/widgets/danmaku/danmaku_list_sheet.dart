@@ -287,7 +287,6 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Header 标题
                 Row(
                   children: [
                     Container(
@@ -327,7 +326,6 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                 ),
                 const SizedBox(height: 10),
 
-                // 核心: 弹幕来源 Card (鲜亮活力，不再灰暗)
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(10),
@@ -380,7 +378,6 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                                   ),
                                 ),
                                 const Spacer(),
-                                // 弹幕条数在来源卡片后面显示
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(
@@ -416,7 +413,6 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                 ),
                 const SizedBox(height: 10),
 
-                // 操作栏: 【手动检索弹幕】按钮 + 弹幕延迟微调控键
                 Row(
                   children: [
                     InkWell(
@@ -466,7 +462,6 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                       ),
                     ),
                     const Spacer(),
-                    // 弹幕延迟控键与数值展示
                     Row(
                       children: [
                         Text(
@@ -496,7 +491,6 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
                   ],
                 ),
 
-                // 如果用户展开了【手动检索弹幕】
                 if (_showSearch) ...[
                   const SizedBox(height: 10),
                   _buildSearchPanel(colorScheme, primaryColor),
@@ -526,7 +520,6 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 搜索框 + 按钮
           Row(
             children: [
               Expanded(
@@ -604,7 +597,6 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
             Text(_searchError!, style: const TextStyle(color: Colors.orangeAccent, fontSize: 10)),
           ],
 
-          // 搜索到的番剧结果切换 Chip
           if (_searchResults.isNotEmpty) ...[
             const SizedBox(height: 8),
             SizedBox(
@@ -656,7 +648,6 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
             ),
           ],
 
-          // 集数选择列表
           if (_selectedSubject != null) ...[
             const SizedBox(height: 8),
             Row(

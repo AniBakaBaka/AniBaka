@@ -1,4 +1,4 @@
-import 'package:test/test.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 import 'package:baka/services/matching/source_match_engine.dart';
 
@@ -99,8 +99,20 @@ void main() {
     ], context);
 
     expect(ranked.first.severeEpisodeConflict, isTrue);
-    expect(ranked.first.confidence, lessThanOrEqualTo(0.35));
+    expect(ranked.first.confidence, lessThanOrEqualTo(0.32));
     expect(ranked.first.shouldProbeImmediately, isFalse);
+    expect(ranked.first.shouldProbeOnFinalPass, isFalse);
+  });
+
+  test('exposes early and final probe tiers', () {
+    final context = SourceMatchContext(primaryTitle: 'Example 第二季');
+    final ranked = engine.rank([
+      candidate('exact', 'Example 第二季', source: 's1', episodes: 12),
+    ], context);
+
+    expect(ranked.first.shouldProbeImmediately, isTrue);
+    expect(ranked.first.shouldProbeOnFinalPass, isTrue);
+    expect(ranked.first.isHighConfidenceTitle, isTrue);
   });
 
   test('counts video rows without allocating split substrings', () {

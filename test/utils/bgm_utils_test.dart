@@ -17,6 +17,40 @@ void main() {
     },
   );
 
+  test('bgmImageProxyUrl unwraps WordPress Photon before wsrv.nl', () {
+    final proxied = BgmUtils.bgmImageProxyUrl(
+      'https://i1.wp.com/lain.bgm.tv/r/100/pic/user/l/000/00/41/4199.jpg?r=1366790712',
+      width: 120,
+    );
+    final uri = Uri.parse(proxied);
+    expect(uri.host, 'wsrv.nl');
+    expect(uri.queryParameters['w'], '120');
+    // Nested i1.wp.com would make wsrv.nl return 400.
+    expect(uri.queryParameters['url'], isNot(contains('i1.wp.com')));
+    expect(
+      uri.queryParameters['url'],
+      'https://lain.bgm.tv/r/100/pic/user/l/000/00/41/4199.jpg?r=1366790712',
+    );
+  });
+
+  test('pickAvatarUrl prefers medium then large then small', () {
+    expect(
+      BgmUtils.pickAvatarUrl({
+        'small': 'https://example.test/s.jpg',
+        'medium': 'https://example.test/m.jpg',
+        'large': 'https://example.test/l.jpg',
+      }),
+      'https://example.test/m.jpg',
+    );
+    expect(
+      BgmUtils.pickAvatarUrl({'small': 'https://example.test/s.jpg'}),
+      'https://example.test/s.jpg',
+    );
+    expect(BgmUtils.pickAvatarUrl('https://example.test/a.jpg'),
+        'https://example.test/a.jpg');
+    expect(BgmUtils.pickAvatarUrl(null), '');
+  });
+
   group('pickAniBakaTmdbBackdrop', () {
     test('prefers the Chinese TMDB backdrop over BGM and other languages', () {
       final detail = <String, dynamic>{

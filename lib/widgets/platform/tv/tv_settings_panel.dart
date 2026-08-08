@@ -282,8 +282,6 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
                     builder: (context, preferences, _) => _TvSliderItem(
                       icon: Icons.monitor_rounded,
                       title: '视频渲染器',
-                      // Android 平台移除 gpu-next（当前 mpv 构建不支持），
-                      // 仅保留 gpu 与 mediacodec_embed。
                       value: PlaybackSettingsService
                           .videoRendererOptionsForPlatform
                           .indexOf(preferences.videoRenderer)

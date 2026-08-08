@@ -8,7 +8,6 @@ import 'package:baka/theme.dart';
 
 /// 应用级共享状态：会话、主界面壳和主题。
 class AppState extends GetxService {
-  // 会话
   final userInfo = Rx<Map<String, dynamic>>({
     'name': '点击登录',
     'qq': '',
@@ -16,13 +15,11 @@ class AppState extends GetxService {
   });
   final loginTrigger = 0.obs;
 
-  // 主界面壳
   final currentPageIndex = 0.obs;
   final isBottomNavVisible = true.obs;
   final isHideBottomNavOnScroll = true.obs;
   final sendCommentTrigger = 0.obs;
 
-  // 主题
   final _themeMode = 1.obs;
   final _dynamicColor = false.obs;
   final _fontFamily = ''.obs;

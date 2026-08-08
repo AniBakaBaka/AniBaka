@@ -208,7 +208,6 @@ class TrackerClient {
       socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
       events = StreamIterator<RawSocketEvent>(socket);
 
-      // ── 1. connect ──
       final connectTx = rng.nextInt(0x7fffffff);
       final connectReq = ByteData(16)
         ..setInt64(0, 0x41727101980)
@@ -224,7 +223,6 @@ class TrackerClient {
         return const [];
       }
 
-      // ── 2. announce ──
       final connectionId = connectView.getInt64(8);
       final announceTx = rng.nextInt(0x7fffffff);
       final left = (totalSize - downloaded).clamp(0, totalSize);

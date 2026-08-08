@@ -496,7 +496,6 @@ class _HomePageState extends State<HomePage>
             : width > 900
             ? 5
             : 3;
-        // 卡片高度 = 2:3 封面 + 间距 + 单行标题
         final itemWidth = (width - 40 - (columns - 1) * 12) / columns;
         final titleHeight = MediaQuery.textScalerOf(context).scale(13) * 1.2;
 

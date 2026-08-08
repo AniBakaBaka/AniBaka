@@ -24,7 +24,6 @@ class Instances {
   /// 获取用户认证 token（封装 SP 访问）
   static String get userToken => sp.getString('usertoken') ?? '';
 
-  // 是否为 Android TV 平台
   static bool isTV = false;
 
   static bool get isDesktopPlatform => Platform.isWindows || Platform.isMacOS;

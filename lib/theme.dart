@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'instance.dart';
 
-// 主题颜色常量
 class ThemeColors {
   static const primary = Color.fromRGBO(0, 119, 182, 1);
   static const contentLight = Color.fromARGB(255, 25, 25, 25);
@@ -11,7 +10,6 @@ class ThemeColors {
   static const error = Color(0xFFF03738);
 }
 
-// 可用字体列表
 class AppFonts {
   static const String systemFont = 'system';
   static const String defaultFont = 'ZCOOL QingKe HuangYou';
@@ -65,7 +63,7 @@ class AppFonts {
   static const String fontScaleKey = 'app_font_scale';
   static const String fontWeightKey = 'app_font_weight';
   static const double defaultFontScale = 1.0;
-  static const int defaultFontWeightIndex = 3; // w400
+  static const int defaultFontWeightIndex = 3;
 
   static const List<FontWeight> availableWeights = [
     FontWeight.w100,

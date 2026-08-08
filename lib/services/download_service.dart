@@ -4,15 +4,16 @@ import 'dart:io';
 
 import 'package:baka/instance.dart';
 import 'package:baka/models/download_task.dart';
+import 'package:baka/pages/player/download_page.dart';
 import 'package:baka/services/app_storage.dart';
 import 'package:baka/services/danmaku_service.dart';
+import 'package:baka/utils/hls_offline_remux.dart';
+import 'package:baka/utils/toast_utils.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:get/get.dart';
-import 'package:baka/utils/toast_utils.dart';
-import 'package:baka/pages/player/download_page.dart';
 import 'package:saver_gallery/saver_gallery.dart';
 
 class DownloadService {
@@ -133,7 +134,8 @@ class DownloadService {
     final filePath = task.filePath;
     if (filePath == null || filePath.isEmpty) return;
 
-    if (task.kind == DownloadTaskKind.hls && _isHlsCacheManifest(filePath)) {
+    // HLS 缓存目录（index.m3u8 或 remux 后的 video.mp4 / video.ts）。
+    if (task.kind == DownloadTaskKind.hls && _isHlsCachePath(filePath)) {
       final dir = File(filePath).parent;
       if (await dir.exists()) {
         await dir.delete(recursive: true);
@@ -222,7 +224,13 @@ class DownloadService {
 
   Future<String> _resolveHlsManifestPath(DownloadTask task) async {
     final existing = task.filePath;
-    if (existing != null && _isHlsCacheManifest(existing)) return existing;
+    if (existing != null && _isHlsCachePath(existing)) {
+      // 已 remux 成 video.mp4/ts 时，清单路径固定为同目录 index.m3u8。
+      final parent = File(existing).parent.path;
+      final name = existing.replaceAll('\\', '/').split('/').last.toLowerCase();
+      if (name == 'index.m3u8') return existing;
+      return _joinPath(parent, 'index.m3u8');
+    }
 
     final dir = await _downloadDirectory();
     final baseName = _stripExtension(task.filename);
@@ -329,8 +337,19 @@ class DownloadService {
     await File(manifestPath).writeAsString(result.localContent);
     task.downloadedBytes = result.totalBytes;
     task.totalBytes = result.totalBytes;
+    // 分片下完后合并为单一视频，播放时走普通文件 seek，不再依赖 m3u8。
+    task.progress = 0.99;
+    _notifyAndSave();
+    final remuxed = await HlsOfflineRemux.remuxManifest(manifestPath);
+    final playablePath = remuxed ?? manifestPath;
+    task.filePath = playablePath;
+    if (remuxed != null) {
+      final length = await File(remuxed).length();
+      task.downloadedBytes = length;
+      task.totalBytes = length;
+    }
     task.progress = 1;
-    return manifestPath;
+    return playablePath;
   }
 
   Future<_M3u8Playlist> _resolveMediaPlaylist(
@@ -398,21 +417,44 @@ class DownloadService {
     final lines = const LineSplitter().convert(playlist.content);
     final rewritten = <String>[];
     final assets = <_HlsAsset>[];
-    final localNameByUrl = <String, String>{};
+    // 同一 URL 不同 BYTERANGE 必须落成不同本地文件。
+    final localNameByKey = <String, String>{};
     var segmentIndex = 0;
     var keyIndex = 0;
     var mapIndex = 0;
+    HlsByteRange? pendingByteRange;
 
-    String addAsset(String rawUrl, String localName) {
+    String addAsset(
+      String rawUrl,
+      String localName, {
+      HlsByteRange? byteRange,
+    }) {
       final absoluteUrl = playlist.url.resolve(rawUrl).toString();
-      return localNameByUrl.putIfAbsent(absoluteUrl, () {
-        assets.add(_HlsAsset(url: absoluteUrl, localName: localName));
+      final key = byteRange == null
+          ? absoluteUrl
+          : '$absoluteUrl#${byteRange.offset}:${byteRange.length}';
+      return localNameByKey.putIfAbsent(key, () {
+        assets.add(
+          _HlsAsset(
+            url: absoluteUrl,
+            localName: localName,
+            byteRange: byteRange,
+          ),
+        );
         return localName;
       });
     }
 
     for (final line in lines) {
       final trimmed = line.trim();
+      if (trimmed.toUpperCase().startsWith('#EXT-X-BYTERANGE:')) {
+        pendingByteRange = HlsByteRange.tryParse(
+          trimmed.substring('#EXT-X-BYTERANGE:'.length),
+        );
+        // 离线文件是完整分片，清单里不再保留 BYTERANGE。
+        continue;
+      }
+
       final isKey = trimmed.startsWith('#EXT-X-KEY');
       if (isKey || trimmed.startsWith('#EXT-X-MAP')) {
         final uri = _m3u8Attribute(line, 'URI');
@@ -420,6 +462,9 @@ class DownloadService {
           rewritten.add(line);
           continue;
         }
+        final mapRange = HlsByteRange.tryParse(
+          _m3u8Attribute(line, 'BYTERANGE')?.value,
+        );
         final localName = addAsset(
           uri.value,
           isKey
@@ -427,16 +472,25 @@ class DownloadService {
                     '${_extensionFromUrl(uri.value, '.key')}'
               : 'map_${(mapIndex++).toString().padLeft(3, '0')}'
                     '${_extensionFromUrl(uri.value, '.mp4')}',
+          byteRange: mapRange,
         );
-        rewritten.add(
-          line.replaceRange(uri.start, uri.end, 'URI="$localName"'),
+        // 去掉 MAP 上的 BYTERANGE，URI 换成本地名。
+        var mapped = line.replaceRange(uri.start, uri.end, 'URI="$localName"');
+        mapped = mapped.replaceAll(
+          RegExp(r',?\s*BYTERANGE=(?:"[^"]+"|[^\s,]+)', caseSensitive: false),
+          '',
         );
+        rewritten.add(mapped);
+        pendingByteRange = null;
       } else if (trimmed.isEmpty || trimmed.startsWith('#')) {
         rewritten.add(line);
       } else {
+        final range = pendingByteRange;
+        pendingByteRange = null;
         final localName = addAsset(
           trimmed,
           'segment_${(segmentIndex++).toString().padLeft(5, '0')}${_extensionFromUrl(trimmed, '.ts')}',
+          byteRange: range,
         );
         rewritten.add(localName);
       }
@@ -475,8 +529,13 @@ class DownloadService {
       task.progress = totalUnits == 0 ? 0 : completedUnits / totalUnits;
     }
 
+    // 清单仅作 remux 中间产物；分片已按 BYTERANGE 裁好，URI 为本地文件名。
+    var localContent = '${rewritten.join('\n')}\n';
+    if (!localContent.contains('#EXT-X-ENDLIST')) {
+      localContent = '$localContent#EXT-X-ENDLIST\n';
+    }
     return _HlsCacheResult(
-      localContent: '${rewritten.join('\n')}\n',
+      localContent: localContent,
       totalBytes: downloadedBytes,
     );
   }
@@ -488,24 +547,47 @@ class DownloadService {
     required void Function(int received, int total) onProgress,
   }) async {
     final target = File(_joinPath(cacheDir.path, asset.localName));
+    final range = asset.byteRange;
     if (await target.exists()) {
       final length = await target.length();
-      if (length > 0) return length;
+      // 已按 BYTERANGE 裁好，或无无完整文件可直接用。
+      if (length > 0 && (range == null || length == range.length)) {
+        return length;
+      }
+      if (range != null && length >= range.offset + range.length) {
+        await HlsOfflineRemux.sliceFileToByteRange(target, range);
+        return target.length();
+      }
     }
 
     final partial = File('${target.path}.part');
     if (await partial.exists()) await partial.delete();
+
+    final headers = <String, dynamic>{};
+    if (range != null) {
+      // 优先让服务端只回传分片；若忽略 Range 则下完再裁。
+      headers['Range'] =
+          'bytes=${range.offset}-${range.offset + range.length - 1}';
+    }
 
     await _dio.download(
       asset.url,
       partial.path,
       cancelToken: cancelToken,
       deleteOnError: false,
+      options: headers.isEmpty ? null : Options(headers: headers),
       onReceiveProgress: onProgress,
     );
 
     if (await target.exists()) await target.delete();
     await partial.rename(target.path);
+
+    if (range != null) {
+      final length = await target.length();
+      if (length != range.length && length >= range.offset + range.length) {
+        await HlsOfflineRemux.sliceFileToByteRange(target, range);
+      }
+    }
     return target.length();
   }
 
@@ -626,12 +708,11 @@ class DownloadService {
     return '$parent$separator$child';
   }
 
-  bool _isHlsCacheManifest(String path) {
+  /// 是否位于 `*.hls/` 缓存目录（清单或 remux 后的单文件）。
+  bool _isHlsCachePath(String path) {
     final normalized = path.replaceAll('\\', '/');
     final parts = normalized.split('/');
-    return parts.length >= 2 &&
-        parts.last == 'index.m3u8' &&
-        parts[parts.length - 2].endsWith('.hls');
+    return parts.length >= 2 && parts[parts.length - 2].endsWith('.hls');
   }
 
   void _throwIfCancelled(CancelToken token, String url) {
@@ -653,8 +734,13 @@ class _M3u8Playlist {
 class _HlsAsset {
   final String url;
   final String localName;
+  final HlsByteRange? byteRange;
 
-  const _HlsAsset({required this.url, required this.localName});
+  const _HlsAsset({
+    required this.url,
+    required this.localName,
+    this.byteRange,
+  });
 }
 
 class _HlsCacheResult {

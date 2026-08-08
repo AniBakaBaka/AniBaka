@@ -7,6 +7,7 @@ import 'package:baka/services/playback_settings_service.dart';
 import 'package:baka/utils/app_logger.dart';
 import 'package:baka/utils/date_util.dart';
 import 'package:baka/widgets/baka_player/anime4k.dart';
+import 'package:baka/widgets/baka_player/hls_seek_session.dart';
 import 'package:baka/widgets/baka_player/mpv_config.dart';
 import 'package:baka/widgets/baka_player/playback_backend.dart';
 import 'package:baka/widgets/baka_player/utils.dart';
@@ -16,8 +17,13 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 class PlaybackController {
-  PlaybackController({PlaybackBackend? backend})
-    : _backend = backend ?? MediaKitPlaybackBackend();
+  PlaybackController({
+    PlaybackBackend? backend,
+    HlsSeekSessionFactory? hlsSeekSessionFactory,
+  }) : _backend = backend ?? MediaKitPlaybackBackend(),
+       _hlsSeekSessionFactory =
+           hlsSeekSessionFactory ??
+           (Platform.isAndroid ? LoopbackHlsSeekSession.start : null);
 
   static const videoFitTypes = <({BoxFit fit, String description})>[
     (fit: BoxFit.contain, description: '\u753b\u9762'),
@@ -30,10 +36,16 @@ class PlaybackController {
   static const _timelineIntervalMs = 250;
   static const _skipCancelVisibleDuration = Duration(seconds: 5);
   static const _reverseTickInterval = Duration(milliseconds: 100);
+  // 网络 HLS 的失败完成事件可能要等分片请求超时后才到达，不能只覆盖手势结束
+  // 后的几秒。与播放器的 network-timeout 保持一致，确保整个 seek 周期都不会
+  // 被误判成自然片尾。
+  static const _seekCompletionGuard = Duration(seconds: 30);
+  static const _completionTolerance = Duration(seconds: 15);
   static const _longPressPixelsPerRate = 32.0;
   static const _maxLongPressRate = 5.0;
 
   final PlaybackBackend _backend;
+  final HlsSeekSessionFactory? _hlsSeekSessionFactory;
   final core = ValueNotifier<PlaybackCoreState>(const PlaybackCoreState());
   final timeline = ValueNotifier<PlaybackTimelineState>(
     const PlaybackTimelineState(),
@@ -81,11 +93,22 @@ class PlaybackController {
   bool _disposed = false;
   bool _hasPlaybackProgress = false;
   bool _eofReached = false;
+  DateTime? _seekStartedAt;
+  Duration? _pendingSeekTarget;
+  bool _resumePrematureSeek = false;
+  bool _seekRecoveryInFlight = false;
+  int _seekRecoveryCount = 0;
+  int _seekGeneration = 0;
   int _openRetryCount = 0;
   int _openGeneration = 0;
   String? _lastOpenUri;
   Map<String, String>? _lastOpenHeaders;
   bool _lastOpenAutoplay = true;
+  HlsSeekSession? _hlsSeekSession;
+  Future<HlsSeekSession?>? _hlsSeekSessionFuture;
+  Duration _hlsTimelineOffset = Duration.zero;
+  Duration? _hlsPositionFloor;
+  bool _hlsReopenInFlight = false;
 
   String? get currentMediaUri => _backend.currentMediaUri;
   List<SubtitleTrack> get subtitleTracks => _backend.subtitleTracks;
@@ -119,6 +142,10 @@ class PlaybackController {
     bool autoplay = true,
     Map<String, String>? httpHeaders,
   }) async {
+    await _clearHlsSeekSession();
+    _hlsTimelineOffset = Duration.zero;
+    _hlsPositionFloor = null;
+    _hlsReopenInFlight = false;
     _openGeneration++;
     _lastOpenUri = uri;
     _lastOpenHeaders = httpHeaders == null
@@ -216,10 +243,7 @@ class PlaybackController {
       _backend.buffered.listen(_onBufferedChanged),
       _backend.buffering.listen(_onBufferingChanged),
       _backend.errors.listen(_onError),
-      _backend.completed.listen((completed) {
-        _eofReached = completed;
-        if (!_disposed && completed) _completed.add(null);
-      }),
+      _backend.completed.listen(_onBackendCompleted),
       _backend.tracks.listen(_onTracksChanged),
     ]);
   }
@@ -258,8 +282,15 @@ class PlaybackController {
     _syncDanmakuActivity();
   }
 
-  void _onPositionChanged(Duration position) {
+  void _onPositionChanged(Duration backendPosition) {
     if (_disposed) return;
+    if (_hlsReopenInFlight) return;
+    final position = backendPosition + _hlsTimelineOffset;
+    final positionFloor = _hlsPositionFloor;
+    if (positionFloor != null) {
+      if (position < positionFloor) return;
+      _hlsPositionFloor = null;
+    }
     if (!_hasPlaybackProgress && position > Duration.zero) {
       _hasPlaybackProgress = true;
       final coreState = core.value;
@@ -298,6 +329,7 @@ class PlaybackController {
 
   void _onDurationChanged(Duration duration) {
     if (_disposed ||
+        _hlsTimelineOffset > Duration.zero ||
         duration == Duration.zero ||
         duration == timeline.value.duration) {
       return;
@@ -305,7 +337,76 @@ class PlaybackController {
     timeline.value = timeline.value.copyWith(duration: duration);
   }
 
-  void _onBufferedChanged(Duration buffered) {
+  void _onBackendCompleted(bool completed) {
+    if (_disposed) return;
+    if (_hlsReopenInFlight) return;
+    if (!completed) {
+      _eofReached = false;
+      return;
+    }
+
+    if (_isPrematureSeekCompletion()) {
+      _eofReached = false;
+      final target = _pendingSeekTarget!;
+      debugPrint(
+        '忽略 seek 产生的提前 EOF: '
+        'target=${target.inMilliseconds}ms, '
+        'duration=${timeline.value.duration.inMilliseconds}ms',
+      );
+      unawaited(_recoverPrematureSeek(target, _seekGeneration));
+      return;
+    }
+
+    _eofReached = true;
+    if (!_completed.isClosed) _completed.add(null);
+  }
+
+  bool _isPrematureSeekCompletion() {
+    final startedAt = _seekStartedAt;
+    final target = _pendingSeekTarget;
+    final duration = timeline.value.duration;
+    if (startedAt == null ||
+        target == null ||
+        duration <= Duration.zero ||
+        DateTime.now().difference(startedAt) > _seekCompletionGuard) {
+      return false;
+    }
+    return target + _completionTolerance < duration;
+  }
+
+  Future<void> _recoverPrematureSeek(Duration target, int generation) async {
+    if (_disposed || _seekRecoveryInFlight || generation != _seekGeneration) {
+      return;
+    }
+    if (_seekRecoveryCount >= 2) {
+      _setPlaybackFailed('当前视频流跳转失败，请重试或切换线路');
+      return;
+    }
+
+    _seekRecoveryInFlight = true;
+    _seekRecoveryCount++;
+    final offset = _seekRecoveryCount == 1 ? '30' : '60';
+    try {
+      if (await _restartHlsAt(target)) return;
+      await _backend.setNativeProperty('hr-seek-demuxer-offset', offset);
+      if (_disposed || generation != _seekGeneration) return;
+      _seekStartedAt = DateTime.now();
+      await _backend.seek(target);
+      if (_resumePrematureSeek && !_disposed && generation == _seekGeneration) {
+        await _backend.play();
+      }
+    } catch (error) {
+      if (!_disposed && generation == _seekGeneration) {
+        debugPrint('恢复 HLS 跳转失败: $error');
+      }
+    } finally {
+      _seekRecoveryInFlight = false;
+    }
+  }
+
+  void _onBufferedChanged(Duration backendBuffered) {
+    if (_hlsReopenInFlight) return;
+    final buffered = backendBuffered + _hlsTimelineOffset;
     if (_disposed || buffered == timeline.value.buffered) return;
     timeline.value = timeline.value.copyWith(buffered: buffered);
   }
@@ -321,6 +422,11 @@ class PlaybackController {
 
   void _onBufferingChanged(bool buffering) {
     if (_disposed) return;
+    if (_hlsReopenInFlight) {
+      _bufferingDebounceTimer?.cancel();
+      _bufferingDebounceTimer = null;
+      return;
+    }
     _bufferingDebounceTimer?.cancel();
     _bufferingDebounceTimer = null;
 
@@ -443,12 +549,135 @@ class PlaybackController {
     // 播放完成后（mpv keep-open 会暂停在结尾）再拖动进度条：seek 之后
     // 后端仍处于暂停，必须显式恢复播放，否则再次拖拽没有效果。
     final resumeAfterSeek = _eofReached;
-    await _performSeek(target, updatePreview: !fromSlider);
+    final clamped = target.clamp(Duration.zero, timeline.value.duration);
+    _seekGeneration++;
+    _seekStartedAt = DateTime.now();
+    _pendingSeekTarget = clamped;
+    _resumePrematureSeek = _backend.isPlaying || core.value.playing;
+    _seekRecoveryCount = 0;
+    _seekRecoveryInFlight = false;
+    _eofReached = false;
+    final restartedHls = await _restartHlsAt(clamped);
+    if (!restartedHls) {
+      await _performSeek(clamped, updatePreview: !fromSlider);
+    }
     if (resumeAfterSeek) {
       _eofReached = false;
       await play();
     }
-    if (!_seekEvents.isClosed) _seekEvents.add(target);
+    if (!_seekEvents.isClosed) _seekEvents.add(clamped);
+  }
+
+  Future<bool> _restartHlsAt(Duration target) async {
+    final factory = _hlsSeekSessionFactory;
+    final uri = _lastOpenUri;
+    final duration = timeline.value.duration;
+    if (factory == null ||
+        uri == null ||
+        !uri.toLowerCase().contains('.m3u8') ||
+        target <= Duration.zero ||
+        duration <= Duration.zero ||
+        target + _completionTolerance >= duration) {
+      return false;
+    }
+
+    final autoplay = _backend.isPlaying || core.value.playing;
+    final previousOffset = _hlsTimelineOffset;
+    final previousPositionFloor = _hlsPositionFloor;
+    _hlsPositionFloor = target;
+    _hlsReopenInFlight = true;
+    _lastTimelineBucket = target.inMilliseconds ~/ _timelineIntervalMs;
+    timeline.value = timeline.value.copyWith(
+      position: target,
+      previewPosition: target,
+    );
+    final state = core.value;
+    core.value = state.copyWith(loading: true, buffering: true, failed: false);
+    _danmakuController?.pause();
+    try {
+      // Freeze the old stream before fetching/building the replacement
+      // manifest. Otherwise it keeps advancing and can overwrite the seek
+      // target while the new HLS source is still loading.
+      await _backend.pause();
+      final session = await _getHlsSeekSession(factory, uri);
+      if (_disposed || session == null || uri != _lastOpenUri) {
+        throw StateError('HLS seek session is unavailable');
+      }
+
+      final request = session.openFor(target);
+      _hlsTimelineOffset = request.timelineOffset;
+      // mpv rebases the truncated manifest's first segment to zero. Add
+      // [request.timelineOffset] back to position/buffer events so the UI and
+      // danmaku remain on the original episode timeline.
+      await _backend.setNativeProperty('rebase-start-time', 'yes');
+      await _backend.setNativeProperty(
+        'demuxer-lavf-o',
+        'allowed_extensions=ALL',
+      );
+      await _backend.open(
+        request.uri,
+        autoplay: false,
+        httpHeaders: _lastOpenHeaders,
+      );
+      await _reapplyHwdec();
+      if (_disposed || uri != _lastOpenUri) return false;
+      _hlsReopenInFlight = false;
+      core.value = core.value.copyWith(loading: false, buffering: false);
+      if (autoplay) await _backend.play();
+      return true;
+    } catch (error) {
+      _hlsReopenInFlight = false;
+      _hlsTimelineOffset = previousOffset;
+      _hlsPositionFloor = previousPositionFloor;
+      debugPrint('HLS segment-boundary reopen failed: $error');
+      if (!_disposed) {
+        core.value = core.value.copyWith(loading: false, buffering: false);
+        if (autoplay && !_backend.isPlaying) await _backend.play();
+      }
+      return false;
+    } finally {
+      _hlsReopenInFlight = false;
+    }
+  }
+
+  Future<HlsSeekSession?> _getHlsSeekSession(
+    HlsSeekSessionFactory factory,
+    String uri,
+  ) async {
+    final existing = _hlsSeekSession;
+    if (existing != null) return existing;
+    final pending = _hlsSeekSessionFuture;
+    if (pending != null) return pending;
+    final future = factory(uri, _lastOpenHeaders ?? const <String, String>{});
+    _hlsSeekSessionFuture = future;
+    try {
+      final session = await future;
+      if (_lastOpenUri == uri && !_disposed) {
+        _hlsSeekSession = session;
+      } else {
+        await session?.dispose();
+      }
+      return _hlsSeekSession;
+    } catch (error) {
+      debugPrint('Unable to create HLS seek session: $error');
+      return null;
+    } finally {
+      if (identical(_hlsSeekSessionFuture, future)) {
+        _hlsSeekSessionFuture = null;
+      }
+    }
+  }
+
+  Future<void> _clearHlsSeekSession() async {
+    final pending = _hlsSeekSessionFuture;
+    _hlsSeekSessionFuture = null;
+    final session = _hlsSeekSession;
+    _hlsSeekSession = null;
+    await session?.dispose();
+    try {
+      final pendingSession = await pending;
+      if (!identical(pendingSession, session)) await pendingSession?.dispose();
+    } catch (_) {}
   }
 
   Future<void> _performSeek(
@@ -1040,6 +1269,12 @@ class PlaybackController {
     _notifyToastChanged();
     _lastTimelineBucket = -1;
     _eofReached = false;
+    _seekStartedAt = null;
+    _pendingSeekTarget = null;
+    _resumePrematureSeek = false;
+    _seekRecoveryInFlight = false;
+    _seekRecoveryCount = 0;
+    _seekGeneration++;
   }
 
   Future<void> dispose() async {
@@ -1060,6 +1295,7 @@ class PlaybackController {
     _danmakuController?.pause();
     _danmakuController = null;
     await _settingsWrites;
+    await _clearHlsSeekSession();
     try {
       await _backend.pause();
     } catch (_) {}

@@ -6,6 +6,7 @@ import 'package:baka/models/anime_detail_view_data.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/widgets/anime_detail/collection_sheet.dart';
+import 'package:baka/widgets/anime_detail/score_distribution_chart.dart';
 import 'package:baka/widgets/common/scale_button.dart';
 
 class AnimeDetailHeader extends StatelessWidget {
@@ -45,53 +46,137 @@ class AnimeDetailHeader extends StatelessWidget {
         final coverWidth = isWide ? 270.0 : 130.0;
         final coverHeight = isWide ? 378.0 : 182.0;
         final hasScore = score != null && score > 0;
+        // 标签：优先完整分类 genres；桌面限高区域展示，移动端限数量。
+        final categoryTags = detail.genres.isNotEmpty
+            ? detail.genres
+            : detail.tags;
         final tagList = _TagsWrap(
-          tags: detail.tags,
+          tags: categoryTags,
           updateTime: updateTime,
           category: category,
           isDark: isDark,
+          // 移动端最多 5 个（另含更新时间/分类 pill 时仍截断 tags 本身）
+          limit: isWide ? null : 5,
         );
-        final actions = Row(
+        Widget actionsRow({required bool expand}) => Row(
           children: [
-            if (isWide)
-              SizedBox(
-                width: 160,
+            if (expand)
+              Expanded(
                 child: _CollectionButton(
                   collection: collection,
                   onTap: onCollectionTap,
                 ),
               )
             else
-              Expanded(
+              SizedBox(
+                width: 160,
                 child: _CollectionButton(
                   collection: collection,
                   onTap: onCollectionTap,
                 ),
               ),
             if (onSearchTap != null) ...[
-              SizedBox(width: isWide ? 16 : 12),
-              if (isWide)
+              SizedBox(width: expand ? 12 : 16),
+              if (expand)
+                Expanded(child: _SearchSourceButton(onTap: onSearchTap))
+              else
                 SizedBox(
                   width: 160,
                   child: _SearchSourceButton(onTap: onSearchTap),
-                )
-              else
-                Expanded(child: _SearchSourceButton(onTap: onSearchTap)),
+                ),
             ],
           ],
         );
+
+        if (isWide) {
+          // 宽屏：封面 | 标题+限高标签；右下角 柱形图 + 分数/排名
+          return SizedBox(
+            height: coverHeight,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _CoverImage(
+                  imageUrl: imageUrl,
+                  heroTag: heroTag,
+                  isDark: isDark,
+                  width: coverWidth,
+                  height: coverHeight,
+                ),
+                const SizedBox(width: 48),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildTitleOrLogo(
+                        title,
+                        detail.logoUrl,
+                        true,
+                        isDark,
+                      ),
+                      if (alias.isNotEmpty && alias != title) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          alias,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                            height: 1.3,
+                            color: isDark
+                                ? Colors.white54
+                                : const Color(0xFF8E8E93),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      // 限高标签区：约 3 行，超出可滚动
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          minHeight: 36,
+                          maxHeight: 96,
+                        ),
+                        child: SingleChildScrollView(
+                          physics: const BouncingScrollPhysics(),
+                          child: tagList,
+                        ),
+                      ),
+                      const Spacer(),
+                      const SizedBox(height: 12),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          actionsRow(expand: false),
+                          const Spacer(),
+                          _DesktopScoreCorner(
+                            score: hasScore ? score : null,
+                            scoreCount: scoreCount,
+                            rank: detail.rank,
+                            distribution: detail.scoreDistribution,
+                            isDark: isDark,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
         final text = SizedBox(
-          height: isWide ? null : coverHeight,
+          height: coverHeight,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildTitleOrLogo(title, detail.logoUrl, isWide, isDark),
+              _buildTitleOrLogo(title, detail.logoUrl, false, isDark),
               if (alias.isNotEmpty && alias != title) ...[
-                SizedBox(height: isWide ? 12 : 6),
+                const SizedBox(height: 6),
                 Text(
                   alias,
                   style: TextStyle(
-                    fontSize: isWide ? 16 : 13,
+                    fontSize: 13,
                     fontWeight: FontWeight.w500,
                     height: 1.3,
                     color: isDark ? Colors.white54 : const Color(0xFF8E8E93),
@@ -100,20 +185,13 @@ class AnimeDetailHeader extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
-              if (isWide && hasScore) const SizedBox(height: 20),
-              if (!isWide) const Spacer(),
+              const Spacer(),
               if (hasScore)
                 _ScoreRow(
                   score: score,
                   scoreCount: scoreCount,
                   isDark: isDark,
                 ),
-              if (isWide) ...[
-                const SizedBox(height: 20),
-                tagList,
-                const SizedBox(height: 32),
-                actions,
-              ],
             ],
           ),
         );
@@ -127,12 +205,11 @@ class AnimeDetailHeader extends StatelessWidget {
               width: coverWidth,
               height: coverHeight,
             ),
-            SizedBox(width: isWide ? 48 : 20),
+            const SizedBox(width: 20),
             Expanded(child: text),
           ],
         );
 
-        if (isWide) return intro;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -140,7 +217,7 @@ class AnimeDetailHeader extends StatelessWidget {
             const SizedBox(height: 24),
             tagList,
             const SizedBox(height: 24),
-            actions,
+            actionsRow(expand: true),
           ],
         );
       },
@@ -307,30 +384,155 @@ class _ScoreRow extends StatelessWidget {
   }
 }
 
+/// 桌面右下角：柱形图 + 分数 / 排名（并排）。
+class _DesktopScoreCorner extends StatelessWidget {
+  const _DesktopScoreCorner({
+    required this.score,
+    required this.scoreCount,
+    required this.rank,
+    required this.distribution,
+    required this.isDark,
+  });
+
+  final double? score;
+  final int scoreCount;
+  final int? rank;
+  final List<int> distribution;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasChart =
+        distribution.length == 10 && distribution.any((c) => c > 0);
+    final hasScore = score != null && score! > 0;
+    if (!hasChart && !hasScore) return const SizedBox.shrink();
+
+    final subColor = isDark ? Colors.white38 : const Color(0xFF8E8E93);
+    final scoreCol = hasScore
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(
+                    score!.toStringAsFixed(1),
+                    style: TextStyle(
+                      fontSize: 36,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -1,
+                      height: 1,
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Icon(
+                    Icons.star_rounded,
+                    size: 22,
+                    color: Color(0xFFFF9500),
+                  ),
+                ],
+              ),
+              if ((rank != null && rank! > 0) || scoreCount > 0) ...[
+                const SizedBox(height: 6),
+                Text(
+                  [
+                    if (rank != null && rank! > 0) '#$rank',
+                    if (scoreCount > 0) '$scoreCount 人评价',
+                  ].join(' · '),
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: subColor,
+                  ),
+                ),
+              ],
+            ],
+          )
+        : null;
+
+    if (!hasChart) return scoreCol ?? const SizedBox.shrink();
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        ScoreDistributionChart(
+          counts: distribution,
+          maxBarHeight: 72,
+          barWidth: 14,
+          barGap: 5,
+          compact: true,
+          showLabels: true,
+        ),
+        if (scoreCol != null) ...[
+          const SizedBox(width: 20),
+          scoreCol,
+        ],
+      ],
+    );
+  }
+}
+
 class _TagsWrap extends StatelessWidget {
   final List<String> tags;
   final String? updateTime;
   final String? category;
   final bool isDark;
 
+  /// `null` = 展示全部；否则截断并显示 +N。
+  final int? limit;
+
   const _TagsWrap({
     required this.tags,
     required this.isDark,
     this.updateTime,
     this.category,
+    this.limit = 3,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 6,
-      runSpacing: 6,
+    final limited = limit;
+    final shown = limited == null ? tags : tags.take(limited).toList();
+    final overflow =
+        limited != null && tags.length > limited ? tags.length - limited : 0;
+
+    final allPills = <Widget>[
+      if (updateTime != null && updateTime!.trim().isNotEmpty)
+        _buildPill(BgmUtils.formatTimeString(updateTime!, '更新于')),
+      if (category?.trim().isNotEmpty == true) _buildPill(category!.trim()),
+      ...shown.map(_buildPill),
+      if (overflow > 0) _buildPill('+$overflow'),
+    ];
+
+    if (allPills.isEmpty) return const SizedBox.shrink();
+
+    final List<Widget> chunkedWraps = [];
+    for (var i = 0; i < allPills.length; i += 7) {
+      final chunk = allPills.sublist(
+        i,
+        i + 7 > allPills.length ? allPills.length : i + 7,
+      );
+      chunkedWraps.add(
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: chunk,
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        if (updateTime != null && updateTime!.trim().isNotEmpty)
-          _buildPill(BgmUtils.formatTimeString(updateTime!, '更新于')),
-        if (category?.trim().isNotEmpty == true) _buildPill(category!.trim()),
-        ...tags.take(3).map(_buildPill),
-        if (tags.length > 3) _buildPill('+${tags.length - 3}'),
+        for (var i = 0; i < chunkedWraps.length; i++) ...[
+          if (i > 0) const SizedBox(height: 6),
+          chunkedWraps[i],
+        ],
       ],
     );
   }

@@ -11,6 +11,8 @@ import 'package:baka/widgets/common/skeletonizer.dart';
 import 'package:baka/widgets/platform/tv/tv_focusable.dart';
 import 'package:baka/widgets/platform/tv/tv_my_page.dart';
 import 'package:baka/widgets/platform/tv/tv_search_page.dart';
+import 'package:baka/widgets/platform/tv/tv_favorites_page.dart';
+import 'package:baka/widgets/platform/tv/tv_settings_page.dart';
 import 'package:baka/widgets/platform/tv/tv_theme_util.dart';
 
 class TvHomePage extends StatefulWidget {
@@ -30,13 +32,12 @@ class TvHomePage extends StatefulWidget {
 }
 
 class _TvHomePageState extends State<TvHomePage> {
-  int _selectedNavIndex = 2; // 0: 👤我的, 1: 🔍搜索, 2: 🌀探索/首页, 3: ⭐追番, 4: 📑历史, 5: ⚙️设置
+  int _selectedNavIndex = 2;
   Map? _focusedItem;
   final ScrollController _scrollController = ScrollController();
   bool _loadingMore = false;
   String? _exhaustedTag;
 
-  // 缓存与详情页同款的 AnimeDetailViewData 数据结构
   final Map<int, AnimeDetailViewData> _detailCache = {};
 
   @override
@@ -122,7 +123,6 @@ class _TvHomePageState extends State<TvHomePage> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. 最左侧侧边栏 (与 tv_anime_detail 源码 100% 保持一致)
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: _buildLeftSidebar(),
@@ -130,22 +130,17 @@ class _TvHomePageState extends State<TvHomePage> {
 
               const SizedBox(width: 24),
 
-              // 2. 右侧主视窗 (包含固定顶部 Header 展台 + 下方独立无限瀑布流)
               Expanded(
-                child: _selectedNavIndex != 2
-                    ? IndexedStack(
-                        index: _selectedNavIndex > 2
-                            ? _selectedNavIndex - 1
-                            : _selectedNavIndex,
-                        children: const [
-                          TvMyPage(),
-                          TvSearchPage(),
-                          TvMyPage(),
-                          TvMyPage(),
-                          TvMyPage(),
-                        ],
-                      )
-                    : _buildFixedHeaderWaterfallView(),
+                child: IndexedStack(
+                  index: _selectedNavIndex,
+                  children: [
+                    const TvMyPage(),
+                    const TvSearchPage(),
+                    _buildFixedHeaderWaterfallView(),
+                    const TvFavoritesPage(),
+                    const TvSettingsPage(),
+                  ],
+                ),
               ),
             ],
           ),
@@ -242,12 +237,10 @@ class _TvHomePageState extends State<TvHomePage> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 1. 固定常驻顶部的 Header 展台 (调大展台尺寸至 370px，背景图为主 760px，信息靠左)
             _buildFixedHeroHeader(currentFocused, detail),
 
             const SizedBox(height: 8),
 
-            // 2. 瀑布流推荐板块标题
             Text(
               '推荐',
               style: TextStyle(
@@ -258,7 +251,6 @@ class _TvHomePageState extends State<TvHomePage> {
             ),
             const SizedBox(height: 10),
 
-            // 3. 下方独立滚动的无限瀑布流海报网格 (Expanded Multi-Column Grid)
             Expanded(
               child: CustomScrollView(
                 controller: _scrollController,
@@ -324,7 +316,6 @@ class _TvHomePageState extends State<TvHomePage> {
                           ),
                         ),
 
-                  // 底部 Loading 提示
                   if (_loadingMore)
                     SliverToBoxAdapter(
                       child: Padding(
@@ -373,7 +364,6 @@ class _TvHomePageState extends State<TvHomePage> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // 1. 右侧主导扩展的大海报/背景图 (宽 760px，主导视觉位)
           if (backdropUrl.isNotEmpty)
             Positioned(
               top: 0,
@@ -399,7 +389,6 @@ class _TvHomePageState extends State<TvHomePage> {
               ),
             ),
 
-          // 2. 清透轻柔的横向渐变过渡遮罩
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
@@ -418,7 +407,6 @@ class _TvHomePageState extends State<TvHomePage> {
             ),
           ),
 
-          // 3. 左侧信息区 (更靠左，在标题位置优先渲染 Logo 图片)
           Padding(
             padding: const EdgeInsets.only(top: 8, bottom: 8),
             child: Row(
@@ -428,12 +416,10 @@ class _TvHomePageState extends State<TvHomePage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // 在标题位置优先显示 Logo 图片
                       _buildTitleOrLogo(title, logoUrl),
 
                       const SizedBox(height: 14),
 
-                      // 剧情故事梗概简述 (更靠左舒展)
                       if (summary.isNotEmpty)
                         Text(
                           summary,
@@ -449,12 +435,10 @@ class _TvHomePageState extends State<TvHomePage> {
 
                       const Spacer(),
 
-                      // 左下角：巨幅评分与 Bangumi 排名
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.baseline,
                         textBaseline: TextBaseline.alphabetic,
                         children: [
-                          // 大号 42px 亮黄评分数字
                           Text(
                             scoreText,
                             style: const TextStyle(
@@ -476,12 +460,10 @@ class _TvHomePageState extends State<TvHomePage> {
                           ),
                           const SizedBox(width: 12),
 
-                          // 5 颗星级渲染
                           _buildStarRating(scoreNum),
 
                           const SizedBox(width: 28),
 
-                          // 醒目的 Bangumi #1 排名标示
                           Text(
                             'Bangumi #$rankNum',
                             style: TextStyle(

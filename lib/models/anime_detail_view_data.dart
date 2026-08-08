@@ -15,9 +15,15 @@ class AnimeDetailViewData {
     required this.infobox,
     required this.characters,
     required this.scoreCount,
+    required this.scoreDistribution,
     required this.backdrops,
     required this.posters,
     this.score,
+    this.rank,
+    this.imdbId,
+    this.tmdbId,
+    this.tvdbId,
+    this.bgmId,
   });
 
   final String title;
@@ -32,8 +38,20 @@ class AnimeDetailViewData {
   final List<Map<String, dynamic>> characters;
   final double? score;
   final int scoreCount;
+
+  /// Bangumi 1–10 分人数分布，下标 0 = 1 分。全 0 表示无数据。
+  final List<int> scoreDistribution;
+  final int? rank;
   final List<Map<String, dynamic>> backdrops;
   final List<Map<String, dynamic>> posters;
+  final String? imdbId;
+  final String? tmdbId;
+  final String? tvdbId;
+  final int? bgmId;
+
+  bool get hasScoreDistribution =>
+      scoreDistribution.length == 10 &&
+      scoreDistribution.any((c) => c > 0);
 
   factory AnimeDetailViewData.from({
     required Map source,
@@ -76,8 +94,7 @@ class AnimeDetailViewData {
               .whereType<String>()
               .toList(growable: false)
         : const <String>[];
-    // 惰性串联：_unique 是 sync*，take(4) 一命中就停，不再为了取前 4 个
-    // 而把 genres + 整张 bgm 标签表 + 拆分后的 source tag 全量展开进一个临时 List。
+    // 完整标签列表（分类 + BGM tags + 源 tag），桌面端展示不再截断。
     final tags = _unique(
       genres
           .cast<String?>()
@@ -89,7 +106,7 @@ class AnimeDetailViewData {
           .followedBy(
             source['tag']?.toString().split(_whitespaceRe) ?? const <String>[],
           ),
-    ).take(4).toList(growable: false);
+    ).toList(growable: false);
 
     final ratings = BgmUtils.asMap(anibaka?['ratings']);
     final anibakaRating = BgmUtils.asMap(ratings?['bgm']);
@@ -102,6 +119,22 @@ class AnimeDetailViewData {
         BgmUtils.toInt(anibakaRating?['total']) ??
         BgmUtils.toInt(bgmRating?['total']) ??
         0;
+    final rank =
+        BgmUtils.toInt(anibakaRating?['rank']) ??
+        BgmUtils.toInt(bgmRating?['rank']);
+    final scoreDistribution = _scoreDistribution(
+      BgmUtils.asMap(bgmRating?['count']) ??
+          BgmUtils.asMap(anibakaRating?['count']),
+    );
+
+    final ids = BgmUtils.asMap(anibaka?['ids']);
+    final imdbId = BgmUtils.trimmed(ids?['imdb_id']) ?? BgmUtils.trimmed(anibaka?['imdb_id']);
+    final tmdbId = BgmUtils.trimmed(ids?['tmdb_id']) ?? BgmUtils.trimmed(anibaka?['tmdb_id']);
+    final tvdbId = BgmUtils.trimmed(ids?['tvdb_id']) ?? BgmUtils.trimmed(anibaka?['tvdb_id']);
+    final bgmId = BgmUtils.toInt(anibaka?['bgm_id']) ??
+        BgmUtils.toInt(bgm?['id']) ??
+        BgmUtils.toInt(source['bgmId']) ??
+        BgmUtils.toInt(source['id']);
 
     return AnimeDetailViewData(
       title: title,
@@ -120,9 +153,26 @@ class AnimeDetailViewData {
       characters: BgmUtils.asMapList(bgm?['characters']),
       score: score,
       scoreCount: scoreCount,
+      scoreDistribution: scoreDistribution,
+      rank: rank,
       backdrops: backdrops,
       posters: posters,
+      imdbId: imdbId,
+      tmdbId: tmdbId,
+      tvdbId: tvdbId,
+      bgmId: bgmId,
     );
+  }
+
+  /// 解析 Bangumi `rating.count` → 长度 10 的人数列表。
+  static List<int> _scoreDistribution(Map<String, dynamic>? countMap) {
+    if (countMap == null || countMap.isEmpty) {
+      return const [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    }
+    return List<int>.generate(10, (i) {
+      final key = '${i + 1}';
+      return BgmUtils.toInt(countMap[key]) ?? 0;
+    }, growable: false);
   }
 
   static String? _imageUrl(Map<String, dynamic>? image) =>
@@ -201,14 +251,25 @@ class AnimeDetailViewData {
     if (rank != null && rank > 0) add('排名', '#$rank');
     if (englishTitle != title) add('英文名', englishTitle);
 
-    final ids = BgmUtils.asMap(anibaka?['ids']);
-    add('IMDb', ids?['imdb_id']);
-    add('TMDB', ids?['tmdb_id']);
-    add('TVDB', ids?['tvdb_id']);
+    const filteredKeys = {
+      'imdb',
+      'imdb_id',
+      'tmdb',
+      'tmdb_id',
+      'tvdb',
+      'tvdb_id',
+      'bangumi',
+      'bgm',
+    };
 
     for (final item in BgmUtils.asMapList(bgm?['infobox'])) {
       final key = BgmUtils.trimmed(item['key']);
-      if (key != null && keys.add(key)) result.add(item);
+      if (key != null) {
+        final lowerKey = key.toLowerCase();
+        if (!filteredKeys.contains(lowerKey) && keys.add(key)) {
+          result.add(item);
+        }
+      }
     }
     return result;
   }

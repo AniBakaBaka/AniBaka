@@ -137,6 +137,8 @@ class _ProbeCountingController extends VideoSourceSearchController {
     SearchResultItem item, {
     required int episodeIndex,
     required int preferredLine,
+    bool resolveMedia = true,
+    bool raceMode = false,
     bool probeDirect = true,
   }) {
     calls++;

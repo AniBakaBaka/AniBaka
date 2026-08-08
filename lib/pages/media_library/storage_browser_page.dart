@@ -27,7 +27,6 @@ class _StorageBrowserPageState extends State<StorageBrowserPage> {
   String? _error;
   int _loadGeneration = 0;
 
-  // 导航栈（用于返回上级目录）
   final List<String> _pathStack = [];
 
   @override
@@ -297,8 +296,6 @@ class _ListItemTile extends StatelessWidget {
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
 }
-
-// ── 文件/目录图标 ──
 
 class _FileIcon extends StatelessWidget {
   final StorageItem item;

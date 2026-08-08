@@ -100,3 +100,61 @@ Future<Map<String, dynamic>?> _loadAnimeDetail(int bgmId) async {
     return null;
   }
 }
+
+final Map<String, Future<Map<String, dynamic>?>> _episodeStillsRequests = {};
+
+/// 获取单集剧照与元数据 API（支持内存缓存）
+Future<Map<String, dynamic>?> getEpisodeStills({
+  int? bgmId,
+  int? tmdbId,
+  String? tvdbId,
+  int season = 1,
+  int episode = 1,
+}) {
+  final cacheKey = 'b:${bgmId}_t:${tmdbId}_v:${tvdbId}_s:${season}_e:$episode';
+  return _episodeStillsRequests[cacheKey] ??= _loadEpisodeStills(
+    bgmId: bgmId,
+    tmdbId: tmdbId,
+    tvdbId: tvdbId,
+    season: season,
+    episode: episode,
+  ).then((data) {
+    if (data == null) _episodeStillsRequests.remove(cacheKey);
+    return data;
+  });
+}
+
+Future<Map<String, dynamic>?> _loadEpisodeStills({
+  int? bgmId,
+  int? tmdbId,
+  String? tvdbId,
+  int season = 1,
+  int episode = 1,
+}) async {
+  try {
+    final queryParams = <String, String>{
+      if (tmdbId != null && tmdbId > 0) 'tmdb_id': '$tmdbId',
+      if (bgmId != null && bgmId > 0) 'bgm_id': '$bgmId',
+      if (tvdbId != null && tvdbId.isNotEmpty) 'tvdb_id': tvdbId,
+      'season': '$season',
+      'ep': '$episode',
+    };
+    final queryString = queryParams.entries
+        .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+        .join('&');
+
+    final response = await NetUtils.get(
+      '$host/api/v1/anime/episode/stills?$queryString',
+      timeout: const Duration(seconds: 6),
+      notifyOnError: false,
+    );
+    final json = BgmUtils.parseJsonMap(response.data);
+    if (json == null) return null;
+    final code = BgmUtils.toInt(json['code']);
+    if (code != 0) return null;
+    return BgmUtils.asMap(json['data']);
+  } catch (_) {
+    return null;
+  }
+}
+

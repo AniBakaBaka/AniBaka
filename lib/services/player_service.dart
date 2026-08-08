@@ -63,7 +63,7 @@ class PlayerService {
   /// Carries a direct URL resolved during matching into the player so opening
   /// the selected source does not resolve the same episode twice.
   static void storePrefetchedPlaybackMedia(
-    Map<String, dynamic> data, {
+    Map data, {
     required int episodeIndex,
     required int lineIndex,
     required String episodeId,
@@ -79,6 +79,13 @@ class PlayerService {
       'resolvedAt': DateTime.now().millisecondsSinceEpoch,
     };
   }
+
+  /// 丢弃失效预取（打开失败 / 校验失败后必须清，避免死链死循环）。
+  static void clearPrefetchFrom(Map data) {
+    data.remove(_prefetchedPlaybackKey);
+  }
+
+  void clearPrefetchedPlaybackMedia() => clearPrefetchFrom(data);
 
   PlayerService({required this.data, this.posIndex}) {
     sourceNames = _parseSourceNames(data['sourceNames']);
@@ -381,27 +388,40 @@ class PlayerService {
     AdapterBase adapter,
     String episodeId, {
     Duration torrentBufferTimeout = TorrentService.defaultBufferTimeout,
+    bool preferPrefetch = true,
   }) async {
     var media =
-        _readPrefetchedPlaybackMedia(episodeId) ??
+        (preferPrefetch ? _readPrefetchedPlaybackMedia(episodeId) : null) ??
         await adapter.resolvePlaybackMedia(episodeId);
+
     if (media.url.isEmpty) {
+      clearPrefetchedPlaybackMedia();
       final episode = currentVideoItem;
       if (episode != null) {
         for (var line = 1; line <= episode.lines.length; line++) {
           if (line == currUrl) continue;
           final alternateId = episode.lineAt(line);
           if (alternateId == null || alternateId.isEmpty) continue;
+          // 换线必须带校验，空壳 m3u8 直接跳过。
           final alternate = await adapter.resolvePlaybackMedia(alternateId);
           if (alternate.url.isEmpty) continue;
-          // 只切换线路不动集数
           applySelection((episodeIndex: currPlayIndex, lineIndex: line));
           media = alternate;
+          storePrefetchedPlaybackMedia(
+            data,
+            episodeIndex: currPlayIndex,
+            lineIndex: line,
+            episodeId: alternateId,
+            url: alternate.url,
+            httpHeaders: alternate.httpHeaders,
+          );
           break;
         }
       }
     }
-    if (media.url.isEmpty || !TorrentService.isBtLink(media.url)) return media;
+    if (media.url.isEmpty || !TorrentService.isBtLink(media.url)) {
+      return media;
+    }
 
     final streamUrl = await TorrentService.instance.resolvePlaybackUrl(
       media.url,

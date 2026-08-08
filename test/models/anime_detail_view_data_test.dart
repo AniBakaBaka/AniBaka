@@ -51,4 +51,35 @@ void main() {
     expect(detail.coverUrl, 'https://example.test/cover.jpg');
     expect(detail.backgroundUrl, detail.coverUrl);
   });
+
+  test('parses bangumi 1-10 score distribution for the desktop chart', () {
+    final detail = AnimeDetailViewData.from(
+      source: const <String, dynamic>{'title': 'Example'},
+      bgmInfo: const BgmInfo(score: 8.2),
+      bgm: const <String, dynamic>{
+        'rating': {
+          'score': 8.2,
+          'total': 100,
+          'rank': 42,
+          'count': {
+            '1': 1,
+            '2': 0,
+            '3': 2,
+            '4': 3,
+            '5': 5,
+            '6': 10,
+            '7': 20,
+            '8': 30,
+            '9': 20,
+            '10': 9,
+          },
+        },
+      },
+    );
+
+    expect(detail.score, 8.2);
+    expect(detail.rank, 42);
+    expect(detail.hasScoreDistribution, isTrue);
+    expect(detail.scoreDistribution, [1, 0, 2, 3, 5, 10, 20, 30, 20, 9]);
+  });
 }

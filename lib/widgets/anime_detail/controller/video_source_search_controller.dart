@@ -3,10 +3,13 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'package:baka/source/source_registry.dart';
+import 'package:baka/source/video_url_extractor.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/services/alias_storage_service.dart';
+import 'package:baka/services/matching/auto_match_strategy.dart';
 import 'package:baka/services/matching/match_memory_service.dart';
+import 'package:baka/services/matching/media_readiness.dart';
 import 'package:baka/services/matching/source_match_engine.dart';
 import 'package:baka/services/player_service.dart';
 import 'package:baka/services/source_adapter_service.dart';
@@ -98,6 +101,10 @@ class SearchResultItem {
   }
 }
 
+/// 探针状态：
+/// - [direct]：目标集媒体已解析并可即点即播（含预取直链 + headers）
+/// - [playable]：剧集目录就绪，但媒体地址尚未解析（点选时仍会再取直链）
+/// - [failed]：目录或媒体解析失败
 enum SourceProbeStatus { pending, resolving, playable, direct, failed }
 
 class SourceProbeState {
@@ -109,6 +116,7 @@ class SourceProbeState {
   String? routeKey;
   int? resolvedLineIndex;
   String? error;
+  String? mediaUrl;
   Future<SourceProbeState>? future;
 
   SourceProbeState({
@@ -117,9 +125,13 @@ class SourceProbeState {
     required this.preferredLine,
   });
 
+  /// 目录就绪即可选；[direct] 额外保证已预取可播媒体。
   bool get isReady =>
       status == SourceProbeStatus.playable ||
       status == SourceProbeStatus.direct;
+
+  /// 已具备即点即播条件。
+  bool get isInstantPlayable => status == SourceProbeStatus.direct;
 }
 
 class SourceCandidateState {
@@ -135,6 +147,7 @@ class SourceCandidateState {
 
   SourceProbeStatus get status => probe.status;
   bool get isReady => probe.isReady;
+  bool get isInstantPlayable => probe.isInstantPlayable;
 }
 
 class DirectSourceGroup {
@@ -150,6 +163,7 @@ class DirectSourceGroup {
 
   SourceCandidateState get primary => origins.first;
   bool get isReady => primary.isReady;
+  bool get isInstantPlayable => primary.isInstantPlayable;
 }
 
 /// 视频源搜索与切换逻辑控制器
@@ -228,6 +242,44 @@ class VideoSourceSearchController {
   final _probes = <String, SourceProbeState>{};
   final _rankCache = <String, SourceMatchScore>{};
   final _triedProbes = <String>{};
+  final _probeQueue = <_ProbeJob>[];
+  bool _probePumpRunning = false;
+  int _activeProbeWorkers = 0;
+  DateTime? _autoMatchStartedAt;
+  Completer<bool>? _autoMatchGate;
+
+  /// 最近一次自动匹配耗时（认领或失败），供调试/对比。
+  Duration? lastAutoMatchDuration;
+
+  /// 目录解析超时（getSources / buildPlayerData）— 竞速档。
+  static const Duration _catalogTimeout = Duration(milliseconds: 2400);
+
+  /// 单条线路：解析直链 + 可达性校验 — 竞速档（快失败）。
+  static const Duration _mediaTimeout = Duration(milliseconds: 3000);
+
+  /// 单候选总预算：与手动点选「一次 prepare」同级。
+  static const Duration _candidateBudget = AutoMatchStrategy.candidateBudget;
+
+  /// 手动点选时稍放宽。
+  static const Duration _manualMediaTimeout = Duration(milliseconds: 5500);
+
+  /// 记忆命中总超时。
+  static const Duration _memoryTimeout = Duration(milliseconds: 4500);
+
+  /// 自动匹配整轮墙钟上限。
+  static const Duration _autoMatchWallClock = AutoMatchStrategy.wallClock;
+
+  /// 自动匹配并发：同时按「手动点选」路径处理的候选数。
+  static const int _autoProbeConcurrency = AutoMatchStrategy.raceConcurrency;
+
+  /// 自动匹配每候选最多线路。
+  static const int _autoMatchMaxLines = AutoMatchStrategy.maxLinesPerCandidate;
+
+  /// 手动点选最多尝试线路。
+  static const int _manualMaxLines = 4;
+
+  /// 可达性探测超时。
+  static const Duration _reachTimeout = Duration(milliseconds: 1500);
 
   late final String _primary;
   late final String _aliasKey;
@@ -235,7 +287,6 @@ class VideoSourceSearchController {
   bool _disposed = false;
   bool _userSelected = false;
   bool _autoMatched = false;
-  Future<void>? _autoMatchFuture;
 
   void markUserSelected() => _userSelected = true;
   bool get isDisposed => _disposed;
@@ -272,7 +323,6 @@ class VideoSourceSearchController {
     candidateRevisionNotifier.dispose();
   }
 
-  // ── 别名 ──
   List<String> _buildAutoAliases() {
     final pool = <String>{_primary};
     final detail = BgmUtils.asMap(seedData?['bgmDetailData']);
@@ -361,11 +411,12 @@ class VideoSourceSearchController {
     await startSearch();
   }
 
-  // ── 搜索流程 ──
   Future<void> startSearch() async {
     final runId = ++_runId;
     _autoMatched = false;
-    _autoMatchFuture = null;
+    lastAutoMatchDuration = null;
+    _autoMatchStartedAt = autoMatchMode ? DateTime.now() : null;
+    _autoMatchGate = autoMatchMode ? Completer<bool>() : null;
     _resetState();
     isSearchingNotifier.value = true;
     _emitProgress();
@@ -376,30 +427,36 @@ class VideoSourceSearchController {
     final memoryFuture = autoMatchMode ? _tryMemory(runId) : null;
     final quick = SourceCatalog.instance.quickSearchSources;
     final custom = SourceCatalog.instance.enabledCustomSources;
-    final keywords = [
-      _primary,
-      ...manualAliasesNotifier.value.take(3),
-      ...automaticAliasesNotifier.value
-          .where(activeAutoAliasesNotifier.value.contains)
-          .take(3),
-    ];
 
+    // 自动匹配：只搜主标题（与用户手动输入一致）；手动模式再带别名。
+    final keywords = autoMatchMode
+        ? <String>[_primary]
+        : <String>[
+            _primary,
+            ...manualAliasesNotifier.value.take(3),
+            ...automaticAliasesNotifier.value
+                .where(activeAutoAliasesNotifier.value.contains)
+                .take(3),
+          ];
+
+    // 自动匹配跳过站内源：站内需二次 play API，拖慢 first-ready。
     _progressing
       ..clear()
       ..addAll([
-        'internal',
+        if (!autoMatchMode) 'internal',
         ...quick.map((s) => s.key),
         ...custom.map((s) => AdapterRegistry.customSourceKey(s.id)),
       ]);
 
     final tasks = [
-      () => _searchSource(
-        runId: runId,
-        keywords: keywords,
-        sourceKey: 'internal',
-        load: _loadInternal,
-        errorMsg: '站内搜索失败',
-      ),
+      if (!autoMatchMode)
+        () => _searchSource(
+          runId: runId,
+          keywords: keywords,
+          sourceKey: 'internal',
+          load: _loadInternal,
+          errorMsg: '站内搜索失败',
+        ),
       for (final s in quick)
         () => _searchSource(
           runId: runId,
@@ -418,16 +475,71 @@ class VideoSourceSearchController {
         ),
     ];
 
+    // 自动匹配更高搜索并发，尽快产出首条高置信结果。
     final searchFuture = _runPool(
       tasks,
-      8,
+      autoMatchMode ? 10 : 8,
       shouldStop: () => _autoMatched || !_alive(runId),
     );
+
     if (memoryFuture != null && await memoryFuture) {
-      unawaited(_finishSearch(runId, searchFuture));
+      // 记忆命中：立刻结束，后台搜索可被 cancel。
+      unawaited(searchFuture);
+      _completeAutoMatchGate(true);
+      if (!_disposed) {
+        isSearchingNotifier.value = false;
+        _emitProgress();
+      }
       return;
     }
+
+    if (autoMatchMode) {
+      // 认领成功 / 全搜+final 结束 / 墙钟：不傻等慢源拖满。
+      unawaited(
+        _finishSearch(runId, searchFuture).whenComplete(() {
+          _completeAutoMatchGate(_autoMatched);
+        }),
+      );
+      try {
+        await _autoMatchGate!.future.timeout(_autoMatchWallClock);
+      } on TimeoutException {
+        // 墙钟到仍未认领：作废本轮，避免迟到的 onMatchFound 与 failed 双回调。
+        if (!_autoMatched) {
+          _runId++;
+          _probeQueue.clear();
+        }
+      }
+      if (!_autoMatched && !_userSelected) {
+        _recordAutoMatchDuration();
+        onMatchFailed?.call();
+      }
+      if (!_disposed) {
+        isSearchingNotifier.value = false;
+        _emitProgress();
+      }
+      return;
+    }
+
     await _finishSearch(runId, searchFuture);
+  }
+
+  void _completeAutoMatchGate(bool matched) {
+    final gate = _autoMatchGate;
+    if (gate != null && !gate.isCompleted) {
+      gate.complete(matched);
+    }
+  }
+
+  void _recordAutoMatchDuration() {
+    final started = _autoMatchStartedAt;
+    if (started == null) return;
+    lastAutoMatchDuration = DateTime.now().difference(started);
+    if (kDebugMode) {
+      debugPrint(
+        '[AutoMatch] done matched=$_autoMatched '
+        'in ${lastAutoMatchDuration!.inMilliseconds}ms',
+      );
+    }
   }
 
   Future<bool> _tryMemory(int runId) async {
@@ -448,18 +560,17 @@ class VideoSourceSearchController {
     );
 
     try {
+      // 记忆命中必须完整解析到可播媒体，避免「匹配成功却播不了」。
       final probe = await ensureCandidatePlayable(
         item,
         episodeIndex: _ep,
         preferredLine: 1,
-        probeDirect: true,
-      ).timeout(const Duration(milliseconds: 3500));
+        resolveMedia: true,
+        raceMode: true,
+      ).timeout(_memoryTimeout);
       if (!_alive(runId) || _autoMatched || _userSelected) return true;
-      if (probe.status == SourceProbeStatus.direct && probe.data != null) {
-        _autoMatched = true;
-        onMatchFound?.call(Map<String, dynamic>.from(probe.data!));
-        unawaited(persistMatchMemory(item, probe.data!));
-        return true;
+      if (probe.isInstantPlayable && probe.data != null) {
+        return _claimAutoMatch(runId, item, probe.data!);
       }
     } catch (_) {}
 
@@ -467,6 +578,22 @@ class VideoSourceSearchController {
       await MatchMemoryService.remove(bgmId: bgmId, title: _primary);
     } catch (_) {}
     return false;
+  }
+
+  /// 原子认领自动匹配结果；成功后停止后续搜索/探针。
+  bool _claimAutoMatch(
+    int runId,
+    SearchResultItem item,
+    Map<String, dynamic> data,
+  ) {
+    if (!_alive(runId) || _autoMatched || _userSelected) return false;
+    _autoMatched = true;
+    _probeQueue.clear();
+    _recordAutoMatchDuration();
+    onMatchFound?.call(Map<String, dynamic>.from(data));
+    unawaited(persistMatchMemory(item, data));
+    _completeAutoMatchGate(true);
+    return true;
   }
 
   Future<void> _finishSearch(int runId, Future<void> searchFuture) async {
@@ -478,13 +605,13 @@ class VideoSourceSearchController {
     }
     if (!_alive(runId)) return;
 
-    if (!_disposed) {
+    if (!_disposed && !autoMatchMode) {
       isSearchingNotifier.value = false;
       _emitProgress();
     }
-    if (autoMatchMode && !_autoMatched && !_userSelected) {
-      onMatchFailed?.call();
-    }
+    // autoMatch 的失败回调由 startSearch 的 gate 统一处理，避免重复。
+    if (!autoMatchMode) return;
+    _completeAutoMatchGate(_autoMatched);
   }
 
   void cancelSearch() {
@@ -523,6 +650,8 @@ class VideoSourceSearchController {
     _probes.clear();
     _rankCache.clear();
     _triedProbes.clear();
+    _probeQueue.clear();
+    _probePumpRunning = false;
     _results.clear();
     _sourceCounts.clear();
     _errors.clear();
@@ -581,33 +710,38 @@ class VideoSourceSearchController {
       return items;
     }
 
-    // 核心优化：并行并发发起主标题与首个别名搜索
-    final coreKeywords = keywords.take(2).toList();
-    final extraKeywords = keywords.skip(2).toList();
+    // 关键词策略：
+    // - 自动匹配：只主标题（1 个），尽快出结果
+    // - 手动：竞速前 2 个关键词（first non-empty wins），不再 Future.wait 等最慢那个
+    final raceKws = keywords
+        .take(
+          autoMatchMode
+              ? AutoMatchStrategy.keywordsPerSourceAuto
+              : AutoMatchStrategy.keywordsPerSourceManual,
+        )
+        .toList();
+    final extraKeywords = autoMatchMode
+        ? const <String>[]
+        : keywords.skip(AutoMatchStrategy.keywordsPerSourceManual).toList();
 
-    if (coreKeywords.isNotEmpty) {
-      attempted += coreKeywords.length;
-      final results = await Future.wait(
-        coreKeywords.map((kw) => tryKeyword(kw)),
-      );
+    if (raceKws.isNotEmpty) {
+      attempted += raceKws.length;
+      final hit = await _raceKeywords(raceKws, tryKeyword, runId);
       if (!_alive(runId) || _autoMatched) return;
-
-      for (var i = 0; i < coreKeywords.length; i++) {
-        final raw = results[i];
-        if (raw == null) {
-          failed++;
-          continue;
-        }
-        final items = parseRaw(raw, coreKeywords[i]);
+      if (hit == null) {
+        failed += raceKws.length;
+      } else {
+        final items = parseRaw(hit.raw, hit.keyword);
         if (items.isNotEmpty) {
           found = true;
           _appendResults(runId, items);
-          break;
+        } else {
+          failed++;
         }
       }
     }
 
-    if (!found && !_autoMatched && _alive(runId)) {
+    if (!found && !_autoMatched && _alive(runId) && extraKeywords.isNotEmpty) {
       for (final kw in extraKeywords) {
         if (!_alive(runId) || _autoMatched) return;
         if (_results.length >= 8) break;
@@ -636,6 +770,45 @@ class VideoSourceSearchController {
     );
   }
 
+  /// 多关键词竞速：谁先返回非空列表谁赢（对齐 first-ready）。
+  Future<({String keyword, List<Map<String, dynamic>> raw})?> _raceKeywords(
+    List<String> keywords,
+    Future<List<Map<String, dynamic>>?> Function(String) load,
+    int runId,
+  ) async {
+    if (keywords.length == 1) {
+      final raw = await load(keywords.first);
+      if (raw == null || raw.isEmpty) return null;
+      return (keyword: keywords.first, raw: raw);
+    }
+
+    final done =
+        Completer<({String keyword, List<Map<String, dynamic>> raw})?>();
+    var remaining = keywords.length;
+
+    for (final kw in keywords) {
+      unawaited(() async {
+        final raw = await load(kw);
+        if (!_alive(runId) || _autoMatched) {
+          if (!done.isCompleted) done.complete(null);
+          return;
+        }
+        if (raw != null && raw.isNotEmpty) {
+          if (!done.isCompleted) {
+            done.complete((keyword: kw, raw: raw));
+          }
+          return;
+        }
+        remaining--;
+        if (remaining <= 0 && !done.isCompleted) {
+          done.complete(null);
+        }
+      }());
+    }
+
+    return done.future;
+  }
+
   Future<List<Map<String, dynamic>>> _loadInternal(String keyword) async {
     final response = await getSearch(keyword);
     final raw = BgmUtils.parseJsonMap(response.data)?['data'];
@@ -651,7 +824,7 @@ class VideoSourceSearchController {
     if (!_alive(runId)) return;
     final context = _syncContext();
     var accepted = 0;
-    SearchResultItem? topConfidenceItem;
+    final freshHigh = <SearchResultItem>[];
 
     for (final item in items) {
       if (_results.containsKey(item.key) || _results.length >= 100) break;
@@ -663,9 +836,9 @@ class VideoSourceSearchController {
           item.matchCandidate,
           context,
         );
-        if (score.confidence < 0.20) continue;
-        if (score.confidence >= 0.80 && topConfidenceItem == null) {
-          topConfidenceItem = item;
+        if (score.confidence < 0.18) continue;
+        if (score.shouldProbeImmediately) {
+          freshHigh.add(item);
         }
       }
 
@@ -678,27 +851,50 @@ class VideoSourceSearchController {
     resultsNotifier.value = List.unmodifiable(_results.values);
 
     if (autoMatchMode && !_userSelected && !_autoMatched) {
-      if (topConfidenceItem != null) {
-        final highItem = topConfidenceItem;
-        unawaited(
-          ensureCandidatePlayable(
-            highItem,
-            episodeIndex: _ep,
-            preferredLine: 1,
-          ).then((probe) {
-            if (_alive(runId) &&
-                !_userSelected &&
-                !_autoMatched &&
-                probe.status == SourceProbeStatus.direct &&
-                probe.data != null) {
-              _autoMatched = true;
-              onMatchFound?.call(Map<String, dynamic>.from(probe.data!));
-              unawaited(persistMatchMemory(highItem, probe.data!));
-            }
-          }),
+      // first-ready：每条高置信立刻按「手动 prepare」路径开探，不批处理等待。
+      // 按置信度排序后插队，最优结果优先占 worker。
+      freshHigh.sort((a, b) {
+        final sa = _rankCache[a.key]?.confidence ?? 0;
+        final sb = _rankCache[b.key]?.confidence ?? 0;
+        return sb.compareTo(sa);
+      });
+      for (final item in freshHigh) {
+        final conf = _rankCache[item.key]?.confidence ?? 0;
+        _enqueueAutoProbe(
+          runId,
+          item,
+          priority: conf >= AutoMatchStrategy.priorityProbeConfidence,
         );
       }
-      unawaited(_scheduleAutoMatch(runId));
+    } else if (!autoMatchMode) {
+      // 手动搜索：后台预解析前几名，点选时尽量零等待。
+      _prefetchTopCandidates(limit: 2);
+    }
+  }
+
+  void _prefetchTopCandidates({int limit = 2}) {
+    final context = _syncContext();
+    final ranked = [
+      for (final item in _results.values)
+        if (item.sourceType != 'internal')
+          _rankCache[item.key] ??= _engine.score(item.matchCandidate, context),
+    ]..sort(SourceMatchEngine.compareScores);
+
+    var n = 0;
+    for (final s in ranked) {
+      if (n >= limit) break;
+      if (!s.shouldProbeImmediately) continue;
+      final item = _results[s.candidate.key];
+      if (item == null) continue;
+      unawaited(
+        ensureCandidatePlayable(
+          item,
+          episodeIndex: _ep,
+          preferredLine: 1,
+          resolveMedia: true,
+        ),
+      );
+      n++;
     }
   }
 
@@ -710,17 +906,98 @@ class VideoSourceSearchController {
     _emitProgress();
   }
 
-  // ── 自动匹配 ──
-  Future<void> _scheduleAutoMatch(int runId) {
-    if (!_alive(runId) || _userSelected || _autoMatched) return Future.value();
-    return _autoMatchFuture ??= _runAutoMatch(
-      runId,
-      finalPass: false,
-    ).whenComplete(() => _autoMatchFuture = null);
+  void _enqueueAutoProbe(
+    int runId,
+    SearchResultItem item, {
+    bool priority = false,
+  }) {
+    if (!_alive(runId) || _autoMatched || _userSelected) return;
+    if (item.sourceType == 'internal') return;
+    if (_autoMatchTimedOut) return;
+    final key = '${item.key}|$_ep|1';
+    if (_triedProbes.contains(key)) return;
+    // 队列去重
+    for (final job in _probeQueue) {
+      if (job.item.key == item.key) return;
+    }
+    final job = _ProbeJob(runId: runId, item: item);
+    if (priority) {
+      _probeQueue.insert(0, job);
+    } else {
+      _probeQueue.add(job);
+    }
+    unawaited(_pumpAutoProbes());
+  }
+
+  bool get _autoMatchTimedOut {
+    final started = _autoMatchStartedAt;
+    if (started == null) return false;
+    return DateTime.now().difference(started) >= _autoMatchWallClock;
+  }
+
+  Future<void> _pumpAutoProbes() async {
+    if (_probePumpRunning) return;
+    _probePumpRunning = true;
+    try {
+      final workers = List.generate(
+        _autoProbeConcurrency,
+        (_) => _autoProbeWorker(),
+      );
+      await Future.wait(workers);
+    } finally {
+      _probePumpRunning = false;
+      // 泵期间又有新任务则续跑
+      if (_probeQueue.isNotEmpty &&
+          !_autoMatched &&
+          !_disposed &&
+          !_autoMatchTimedOut) {
+        unawaited(_pumpAutoProbes());
+      }
+    }
+  }
+
+  Future<void> _autoProbeWorker() async {
+    _activeProbeWorkers++;
+    try {
+      while (!_disposed && !_autoMatched && !_userSelected) {
+        if (_autoMatchTimedOut) {
+          _probeQueue.clear();
+          return;
+        }
+        if (_probeQueue.isEmpty) return;
+        final job = _probeQueue.removeAt(0);
+        if (!_alive(job.runId) || _autoMatched || _userSelected) return;
+        final probeKey = '${job.item.key}|$_ep|1';
+        if (_triedProbes.contains(probeKey)) continue;
+        _triedProbes.add(probeKey);
+
+        try {
+          // 竞速：严格单候选预算，超时即放弃该源。
+          final probe = await ensureCandidatePlayable(
+            job.item,
+            episodeIndex: _ep,
+            preferredLine: 1,
+            resolveMedia: true,
+            raceMode: true,
+          ).timeout(_candidateBudget);
+          if (!_alive(job.runId) || _userSelected || _autoMatched) return;
+          if (probe.isInstantPlayable && probe.data != null) {
+            _claimAutoMatch(job.runId, job.item, probe.data!);
+            _probeQueue.clear();
+            return;
+          }
+        } catch (_) {
+          // 单候选失败/超时：继续竞速其他源
+        }
+      }
+    } finally {
+      _activeProbeWorkers--;
+    }
   }
 
   Future<void> _runAutoMatch(int runId, {required bool finalPass}) async {
     if (!_alive(runId) || _userSelected || _autoMatched) return;
+    if (_autoMatchTimedOut) return;
     final context = _syncContext();
 
     final ranked = [
@@ -729,51 +1006,54 @@ class VideoSourceSearchController {
           _rankCache[item.key] ??= _engine.score(item.matchCandidate, context),
     ]..sort(SourceMatchEngine.compareScores);
 
+    // final：每源最多 2 条兜底；中间路径已在 _appendResults 即时入队。
+    final perSourceCap = finalPass ? 2 : 1;
+    final maxCandidates = finalPass ? 8 : 4;
     final bySource = <String, List<SearchResultItem>>{};
     for (final s in ranked) {
-      if (finalPass ? s.confidence < 0.70 : !s.shouldProbeImmediately) continue;
+      final pass = finalPass
+          ? s.confidence >= AutoMatchStrategy.finalProbeConfidence &&
+                !s.seasonConflict &&
+                !s.severeEpisodeConflict
+          : s.confidence >= AutoMatchStrategy.immediateProbeConfidence &&
+                !s.seasonConflict &&
+                !s.severeEpisodeConflict;
+      if (!pass) continue;
       final item = _results[s.candidate.key];
       if (item == null) continue;
       if (_triedProbes.contains('${item.key}|$_ep|1')) continue;
       final list = bySource.putIfAbsent(item.sourceType, () => []);
-      if (list.length < 2) list.add(item);
+      if (list.length < perSourceCap) list.add(item);
     }
 
     final candidates = <SearchResultItem>[];
-    for (var round = 0; round < 2; round++) {
+    for (var round = 0; round < perSourceCap; round++) {
       for (final list in bySource.values) {
         if (round < list.length) {
           candidates.add(list[round]);
-          if (candidates.length >= 4) break;
+          if (candidates.length >= maxCandidates) break;
         }
       }
-      if (candidates.length >= 4) break;
-    }
-    if (candidates.isEmpty) return;
-
-    var next = 0;
-    Future<void> worker() async {
-      while (next < candidates.length && _alive(runId) && !_autoMatched) {
-        if (_userSelected) return;
-        final item = candidates[next++];
-        _triedProbes.add('${item.key}|$_ep|1');
-        final probe = await ensureCandidatePlayable(
-          item,
-          episodeIndex: _ep,
-          preferredLine: 1,
-        );
-        if (!_alive(runId) || _userSelected || _autoMatched) return;
-        if (probe.status == SourceProbeStatus.direct && probe.data != null) {
-          _autoMatched = true;
-          onMatchFound?.call(Map<String, dynamic>.from(probe.data!));
-          unawaited(persistMatchMemory(item, probe.data!));
-          return;
-        }
-      }
+      if (candidates.length >= maxCandidates) break;
     }
 
-    final n = candidates.length < 4 ? candidates.length : 4;
-    await Future.wait(List.generate(n, (_) => worker()));
+    for (final item in candidates) {
+      _enqueueAutoProbe(
+        runId,
+        item,
+        priority: (_rankCache[item.key]?.confidence ?? 0) >=
+            AutoMatchStrategy.priorityProbeConfidence,
+      );
+    }
+
+    // 等待当前队列抽干 / 认领 / 墙钟超时
+    while ((_probePumpRunning ||
+            _probeQueue.isNotEmpty ||
+            _activeProbeWorkers > 0) &&
+        !_autoMatchTimedOut) {
+      if (!_alive(runId) || _autoMatched || _userSelected) return;
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
   }
 
   Future<Map<String, dynamic>?> findNextPlayableCandidate({
@@ -799,8 +1079,10 @@ class VideoSourceSearchController {
           item,
           episodeIndex: ep,
           preferredLine: 1,
-        ).timeout(const Duration(milliseconds: 4500));
-        if (probe.status == SourceProbeStatus.direct && probe.data != null) {
+          resolveMedia: true,
+          raceMode: true,
+        ).timeout(_candidateBudget);
+        if (probe.isInstantPlayable && probe.data != null) {
           unawaited(persistMatchMemory(item, probe.data!));
           return Map<String, dynamic>.from(probe.data!);
         }
@@ -852,7 +1134,6 @@ class VideoSourceSearchController {
     );
   }
 
-  // ── 切换 / 线路探针 ──
   List<DirectSourceGroup> getDirectSourceGroups({
     required int episodeIndex,
     required int preferredLine,
@@ -900,12 +1181,14 @@ class VideoSourceSearchController {
     for (final c in candidates) {
       if (c.status == SourceProbeStatus.resolving) {
         if (++active >= 4) return;
-      } else if (c.status == SourceProbeStatus.pending) {
+      } else if (c.status == SourceProbeStatus.pending ||
+          (c.status == SourceProbeStatus.playable && !c.isInstantPlayable)) {
         unawaited(
           ensureCandidatePlayable(
             c.item,
             episodeIndex: c.probe.episodeIndex,
             preferredLine: c.probe.preferredLine,
+            resolveMedia: true,
           ),
         );
         if (++active >= 4) {
@@ -919,14 +1202,33 @@ class VideoSourceSearchController {
     SourceCandidateState candidate,
   ) {
     final probe = candidate.probe;
-    if (probe.isReady) {
+    if (probe.isInstantPlayable) {
       return Future.value(probe);
     }
     return ensureCandidatePlayable(
       candidate.item,
       episodeIndex: probe.episodeIndex,
       preferredLine: probe.preferredLine,
+      resolveMedia: true,
     );
+  }
+
+  /// 用户点选条目：完整解析到可播媒体后返回 data，供即点即播。
+  Future<Map<String, dynamic>?> prepareForPlayback(
+    SearchResultItem item, {
+    int? episodeIndex,
+    int preferredLine = 1,
+  }) async {
+    final probe = await ensureCandidatePlayable(
+      item,
+      episodeIndex: episodeIndex ?? _ep,
+      preferredLine: preferredLine,
+      resolveMedia: true,
+      raceMode: false,
+    );
+    if (probe.data == null) return null;
+    // 即使媒体解析失败，仍返回目录数据让播放器自行重试线路。
+    return Map<String, dynamic>.from(probe.data!);
   }
 
   int _statusRank(SourceProbeStatus s) => switch (s) {
@@ -937,22 +1239,73 @@ class VideoSourceSearchController {
     SourceProbeStatus.failed => 4,
   };
 
+  /// [resolveMedia]：是否继续把目标集解析成真实播放地址并写入预取。
+  /// [raceMode]：自动匹配竞速——更短超时、少扫线、解析失败不重试。
   Future<SourceProbeState> ensureCandidatePlayable(
     SearchResultItem item, {
     required int episodeIndex,
     required int preferredLine,
-    bool probeDirect = true,
+    bool resolveMedia = true,
+    bool raceMode = false,
+    @Deprecated('Use resolveMedia') bool probeDirect = true,
   }) {
+    final wantMedia = resolveMedia && probeDirect;
     final probe = _probeFor(item, episodeIndex, preferredLine);
-    if (probe.isReady) {
+
+    // 已有即点即播结果，直接复用。
+    if (probe.isInstantPlayable) {
+      return Future.value(probe);
+    }
+    // 只要目录即可，且目录已就绪。
+    if (!wantMedia && probe.isReady) {
+      return Future.value(probe);
+    }
+    // 目录已就绪但还差媒体：升级解析，避免重复拉详情。
+    if (wantMedia &&
+        probe.data != null &&
+        probe.status == SourceProbeStatus.playable) {
+      return _upgradeProbeToMedia(probe, raceMode: raceMode);
+    }
+
+    // 若当前 future 正在跑，挂接；媒体需求在目录完成后升级。
+    final running = probe.future;
+    if (running != null) {
+      if (!wantMedia) return running;
+      return running.then((state) {
+        if (state.isInstantPlayable ||
+            state.status == SourceProbeStatus.failed) {
+          return state;
+        }
+        if (state.data != null) {
+          return _upgradeProbeToMedia(state, raceMode: raceMode);
+        }
+        return state;
+      });
+    }
+
+    final future = _resolveProbe(
+      probe,
+      resolveMedia: wantMedia,
+      raceMode: raceMode,
+    );
+    probe.future = future;
+    future.whenComplete(() {
+      if (identical(probe.future, future)) probe.future = null;
+    });
+    return future;
+  }
+
+  Future<SourceProbeState> _upgradeProbeToMedia(
+    SourceProbeState probe, {
+    bool raceMode = false,
+  }) {
+    if (probe.isInstantPlayable || probe.data == null) {
       return Future.value(probe);
     }
     final running = probe.future;
-    if (running != null) {
-      return running;
-    }
+    if (running != null) return running;
 
-    final future = _resolveProbe(probe, probeDirect: probeDirect);
+    final future = _resolveMediaOntoProbe(probe, raceMode: raceMode);
     probe.future = future;
     future.whenComplete(() {
       if (identical(probe.future, future)) probe.future = null;
@@ -978,74 +1331,306 @@ class VideoSourceSearchController {
 
   Future<SourceProbeState> _resolveProbe(
     SourceProbeState probe, {
-    bool probeDirect = true,
+    required bool resolveMedia,
+    bool raceMode = false,
   }) async {
     probe.status = SourceProbeStatus.resolving;
     candidateRevisionNotifier.value++;
 
     try {
+      final catalogTimeout = raceMode
+          ? _catalogTimeout
+          : const Duration(milliseconds: 4000);
       final videoData = await resolveVideoData(
         probe.item,
-      ).timeout(const Duration(milliseconds: 4500));
-      final rawEpisodes = PlaybackEpisodeCatalog.rawEpisodesOf(
-        videoData,
-      ).map(PlaybackEpisode.parse).whereType<PlaybackEpisode>().toList();
+      ).timeout(catalogTimeout);
+      final rawEpisodes = PlaybackEpisodeCatalog.rawEpisodesOf(videoData)
+          .map(PlaybackEpisode.parse)
+          .whereType<PlaybackEpisode>()
+          .toList();
 
-      if (rawEpisodes.isNotEmpty) {
-        final epIndex =
-            (probe.episodeIndex >= 0 && probe.episodeIndex < rawEpisodes.length)
-            ? probe.episodeIndex
-            : 0;
-        final episodeItem = rawEpisodes[epIndex];
-        final totalLines = episodeItem.lines.length;
-        final lineIndex =
-            (probe.preferredLine >= 1 && probe.preferredLine <= totalLines)
-            ? probe.preferredLine
-            : 1;
-        probe.resolvedLineIndex = lineIndex;
-
-        final episodesData = rawEpisodes.map((e) => e.serialize()).toList();
-        final readyData = Map<String, dynamic>.from(videoData)
-          ..['videoList'] = episodesData
-          ..['episodes'] = episodesData
-          ..['currPlayIndex'] = epIndex
-          ..['currUrl'] = lineIndex;
-
-        final directUrl = episodeItem.lineAt(lineIndex);
-        if (directUrl != null && directUrl.isNotEmpty) {
-          probe.routeKey = 'direct:${_norm(directUrl)}';
-          if (probeDirect &&
-              (directUrl.startsWith('http://') ||
-                  directUrl.startsWith('https://'))) {
-            PlayerService.storePrefetchedPlaybackMedia(
-              readyData,
-              episodeIndex: epIndex,
-              lineIndex: lineIndex,
-              episodeId: episodeItem.title,
-              url: directUrl,
-              httpHeaders: const {},
-            );
-            probe.status = SourceProbeStatus.direct;
-          } else {
-            probe.status = SourceProbeStatus.playable;
-          }
-        } else {
-          probe.status = SourceProbeStatus.playable;
-        }
-
-        probe.data = readyData;
-        _resolvedCache[probe.item.key] = readyData;
-      } else {
+      if (rawEpisodes.isEmpty) {
         probe.status = SourceProbeStatus.failed;
         probe.error = '未找到可播放剧集';
+        candidateRevisionNotifier.value++;
+        return probe;
       }
+
+      final epIndex =
+          (probe.episodeIndex >= 0 && probe.episodeIndex < rawEpisodes.length)
+          ? probe.episodeIndex
+          : 0;
+      final episodeItem = rawEpisodes[epIndex];
+      final totalLines = episodeItem.lines.length;
+      final lineIndex =
+          (probe.preferredLine >= 1 && probe.preferredLine <= totalLines)
+          ? probe.preferredLine
+          : 1;
+      probe.resolvedLineIndex = lineIndex;
+
+      final episodesData = rawEpisodes.map((e) => e.serialize()).toList();
+      final readyData = Map<String, dynamic>.from(videoData)
+        ..['videoList'] = episodesData
+        ..['episodes'] = episodesData
+        ..['currPlayIndex'] = epIndex
+        ..['currUrl'] = lineIndex;
+
+      probe.data = readyData;
+      _resolvedCache[probe.item.key] = readyData;
+
+      if (!resolveMedia) {
+        // 仅目录：不冒充已验证直链；点选时再升级解析媒体。
+        final token = episodeItem.lineAt(lineIndex);
+        probe.routeKey = _routeKeyFor(token);
+        probe.status = SourceProbeStatus.playable;
+        candidateRevisionNotifier.value++;
+        return probe;
+      }
+
+      return _attachMedia(
+        probe,
+        readyData,
+        episodeItem,
+        epIndex,
+        lineIndex,
+        raceMode: raceMode,
+      );
     } catch (e) {
       probe.status = SourceProbeStatus.failed;
       probe.error = e.toString();
+      candidateRevisionNotifier.value++;
+      return probe;
+    }
+  }
+
+  Future<SourceProbeState> _resolveMediaOntoProbe(
+    SourceProbeState probe, {
+    bool raceMode = false,
+  }) async {
+    final data = probe.data;
+    if (data == null) {
+      return _resolveProbe(probe, resolveMedia: true, raceMode: raceMode);
     }
 
+    probe.status = SourceProbeStatus.resolving;
+    candidateRevisionNotifier.value++;
+
+    try {
+      final rawEpisodes = PlaybackEpisodeCatalog.rawEpisodesOf(data)
+          .map(PlaybackEpisode.parse)
+          .whereType<PlaybackEpisode>()
+          .toList();
+      if (rawEpisodes.isEmpty) {
+        probe.status = SourceProbeStatus.failed;
+        probe.error = '未找到可播放剧集';
+        candidateRevisionNotifier.value++;
+        return probe;
+      }
+
+      final epIndex =
+          (probe.episodeIndex >= 0 && probe.episodeIndex < rawEpisodes.length)
+          ? probe.episodeIndex
+          : 0;
+      final episodeItem = rawEpisodes[epIndex];
+      final totalLines = episodeItem.lines.length;
+      final lineIndex =
+          (probe.preferredLine >= 1 && probe.preferredLine <= totalLines)
+          ? probe.preferredLine
+          : 1;
+      probe.resolvedLineIndex = lineIndex;
+
+      final readyData = Map<String, dynamic>.from(data)
+        ..['currPlayIndex'] = epIndex
+        ..['currUrl'] = lineIndex;
+
+      return _attachMedia(
+        probe,
+        readyData,
+        episodeItem,
+        epIndex,
+        lineIndex,
+        raceMode: raceMode,
+      );
+    } catch (e) {
+      probe.status = SourceProbeStatus.failed;
+      probe.error = e.toString();
+      candidateRevisionNotifier.value++;
+      return probe;
+    }
+  }
+
+  /// 解析真实媒体地址；必要时轮换线路。成功则写入预取（episodeId = 线路 token）。
+  Future<SourceProbeState> _attachMedia(
+    SourceProbeState probe,
+    Map<String, dynamic> readyData,
+    PlaybackEpisode episodeItem,
+    int epIndex,
+    int preferredLineIndex, {
+    bool raceMode = false,
+  }) async {
+    final sourceKey =
+        readyData['source']?.toString() ?? probe.item.sourceType;
+    final lineCount = episodeItem.lines.length;
+    if (lineCount <= 0) {
+      probe.status = SourceProbeStatus.failed;
+      probe.error = '无线路可播';
+      probe.data = readyData;
+      candidateRevisionNotifier.value++;
+      return probe;
+    }
+
+    // 站内源：目录就绪即可选；若线路已是媒体直链则顺便预取。
+    if (sourceKey == 'internal') {
+      final lineIndex =
+          (preferredLineIndex >= 1 && preferredLineIndex <= lineCount)
+          ? preferredLineIndex
+          : 1;
+      final token = episodeItem.lineAt(lineIndex)?.trim() ?? '';
+      readyData['currUrl'] = lineIndex;
+      probe.resolvedLineIndex = lineIndex;
+      probe.routeKey = _routeKeyFor(token);
+      probe.data = readyData;
+      if (MediaReadiness.isAcceptablePlaybackUrl(token)) {
+        PlayerService.storePrefetchedPlaybackMedia(
+          readyData,
+          episodeIndex: epIndex,
+          lineIndex: lineIndex,
+          episodeId: token,
+          url: token,
+          httpHeaders: const {},
+        );
+        probe.mediaUrl = token;
+        probe.status = SourceProbeStatus.direct;
+      } else {
+        probe.status = SourceProbeStatus.playable;
+      }
+      _resolvedCache[probe.item.key] = readyData;
+      candidateRevisionNotifier.value++;
+      return probe;
+    }
+
+    // 竞速只扫 1~2 线；手动点选可多扫几条。
+    final maxLines = raceMode ? _autoMatchMaxLines : _manualMaxLines;
+    final order = <int>[
+      if (preferredLineIndex >= 1 && preferredLineIndex <= lineCount)
+        preferredLineIndex,
+      for (var i = 1; i <= lineCount; i++)
+        if (i != preferredLineIndex) i,
+    ].take(maxLines).toList();
+
+    final lineTimeout = raceMode ? _mediaTimeout : _manualMediaTimeout;
+    Object? lastError;
+    for (final lineIndex in order) {
+      // 整候选已超时则立刻放弃剩余线路。
+      if (raceMode && _autoMatchTimedOut) break;
+
+      final token = episodeItem.lineAt(lineIndex)?.trim() ?? '';
+      if (token.isEmpty) continue;
+
+      try {
+        final media = await _resolveLineMedia(
+          sourceKey: sourceKey,
+          itemData: probe.item.data,
+          lineToken: token,
+          raceMode: raceMode,
+        ).timeout(lineTimeout);
+
+        if (!MediaReadiness.isAcceptablePlaybackUrl(media.url)) {
+          lastError = '线路 $lineIndex 返回不可播地址';
+          continue;
+        }
+
+        readyData['currUrl'] = lineIndex;
+        probe.resolvedLineIndex = lineIndex;
+        probe.routeKey = _routeKeyFor(token);
+        probe.mediaUrl = media.url;
+
+        // 关键：episodeId 必须与 PlayerService.currentEpisodeId（线路 token）一致。
+        PlayerService.storePrefetchedPlaybackMedia(
+          readyData,
+          episodeIndex: epIndex,
+          lineIndex: lineIndex,
+          episodeId: token,
+          url: media.url,
+          httpHeaders: media.httpHeaders,
+        );
+
+        probe.data = readyData;
+        probe.status = SourceProbeStatus.direct;
+        _resolvedCache[probe.item.key] = readyData;
+        candidateRevisionNotifier.value++;
+        return probe;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+
+    // 媒体全失败：保留目录供 UI 展示，但不标为 direct，避免误匹配。
+    probe.data = readyData;
+    probe.status = SourceProbeStatus.failed;
+    probe.error = lastError?.toString() ?? '无法解析播放地址';
     candidateRevisionNotifier.value++;
     return probe;
+  }
+
+  Future<({String url, Map<String, String> httpHeaders})> _resolveLineMedia({
+    required String sourceKey,
+    required Map<String, dynamic> itemData,
+    required String lineToken,
+    bool raceMode = false,
+  }) async {
+    final kind = MediaReadiness.classify(lineToken);
+    final adapter = _adapter.adapterFor(sourceKey, itemData);
+    final reachTimeout = raceMode
+        ? _reachTimeout
+        : const Duration(milliseconds: 2500);
+    final maxAttempts = raceMode ? 1 : 2;
+
+    if (kind == MediaTokenKind.torrent) {
+      return (url: lineToken, httpHeaders: const <String, String>{});
+    }
+
+    if (kind == MediaTokenKind.directMedia) {
+      final headers = <String, String>{
+        ...?adapter?.mediaValidationHeaders,
+      }..removeWhere((_, v) => v.isEmpty);
+      if (VideoUrlExtractor.isSignedCdnUrl(lineToken)) {
+        headers.removeWhere((k, _) => k.toLowerCase() == 'referer');
+      }
+      // 形态像直链仍要探测可达：baofeng 等空壳 m3u8 必须在此处被挡掉。
+      final reachable = adapter == null
+          ? true
+          : await adapter.isPlaybackUrlReachable(
+              lineToken,
+              timeout: reachTimeout,
+            );
+      if (!reachable) {
+        return (url: '', httpHeaders: const <String, String>{});
+      }
+      return (url: lineToken, httpHeaders: Map<String, String>.from(headers));
+    }
+
+    // 必须校验：不可达则返回空，上层换线/换源，绝不预取死链。
+    return _adapter.resolvePlaybackMedia(
+      sourceKey,
+      lineToken,
+      item: itemData,
+      skipValidation: false,
+      maxAttempts: maxAttempts,
+      reachTimeout: reachTimeout,
+    );
+  }
+
+  String _routeKeyFor(String? token) {
+    final value = token?.trim() ?? '';
+    if (value.isEmpty) return 'candidate:empty';
+    final kind = MediaReadiness.classify(value);
+    return switch (kind) {
+      MediaTokenKind.directMedia => 'media:${_norm(value)}',
+      MediaTokenKind.torrent => 'bt:${_norm(value)}',
+      MediaTokenKind.needsResolve => 'token:${_norm(value)}',
+      MediaTokenKind.empty => 'candidate:empty',
+    };
   }
 
   Future<Map<String, dynamic>> resolveVideoData(SearchResultItem item) async {
@@ -1127,4 +1712,11 @@ class VideoSourceSearchController {
     }
     return data;
   }
+}
+
+class _ProbeJob {
+  const _ProbeJob({required this.runId, required this.item});
+
+  final int runId;
+  final SearchResultItem item;
 }

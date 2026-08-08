@@ -18,7 +18,6 @@ class RuleHubIndex {
         try {
           rules.add(RuleHubItem.fromJson(item));
         } catch (_) {
-          // 跳过无效条目
         }
       }
     }

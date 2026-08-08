@@ -86,7 +86,6 @@ class _DanmakuInputOverlayState extends State<DanmakuInputOverlay>
 
   @override
   Widget build(BuildContext context) {
-    // 拦截返回键
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -95,7 +94,7 @@ class _DanmakuInputOverlayState extends State<DanmakuInputOverlay>
         }
       },
       child: GestureDetector(
-        onTap: _close, // 点击背景关闭
+        onTap: _close,
         child: Stack(
           children: [
             Positioned.fill(
@@ -104,7 +103,7 @@ class _DanmakuInputOverlayState extends State<DanmakuInputOverlay>
                 child: Container(
                   color: Colors.black.withValues(
                     alpha: 0.01,
-                  ), // 极其微弱的遮罩，几乎透明，仅用于接收点击事件
+                  ),
                 ),
               ),
             ),
@@ -116,7 +115,7 @@ class _DanmakuInputOverlayState extends State<DanmakuInputOverlay>
                 child: FadeTransition(
                   opacity: _fadeAnim,
                   child: GestureDetector(
-                    onTap: () {}, // 阻止点击事件透传到背景
+                    onTap: () {},
                     child: Container(
                       margin: const EdgeInsets.only(
                         bottom: 20,
@@ -127,7 +126,7 @@ class _DanmakuInputOverlayState extends State<DanmakuInputOverlay>
                       decoration: BoxDecoration(
                         color: const Color(
                           0xFF1E1E1E,
-                        ).withValues(alpha: 0.95), // 深色背景
+                        ).withValues(alpha: 0.95),
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(
                           color: Colors.white.withValues(alpha: 0.1),

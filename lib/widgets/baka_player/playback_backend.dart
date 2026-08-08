@@ -132,8 +132,9 @@ class MediaKitPlaybackBackend implements PlaybackBackend {
     final videoController = _videoController;
     if (videoController == null) return;
     try {
-      final platform = await videoController.platform.future
-          .timeout(_surfaceReadyTimeout);
+      final platform = await videoController.platform.future.timeout(
+        _surfaceReadyTimeout,
+      );
       if ((platform.id.value ?? 0) != 0) return;
       final completer = Completer<void>();
       void listener() {

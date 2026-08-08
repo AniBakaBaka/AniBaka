@@ -18,11 +18,10 @@ class CollectionApi {
       final data = response.data;
       if (data == null || (data is String && data.isEmpty)) return fallback;
 
-      // 智能解析：支持直接返回 Map 或 String 类型 JSON
       final json = data is String ? jsonDecode(data) : data;
       if (json['code'] == 0) {
         if (parser != null && json['data'] != null) return parser(json['data']);
-        if (fallback is bool) return true as T; // bool 类型快速返回
+        if (fallback is bool) return true as T;
         return (json['data'] as T?) ?? fallback;
       }
       debugPrint('[CollectionApi] 接口业务异常: ${json['message']}');

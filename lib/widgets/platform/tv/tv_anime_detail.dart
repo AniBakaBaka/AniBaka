@@ -293,7 +293,6 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // 1. 全屏背景大图 (优先 AniBaka backdrops 横屏背景大图)
             if (bgUrl.isNotEmpty)
               Positioned.fill(
                 child: CachedNetworkImage(
@@ -308,7 +307,6 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                 ),
               ),
 
-            // 2. 上方无阴影，仅下方有极其丝滑平滑的深度渐变阴影
             Positioned.fill(
               child: Container(
                 decoration: BoxDecoration(
@@ -328,7 +326,6 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
               ),
             ),
 
-            // 3. 主界面 Padding & Alignment
             SafeArea(
               child: Padding(
                 padding: const EdgeInsets.symmetric(
@@ -336,19 +333,16 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 左侧功能侧边栏
                     _buildLeftSidebar(),
 
                     const SizedBox(width: 36),
 
-                    // 主要内容区域
                     Expanded(
                       child: FocusTraversalGroup(
                         policy: ReadingOrderTraversalPolicy(),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // 1. 顶部：主标题 (优先显示 Logo 图片) & 副标题
                             _buildTitleOrLogo(title, _detail.logoUrl),
 
                             if (alias.isNotEmpty && alias != title)
@@ -370,7 +364,6 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
 
                             const SizedBox(height: 16),
 
-                            // 2. 时间与集数状态 + 收藏/在看/想看 Counter 统计
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
@@ -426,11 +419,9 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
 
                             const Spacer(),
 
-                            // 3. 底部横向区域 (左下：控制按钮组，右下：标签Wall + 柱形图评分)
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
-                                // 左下角：追番状态 + 3个控制小按钮
                                 Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   mainAxisSize: MainAxisSize.min,
@@ -498,7 +489,6 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
 
                                 const Spacer(),
 
-                                // 右下角：[ 标签 Tags 墙 ] + [ 24px ] + [ 柱形图评分面板 ]
                                 _buildRightBottomPanel(),
                               ],
                             ),
@@ -511,7 +501,6 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
               ),
             ),
 
-            // 4. Bangumi 剧集列表具体弹窗
             if (_showEpisodeSelector)
               Positioned.fill(
                 child: AnimatedContainer(
@@ -521,6 +510,9 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                     videoList: _bgmVideoList,
                     currentIndex: 0,
                     currUrl: 1,
+                    bgmId: _subjectId ?? _detail.bgmId,
+                    tmdbId: BgmUtils.toInt(_detail.tmdbId),
+                    tvdbId: _detail.tvdbId,
                     onEpisodeSelected: (index) {
                       setState(() {
                         _showEpisodeSelector = false;
@@ -674,7 +666,6 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
       crossAxisAlignment: CrossAxisAlignment.end,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 标签墙放到评分和柱形图的左边
         Flexible(
           child: Container(
             constraints: const BoxConstraints(maxWidth: 420),
@@ -682,7 +673,6 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
           ),
         ),
         const SizedBox(width: 24),
-        // 柱形图与评分面板
         _buildScorePanel(),
       ],
     );

@@ -31,6 +31,27 @@ void main() {
     expect(lowMemory['cache-secs'], '5');
   });
 
+  test('network streams use the native demuxer defaults', () {
+    for (final uri in <String>[
+      'https://example.com/video/index.m3u8?token=1',
+      'https://example.com/HLS/master',
+      'https://example.com/play?type=m3u8&id=1',
+      'https://example.com/opaque-signed-playback',
+      'https://example.com/video.mp4',
+    ]) {
+      final properties = buildPlayerProperties(mediaUri: uri);
+      final options = properties['demuxer-lavf-o'];
+      expect(options, isEmpty, reason: uri);
+      expect(properties['rebase-start-time'], 'yes', reason: uri);
+      expect(properties['hr-seek'], 'yes', reason: uri);
+      expect(
+        properties['hr-seek-demuxer-offset'],
+        uri.contains('.m3u8') ? '12' : '0',
+        reason: uri,
+      );
+    }
+  });
+
   test('Android gpu profile pins rgba8 and disables heavy GPU features', () {
     final properties = buildPlayerProperties(
       videoRenderer: 'gpu',
@@ -71,21 +92,26 @@ void main() {
     expect(properties, isNot(contains('vid')));
   });
 
-  test('effectiveHwdec forces mediacodec only for direct renderer on Android',
-      () {
-    expect(
-      effectiveHwdec('auto-safe', 'mediacodec_embed', android: true),
-      'mediacodec',
-    );
-    expect(effectiveHwdec('no', 'mediacodec_embed', android: true), 'mediacodec');
-    expect(effectiveHwdec('no', 'mediacodec_embed', android: false), 'no');
-    expect(effectiveHwdec('no', 'gpu-next', android: true), 'no');
-    expect(effectiveHwdec('auto', 'gpu', android: true), 'auto');
-    expect(
-      effectiveHwdec('mediacodec-copy', 'gpu', android: true),
-      'mediacodec-copy',
-    );
-  });
+  test(
+    'effectiveHwdec forces mediacodec only for direct renderer on Android',
+    () {
+      expect(
+        effectiveHwdec('auto-safe', 'mediacodec_embed', android: true),
+        'mediacodec',
+      );
+      expect(
+        effectiveHwdec('no', 'mediacodec_embed', android: true),
+        'mediacodec',
+      );
+      expect(effectiveHwdec('no', 'mediacodec_embed', android: false), 'no');
+      expect(effectiveHwdec('no', 'gpu-next', android: true), 'no');
+      expect(effectiveHwdec('auto', 'gpu', android: true), 'auto');
+      expect(
+        effectiveHwdec('mediacodec-copy', 'gpu', android: true),
+        'mediacodec-copy',
+      );
+    },
+  );
 
   test('Android never hot-swaps vo or hwdec on the running player', () {
     for (final renderer in <String>['gpu', 'gpu-next', 'mediacodec_embed']) {

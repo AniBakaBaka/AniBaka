@@ -165,8 +165,6 @@ class _ThreadPageState extends State<ThreadPage>
     }
   }
 
-  // ─── Build ───
-
   @override
   Widget build(BuildContext context) {
     super.build(context);

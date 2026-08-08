@@ -99,7 +99,6 @@ class TorrentEngine {
   static const int _minBufferBytes = 2 * 1024 * 1024; // 2MB 最小缓冲
   static const int _maxPeers = 30;
 
-  // 速度追踪
   int _lastSpeedBytes = 0;
   int _lastUploadBytes = 0;
   int _uploadedBytes = 0;
@@ -184,7 +183,6 @@ class TorrentEngine {
       '总大小: ${(meta.totalSize / 1024 / 1024).toStringAsFixed(1)}MB',
     );
 
-    // 找到视频文件
     final videoIndex = meta.findVideoFileIndex();
     if (videoIndex == null) {
       _setError('种子中未找到视频文件');
@@ -193,7 +191,6 @@ class TorrentEngine {
 
     debugPrint('[TorrentEngine] 目标视频: ${meta.files[videoIndex]}');
 
-    // 初始化 piece 管理器
     _pieceManager = PieceManager(metadata: meta, targetFileIndex: videoIndex);
 
     _pieceManager!.onProgress = (downloaded, total) {
@@ -201,7 +198,6 @@ class TorrentEngine {
       final progress = targetSize > 0 ? downloaded / targetSize : 0.0;
       onProgress?.call(progress, downloaded, targetSize);
 
-      // 检查是否可以开始播放
       if (!_readyNotified && _pieceManager!.isReadyToPlay) {
         _readyNotified = true;
         onReadyToPlay?.call(_streamServer.streamUrl);
@@ -217,11 +213,9 @@ class TorrentEngine {
       }
     };
 
-    // 启动流媒体服务器
     await _streamServer.start(_pieceManager!);
     await _startPeerListener(meta, _pieceManager!);
 
-    // 开始连接 peer 下载
     _setState(TorrentState.connecting);
     final peerCount = await _connectToPeers();
     if (peerCount == 0) {
@@ -232,13 +226,11 @@ class TorrentEngine {
       return null;
     }
 
-    // 定期重新 announce
     _announceTimer = Timer.periodic(
       const Duration(minutes: 5),
       (_) => _connectToPeers(),
     );
 
-    // 定期检查 peer 连接状态
     _peerCheckTimer = Timer.periodic(
       const Duration(seconds: 10),
       (_) => _checkPeers(),

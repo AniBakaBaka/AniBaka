@@ -1,8 +1,12 @@
-import 'package:baka/widgets/platform/tv/tv_theme_util.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:baka/widgets/platform/tv/tv_focusable.dart';
+
+import 'package:baka/api/post.dart';
 import 'package:baka/models/playback_episode.dart';
+import 'package:baka/utils/bgm_utils.dart';
+import 'package:baka/widgets/platform/tv/tv_focusable.dart';
+import 'package:baka/widgets/platform/tv/tv_theme_util.dart';
 
 class TvEpisodeSelector extends StatefulWidget {
   final List<PlaybackEpisode> videoList;
@@ -12,6 +16,9 @@ class TvEpisodeSelector extends StatefulWidget {
   final Function(int) onEpisodeSelected;
   final Function(int) onUrlChanged;
   final VoidCallback onClose;
+  final int? bgmId;
+  final int? tmdbId;
+  final String? tvdbId;
 
   const TvEpisodeSelector({
     required this.videoList,
@@ -21,6 +28,9 @@ class TvEpisodeSelector extends StatefulWidget {
     required this.onUrlChanged,
     required this.onClose,
     this.sourceNames,
+    this.bgmId,
+    this.tmdbId,
+    this.tvdbId,
     super.key,
   });
 
@@ -29,10 +39,15 @@ class TvEpisodeSelector extends StatefulWidget {
 }
 
 class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
-  int _tabIndex = 0;
-  final ScrollController _episodeScrollController = ScrollController();
+  int _tabIndex = 0; // 0: 选集, 1: 线路
+  late int _focusedIndex;
+  final ScrollController _horizontalScrollController = ScrollController();
   late List<int> _episodeIndexes;
   bool _sortAscending = true;
+
+  /// 集中存储单集剧照与元数据，保证上下共享相同的数据源，零重复获取
+  final Map<int, Map<String, dynamic>> _stillsCache = {};
+  final Set<int> _loadingEpisodes = {};
 
   int get _lineCount {
     final index = widget.currentIndex;
@@ -44,7 +59,13 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
   @override
   void initState() {
     super.initState();
+    _focusedIndex = widget.currentIndex.clamp(
+      0,
+      widget.videoList.isEmpty ? 0 : widget.videoList.length - 1,
+    );
     _refreshEpisodeIndexes();
+    _fetchEpisodeDetails(_focusedIndex);
+
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _scrollToCurrentEpisode(),
     );
@@ -56,8 +77,9 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
     if (oldWidget.videoList != widget.videoList) {
       _refreshEpisodeIndexes();
     }
-    if (oldWidget.videoList != widget.videoList ||
-        oldWidget.currentIndex != widget.currentIndex) {
+    if (oldWidget.currentIndex != widget.currentIndex) {
+      _focusedIndex = widget.currentIndex;
+      _fetchEpisodeDetails(_focusedIndex);
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _scrollToCurrentEpisode(),
       );
@@ -66,7 +88,7 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
 
   @override
   void dispose() {
-    _episodeScrollController.dispose();
+    _horizontalScrollController.dispose();
     super.dispose();
   }
 
@@ -85,20 +107,81 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
   }
 
   void _scrollToCurrentEpisode() {
-    var targetIndex = _episodeIndexes.indexOf(widget.currentIndex);
-    if (targetIndex < 0 || !_episodeScrollController.hasClients) return;
+    var targetIndex = _episodeIndexes.indexOf(_focusedIndex);
+    if (targetIndex < 0 || !_horizontalScrollController.hasClients) return;
     if (!_sortAscending) {
       targetIndex = _episodeIndexes.length - targetIndex - 1;
     }
-    final targetOffset = (targetIndex * 64.0).clamp(
+    final cardWidth = (110.0 * 16 / 9) + 14.0; // 16:9 card width + spacing
+    final targetOffset = (targetIndex * cardWidth - 80.0).clamp(
       0.0,
-      _episodeScrollController.position.maxScrollExtent,
+      _horizontalScrollController.position.maxScrollExtent,
     );
-    _episodeScrollController.animateTo(
+    _horizontalScrollController.animateTo(
       targetOffset,
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
     );
+  }
+
+  /// 共享从单一数据源获取剧照，绝不重复拉取
+  void _fetchEpisodeDetails(int episodeIndex) {
+    if (episodeIndex < 0 || episodeIndex >= widget.videoList.length) return;
+    if (_stillsCache.containsKey(episodeIndex) ||
+        _loadingEpisodes.contains(episodeIndex)) {
+      return;
+    }
+
+    _loadingEpisodes.add(episodeIndex);
+    final epNum = episodeIndex + 1;
+
+    getEpisodeStills(
+      bgmId: widget.bgmId,
+      tmdbId: widget.tmdbId,
+      tvdbId: widget.tvdbId,
+      season: 1,
+      episode: epNum,
+    ).then((data) {
+      if (mounted) {
+        _loadingEpisodes.remove(episodeIndex);
+        if (data != null) {
+          setState(() {
+            _stillsCache[episodeIndex] = data;
+          });
+        }
+      }
+    }).catchError((_) {
+      if (mounted) {
+        _loadingEpisodes.remove(episodeIndex);
+      }
+    });
+
+    for (final nextEp in [episodeIndex - 1, episodeIndex + 1]) {
+      if (nextEp >= 0 &&
+          nextEp < widget.videoList.length &&
+          !_stillsCache.containsKey(nextEp) &&
+          !_loadingEpisodes.contains(nextEp)) {
+        _fetchEpisodeDetails(nextEp);
+      }
+    }
+  }
+
+  /// 获取指定剧集的剧照路径，上下组件共享相同链接与缓存
+  String _getEpisodeStillUrl(int episodeIndex) {
+    final stillData = _stillsCache[episodeIndex];
+    if (stillData == null) return '';
+    return BgmUtils.trimmed(stillData['still_url']) ??
+        BgmUtils.trimmed(stillData['still_thumb']) ??
+        '';
+  }
+
+  void _onEpisodeFocused(int episodeIndex) {
+    if (_focusedIndex != episodeIndex) {
+      setState(() {
+        _focusedIndex = episodeIndex;
+      });
+      _fetchEpisodeDetails(episodeIndex);
+    }
   }
 
   @override
@@ -108,7 +191,7 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
     final showLineTab = _lineCount > 1;
 
     return Align(
-      alignment: Alignment.centerRight,
+      alignment: Alignment.bottomCenter,
       child: FocusScope(
         autofocus: true,
         onKeyEvent: (node, event) {
@@ -122,60 +205,204 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
           return KeyEventResult.ignored;
         },
         child: Container(
-          width: 420,
-          height: double.infinity,
+          width: double.infinity,
+          height: 360,
           decoration: BoxDecoration(
-            color: context.tvPanelBgColor,
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withValues(alpha: 0.35),
+                Colors.black.withValues(alpha: 0.85),
+                Colors.black.withValues(alpha: 0.96),
+              ],
+              stops: const [0.0, 0.45, 1.0],
+            ),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             border: Border(
-              left: BorderSide(
-                color: primaryColor.withValues(alpha: 0.3),
-                width: 1,
+              top: BorderSide(
+                color: primaryColor.withValues(alpha: 0.4),
+                width: 1.5,
               ),
             ),
             boxShadow: [
               BoxShadow(
-                color: context.tvShadowColor(0.6),
-                blurRadius: 40,
-                offset: const Offset(-10, 0),
+                color: Colors.black.withValues(alpha: 0.6),
+                blurRadius: 36,
+                offset: const Offset(0, -10),
               ),
             ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 32),
+              _buildFocusedDetailsHeader(primaryColor, showLineTab),
 
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Row(
+              const Divider(height: 1, thickness: 0.5, color: Colors.white12),
+
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: _tabIndex == 0
+                      ? _buildHorizontalEpisodeList(primaryColor)
+                      : _buildLineList(primaryColor),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 上半部分：焦点剧集的 16:9 剧照 + 标题 + 剧情简介预览
+  Widget _buildFocusedDetailsHeader(Color primaryColor, bool showLineTab) {
+    final epItem =
+        (_focusedIndex >= 0 && _focusedIndex < widget.videoList.length)
+            ? widget.videoList[_focusedIndex]
+            : null;
+    final stillData = _stillsCache[_focusedIndex];
+
+    final stillUrl = _getEpisodeStillUrl(_focusedIndex);
+
+    final name = BgmUtils.trimmed(stillData?['name']) ?? epItem?.title ?? '剧集详情';
+    final overview = BgmUtils.trimmed(stillData?['overview']) ??
+        (epItem != null ? '第 ${_focusedIndex + 1} 集' : '');
+    final airDate = BgmUtils.trimmed(stillData?['air_date']);
+    final isPlaying = _focusedIndex == widget.currentIndex;
+
+    return Container(
+      height: 165,
+      padding: const EdgeInsets.fromLTRB(28, 14, 28, 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              height: 118,
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Container(
+                  color: context.tvHighlightColor(0.08),
+                  child: stillUrl.isNotEmpty
+                      ? CachedNetworkImage(
+                          imageUrl: stillUrl,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) => Container(
+                            color: context.tvHighlightColor(0.08),
+                            child: const Center(
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ),
+                          errorWidget: (context, url, error) => Center(
+                            child: Icon(
+                              Icons.movie_rounded,
+                              color: context.tvTextHintColor,
+                              size: 36,
+                            ),
+                          ),
+                        )
+                      : Center(
+                          child: Icon(
+                            Icons.movie_rounded,
+                            color: context.tvTextHintColor,
+                            size: 36,
+                          ),
+                        ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 20),
+
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    Icon(Icons.playlist_play, color: primaryColor, size: 28),
-                    const SizedBox(width: 12),
-                    Text(
-                      widget.videoList.isNotEmpty
-                          ? '${widget.videoList.length} 集'
-                          : '选集',
-                      style: TextStyle(
-                        color: context.tvTextColor,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: primaryColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '第 ${_focusedIndex + 1} 集',
+                        style: TextStyle(
+                          color: primaryColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
+                    if (isPlaying) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(
+                              Icons.play_circle_fill,
+                              color: Colors.greenAccent,
+                              size: 12,
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              '正在播放',
+                              style: TextStyle(
+                                color: Colors.greenAccent,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    if (airDate != null && airDate.isNotEmpty) ...[
+                      const SizedBox(width: 12),
+                      Text(
+                        '首播: $airDate',
+                        style: TextStyle(
+                          color: context.tvTextSecondaryColor,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                     const Spacer(),
+
+                    if (showLineTab) ...[
+                      _buildTabButton('选集', 0, primaryColor),
+                      const SizedBox(width: 8),
+                      _buildTabButton('线路', 1, primaryColor),
+                      const SizedBox(width: 12),
+                    ],
                     TvFocusable(
                       onPressed: _toggleSortOrder,
-                      borderRadius: BorderRadius.circular(18),
-                      focusBorderWidth: 2,
+                      borderRadius: BorderRadius.circular(16),
                       enableScale: false,
                       enableGlow: false,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
+                          horizontal: 10,
+                          vertical: 5,
                         ),
                         decoration: BoxDecoration(
                           color: context.tvHighlightColor(0.08),
-                          borderRadius: BorderRadius.circular(18),
+                          borderRadius: BorderRadius.circular(16),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -185,14 +412,14 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
                                   ? Icons.arrow_upward_rounded
                                   : Icons.arrow_downward_rounded,
                               color: primaryColor,
-                              size: 16,
+                              size: 14,
                             ),
-                            const SizedBox(width: 6),
+                            const SizedBox(width: 4),
                             Text(
                               _sortAscending ? '正序' : '倒序',
                               style: TextStyle(
                                 color: context.tvTextColor,
-                                fontSize: 13,
+                                fontSize: 12,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -200,63 +427,37 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: context.tvHighlightColor(0.1),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.arrow_back,
-                            color: context.tvTextSecondaryColor,
-                            size: 14,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            '返回',
-                            style: TextStyle(
-                              color: context.tvTextSecondaryColor,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   ],
                 ),
-              ),
-
-              const SizedBox(height: 16),
-
-              if (showLineTab)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: Row(
-                    children: [
-                      _buildTabButton('选集', 0, primaryColor),
-                      const SizedBox(width: 8),
-                      _buildTabButton('线路', 1, primaryColor),
-                    ],
+                const SizedBox(height: 8),
+                Text(
+                  name,
+                  style: TextStyle(
+                    color: context.tvTextColor,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: -0.2,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 6),
+                Expanded(
+                  child: Text(
+                    overview.isNotEmpty ? overview : '暂无详细简介',
+                    style: TextStyle(
+                      color: context.tvTextSecondaryColor,
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-
-              if (showLineTab) const SizedBox(height: 16),
-
-              Expanded(
-                child: _tabIndex == 0
-                    ? _buildEpisodeList(primaryColor)
-                    : _buildLineList(primaryColor),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -265,15 +466,15 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
     final isSelected = _tabIndex == index;
     return TvFocusable(
       onPressed: () => setState(() => _tabIndex = index),
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(16),
       enableScale: false,
       enableGlow: false,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
         decoration: BoxDecoration(
           color: isSelected ? primaryColor : context.tvHighlightColor(0.08),
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(16),
         ),
         child: Text(
           label,
@@ -281,7 +482,7 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
             color: isSelected
                 ? context.tvTextColor
                 : context.tvTextSecondaryColor,
-            fontSize: 15,
+            fontSize: 13,
             fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
           ),
         ),
@@ -289,7 +490,8 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
     );
   }
 
-  Widget _buildEpisodeList(Color primaryColor) {
+  /// 下半部分：带 16:9 剧照的选集卡片横向列表，上下共享图片数据
+  Widget _buildHorizontalEpisodeList(Color primaryColor) {
     if (_episodeIndexes.isEmpty) {
       return Center(
         child: Text(
@@ -300,90 +502,156 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
     }
 
     return ListView.builder(
-      controller: _episodeScrollController,
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      controller: _horizontalScrollController,
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 28),
       itemCount: _episodeIndexes.length,
-      itemExtent: 64,
       itemBuilder: (context, index) {
         final episodeIndex = _sortAscending
             ? _episodeIndexes[index]
             : _episodeIndexes[_episodeIndexes.length - index - 1];
         final item = widget.videoList[episodeIndex];
         final isPlaying = episodeIndex == widget.currentIndex;
-        final title = item.title;
-        final lineCount = item.lineCount;
+        final stillData = _stillsCache[episodeIndex];
+
+        final stillUrl = _getEpisodeStillUrl(episodeIndex);
+        final epName = BgmUtils.trimmed(stillData?['name']) ?? item.title;
 
         return Padding(
-          padding: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.only(right: 14),
           child: TvFocusable(
             autofocus: isPlaying,
+            onFocusChange: (focused) {
+              if (focused) _onEpisodeFocused(episodeIndex);
+            },
             onPressed: () => widget.onEpisodeSelected(episodeIndex),
-            borderRadius: BorderRadius.circular(10),
-            focusScale: 1.02,
-            enableGlow: false,
-            focusBorderWidth: 2,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: isPlaying
-                    ? primaryColor.withValues(alpha: 0.2)
-                    : context.tvHighlightColor(0.05),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  if (isPlaying)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 12),
-                      child: Icon(
-                        Icons.play_arrow_rounded,
-                        color: primaryColor,
-                        size: 22,
-                      ),
+            borderRadius: BorderRadius.circular(12),
+            focusScale: 1.06,
+            enableGlow: true,
+            focusBorderWidth: 2.5,
+            child: SizedBox(
+              height: 110,
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: context.tvHighlightColor(0.06),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isPlaying
+                          ? primaryColor
+                          : context.tvHighlightColor(0.12),
+                      width: isPlaying ? 1.5 : 0.8,
                     ),
-
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(11),
+                    child: Stack(
                       children: [
-                        Text(
-                          title,
-                          style: TextStyle(
-                            color: isPlaying
-                                ? primaryColor
-                                : context.tvTextColor,
-                            fontSize: 16,
-                            fontWeight: isPlaying
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        Positioned.fill(
+                          child: stillUrl.isNotEmpty
+                              ? CachedNetworkImage(
+                                  imageUrl: stillUrl,
+                                  fit: BoxFit.cover,
+                                  placeholder: (context, url) => Container(
+                                    color: context.tvHighlightColor(0.05),
+                                  ),
+                                  errorWidget: (context, url, error) => Container(
+                                    color: context.tvHighlightColor(0.08),
+                                    child: Center(
+                                      child: Icon(
+                                        Icons.play_circle_outline,
+                                        color: context.tvTextHintColor,
+                                        size: 32,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : Container(
+                                  color: context.tvHighlightColor(0.08),
+                                  child: Center(
+                                    child: Icon(
+                                      Icons.play_circle_outline,
+                                      color: context.tvTextHintColor,
+                                      size: 32,
+                                    ),
+                                  ),
+                                ),
                         ),
-                        if (lineCount > 1)
-                          Text(
-                            '$lineCount 条线路',
-                            style: TextStyle(
-                              color: context.tvHighlightColor(0.4),
-                              fontSize: 12,
+
+                        Positioned.fill(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.transparent,
+                                  Colors.black.withValues(alpha: 0.85),
+                                ],
+                                stops: const [0.4, 1.0],
+                              ),
                             ),
                           ),
+                        ),
+
+                        if (isPlaying)
+                          Positioned(
+                            top: 8,
+                            left: 8,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: primaryColor,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Icon(
+                                Icons.play_arrow_rounded,
+                                color: Colors.black,
+                                size: 14,
+                              ),
+                            ),
+                          ),
+
+                        Positioned(
+                          left: 10,
+                          right: 10,
+                          bottom: 8,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'EP ${episodeIndex + 1}',
+                                style: TextStyle(
+                                  color: isPlaying
+                                      ? primaryColor
+                                      : Colors.white.withValues(alpha: 0.7),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 1),
+                              Text(
+                                epName,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
-
-                  Text(
-                    '${episodeIndex + 1}',
-                    style: TextStyle(
-                      color: isPlaying
-                          ? primaryColor.withValues(alpha: 0.7)
-                          : context.tvHighlightColor(0.3),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -398,13 +666,13 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.info_outline, color: context.tvTextHintColor, size: 48),
-            const SizedBox(height: 12),
+            Icon(Icons.info_outline, color: context.tvTextHintColor, size: 40),
+            const SizedBox(height: 8),
             Text(
               '此剧集暂无其他线路',
               style: TextStyle(
                 color: context.tvTextSecondaryColor,
-                fontSize: 16,
+                fontSize: 15,
               ),
             ),
           ],
@@ -413,77 +681,62 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
     }
 
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 28),
       itemCount: _lineCount,
-      itemExtent: 64,
       itemBuilder: (context, index) {
         final lineIndex = index + 1;
         final isSelected = lineIndex == widget.currUrl;
-        final lineName =
-            (widget.sourceNames != null &&
+        final lineName = (widget.sourceNames != null &&
                 lineIndex > 0 &&
                 lineIndex <= widget.sourceNames!.length)
             ? widget.sourceNames![lineIndex - 1]
             : '线路 $lineIndex';
 
         return Padding(
-          padding: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.only(right: 14),
           child: TvFocusable(
             autofocus: isSelected,
             onPressed: () => widget.onUrlChanged(lineIndex),
-            borderRadius: BorderRadius.circular(10),
-            focusScale: 1.02,
+            borderRadius: BorderRadius.circular(12),
+            focusScale: 1.04,
             enableGlow: false,
             focusBorderWidth: 2,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              width: 160,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               decoration: BoxDecoration(
                 color: isSelected
                     ? primaryColor.withValues(alpha: 0.2)
-                    : context.tvHighlightColor(0.05),
-                borderRadius: BorderRadius.circular(10),
+                    : context.tvHighlightColor(0.06),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isSelected
+                      ? primaryColor
+                      : context.tvHighlightColor(0.12),
+                ),
               ),
-              child: Row(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(
                     isSelected
                         ? Icons.radio_button_checked
                         : Icons.radio_button_unchecked,
                     color: isSelected ? primaryColor : context.tvTextHintColor,
-                    size: 20,
+                    size: 24,
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      lineName,
-                      style: TextStyle(
-                        color: isSelected ? primaryColor : context.tvTextColor,
-                        fontSize: 16,
-                        fontWeight: isSelected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                      ),
+                  const SizedBox(height: 10),
+                  Text(
+                    lineName,
+                    style: TextStyle(
+                      color: isSelected ? primaryColor : context.tvTextColor,
+                      fontSize: 15,
+                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  if (isSelected)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: primaryColor.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        '当前',
-                        style: TextStyle(
-                          color: primaryColor,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
                 ],
               ),
             ),

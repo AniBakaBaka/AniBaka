@@ -53,8 +53,6 @@ class ThreadService {
     (i) => ThreadTab(channels[i]),
   );
 
-  // ─── Cache ───
-
   List? _readCache(int pid, {bool ignoreExpiry = true}) {
     final raw = AppStorage.threadCommentsBox.get('comments_$pid');
     if (raw is! Map) return null;
@@ -87,8 +85,6 @@ class ThreadService {
           if (c is Map) c['id'],
       ]);
   }
-
-  // ─── Fetch ───
 
   Future<List> _fetchPage(int pid, int page) async {
     final response = await getComments(pid, pageSize, '', page: page);

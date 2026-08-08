@@ -208,16 +208,26 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
   Future<({String url, Map<String, String> httpHeaders})> resolvePlaybackMedia(
     String episodeId, {
     bool skipValidation = false,
+    int maxAttempts = 2,
+    Duration? reachTimeout,
   }) async {
     if (!_playFeatures.usesDynamicMetadata) {
       return super.resolvePlaybackMedia(
         episodeId,
         skipValidation: skipValidation,
+        maxAttempts: maxAttempts,
+        reachTimeout: reachTimeout,
       );
     }
     return _withPlayCookieSnapshot(() async {
       final media = await _interpreter.runPlayMedia(rule, this, episodeId);
       if (media.url.isEmpty) {
+        return (url: '', httpHeaders: const <String, String>{});
+      }
+      if (!skipValidation &&
+          !validatesOwnUrls &&
+          !await isPlaybackUrlReachable(media.url, timeout: reachTimeout)) {
+        debugPrint('$name: 动态媒体不可达/不可播，丢弃: ${media.url}');
         return (url: '', httpHeaders: const <String, String>{});
       }
       return (url: media.url, httpHeaders: await _resolveMediaHeaders(media));

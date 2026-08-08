@@ -208,6 +208,46 @@ class SourceAdapterService {
     return descriptor.buildPlayerData(adapter: adapter, item: item);
   }
 
+  /// 按 source key 取（或创建）缓存中的适配器实例。
+  ///
+  /// 与 [buildPlayerData] 共用同一 LRU 缓存，保证搜索/探针阶段的 Cookie
+  /// 与后续 `resolvePlaybackMedia` 一致。
+  AdapterBase? adapterFor(String sourceKey, [Map<String, dynamic>? item]) {
+    if (sourceKey.isEmpty || sourceKey == 'internal') return null;
+
+    if (AdapterRegistry.isCustomSource(sourceKey)) {
+      final config = _resolveCustomSourceConfig(sourceKey, item ?? const {});
+      if (config == null) return null;
+      return getCustomAdapter(config);
+    }
+
+    return getBuiltinAdapter(sourceKey);
+  }
+
+  /// 解析指定源某条线路 token 的真实播放地址与请求头。
+  ///
+  /// 默认 [skipValidation]=false：自动匹配/即点即播必须确认媒体可达，
+  /// 避免把 403 空壳 m3u8 当成成功结果预取进播放器。
+  Future<({String url, Map<String, String> httpHeaders})> resolvePlaybackMedia(
+    String sourceKey,
+    String episodeToken, {
+    Map<String, dynamic>? item,
+    bool skipValidation = false,
+    int maxAttempts = 2,
+    Duration? reachTimeout,
+  }) async {
+    final adapter = adapterFor(sourceKey, item);
+    if (adapter == null) {
+      return (url: '', httpHeaders: const <String, String>{});
+    }
+    return adapter.resolvePlaybackMedia(
+      episodeToken,
+      skipValidation: skipValidation,
+      maxAttempts: maxAttempts,
+      reachTimeout: reachTimeout,
+    );
+  }
+
   CustomSourceConfig? _resolveCustomSourceConfig(
     String sourceKey,
     Map<String, dynamic> item,
