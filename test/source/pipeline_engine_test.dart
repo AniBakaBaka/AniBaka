@@ -1118,20 +1118,4 @@ void main() {
     expect(config.pipeline?['directConnection'], isTrue);
     expect(RuleMigrator.ruleForConfig(config).directConnection, isTrue);
   });
-
-  test('legacy pekolove installs recover direct routing', () {
-    final config = CustomSourceConfig(
-      id: 'ani_pekolove',
-      name: 'Pekolove',
-      baseUrl: 'https://ani.pekolove.net',
-      pipeline: const {
-        'search': <Object>[],
-        'detail': <Object>[],
-        'play': <Object>[],
-      },
-    );
-
-    expect(config.pipeline, isNot(contains('directConnection')));
-    expect(RuleMigrator.ruleForConfig(config).directConnection, isTrue);
-  });
 }

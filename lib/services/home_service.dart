@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import 'package:baka/api/bgm.dart';
+import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/services/app_storage.dart';
 import 'package:baka/services/bgm_service.dart';
@@ -261,7 +262,7 @@ class HomeDataService {
         }
         if (bgmId == null) return;
 
-        final detail = await getAnimeDetail(bgmId);
+        final detail = await AniBakaApi.getAnimeDetail(bgmId);
         final url = BgmUtils.pickAniBakaTmdbBackdrop(detail);
         if (url != null) item['backdropUrl'] = url;
       }),
@@ -273,19 +274,15 @@ class HomeDataService {
     final index = rankIndex.value;
     try {
       final items = _listOf(
-        await _cached(
-          'home_rank_bgm_$index',
-          () async {
-            final response = await searchBgmByTag(
-              const [],
-              limit: 21,
-              sort: 'rank',
-              airDate: _rankAirDateFilter(rankDays[index]),
-            );
-            return BgmService.convertSearchResponseToAppFormat(response.data);
-          },
-          force: force,
-        ),
+        await _cached('home_rank_bgm_$index', () async {
+          final response = await searchBgmByTag(
+            const [],
+            limit: 21,
+            sort: 'rank',
+            airDate: _rankAirDateFilter(rankDays[index]),
+          );
+          return BgmService.convertSearchResponseToAppFormat(response.data);
+        }, force: force),
       );
       final updated = List<List<dynamic>>.of(ranks.value);
       updated[index] = items;
@@ -325,9 +322,7 @@ class HomeDataService {
   }) async {
     final raw = await _cached('home_xinfan_bgm_v2', () async {
       final groups = _emptyGroups(7);
-      final days = BgmUtils.parseJsonMap(
-        (await getBgmCalendar()).data,
-      );
+      final days = BgmUtils.parseJsonMap((await getBgmCalendar()).data);
       if (days == null) return groups;
 
       days.forEach((key, value) {

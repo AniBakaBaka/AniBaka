@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:baka/api/play_history.dart';
+import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/play_history.dart';
 import 'package:baka/services/app_storage.dart';
@@ -65,18 +65,21 @@ class PlayHistorySyncService {
 
   static int _watchTime(Map record) => record['watchTime'] as int? ?? 0;
 
-  static Iterable<Map> _storedRecords(String key) sync* {
+  static Iterable<Map<String, dynamic>> _storedRecords(String key) sync* {
     if (!Hive.isBoxOpen(AppStorage.playHistoryBoxName)) return;
     final stored = AppStorage.playHistoryBox.get(key);
     if (stored is! List) return;
     for (final item in stored) {
-      if (item is Map) yield item;
+      if (item is Map<String, dynamic>) {
+        yield item;
+      } else if (item is Map) {
+        yield item.cast<String, dynamic>();
+      }
     }
   }
 
-  static List<Map<String, dynamic>> _readList(String key) => [
-    for (final item in _storedRecords(key)) Map<String, dynamic>.from(item),
-  ];
+  static List<Map<String, dynamic>> _readList(String key) =>
+      _storedRecords(key).toList(growable: false);
 
   static bool _sameAnime(Map left, Map right) {
     final leftBgmId = BgmUtils.toInt(left['bgmId']);
@@ -245,7 +248,7 @@ class PlayHistorySyncService {
     final next = <Map<String, dynamic>>[record];
     for (final item in _storedRecords(_resumeKey)) {
       if (_sameAnime(record, item)) continue;
-      next.add(Map<String, dynamic>.from(item));
+      next.add(item);
       if (next.length >= _maxHistoryCount) break;
     }
     await AppStorage.playHistoryBox.put(_resumeKey, next);
@@ -254,7 +257,7 @@ class PlayHistorySyncService {
   /// 从远程服务器拉取历史记录并合并到本地
   static Future<void> syncRemoteToLocal() async {
     try {
-      final response = await PlayHistoryApi.getPlayHistoryList(
+      final response = await AniBakaApi.getPlayHistory(
         pageSize: _maxHistoryCount,
       );
       if (response == null || response.list.isEmpty) return;
@@ -301,14 +304,14 @@ class PlayHistorySyncService {
       final next = <Map<String, dynamic>>[record];
       for (final item in _storedRecords(_historyKey)) {
         if (_localKey(item) == key) continue;
-        next.add(Map<String, dynamic>.from(item));
+        next.add(item);
         if (next.length >= _maxHistoryCount) break;
       }
       await _persist(next);
 
       final remote = _toRemote(record);
       if (remote != null && Instances.userToken.isNotEmpty) {
-        unawaited(PlayHistoryApi.addOrUpdatePlayHistory(remote));
+        unawaited(AniBakaApi.savePlayHistory(remote));
       }
 
       final bgmId = BgmUtils.toInt(record['bgmId']);

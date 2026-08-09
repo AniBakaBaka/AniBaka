@@ -1,10 +1,9 @@
 import 'dart:convert';
 
-import 'package:baka/api/collection.dart';
+import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/services/bangumi_sync_service.dart';
-import 'package:baka/utils/bgm_utils.dart';
 
 /// 登录 AniBaka 时使用云端收藏；未登录时使用设备本地收藏。
 class CollectionService {
@@ -12,6 +11,7 @@ class CollectionService {
 
   static const _localKey = 'local_anime_collections_v1';
   static Future<List<AnimeCollection>>? _bangumiCollectionRequest;
+  static List<AnimeCollection>? _localCache;
 
   static bool get isLocalMode => Instances.userToken.isEmpty;
   static bool get isBangumiMode =>
@@ -22,7 +22,7 @@ class CollectionService {
     bool syncBangumi = true,
   }) async {
     if (!isLocalMode) {
-      final saved = await CollectionApi.addOrUpdate(collection);
+      final saved = await AniBakaApi.saveCollection(collection);
       if (saved != null &&
           syncBangumi &&
           BangumiSyncService.instance.isConnected) {
@@ -35,14 +35,13 @@ class CollectionService {
     }
     final items = _readLocal();
     final index = items.indexWhere((item) => _sameIdentity(item, collection));
-    final normalized = _withStatusText(collection);
     if (index < 0) {
-      items.add(normalized);
+      items.add(collection);
     } else {
-      items[index] = normalized;
+      items[index] = collection;
     }
     await _writeLocal(items);
-    return normalized;
+    return collection;
   }
 
   static Future<CollectionListResponse?> getList({
@@ -52,7 +51,7 @@ class CollectionService {
     int? bgmId,
   }) async {
     if (!isLocalMode) {
-      return CollectionApi.getList(
+      return AniBakaApi.getCollections(
         page: page,
         pageSize: pageSize,
         status: status,
@@ -60,23 +59,20 @@ class CollectionService {
       );
     }
     if (isBangumiMode) await _refreshBangumiCollections();
-    final filtered = _readLocal().where((item) {
-      if (status != null && item.status != status) return false;
-      if (bgmId != null && item.bgmId != bgmId) return false;
-      return true;
-    }).toList();
     final safePage = page < 1 ? 1 : page;
     final safePageSize = pageSize < 1 ? 20 : pageSize;
     final start = (safePage - 1) * safePageSize;
-    final end = start + safePageSize < filtered.length
-        ? start + safePageSize
-        : filtered.length;
-    final list = start >= filtered.length
-        ? <AnimeCollection>[]
-        : filtered.sublist(start, end);
+    var total = 0;
+    final list = <AnimeCollection>[];
+    for (final item in _readLocal()) {
+      if (status != null && item.status != status) continue;
+      if (bgmId != null && item.bgmId != bgmId) continue;
+      if (total >= start && list.length < safePageSize) list.add(item);
+      total++;
+    }
     return CollectionListResponse(
       list: list,
-      total: filtered.length,
+      total: total,
       page: safePage,
       pageSize: safePageSize,
     );
@@ -96,7 +92,7 @@ class CollectionService {
     var total = 1;
     final result = <AnimeCollection>[];
     while (result.length < total) {
-      final response = await CollectionApi.getList(
+      final response = await AniBakaApi.getCollections(
         page: page,
         pageSize: pageSize,
       );
@@ -110,7 +106,7 @@ class CollectionService {
   }
 
   static Future<CollectionStats?> getStats() async {
-    if (!isLocalMode) return CollectionApi.getStats();
+    if (!isLocalMode) return AniBakaApi.getCollectionStats();
     if (isBangumiMode) await _refreshBangumiCollections();
     final counts = <int, int>{};
     for (final item in _readLocal()) {
@@ -127,7 +123,7 @@ class CollectionService {
   }
 
   static Future<AnimeCollection?> getByPostId(int postId) async {
-    if (!isLocalMode) return CollectionApi.getByPostId(postId);
+    if (!isLocalMode) return AniBakaApi.getCollectionByPostId(postId);
     return _firstWhereOrNull(_readLocal(), (item) => item.postId == postId);
   }
 
@@ -135,7 +131,7 @@ class CollectionService {
     int bgmId, {
     bool refreshBangumi = true,
   }) async {
-    if (!isLocalMode) return CollectionApi.getByBgmId(bgmId);
+    if (!isLocalMode) return AniBakaApi.getCollectionByBgmId(bgmId);
     if (refreshBangumi && isBangumiMode) {
       final remote = await BangumiSyncService.instance.getCollection(bgmId);
       if (remote == null) return null;
@@ -151,7 +147,7 @@ class CollectionService {
   }
 
   static Future<bool> delete(int postId) async {
-    if (!isLocalMode) return CollectionApi.delete(postId);
+    if (!isLocalMode) return AniBakaApi.deleteCollection(postId);
     if (isBangumiMode) {
       throw const BangumiSyncException(
         'Bangumi 官方 API 暂不支持取消收藏，请到 Bangumi 页面操作',
@@ -161,7 +157,7 @@ class CollectionService {
   }
 
   static Future<bool> deleteByBgmId(int bgmId) async {
-    if (!isLocalMode) return CollectionApi.deleteByBgmId(bgmId);
+    if (!isLocalMode) return AniBakaApi.deleteCollectionByBgmId(bgmId);
     if (isBangumiMode) {
       throw const BangumiSyncException(
         'Bangumi 官方 API 暂不支持取消收藏，请到 Bangumi 页面操作',
@@ -214,7 +210,7 @@ class CollectionService {
     AnimeCollection remote,
     AnimeCollection? local,
   ) {
-    if (local == null) return _withStatusText(remote);
+    if (local == null) return remote;
     return AnimeCollection(
       id: local.id,
       userId: local.userId,
@@ -250,39 +246,26 @@ class CollectionService {
   }
 
   static List<AnimeCollection> _readLocal() {
+    final cached = _localCache;
+    if (cached != null) return cached;
     final raw = Instances.sp.getString(_localKey);
-    if (raw == null || raw.isEmpty) return [];
-    try {
-      return BgmUtils.parseJsonList(jsonDecode(raw))
-          .map(BgmUtils.parseJsonMap)
-          .whereType<Map<String, dynamic>>()
-          .map(AnimeCollection.fromJson)
-          .toList();
-    } catch (_) {
-      return [];
-    }
+    if (raw == null || raw.isEmpty) return _localCache = [];
+    final decoded = jsonDecode(raw) as List<dynamic>;
+    return _localCache = decoded
+        .cast<Map<String, dynamic>>()
+        .map(AnimeCollection.fromJson)
+        .toList(growable: true);
   }
 
   static Future<void> _writeLocal(List<AnimeCollection> items) {
-    return Instances.sp.setString(
-      _localKey,
-      jsonEncode(items.map(_toLocalJson).toList()),
-    );
-  }
-
-  static Map<String, dynamic> _toLocalJson(AnimeCollection item) => {
-    ...item.toJson(),
-    if (item.id != null) 'id': item.id,
-    if (item.userId != null) 'user_id': item.userId,
-    if (item.statusText != null) 'status_text': item.statusText,
-    if (item.bgmRating != null) 'bgm_rating': item.bgmRating,
-  };
-
-  static AnimeCollection _withStatusText(AnimeCollection item) {
-    final json = _toLocalJson(item);
-    json['status_text'] =
-        item.statusText ?? CollectionStatus.fromValue(item.status)?.label;
-    return AnimeCollection.fromJson(json);
+    _localCache = items;
+    final json = StringBuffer('[');
+    for (var i = 0; i < items.length; i++) {
+      if (i > 0) json.write(',');
+      json.write(jsonEncode(items[i].toJson(includeLocalFields: true)));
+    }
+    json.write(']');
+    return Instances.sp.setString(_localKey, json.toString());
   }
 
   static bool _sameIdentity(AnimeCollection a, AnimeCollection b) {

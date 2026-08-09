@@ -95,11 +95,14 @@ class AnimeCollection {
     );
   }
 
-  Map<String, dynamic> toJson() {
+  Map<String, dynamic> toJson({bool includeLocalFields = false}) {
     return {
+      if (includeLocalFields && id != null) 'id': id,
+      if (includeLocalFields && userId != null) 'user_id': userId,
       if (postId != null) 'post_id': postId,
       if (bgmId != null) 'bgm_id': bgmId,
       'status': status,
+      if (includeLocalFields && statusText != null) 'status_text': statusText,
       if (rating > 0) 'rating': rating,
       if (comment != null && comment!.isNotEmpty) 'comment': comment,
       if (epTotal != null) 'ep_total': epTotal,
@@ -110,6 +113,7 @@ class AnimeCollection {
       if (postCover != null && postCover!.isNotEmpty) 'post_cover': postCover,
       if (bgmImage != null && bgmImage!.isNotEmpty) 'bgm_image': bgmImage,
       if (bgmTitle != null && bgmTitle!.isNotEmpty) 'bgm_title': bgmTitle,
+      if (includeLocalFields && bgmRating != null) 'bgm_rating': bgmRating,
     };
   }
 }

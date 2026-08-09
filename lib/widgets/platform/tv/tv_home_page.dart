@@ -2,7 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import 'package:baka/api/bgm.dart';
-import 'package:baka/api/post.dart';
+import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/models/anime_detail_view_data.dart';
 import 'package:baka/services/home_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
@@ -95,7 +95,7 @@ class _TvHomePageState extends State<TvHomePage> {
     () async {
       try {
         final bgmFuture = getBgmSubject(subjectId);
-        final anibakaFuture = getAnimeDetail(subjectId);
+        final anibakaFuture = AniBakaApi.getAnimeDetail(subjectId);
         final detailData = await bgmFuture;
         final anibakaData = await anibakaFuture;
         if (!mounted || request != _detailRequest) return;

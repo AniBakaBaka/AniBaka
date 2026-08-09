@@ -2,7 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'package:baka/api/post.dart';
+import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/widgets/platform/tv/tv_focusable.dart';
@@ -140,7 +140,7 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
     }
 
     try {
-      final data = await getEpisodeStills(
+      final data = await AniBakaApi.getEpisodeStills(
         bgmId: widget.bgmId,
         tmdbId: widget.tmdbId,
         tvdbId: widget.tvdbId,

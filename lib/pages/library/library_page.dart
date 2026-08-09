@@ -1,4 +1,4 @@
-import 'package:baka/api/play_history.dart';
+import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/pages/player/player_page.dart';
@@ -136,7 +136,7 @@ class _LibraryPageState extends State<LibraryPage> {
     if (confirmed == DialogAction.confirm) {
       await PlayHistorySyncService.clearHistory();
       if (_isLoggedIn) {
-        PlayHistoryApi.clearPlayHistory().catchError((_) => false);
+        AniBakaApi.clearPlayHistory().catchError((_) => false);
       }
       if (mounted) setState(() => _historyList.clear());
     }
@@ -402,10 +402,7 @@ class _LibraryPageState extends State<LibraryPage> {
         _getGridCrossAxisCount(context) * 3,
         (context, index) => AppSkeletonizer(
           enabled: true,
-          child: _CollectionCard(
-            collection: _dummyCollection,
-            onTap: () {},
-          ),
+          child: _CollectionCard(collection: _dummyCollection, onTap: () {}),
         ),
       );
     }
@@ -486,8 +483,6 @@ class _LibraryPageState extends State<LibraryPage> {
     });
   }
 }
-
-
 
 class _HistoryCard extends StatelessWidget {
   final Map data;

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:baka/api/bgm.dart';
-import 'package:baka/api/post.dart';
+import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/models/anime_detail_view_data.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/models/playback_episode.dart';
@@ -74,7 +74,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
       if (subjectId == null) return;
 
       final bgmFuture = getBgmSubject(subjectId);
-      final anibakaFuture = getAnimeDetail(subjectId);
+      final anibakaFuture = AniBakaApi.getAnimeDetail(subjectId);
       final episodesFuture = getBgmEpisodes(subjectId);
       final bgm = await bgmFuture;
       final anibaka = await anibakaFuture;

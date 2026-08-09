@@ -68,8 +68,8 @@ class BangumiOAuthStart {
   final String state;
 }
 
-class BangumiOAuthToken {
-  const BangumiOAuthToken({
+class _BangumiOAuthToken {
+  const _BangumiOAuthToken({
     required this.accessToken,
     required this.refreshToken,
     required this.expiresIn,
@@ -80,18 +80,9 @@ class BangumiOAuthToken {
   final int expiresIn;
 }
 
-abstract interface class BangumiOAuthBroker {
-  Future<BangumiOAuthStart> begin();
+class _BangumiOAuthBroker {
+  const _BangumiOAuthBroker();
 
-  Future<BangumiOAuthToken> waitForCompletion(String state);
-
-  Future<BangumiOAuthToken> refresh(String refreshToken);
-}
-
-class AniBakaBangumiOAuthBroker implements BangumiOAuthBroker {
-  const AniBakaBangumiOAuthBroker();
-
-  @override
   Future<BangumiOAuthStart> begin() async {
     final data = await _post('/api/v1/bangumi/oauth/start', const {});
     final authorizationUrl = data['authorization_url']?.toString() ?? '';
@@ -102,8 +93,7 @@ class AniBakaBangumiOAuthBroker implements BangumiOAuthBroker {
     return BangumiOAuthStart(authorizationUrl: authorizationUrl, state: state);
   }
 
-  @override
-  Future<BangumiOAuthToken> waitForCompletion(String state) async {
+  Future<_BangumiOAuthToken> waitForCompletion(String state) async {
     final deadline = DateTime.now().add(const Duration(minutes: 10));
     while (DateTime.now().isBefore(deadline)) {
       final uri = Uri.parse(
@@ -121,8 +111,7 @@ class AniBakaBangumiOAuthBroker implements BangumiOAuthBroker {
     throw const BangumiSyncException('Bangumi 登录超时，请重试');
   }
 
-  @override
-  Future<BangumiOAuthToken> refresh(String refreshToken) async {
+  Future<_BangumiOAuthToken> refresh(String refreshToken) async {
     final data = await _post('/api/v1/bangumi/oauth/refresh', {
       'refresh_token': refreshToken,
     });
@@ -150,12 +139,12 @@ class AniBakaBangumiOAuthBroker implements BangumiOAuthBroker {
     return BgmUtils.asMap(root['data']);
   }
 
-  static BangumiOAuthToken _tokenFromJson(Map<String, dynamic> json) {
+  static _BangumiOAuthToken _tokenFromJson(Map<String, dynamic> json) {
     final accessToken = json['access_token']?.toString() ?? '';
     if (accessToken.isEmpty) {
       throw const BangumiSyncException('Bangumi 登录未返回有效令牌');
     }
-    return BangumiOAuthToken(
+    return _BangumiOAuthToken(
       accessToken: accessToken,
       refreshToken: json['refresh_token']?.toString() ?? '',
       expiresIn: BgmUtils.toInt(json['expires_in']) ?? 604800,
@@ -163,8 +152,8 @@ class AniBakaBangumiOAuthBroker implements BangumiOAuthBroker {
   }
 }
 
-class BangumiCollectionRecord {
-  const BangumiCollectionRecord({
+class _BangumiCollectionRecord {
+  const _BangumiCollectionRecord({
     required this.subjectId,
     required this.status,
     required this.rating,
@@ -188,11 +177,11 @@ class BangumiCollectionRecord {
   final int? episodeTotal;
   final double? subjectScore;
 
-  factory BangumiCollectionRecord.fromJson(Map<String, dynamic> json) {
+  factory _BangumiCollectionRecord.fromJson(Map<String, dynamic> json) {
     final subject = BgmUtils.asMap(json['subject']);
     final nameCn = subject?['name_cn']?.toString().trim() ?? '';
     final name = subject?['name']?.toString().trim() ?? '';
-    return BangumiCollectionRecord(
+    return _BangumiCollectionRecord(
       subjectId: BgmUtils.toInt(json['subject_id']) ?? 0,
       status: BgmUtils.toInt(json['type']) ?? CollectionStatus.wish.value,
       rating: BgmUtils.toInt(json['rate']) ?? 0,
@@ -230,8 +219,8 @@ class BangumiCollectionRecord {
   );
 }
 
-class BangumiEpisodeRecord {
-  const BangumiEpisodeRecord({
+class _BangumiEpisodeRecord {
+  const _BangumiEpisodeRecord({
     required this.id,
     required this.collectionType,
     required this.sort,
@@ -241,9 +230,9 @@ class BangumiEpisodeRecord {
   final int collectionType;
   final double sort;
 
-  factory BangumiEpisodeRecord.fromJson(Map<String, dynamic> json) {
+  factory _BangumiEpisodeRecord.fromJson(Map<String, dynamic> json) {
     final episode = BgmUtils.asMap(json['episode']);
-    return BangumiEpisodeRecord(
+    return _BangumiEpisodeRecord(
       id: BgmUtils.toInt(episode?['id']) ?? 0,
       collectionType: BgmUtils.toInt(json['type']) ?? 0,
       sort: BgmUtils.toDouble(episode?['sort']) ?? 0,
@@ -251,35 +240,17 @@ class BangumiEpisodeRecord {
   }
 }
 
-abstract interface class BangumiApi {
-  Future<BangumiAccount> getMe(String token);
-
-  Future<BangumiCollectionRecord?> getCollection(String token, int subjectId);
-
-  Future<List<BangumiCollectionRecord>> getAnimeCollections(
-    String token,
-    String username,
-  );
-
-  Future<void> putCollection(String token, AnimeCollection collection);
-
-  Future<void> putEpisodeProgress(String token, int subjectId, int watched);
-}
-
-class BangumiApiClient implements BangumiApi {
-  BangumiApiClient({http.Client? client})
-    : _client = client ?? IOClient(SystemProxyService.createHttpClient());
+class _BangumiApi {
+  _BangumiApi() : _client = IOClient(SystemProxyService.createHttpClient());
 
   final http.Client _client;
 
-  @override
   Future<BangumiAccount> getMe(String token) async {
     final json = await _request('GET', '/v0/me', token: token);
     return BangumiAccount.fromJson(BgmUtils.parseJsonMap(json) ?? const {});
   }
 
-  @override
-  Future<BangumiCollectionRecord?> getCollection(
+  Future<_BangumiCollectionRecord?> getCollection(
     String token,
     int subjectId,
   ) async {
@@ -290,22 +261,21 @@ class BangumiApiClient implements BangumiApi {
         token: token,
       );
       final map = BgmUtils.parseJsonMap(json);
-      return map == null ? null : BangumiCollectionRecord.fromJson(map);
+      return map == null ? null : _BangumiCollectionRecord.fromJson(map);
     } on BangumiSyncException catch (error) {
       if (error.statusCode == 404) return null;
       rethrow;
     }
   }
 
-  @override
-  Future<List<BangumiCollectionRecord>> getAnimeCollections(
+  Future<List<_BangumiCollectionRecord>> getAnimeCollections(
     String token,
     String username,
   ) async {
     const limit = 100;
     var offset = 0;
     var total = 1;
-    final result = <BangumiCollectionRecord>[];
+    final result = <_BangumiCollectionRecord>[];
 
     while (offset < total) {
       final path = Uri(
@@ -324,7 +294,7 @@ class BangumiApiClient implements BangumiApi {
       for (final item in items) {
         final map = BgmUtils.asMap(item);
         if (map == null) continue;
-        final record = BangumiCollectionRecord.fromJson(map);
+        final record = _BangumiCollectionRecord.fromJson(map);
         if (record.subjectId > 0) result.add(record);
       }
       if (items.isEmpty) break;
@@ -333,7 +303,6 @@ class BangumiApiClient implements BangumiApi {
     return result;
   }
 
-  @override
   Future<void> putCollection(String token, AnimeCollection collection) async {
     final subjectId = collection.bgmId;
     if (subjectId == null || subjectId <= 0) return;
@@ -351,7 +320,6 @@ class BangumiApiClient implements BangumiApi {
     );
   }
 
-  @override
   Future<void> putEpisodeProgress(
     String token,
     int subjectId,
@@ -364,11 +332,11 @@ class BangumiApiClient implements BangumiApi {
     final page =
         BgmUtils.parseJsonMap(await _request('GET', path, token: token)) ??
         const <String, dynamic>{};
-    final episodes = <BangumiEpisodeRecord>[];
+    final episodes = <_BangumiEpisodeRecord>[];
     for (final item in BgmUtils.parseJsonList(page['data'])) {
       final map = BgmUtils.asMap(item);
       if (map == null) continue;
-      final episode = BangumiEpisodeRecord.fromJson(map);
+      final episode = _BangumiEpisodeRecord.fromJson(map);
       if (episode.id > 0) episodes.add(episode);
     }
     episodes.sort((a, b) => a.sort.compareTo(b.sort));
@@ -458,30 +426,6 @@ class BangumiApiClient implements BangumiApi {
   }
 }
 
-abstract interface class CollectionSyncStore {
-  Future<List<AnimeCollection>> getAll();
-
-  Future<bool> save(AnimeCollection collection);
-}
-
-class AdaptiveCollectionSyncStore implements CollectionSyncStore {
-  const AdaptiveCollectionSyncStore();
-
-  @override
-  Future<List<AnimeCollection>> getAll() async {
-    return CollectionService.getAll(refreshBangumi: false);
-  }
-
-  @override
-  Future<bool> save(AnimeCollection collection) async {
-    return await CollectionService.addOrUpdate(
-          collection,
-          syncBangumi: false,
-        ) !=
-        null;
-  }
-}
-
 class BangumiSyncReport {
   const BangumiSyncReport({
     required this.imported,
@@ -515,15 +459,9 @@ class BangumiSyncReport {
 }
 
 class BangumiSyncService {
-  BangumiSyncService({
-    BangumiApi? api,
-    BangumiOAuthBroker? oauthBroker,
-    CollectionSyncStore? collections,
-  }) : _api = api ?? BangumiApiClient(),
-       _oauthBroker = oauthBroker ?? const AniBakaBangumiOAuthBroker(),
-       _collections = collections ?? const AdaptiveCollectionSyncStore();
+  BangumiSyncService._();
 
-  static final BangumiSyncService instance = BangumiSyncService();
+  static final BangumiSyncService instance = BangumiSyncService._();
 
   static const _tokenKey = 'bangumi_access_token';
   static const _refreshTokenKey = 'bangumi_refresh_token';
@@ -539,9 +477,8 @@ class BangumiSyncService {
   static const _autoMarkEpisodeKey = 'bangumi_auto_mark_episode';
   static const _quickMarkGridKey = 'bangumi_quick_mark_grid';
 
-  final BangumiApi _api;
-  final BangumiOAuthBroker _oauthBroker;
-  final CollectionSyncStore _collections;
+  final _BangumiApi _api = _BangumiApi();
+  final _BangumiOAuthBroker _oauthBroker = const _BangumiOAuthBroker();
 
   bool get isLocalMode => Instances.userToken.isEmpty;
 
@@ -646,10 +583,10 @@ class BangumiSyncService {
       user = await _api.getMe(token);
       await Instances.sp.setString(_accountKey, jsonEncode(user.toJson()));
     }
-    return (await _api.getAnimeCollections(
-      token,
-      user.username,
-    )).map((item) => item.toAnimeCollection()).toList(growable: false);
+    return [
+      for (final item in await _api.getAnimeCollections(token, user.username))
+        item.toAnimeCollection(),
+    ];
   }
 
   /// 直接写入 Bangumi 收藏状态；Access Token 只保存在本机。
@@ -712,15 +649,19 @@ class BangumiSyncService {
     }
     final remote = await _api.getAnimeCollections(token, user.username);
     onProgress?.call(isLocalMode ? '正在读取本机追番记录…' : '正在读取 AniBaka 追番记录…');
-    final local = await _collections.getAll();
+    final local = await CollectionService.getAll(refreshBangumi: false);
 
-    final remoteById = {for (final item in remote) item.subjectId: item};
-    final localById = <int, AnimeCollection>{};
+    final items =
+        <int, ({_BangumiCollectionRecord? remote, AnimeCollection? local})>{
+          for (final item in remote)
+            item.subjectId: (remote: item, local: null),
+        };
     for (final item in local) {
       final id = item.bgmId;
-      if (id != null && id > 0) localById[id] = item;
+      if (id == null || id <= 0) continue;
+      items[id] = (remote: items[id]?.remote, local: item);
     }
-    final ids = {...remoteById.keys, ...localById.keys}.toList()..sort();
+    final ids = items.keys.toList()..sort();
     final snapshots = _loadSnapshots();
     final pendingPush = _loadPendingPush();
     var imported = 0;
@@ -733,8 +674,9 @@ class BangumiSyncService {
 
     for (var index = 0; index < ids.length; index++) {
       final id = ids[index];
-      final remoteItem = remoteById[id];
-      final localItem = localById[id];
+      final pair = items[id]!;
+      final remoteItem = pair.remote;
+      final localItem = pair.local;
       onProgress?.call('正在同步 ${index + 1}/${ids.length}…');
 
       final remoteFingerprint = remoteItem?.fingerprint;
@@ -783,7 +725,11 @@ class BangumiSyncService {
           final remoteChanged =
               previous != null && remoteFingerprint != previous;
           if (localChanged && remoteChanged) conflicts++;
-          if (!await _collections.save(remoteItem.toAnimeCollection())) {
+          if (await CollectionService.addOrUpdate(
+                remoteItem.toAnimeCollection(),
+                syncBangumi: false,
+              ) ==
+              null) {
             throw BangumiSyncException(
               isLocalMode ? '本机保存追番记录失败' : 'AniBaka 保存追番记录失败',
             );
@@ -848,7 +794,7 @@ class BangumiSyncService {
     }
     final refreshed = await _oauthBroker.refresh(refreshToken);
     final effectiveToken = refreshed.refreshToken.isEmpty
-        ? BangumiOAuthToken(
+        ? _BangumiOAuthToken(
             accessToken: refreshed.accessToken,
             refreshToken: refreshToken,
             expiresIn: refreshed.expiresIn,
@@ -858,7 +804,7 @@ class BangumiSyncService {
     return effectiveToken.accessToken;
   }
 
-  Future<void> _saveOAuthToken(BangumiOAuthToken token) async {
+  Future<void> _saveOAuthToken(_BangumiOAuthToken token) async {
     await Instances.sp.setString(_tokenKey, token.accessToken);
     if (token.refreshToken.isNotEmpty) {
       await Instances.sp.setString(_refreshTokenKey, token.refreshToken);
@@ -926,7 +872,7 @@ String _fingerprint({
   required List<String> tags,
   required bool isPrivate,
 }) {
-  final normalizedTags = [...tags]..sort();
+  final normalizedTags = tags.length < 2 ? tags : ([...tags]..sort());
   return jsonEncode({
     'status': status,
     'rating': rating,
@@ -939,12 +885,23 @@ String _fingerprint({
 
 List<String> _parseTags(String? value) {
   if (value == null || value.trim().isEmpty) return const [];
-  return value
-      .split(RegExp(r'[,，\s]+'))
-      .map((tag) => tag.trim())
-      .where((tag) => tag.isNotEmpty)
-      .toSet()
-      .toList(growable: false);
+  final tags = <String>[];
+  final seen = <String>{};
+  var start = 0;
+  for (var i = 0; i <= value.length; i++) {
+    final separator =
+        i == value.length ||
+        value.codeUnitAt(i) == 0x2C ||
+        value.codeUnitAt(i) == 0xFF0C ||
+        value.codeUnitAt(i) <= 0x20;
+    if (!separator) continue;
+    if (i > start) {
+      final tag = value.substring(start, i).trim();
+      if (tag.isNotEmpty && seen.add(tag)) tags.add(tag);
+    }
+    start = i + 1;
+  }
+  return tags;
 }
 
 String? _nonEmpty(Object? value) {

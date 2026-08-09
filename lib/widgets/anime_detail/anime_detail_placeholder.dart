@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:baka/api/bgm.dart';
-import 'package:baka/api/post.dart';
+import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/models/anime_detail_view_data.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/services/bgm_service.dart';
@@ -116,7 +116,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     // Phase 2: 并发启动所有请求，各自独立更新 UI
     // AniBaka 自有 API（含 overview）
     if (_anibakaData == null) {
-      getAnimeDetail(bgmId)
+      AniBakaApi.getAnimeDetail(bgmId)
           .then((data) {
             if (!mounted) return;
             _anibakaData = BgmUtils.asMap(data);
