@@ -19,29 +19,34 @@ class TagPage extends StatefulWidget {
 }
 
 class _TagPageState extends State<TagPage> {
-  List<dynamic> _items = const [];
+  List<Map> _items = [];
   int _page = 0;
 
   Future<bool> _loadPage(int page) async {
     try {
-      List<dynamic> posts = const [];
+      List<Map> posts = const [];
       if (widget.tag.isNotEmpty) {
         const pageSize = 15;
-        final response = await searchBgmByTag(
+        final subjects = await searchBgmByTag(
           [widget.tag],
           limit: pageSize,
           offset: (page - 1) * pageSize,
         );
-        posts = BgmService.convertSearchResponseToAppFormat(response.data);
+        posts = BgmService.convertSearchToAppFormat(subjects);
       } else if (widget.uid != 0) {
         final response = await getPost('', '', page, 15, uid: widget.uid);
-        posts = List<dynamic>.from(jsonDecode(response.data)['data'] as List);
+        posts = ((jsonDecode(response.data) as Map)['data'] as List)
+            .cast<Map>();
       }
 
       if (!mounted) return posts.isNotEmpty;
       setState(() {
         _page = page;
-        _items = page == 1 ? posts : [..._items, ...posts];
+        if (page == 1) {
+          _items = posts;
+        } else {
+          _items.addAll(posts);
+        }
       });
       return posts.isNotEmpty;
     } catch (e) {
@@ -94,7 +99,7 @@ class _TagPageState extends State<TagPage> {
           ),
           itemCount: _items.length,
           itemBuilder: (_, index) {
-            final data = _items[index] as Map;
+            final data = _items[index];
             return PostCard(
               data,
               onTap: widget.tag.isEmpty ? null : () => _openBgmSubject(data),

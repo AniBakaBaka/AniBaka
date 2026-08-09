@@ -17,7 +17,7 @@ class _DanmakuSyncCounter implements DanmakuListener {
   @override
   void onDanmakuTimeSync(Duration position) => syncCount++;
   @override
-  void onDanmakuInject(List<DanmakuItem> items) {}
+  void onDanmakuInject(DanmakuItem item) {}
   @override
   void onDanmakuItemsChanged() {}
   @override
@@ -307,51 +307,44 @@ void main() {
     await controller.dispose();
   });
 
-  test('debounces buffering and recovers from fatal error state', () async {
-    final backend = FakePlaybackBackend();
-    final controller = PlaybackController(backend: backend);
-    await controller.initialize();
-
-    backend.emitPlaying(true);
-    expect(controller.core.value.buffering, isFalse);
-    backend.emitBuffering(true);
-    await Future<void>.delayed(const Duration(milliseconds: 650));
-    expect(controller.core.value.buffering, isTrue);
-    backend.emitBuffering(false);
-    expect(controller.core.value.buffering, isFalse);
-
-    backend.emitPlaying(false);
-    backend.emitError('fatal\nmessage');
-    await Future<void>.delayed(const Duration(milliseconds: 350));
-    expect(controller.core.value.failed, isTrue);
-    expect(controller.core.value.errorMessage, contains('fatal'));
-    backend.emitPlaying(true);
-    expect(controller.core.value.failed, isFalse);
-    expect(controller.core.value.errorMessage, isEmpty);
-    await controller.dispose();
-  });
-
   test(
-    'retries an autoplay open error before any media progress, then fails',
+    'uses backend buffering and error state without guessed delays',
     () async {
       final backend = FakePlaybackBackend();
       final controller = PlaybackController(backend: backend);
-      await controller.open('https://example.test/video.mp4');
+      await controller.initialize();
 
-      backend.emitError('Failed to open https://example.test/video.mp4.');
-      await Future<void>.delayed(const Duration(milliseconds: 900));
+      backend.emitPlaying(true);
+      expect(controller.core.value.buffering, isFalse);
+      backend.emitBuffering(true);
+      expect(controller.core.value.buffering, isTrue);
+      backend.emitBuffering(false);
+      expect(controller.core.value.buffering, isFalse);
 
-      expect(backend.openCount, 2);
-      expect(controller.core.value.failed, isFalse);
-
-      backend.emitError('Failed to open https://example.test/video.mp4.');
-      await Future<void>.delayed(const Duration(milliseconds: 350));
-
+      backend.emitPlaying(false);
+      backend.emitError('fatal\nmessage');
       expect(controller.core.value.failed, isTrue);
-      expect(controller.core.value.errorMessage, contains('Failed to open'));
+      expect(controller.core.value.errorMessage, contains('fatal'));
+      backend.emitPlaying(true);
+      expect(controller.core.value.failed, isFalse);
+      expect(controller.core.value.errorMessage, isEmpty);
       await controller.dispose();
     },
   );
+
+  test('fails a stopped backend error without delayed retry', () async {
+    final backend = FakePlaybackBackend();
+    final controller = PlaybackController(backend: backend);
+    await controller.open('https://example.test/video.mp4');
+
+    backend.emitPlaying(false);
+    backend.emitError('Failed to open https://example.test/video.mp4.');
+
+    expect(backend.openCount, 1);
+    expect(controller.core.value.failed, isTrue);
+    expect(controller.core.value.errorMessage, contains('Failed to open'));
+    await controller.dispose();
+  });
 
   test(
     'keeps transient backend errors non-fatal after playback advances',
@@ -362,7 +355,6 @@ void main() {
       backend.emitPosition(const Duration(seconds: 2));
 
       backend.emitError('temporary network read error');
-      await Future<void>.delayed(const Duration(milliseconds: 350));
 
       expect(backend.openCount, 1);
       expect(controller.core.value.failed, isFalse);
@@ -370,15 +362,15 @@ void main() {
     },
   );
 
-  test('does not retry a stale error after media is replaced', () async {
+  test('opening replacement media clears the previous failure', () async {
     final backend = FakePlaybackBackend();
     final controller = PlaybackController(backend: backend);
     await controller.open('https://example.test/first.mp4');
 
+    backend.emitPlaying(false);
     backend.emitError('Failed to open first.mp4');
-    await Future<void>.delayed(const Duration(milliseconds: 350));
+    expect(controller.core.value.failed, isTrue);
     await controller.open('https://example.test/second.mp4');
-    await Future<void>.delayed(const Duration(milliseconds: 600));
 
     expect(backend.openCount, 2);
     expect(backend.currentMediaUri, 'https://example.test/second.mp4');

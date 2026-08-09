@@ -17,10 +17,9 @@ const double _repeatWindowMs = 10000;
 const double _seekThresholdMs = 1200;
 
 class DanmakuView extends StatefulWidget {
-  const DanmakuView({required this.controller, this.created, super.key});
+  const DanmakuView({required this.controller, super.key});
 
   final DanmakuController controller;
-  final ValueChanged<bool>? created;
 
   @override
   State<DanmakuView> createState() => _DanmakuViewState();
@@ -45,6 +44,7 @@ class _DanmakuViewState extends State<DanmakuView>
   double _viewWidth = 0;
   double _viewHeight = 0;
   double _lineHeight = 0;
+  double _nextExpiryMs = double.infinity;
   bool? _lastReportedRunning;
   DateTime? _lastDriftLogAt;
 
@@ -56,7 +56,6 @@ class _DanmakuViewState extends State<DanmakuView>
     super.initState();
     _ticker = createTicker(_onTick);
     widget.controller.attach(this);
-    widget.created?.call(true);
     _log('Danmaku view created: items=${_controller.items.length}');
   }
 
@@ -118,6 +117,9 @@ class _DanmakuViewState extends State<DanmakuView>
       _clearRecentTexts();
       _cursor = _lowerBound(_controller.items, positionMs);
       _repaint.value++;
+      _emitDue();
+      _scheduleWork(rescheduleWake: true);
+      return;
     } else if (_ticker.isActive) {
       _clockMs += drift.clamp(-16.0, 16.0);
     } else {
@@ -128,7 +130,8 @@ class _DanmakuViewState extends State<DanmakuView>
   }
 
   @override
-  void onDanmakuPlaybackRateChanged(double rate) => _scheduleWork();
+  void onDanmakuPlaybackRateChanged(double rate) =>
+      _scheduleWork(rescheduleWake: true);
 
   @override
   void onDanmakuItemsChanged() {
@@ -141,15 +144,13 @@ class _DanmakuViewState extends State<DanmakuView>
       'cursor=$_cursor clockMs=${_clockMs.round()}',
     );
     _repaint.value++;
-    _scheduleWork();
+    _scheduleWork(rescheduleWake: true);
   }
 
   @override
-  void onDanmakuInject(List<DanmakuItem> items) {
+  void onDanmakuInject(DanmakuItem item) {
     if (!_hasViewport) return;
-    for (final item in items) {
-      _tryEmit(item, checkBlock: false);
-    }
+    _tryEmit(item, checkBlock: false);
     _repaint.value++;
     _scheduleWork();
   }
@@ -171,6 +172,7 @@ class _DanmakuViewState extends State<DanmakuView>
       if (hidden) entry.layout.dispose();
       return hidden;
     });
+    _recalculateNextExpiry();
 
     final styleChanged =
         next.fontSize != previous.fontSize ||
@@ -213,26 +215,33 @@ class _DanmakuViewState extends State<DanmakuView>
     _repaint.value++;
   }
 
-  void _scheduleWork() {
-    _wakeTimer?.cancel();
-    _wakeTimer = null;
+  void _scheduleWork({bool rescheduleWake = false}) {
     if (!_controller.running || !_hasViewport || !mounted) {
-      _stopTicker();
+      _stopWork();
       return;
     }
     if (_active.isNotEmpty) {
+      _wakeTimer?.cancel();
+      _wakeTimer = null;
       _ensureTicker();
       return;
     }
 
     _stopTicker();
     final items = _controller.items;
-    if (_cursor >= items.length) return;
+    if (_cursor >= items.length) {
+      _wakeTimer?.cancel();
+      _wakeTimer = null;
+      return;
+    }
+    if (!rescheduleWake && _wakeTimer?.isActive == true) return;
+    _wakeTimer?.cancel();
     final rate = _controller.playbackRate;
     final delayMs = math.max(0.0, (items[_cursor].time - _clockMs) / rate);
     _wakeTimer = Timer(
       Duration(microseconds: math.max(1, (delayMs * 1000).round())),
       () {
+        _wakeTimer = null;
         if (!_controller.running || !mounted) return;
         if (_cursor < _controller.items.length) {
           _clockMs = math.max(
@@ -301,6 +310,7 @@ class _DanmakuViewState extends State<DanmakuView>
         layout: layout,
       );
       _active.add(entry);
+      _nextExpiryMs = math.min(_nextExpiryMs, entry.endMs);
       _scrollTracks[index].register(
         startMs: entry.startMs,
         width: entry.layout.size.width,
@@ -327,23 +337,28 @@ class _DanmakuViewState extends State<DanmakuView>
     if (layout == null) return;
     final durationMs = top ? _topDurationMs : _bottomDurationMs;
     busy[trackIndex] = _clockMs + durationMs;
-    _active.add(
-      _Entry(
-        item: item,
-        track: trackIndex,
-        startMs: _clockMs,
-        durationMs: durationMs,
-        speed: 0,
-        x: (_viewWidth - layout.size.width) / 2,
-        y: _fixedTrackY(trackIndex, top: top),
-        layout: layout,
-      ),
+    final entry = _Entry(
+      item: item,
+      track: trackIndex,
+      startMs: _clockMs,
+      durationMs: durationMs,
+      speed: 0,
+      x: (_viewWidth - layout.size.width) / 2,
+      y: _fixedTrackY(trackIndex, top: top),
+      layout: layout,
     );
+    _active.add(entry);
+    _nextExpiryMs = math.min(_nextExpiryMs, entry.endMs);
   }
 
   void _expire() {
+    if (_clockMs < _nextExpiryMs) return;
+    _nextExpiryMs = double.infinity;
     _active.removeWhere((entry) {
-      if (_clockMs < entry.endMs) return false;
+      if (_clockMs < entry.endMs) {
+        _nextExpiryMs = math.min(_nextExpiryMs, entry.endMs);
+        return false;
+      }
       entry.layout.dispose();
       return true;
     });
@@ -388,13 +403,12 @@ class _DanmakuViewState extends State<DanmakuView>
   }
 
   void _relayout(DanmakuOption option, {required bool relayoutText}) {
-    final removed = <_Entry>[];
-    for (final entry in _active) {
+    _active.removeWhere((entry) {
       final scroll = entry.item.type == 1;
       final trackCount = scroll ? _scrollTracks.length : _topBusyUntil.length;
       if (entry.track >= trackCount) {
-        removed.add(entry);
-        continue;
+        entry.layout.dispose();
+        return true;
       }
       if (relayoutText) {
         final layout = _layoutDanmaku(
@@ -403,8 +417,8 @@ class _DanmakuViewState extends State<DanmakuView>
           option,
         );
         if (layout == null) {
-          removed.add(entry);
-          continue;
+          entry.layout.dispose();
+          return true;
         }
         entry.layout.dispose();
         entry.layout = layout;
@@ -421,11 +435,8 @@ class _DanmakuViewState extends State<DanmakuView>
         entry.x = (_viewWidth - entry.layout.size.width) / 2;
         entry.y = _fixedTrackY(entry.track, top: entry.item.type == 5);
       }
-    }
-    for (final entry in removed) {
-      entry.layout.dispose();
-      _active.remove(entry);
-    }
+      return false;
+    });
 
     _resetTracks();
     for (final entry in _active) {
@@ -450,6 +461,7 @@ class _DanmakuViewState extends State<DanmakuView>
           );
       }
     }
+    _recalculateNextExpiry();
   }
 
   double _fixedTrackY(int index, {required bool top}) => top
@@ -473,6 +485,15 @@ class _DanmakuViewState extends State<DanmakuView>
       entry.layout.dispose();
     }
     _active.clear();
+    _nextExpiryMs = double.infinity;
+  }
+
+  void _recalculateNextExpiry() {
+    var next = double.infinity;
+    for (final entry in _active) {
+      next = math.min(next, entry.endMs);
+    }
+    _nextExpiryMs = next;
   }
 
   void _clearRecentTexts() {
@@ -644,41 +665,26 @@ class _TextLayout {
   }
 }
 
-class _RecentText {
-  const _RecentText(this.text, this.timeMs);
-
-  final String text;
-  final double timeMs;
-}
-
 @visibleForTesting
 class DanmakuRepeatWindow {
-  final Map<String, double> _latest = <String, double>{};
-  final Queue<_RecentText> _events = Queue<_RecentText>();
+  final LinkedHashMap<String, double> _latest = LinkedHashMap<String, double>();
 
   bool shouldBlock(String text, double nowMs) {
     final cutoff = nowMs - _repeatWindowMs;
-    while (_events.isNotEmpty && _events.first.timeMs <= cutoff) {
-      final expired = _events.removeFirst();
-      if (_latest[expired.text] == expired.timeMs) {
-        _latest.remove(expired.text);
-      }
+    while (_latest.isNotEmpty && _latest.values.first <= cutoff) {
+      _latest.remove(_latest.keys.first);
     }
 
-    final previous = _latest[text];
+    final previous = _latest.remove(text);
     final duplicate = previous != null && nowMs - previous < _repeatWindowMs;
     _latest[text] = nowMs;
-    _events.addLast(_RecentText(text, nowMs));
     return duplicate;
   }
 
-  void clear() {
-    _latest.clear();
-    _events.clear();
-  }
+  void clear() => _latest.clear();
 
   @visibleForTesting
-  int get retainedEventCount => _events.length;
+  int get retainedEventCount => _latest.length;
 }
 
 class _DanmakuPainter extends CustomPainter {

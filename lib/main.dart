@@ -355,7 +355,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                     children: [
                       if (Instances.isDesktopPlatform)
                         Obx(() {
-                          _appState.loginTrigger.value;
+                          _appState.userInfo.value;
                           return WindowsSidebar(
                             currentPageIndex: _appState.currentPageIndex.value,
                             onPageChange: _appState.changePage,

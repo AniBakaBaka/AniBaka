@@ -46,7 +46,7 @@ class WindowsHomePage extends StatelessWidget {
   }
 
   Widget _buildBanner() {
-    return ValueListenableBuilder<List<dynamic>>(
+    return ValueListenableBuilder<HomeItems>(
       valueListenable: svc.swipers,
       builder: (context, swipers, _) {
         if (swipers.isEmpty) {
@@ -69,7 +69,7 @@ class WindowsHomePage extends StatelessWidget {
   }
 
   Widget _buildSchedule() {
-    return ValueListenableBuilder<List<List<dynamic>>>(
+    return ValueListenableBuilder<List<HomeItems>>(
       valueListenable: svc.schedule,
       builder: (context, schedule, _) => ValueListenableBuilder<int>(
         valueListenable: svc.week,
@@ -98,7 +98,7 @@ class WindowsHomePage extends StatelessWidget {
         child: ValueListenableBuilder<int>(
           valueListenable: svc.rankIndex,
           builder: (context, index, _) =>
-              ValueListenableBuilder<List<List<dynamic>>>(
+              ValueListenableBuilder<List<HomeItems>>(
                 valueListenable: svc.ranks,
                 builder: (context, ranks, _) => RankSection(
                   items: ranks[index],
@@ -130,7 +130,7 @@ class WindowsHomePage extends StatelessWidget {
   }
 
   Widget _buildFeedGrid() {
-    return ValueListenableBuilder<List<dynamic>>(
+    return ValueListenableBuilder<HomeItems>(
       valueListenable: svc.feed,
       builder: (context, items, _) => SliverLayoutBuilder(
         builder: (context, constraints) {
@@ -146,7 +146,7 @@ class WindowsHomePage extends StatelessWidget {
               ),
               delegate: SliverChildBuilderDelegate(
                 (context, index) {
-                  final item = items[index] as Map;
+                  final item = items[index];
                   return PostCard(
                     item,
                     key: ValueKey(

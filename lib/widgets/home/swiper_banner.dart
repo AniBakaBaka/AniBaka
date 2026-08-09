@@ -3,17 +3,14 @@ import 'package:baka/instance.dart';
 
 import 'package:baka/services/navigation_service.dart';
 import 'package:baka/services/settings_service.dart';
-import 'package:baka/utils/bgm_utils.dart';
-import 'package:baka/utils/reg_utils.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 class SwiperBanner extends StatefulWidget {
-  final List swiperData;
+  final List<Map> swiperData;
 
   const SwiperBanner({required this.swiperData, super.key});
 
@@ -23,7 +20,6 @@ class SwiperBanner extends StatefulWidget {
 
 class _SwiperBannerState extends State<SwiperBanner> {
   late final PageController _pageController = PageController();
-  late List<String> _imageUrls = _resolveImageUrls(widget.swiperData);
   final ValueNotifier<int> _currentIndexNotifier = ValueNotifier<int>(0);
   Timer? _timer;
   bool _showSwiper = !SwiperSettingsService.isHidden;
@@ -40,16 +36,16 @@ class _SwiperBannerState extends State<SwiperBanner> {
   @override
   void didUpdateWidget(covariant SwiperBanner oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final nextUrls = _resolveImageUrls(widget.swiperData);
-    if (listEquals(_imageUrls, nextUrls)) return;
+    if (identical(oldWidget.swiperData, widget.swiperData)) return;
 
-    _imageUrls = nextUrls;
-    final index = _imageUrls.isEmpty
+    final index = widget.swiperData.isEmpty
         ? 0
-        : _currentIndexNotifier.value.clamp(0, _imageUrls.length - 1);
+        : _currentIndexNotifier.value.clamp(0, widget.swiperData.length - 1);
     _currentIndexNotifier.value = index;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _pageController.hasClients && _imageUrls.isNotEmpty) {
+      if (mounted &&
+          _pageController.hasClients &&
+          widget.swiperData.isNotEmpty) {
         _pageController.jumpToPage(index);
       }
     });
@@ -70,17 +66,6 @@ class _SwiperBannerState extends State<SwiperBanner> {
     _restartAutoPlay();
   }
 
-  static List<String> _resolveImageUrls(List items) {
-    return List<String>.generate(items.length, (index) {
-      final item = items[index];
-      if (item is! Map) return getSuo(item?.toString());
-      return BgmUtils.trimmed(item['backdropUrl']) ??
-          BgmUtils.trimmed(item['posterUrl']) ??
-          BgmUtils.resolveCoverImage(item) ??
-          getSuo(item['content']?.toString() ?? '');
-    }, growable: false);
-  }
-
   @override
   void dispose() {
     _timer?.cancel();
@@ -94,14 +79,14 @@ class _SwiperBannerState extends State<SwiperBanner> {
     if (_reduceVisualEffects ||
         !_tickerEnabled ||
         !_showSwiper ||
-        _imageUrls.length < 2) {
+        widget.swiperData.length < 2) {
       return;
     }
 
     _timer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (_isInteracting || !_pageController.hasClients) return;
       _pageController.animateToPage(
-        (_currentIndexNotifier.value + 1) % _imageUrls.length,
+        (_currentIndexNotifier.value + 1) % widget.swiperData.length,
         duration: const Duration(milliseconds: 600),
         curve: Curves.fastOutSlowIn,
       );
@@ -130,14 +115,12 @@ class _SwiperBannerState extends State<SwiperBanner> {
       confirmText: _showSwiper ? '隐藏横幅' : '显示横幅',
       cancelText: '取消',
     );
-    if (confirmed == DialogAction.confirm && mounted) _toggleSwiper();
+    if (confirmed && mounted) _toggleSwiper();
   }
 
   void _openItem(int index) {
     HapticFeedback.lightImpact();
     final data = widget.swiperData[index];
-    if (data is! Map) return;
-
     final link = data['videos']?.toString() ?? '';
     if (link.isNotEmpty && !link.contains(r'$')) {
       unawaited(launchUrlString(link, mode: LaunchMode.externalApplication));
@@ -182,7 +165,7 @@ class _SwiperBannerState extends State<SwiperBanner> {
         ),
       );
     }
-    if (_imageUrls.isEmpty) return const SizedBox.shrink();
+    if (widget.swiperData.isEmpty) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
     final primaryColor = theme.colorScheme.primary;
@@ -201,14 +184,15 @@ class _SwiperBannerState extends State<SwiperBanner> {
             onPointerCancel: (_) => _isInteracting = false,
             child: PageView.builder(
               controller: _pageController,
-              itemCount: _imageUrls.length,
+              itemCount: widget.swiperData.length,
               onPageChanged: (index) {
                 _currentIndexNotifier.value = index;
               },
               itemBuilder: (_, index) => GestureDetector(
                 onTap: () => _openItem(index),
                 child: CachedNetworkImage(
-                  imageUrl: _imageUrls[index],
+                  imageUrl:
+                      widget.swiperData[index]['bannerImageUrl'] as String,
                   fit: BoxFit.cover,
                   width: double.infinity,
                   height: double.infinity,
@@ -216,9 +200,8 @@ class _SwiperBannerState extends State<SwiperBanner> {
                   useOldImageOnUrlChange: true,
                   fadeInDuration: Duration.zero,
                   fadeOutDuration: Duration.zero,
-                  placeholder: (_, _) => const ColoredBox(
-                    color: Color(0xFF121212),
-                  ),
+                  placeholder: (_, _) =>
+                      const ColoredBox(color: Color(0xFF121212)),
                   errorWidget: (_, _, _) => const ColoredBox(
                     color: Color(0xFF121212),
                     child: Icon(
@@ -307,7 +290,9 @@ class _SwiperBannerState extends State<SwiperBanner> {
                       const SizedBox(width: 24),
                       Row(
                         mainAxisSize: MainAxisSize.min,
-                        children: List.generate(_imageUrls.length, (idx) {
+                        children: List.generate(widget.swiperData.length, (
+                          idx,
+                        ) {
                           final isActive = idx == currentIndex;
                           return AnimatedContainer(
                             duration: _reduceVisualEffects
@@ -350,7 +335,6 @@ class _SwiperBannerState extends State<SwiperBanner> {
 
   String _titleAt(int index) {
     if (index < 0 || index >= widget.swiperData.length) return '';
-    final item = widget.swiperData[index];
-    return item is Map ? item['title']?.toString() ?? '' : '';
+    return widget.swiperData[index]['title'] as String;
   }
 }

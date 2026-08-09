@@ -297,25 +297,20 @@ class BgmService {
   }
 
   static List<Map<String, dynamic>> convertTrendingToAppFormat(
-    List<dynamic> bgmData,
+    List<Map<String, dynamic>> bgmData,
   ) => _convertSubjects(bgmData, trending: true);
 
-  static List<Map<String, dynamic>> convertSearchResponseToAppFormat(
-    dynamic responseData,
-  ) {
-    final data = BgmUtils.parseJsonMap(responseData);
-    final items = data?['data'] ?? data?['items'];
-    return items is List ? _convertSubjects(items, trending: false) : const [];
-  }
+  static List<Map<String, dynamic>> convertSearchToAppFormat(
+    List<Map<String, dynamic>> subjects,
+  ) => _convertSubjects(subjects, trending: false);
 
   static List<Map<String, dynamic>> _convertSubjects(
-    List items, {
+    List<Map<String, dynamic>> items, {
     required bool trending,
   }) {
     final result = <Map<String, dynamic>>[];
     for (final item in items) {
-      final subject = trending && item is Map ? item['subject'] ?? item : item;
-      if (subject is! Map) continue;
+      final subject = trending ? item['subject'] as Map<String, dynamic> : item;
 
       final id = BgmUtils.toInt(subject['id']);
       if (id == null || id <= 0) continue;

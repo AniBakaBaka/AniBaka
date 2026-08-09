@@ -537,7 +537,7 @@ class CIslandCommentWidgetState extends State<CIslandCommentWidget>
       confirmText: '复制并打开',
       cancelText: '取消',
     );
-    if (action != DialogAction.confirm || !mounted) return;
+    if (!action || !mounted) return;
 
     try {
       final episode = await BgmService.resolveEpisodeByIndex(

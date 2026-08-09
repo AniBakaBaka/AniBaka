@@ -8,12 +8,6 @@ import 'package:baka/services/source_adapter_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/widgets/anime_detail/controller/video_source_search_controller.dart';
 
-class SourceSwitchSelection {
-  const SourceSwitchSelection({required this.data, required this.lineIndex});
-  final Map<String, dynamic> data;
-  final int lineIndex;
-}
-
 /// 视频源搜索与线路切换底部滑栏
 class VideoSourceSearchSheet extends StatefulWidget {
   final Map<String, dynamic> seedData;
@@ -35,7 +29,7 @@ class VideoSourceSearchSheet extends StatefulWidget {
     super.key,
   });
 
-  static Future<SourceSwitchSelection?> show(
+  static Future<Map<String, dynamic>?> show(
     BuildContext context, {
     required Map<String, dynamic> seedData,
     int currentEpisodeIndex = 0,
@@ -43,7 +37,7 @@ class VideoSourceSearchSheet extends StatefulWidget {
     String? currentSource,
     VideoSourceSearchController? searchController,
     String? heroTag,
-  }) => showModalBottomSheet<SourceSwitchSelection>(
+  }) => showModalBottomSheet<Map<String, dynamic>>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -114,14 +108,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
 
     _sourceKeysNotifier = ValueNotifier<List<String>>(_currentSourceKeys());
 
-    for (final n in [
-      _controller.resultsNotifier,
-      _controller.candidateRevisionNotifier,
-      _controller.progressNotifier,
-      _controller.isSearchingNotifier,
-    ]) {
-      n.addListener(_onCandidatesChanged);
-    }
+    _controller.addListener(_onCandidatesChanged);
 
     _controller.ensureAdapterReady().then((_) {
       if (!mounted) {
@@ -134,8 +121,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     });
 
     _readRoutes();
-    if (_controller.resultsNotifier.value.isEmpty &&
-        !_controller.isSearchingNotifier.value) {
+    if (_controller.results.isEmpty && !_controller.isSearching) {
       _controller.startSearch();
     } else {
       _continueAutoProbe();
@@ -152,14 +138,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
 
   @override
   void dispose() {
-    for (final n in [
-      _controller.resultsNotifier,
-      _controller.candidateRevisionNotifier,
-      _controller.progressNotifier,
-      _controller.isSearchingNotifier,
-    ]) {
-      n.removeListener(_onCandidatesChanged);
-    }
+    _controller.removeListener(_onCandidatesChanged);
     if (widget.searchController == null &&
         !VideoSourceSearchController.isGlobalCached(_controller)) {
       _controller.dispose();
@@ -257,15 +236,13 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
         return;
       }
       final lineIndex = probe.resolvedLineIndex ?? probe.preferredLine;
-      final selectionData = Map<String, dynamic>.from(data)
+      final selectionData = data
         ..['currPlayIndex'] = widget.currentEpisodeIndex
         ..['currUrl'] = lineIndex;
       await _controller.persistMatchMemory(origin.item, selectionData);
       if (mounted) {
         if (_isFromPlayer) {
-          Navigator.of(context).pop(
-            SourceSwitchSelection(data: selectionData, lineIndex: lineIndex),
-          );
+          Navigator.of(context).pop(selectionData);
         } else {
           _navigateToPlayer(selectionData);
         }
@@ -290,7 +267,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
   }
 
   Future<void> _showAddAliasDialog() async {
-    if (_controller.isSearchingNotifier.value) return;
+    if (_controller.isSearching) return;
     final textController = TextEditingController();
     final value = await showDialog<String>(
       context: context,
@@ -345,11 +322,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
         return;
       }
       if (_isFromPlayer && Navigator.of(context).canPop()) {
-        final line =
-            BgmUtils.toInt(videoData['currUrl']) ?? widget.currentLineIndex;
-        Navigator.of(
-          context,
-        ).pop(SourceSwitchSelection(data: videoData, lineIndex: line));
+        Navigator.of(context).pop(videoData);
         return;
       }
       _navigateToPlayer(videoData);
@@ -366,7 +339,12 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     if (!mounted) return;
     _controller.cancelSearch();
     VideoSourceSearchController.cacheGlobal(_title, _controller);
-    NavigationService.toPlayer(context, videoData, popFirst: true);
+    NavigationService.toPlayer(
+      context,
+      videoData,
+      popFirst: true,
+      autoMatch: false,
+    );
   }
 
   @override
@@ -584,21 +562,16 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
   }
 
   Widget _buildAliasBar(bool isDark, Color primary) => ListenableBuilder(
-    listenable: Listenable.merge([
-      _controller.isSearchingNotifier,
-      _controller.automaticAliasesNotifier,
-      _controller.manualAliasesNotifier,
-      _controller.activeAutoAliasesNotifier,
-    ]),
+    listenable: _controller,
     builder: (context, _) {
-      final isSearching = _controller.isSearchingNotifier.value;
-      final activeAuto = _controller.activeAutoAliasesNotifier.value;
+      final isSearching = _controller.isSearching;
+      final activeAuto = _controller.activeAutoAliases;
       return SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
         child: Row(
           children: [
-            for (final alias in _controller.automaticAliasesNotifier.value)
+            for (final alias in _controller.automaticAliases)
               _buildAliasTag(
                 label: alias,
                 color: activeAuto.contains(alias)
@@ -611,7 +584,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
                     ? null
                     : () => _controller.toggleAutoAlias(alias),
               ),
-            for (final alias in _controller.manualAliasesNotifier.value)
+            for (final alias in _controller.manualAliases)
               _buildAliasTag(
                 label: alias,
                 color: const Color(0xFF42A5F5),
@@ -699,12 +672,9 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
   );
 
   Widget _buildErrorBanner(bool isDark) => ListenableBuilder(
-    listenable: Listenable.merge([
-      _controller.progressNotifier,
-      _controller.isSearchingNotifier,
-    ]),
+    listenable: _controller,
     builder: (context, _) {
-      final errors = _controller.progressNotifier.value.searchErrors;
+      final errors = _controller.searchErrors;
       if (errors.isEmpty) return const SizedBox.shrink();
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -735,7 +705,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
                 ),
               ),
               TextButton.icon(
-                onPressed: _controller.isSearchingNotifier.value
+                onPressed: _controller.isSearching
                     ? null
                     : _controller.startSearch,
                 icon: const Icon(Icons.refresh_rounded, size: 14),
@@ -757,19 +727,13 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     bool isDarkMode,
     Color primary,
   ) => ListenableBuilder(
-    listenable: Listenable.merge([
-      _controller.progressNotifier,
-      _controller.isSearchingNotifier,
-      _controller.resultsNotifier,
-      _sourceKeysNotifier,
-    ]),
+    listenable: Listenable.merge([_controller, _sourceKeysNotifier]),
     builder: (context, _) {
-      final progressState = _controller.progressNotifier.value;
-      final results = _controller.resultsNotifier.value;
+      final results = _controller.results;
       final sourceKeys = _sourceKeysNotifier.value;
-      final isSearching = _controller.isSearchingNotifier.value;
-      final completed = progressState.finishedSources;
-      final inProgress = progressState.progressingSources;
+      final isSearching = _controller.isSearching;
+      final completed = _controller.finishedSources;
+      final inProgress = _controller.progressingSources;
 
       final totalSourcesCount = (sourceKeys.length - 1).clamp(1, 99);
       final progressFraction = totalSourcesCount > 0
@@ -961,14 +925,13 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     return ListenableBuilder(
       listenable: Listenable.merge([
         _selectedFilterNotifier,
-        _controller.resultsNotifier,
+        _controller,
         _sourceKeysNotifier,
-        _controller.isSearchingNotifier,
       ]),
       builder: (context, _) {
         final selectedFilter = _selectedFilterNotifier.value;
-        final results = _controller.resultsNotifier.value;
-        final isSearching = _controller.isSearchingNotifier.value;
+        final results = _controller.results;
+        final isSearching = _controller.isSearching;
 
         if (isSearching && results.isEmpty && _routes.isEmpty) {
           return ListView(

@@ -104,6 +104,7 @@ class _DownloadDialog extends StatefulWidget {
 class _DownloadDialogState extends State<_DownloadDialog> {
   double _progress = 0.0;
   String _status = '准备下载...';
+  bool _failed = false;
 
   @override
   void initState() {
@@ -146,29 +147,23 @@ class _DownloadDialogState extends State<_DownloadDialog> {
         },
       );
 
-      if (Platform.isWindows || Platform.isMacOS) {
-        if (mounted) {
-          setState(() => _status = '下载完成！文件保存在：\n${dir.path}');
-        }
-        await Future.delayed(const Duration(seconds: 3));
-      } else {
-        if (mounted) setState(() => _status = '下载完成，准备安装...');
-      }
-
       if (mounted) Navigator.of(context).pop();
       await OpenFilex.open(filePath);
     } catch (e) {
       debugPrint('下载错误: $e');
-      if (mounted) setState(() => _status = '下载失败: $e');
-      await Future.delayed(const Duration(seconds: 2));
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) {
+        setState(() {
+          _failed = true;
+          _status = '下载失败: $e';
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: false,
+      canPop: _failed,
       child: Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Padding(
@@ -200,6 +195,13 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                 style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                 textAlign: TextAlign.center,
               ),
+              if (_failed) ...[
+                const SizedBox(height: 20),
+                FilledButton.tonal(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('关闭'),
+                ),
+              ],
             ],
           ),
         ),

@@ -19,7 +19,6 @@ class DanmakuController extends ChangeNotifier {
   );
 
   double timeOffset = 0.0; // 弹幕时间偏移量（单位：秒，正值延后，负值提前）
-  String sourceProvider = 'dandanplay'; // 弹幕来源平台
 
   bool get running => _running;
   double get playbackRate => _playbackRate;
@@ -27,6 +26,7 @@ class DanmakuController extends ChangeNotifier {
   List<DanmakuItem> get items => _items;
 
   void setTimeOffset(double offsetInSeconds) {
+    if (timeOffset == offsetInSeconds) return;
     timeOffset = offsetInSeconds;
     if (_lastPosition != null) {
       syncTime(_lastPosition!);
@@ -44,13 +44,8 @@ class DanmakuController extends ChangeNotifier {
   }
 
   /// 设置整集弹幕（须按 time 升序）
-  void setItems(List<DanmakuItem> items, {String? provider}) {
+  void setItems(List<DanmakuItem> items) {
     _items = items;
-    if (provider != null && provider.trim().isNotEmpty) {
-      sourceProvider = provider.trim();
-    } else {
-      sourceProvider = 'dandanplay';
-    }
     _listener?.onDanmakuItemsChanged();
     notifyListeners();
   }
@@ -62,24 +57,29 @@ class DanmakuController extends ChangeNotifier {
       _listener?.onDanmakuTimeSync(position);
     } else {
       final offsetMs = (timeOffset * 1000).round();
-      final adjustedMs = (position.inMilliseconds - offsetMs).clamp(0, 86400000);
+      final adjustedMs = (position.inMilliseconds - offsetMs).clamp(
+        0,
+        86400000,
+      );
       _listener?.onDanmakuTimeSync(Duration(milliseconds: adjustedMs));
     }
   }
 
   /// 立即注入弹幕（如用户发送）
-  void addItems(List<DanmakuItem> items) {
-    if (items.isEmpty || !_running) return;
-    _listener?.onDanmakuInject(items);
+  void addItem(DanmakuItem item) {
+    if (!_running) return;
+    _listener?.onDanmakuInject(item);
     notifyListeners();
   }
 
   void pause() {
+    if (!_running) return;
     _running = false;
     _listener?.onDanmakuPause();
   }
 
   void resume() {
+    if (_running) return;
     _running = true;
     _listener?.onDanmakuResume();
   }
@@ -87,11 +87,9 @@ class DanmakuController extends ChangeNotifier {
   /// 清空数据与屏幕（切集时调用）
   void reset() {
     _items = const [];
-    sourceProvider = 'dandanplay';
     _listener?.onDanmakuReset();
     notifyListeners();
   }
-
 
   void updateOption(DanmakuOption option) {
     final old = _option;
@@ -126,7 +124,7 @@ abstract interface class DanmakuListener {
   void onDanmakuTimeSync(Duration position);
   void onDanmakuPlaybackRateChanged(double rate);
   void onDanmakuItemsChanged();
-  void onDanmakuInject(List<DanmakuItem> items);
+  void onDanmakuInject(DanmakuItem item);
   void onDanmakuOptionChanged(DanmakuOption next, DanmakuOption previous);
   void onDanmakuPause();
   void onDanmakuResume();

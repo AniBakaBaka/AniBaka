@@ -110,7 +110,7 @@ class LoginState extends State<Login> {
       confirmText: '继续使用 Bangumi',
       cancelText: '返回登录 AniBaka',
     );
-    if (action != DialogAction.confirm || !mounted) return;
+    if (!action || !mounted) return;
 
     final result = await showAppInputDialog(
       context,
@@ -119,11 +119,11 @@ class LoginState extends State<Login> {
       confirmText: '验证并登录',
       obscureText: true,
     );
-    if (result?.isConfirmed != true || !mounted) return;
+    if (result == null || !mounted) return;
 
     setState(() => _bangumiBusy = true);
     try {
-      final account = await _bangumi.connect(result!.value ?? '');
+      final account = await _bangumi.connect(result);
       if (!mounted) return;
       if (Get.isRegistered<AppState>()) {
         Get.find<AppState>().triggerLoginRefresh();
@@ -149,7 +149,7 @@ class LoginState extends State<Login> {
       confirmText: '了解风险，继续登录',
       cancelText: '改用 Access Token',
     );
-    if (action != DialogAction.confirm || !mounted) return;
+    if (!action || !mounted) return;
 
     setState(() => _bangumiBusy = true);
     try {

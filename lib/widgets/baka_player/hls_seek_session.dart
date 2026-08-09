@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -89,14 +90,20 @@ class LoopbackHlsSeekSession implements HlsSeekSession {
   @override
   ({String uri, Duration timelineOffset}) openFor(Duration target) {
     final generation = (++_generation).toRadixString(36);
-    var segmentIndex = 0;
-    var offset = Duration.zero;
-    for (var i = 0; i < _segmentStarts.length; i++) {
-      final start = _segmentStarts[i];
-      if (start > target) break;
-      segmentIndex = i;
-      offset = start;
+    var low = 0;
+    var high = _segmentStarts.length;
+    while (low < high) {
+      final middle = (low + high) >> 1;
+      if (_segmentStarts[middle] <= target) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
     }
+    final segmentIndex = math.max(0, low - 1);
+    final offset = _segmentStarts.isEmpty
+        ? Duration.zero
+        : _segmentStarts[segmentIndex];
     return (
       uri:
           'http://${_server.address.address}:${_server.port}/$_secret/'
@@ -142,59 +149,80 @@ class LoopbackHlsSeekSession implements HlsSeekSession {
 
   @visibleForTesting
   static String absolutizeManifest(String body, Uri manifestUri) {
-    return body
-        .replaceAll('\r\n', '\n')
-        .split('\n')
-        .map((line) {
-          final trimmed = line.trim();
-          if (trimmed.isEmpty) return '';
-          if (!trimmed.startsWith('#')) {
-            return manifestUri.resolve(trimmed).toString();
-          }
-          return line.replaceAllMapped(_uriAttribute, (match) {
-            return 'URI="${manifestUri.resolve(match.group(1)!).toString()}"';
-          });
-        })
-        .join('\n');
+    final lines = body.replaceAll('\r\n', '\n').split('\n');
+    final output = StringBuffer();
+    for (var index = 0; index < lines.length; index++) {
+      if (index != 0) output.write('\n');
+      final line = lines[index];
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+      if (!trimmed.startsWith('#')) {
+        output.write(manifestUri.resolve(trimmed));
+        continue;
+      }
+      output.write(
+        line.replaceAllMapped(_uriAttribute, (match) {
+          return 'URI="${manifestUri.resolve(match.group(1)!)}"';
+        }),
+      );
+    }
+    return output.toString();
   }
 
   @visibleForTesting
   static String buildTruncatedManifest(String vodManifest, int segmentIndex) {
     final lines = vodManifest.replaceAll('\r\n', '\n').split('\n');
-    final segmentLines = <int>[];
+    var firstSegmentLine = -1;
+    var segmentCount = 0;
     for (var i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith('#EXTINF:')) segmentLines.add(i);
+      if (!lines[i].startsWith('#EXTINF:')) continue;
+      firstSegmentLine = firstSegmentLine < 0 ? i : firstSegmentLine;
+      segmentCount++;
     }
-    if (segmentLines.isEmpty) return vodManifest;
+    if (segmentCount == 0) return vodManifest;
 
-    final index = segmentIndex.clamp(0, segmentLines.length - 1);
-    final firstSegmentLine = segmentLines.first;
-    final targetLine = segmentLines[index];
-    final header = lines
-        .sublist(0, firstSegmentLine)
-        .where((line) => !line.startsWith('#EXT-X-START:'))
-        .toList();
+    final index = segmentIndex.clamp(0, segmentCount - 1);
+    var targetLine = firstSegmentLine;
+    var currentSegment = 0;
+    for (var i = firstSegmentLine; i < lines.length; i++) {
+      if (!lines[i].startsWith('#EXTINF:')) continue;
+      if (currentSegment++ == index) {
+        targetLine = i;
+        break;
+      }
+    }
 
     var hasMediaSequence = false;
-    for (var i = 0; i < header.length; i++) {
-      if (!header[i].startsWith('#EXT-X-MEDIA-SEQUENCE:')) continue;
-      hasMediaSequence = true;
-      final original = int.tryParse(header[i].split(':').last) ?? 0;
-      header[i] = '#EXT-X-MEDIA-SEQUENCE:${original + index}';
+    final output = StringBuffer();
+    for (var i = 0; i < firstSegmentLine; i++) {
+      final line = lines[i];
+      if (line.startsWith('#EXT-X-START:')) continue;
+      if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
+        hasMediaSequence = true;
+        final separator = line.indexOf(':');
+        final original = int.parse(line.substring(separator + 1));
+        output.writeln('#EXT-X-MEDIA-SEQUENCE:${original + index}');
+      } else {
+        output.writeln(line);
+      }
     }
     if (!hasMediaSequence) {
-      header.add('#EXT-X-MEDIA-SEQUENCE:$index');
+      output.writeln('#EXT-X-MEDIA-SEQUENCE:$index');
     }
 
-    // Preserve the latest encryption/init declarations when a playlist
-    // changes them between segments.
-    final activeTags = <String, String>{};
-    for (final line in lines.sublist(firstSegmentLine, targetLine)) {
-      if (line.startsWith('#EXT-X-KEY:')) activeTags['key'] = line;
-      if (line.startsWith('#EXT-X-MAP:')) activeTags['map'] = line;
+    String? activeKey;
+    String? activeMap;
+    for (var i = firstSegmentLine; i < targetLine; i++) {
+      final line = lines[i];
+      if (line.startsWith('#EXT-X-KEY:')) activeKey = line;
+      if (line.startsWith('#EXT-X-MAP:')) activeMap = line;
     }
-    header.addAll(activeTags.values);
-    return '${[...header, ...lines.sublist(targetLine)].join('\n')}\n';
+    if (activeKey != null) output.writeln(activeKey);
+    if (activeMap != null) output.writeln(activeMap);
+    for (var i = targetLine; i < lines.length; i++) {
+      output.writeln(lines[i]);
+    }
+    return output.toString();
   }
 
   @visibleForTesting
@@ -212,7 +240,7 @@ class LoopbackHlsSeekSession implements HlsSeekSession {
       final seconds = double.tryParse(value) ?? 0;
       elapsedMicroseconds += (seconds * Duration.microsecondsPerSecond).round();
     }
-    return List<Duration>.unmodifiable(result);
+    return result;
   }
 
   @override

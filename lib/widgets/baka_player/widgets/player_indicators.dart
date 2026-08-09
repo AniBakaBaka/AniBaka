@@ -157,12 +157,12 @@ class PlayerVolumeBrightnessIndicators extends StatelessWidget {
 
 class PlayerErrorIndicator extends StatelessWidget {
   final PlaybackController controller;
-  final Map? detail;
+  final bool canSearchSource;
   final VoidCallback onSearch;
 
   const PlayerErrorIndicator({
     required this.controller,
-    required this.detail,
+    required this.canSearchSource,
     required this.onSearch,
     super.key,
   });
@@ -185,7 +185,8 @@ class PlayerErrorIndicator extends StatelessWidget {
                 style: TextStyle(color: Colors.white),
               ),
               const SizedBox(height: 10),
-              if (detail != null && detail!['title'] != null)
+              if (canSearchSource &&
+                  controller.mediaInfo.value.title.isNotEmpty)
                 InkWell(
                   onTap: onSearch,
                   borderRadius: BorderRadius.circular(20),

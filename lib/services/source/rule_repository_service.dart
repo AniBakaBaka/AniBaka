@@ -51,7 +51,7 @@ class RuleRepositoryService extends ChangeNotifier {
   );
   final Map<String, ({RuleHubIndex index, int expiresAt})> _memoryCache = {};
 
-  List<String> get subscriptions => List.unmodifiable(_storedSubscriptions());
+  List<String> get subscriptions => _storedSubscriptions();
 
   Future<bool> addSubscription(String url) async {
     final normalized = _canonicalUrl(url.trim());

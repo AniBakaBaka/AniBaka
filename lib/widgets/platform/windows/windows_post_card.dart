@@ -30,14 +30,14 @@ Widget buildTag(String text, {Color? backgroundColor}) {
 
 class WindowsCard extends StatelessWidget {
   final Map data;
-  final String displayTag;
+  final String tagText;
   final String? scoreText;
   final Object heroTag;
   final Widget image;
 
   const WindowsCard({
     required this.data,
-    required this.displayTag,
+    required this.tagText,
     required this.scoreText,
     required this.heroTag,
     required this.image,
@@ -46,14 +46,6 @@ class WindowsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    String cleanDisplayTag = displayTag;
-    if (scoreText != null && scoreText!.isNotEmpty) {
-      cleanDisplayTag = cleanDisplayTag
-          .replaceAll(' · $scoreText', '')
-          .replaceAll('评分 $scoreText', '')
-          .trim();
-    }
-
     return AspectRatio(
       aspectRatio: 2 / 3,
       child: Container(
@@ -87,8 +79,8 @@ class WindowsCard extends StatelessWidget {
                       ).colorScheme.primary.withValues(alpha: 0.9),
                     ),
                   ),
-                if (cleanDisplayTag.isNotEmpty)
-                  Positioned(left: 6, top: 6, child: buildTag(cleanDisplayTag)),
+                if (tagText.isNotEmpty)
+                  Positioned(left: 6, top: 6, child: buildTag(tagText)),
               ],
             ),
           ),

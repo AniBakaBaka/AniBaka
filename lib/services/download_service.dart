@@ -7,6 +7,7 @@ import 'package:baka/models/download_task.dart';
 import 'package:baka/pages/player/download_page.dart';
 import 'package:baka/services/app_storage.dart';
 import 'package:baka/services/danmaku_service.dart';
+import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/hls_offline_remux.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:dio/dio.dart';
@@ -607,17 +608,15 @@ class DownloadService {
 
     if (task.bgmId != null && task.episodeIndex != null) {
       try {
-        final danmuList = await DanmakuService.getDanmakuItems(
-          bgmId: task.bgmId!,
+        final danmuList = await DanmakuService.fetch(
+          subjectId: task.bgmId!,
           episodeIndex: task.episodeIndex!,
-          originalTitle: task.title,
+          titles: BgmUtils.buildSearchTitles([task.title]),
         );
         if (danmuList.isNotEmpty) {
           final dir = await _downloadDirectory();
           final path = '${dir.path}/${task.filename}_danmaku.json';
-          await File(
-            path,
-          ).writeAsString(jsonEncode(DanmakuService.serializeItems(danmuList)));
+          await File(path).writeAsString(DanmakuService.encode(danmuList));
           task.danmakuPath = path;
         }
       } catch (e) {
@@ -736,11 +735,7 @@ class _HlsAsset {
   final String localName;
   final HlsByteRange? byteRange;
 
-  const _HlsAsset({
-    required this.url,
-    required this.localName,
-    this.byteRange,
-  });
+  const _HlsAsset({required this.url, required this.localName, this.byteRange});
 }
 
 class _HlsCacheResult {

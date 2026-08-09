@@ -12,6 +12,7 @@ import 'package:flutter_volume_controller/flutter_volume_controller.dart';
 import 'package:fullscreen_window/fullscreen_window.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
+import 'package:baka/widgets/danmaku/view.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:baka/widgets/baka_player/utils.dart';
 import 'package:ios_orientation/ios_orientation.dart';
@@ -35,10 +36,10 @@ class BakaPlayer extends StatefulWidget {
   const BakaPlayer({
     required this.controller,
     this.full = false,
-    this.detail,
+    this.canSearchSource = false,
     this.headerControl,
     this.onPickEpisode,
-    this.danmuWidget,
+    this.danmakuEnabled = false,
     this.hasNextEpisode = false,
     this.onNextEpisode,
     this.onFullScreenChanged,
@@ -49,9 +50,9 @@ class BakaPlayer extends StatefulWidget {
   final PlaybackController controller;
   final Widget? headerControl;
   final VoidCallback? onPickEpisode;
-  final Widget? danmuWidget;
+  final bool danmakuEnabled;
   final bool full;
-  final Map? detail;
+  final bool canSearchSource;
   final bool hasNextEpisode;
   final VoidCallback? onNextEpisode;
   final ValueChanged<bool>? onFullScreenChanged;
@@ -61,9 +62,9 @@ class BakaPlayer extends StatefulWidget {
     controller: controller,
     full: true,
     headerControl: headerControl,
-    danmuWidget: danmuWidget,
+    danmakuEnabled: danmakuEnabled,
     onPickEpisode: onPickEpisode,
-    detail: detail,
+    canSearchSource: canSearchSource,
     hasNextEpisode: hasNextEpisode,
     onNextEpisode: onNextEpisode,
     onFullScreenChanged: onFullScreenChanged,
@@ -136,9 +137,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
     });
     if (widget.full) _applyFullScreenMode();
     _initializeControls();
-    if (!widget.full && widget.detail != null) {
-      unawaited(widget.controller.initialize());
-    }
     widget.controller.core.addListener(_maybeAutoEnterFullscreen);
     _maybeAutoEnterFullscreen();
   }
@@ -328,7 +326,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
           _buildLockButton(),
           PlayerErrorIndicator(
             controller: widget.controller,
-            detail: widget.detail,
+            canSearchSource: widget.canSearchSource,
             onSearch: _navigateToSearch,
           ),
           PlayerPrompts(
@@ -355,14 +353,14 @@ class _BakaPlayerState extends State<BakaPlayer> {
           controller: widget.controller,
           onSend: (text, color, type) {
             showSnackBar('\u53d1\u5c04\u6210\u529f');
-            widget.controller.danmakuController.addItems([
+            widget.controller.danmakuController.addItem(
               DanmakuItem(
                 text,
                 time: widget.controller.timeline.value.position.inMilliseconds,
                 type: type,
                 color: color,
               ),
-            ]);
+            );
           },
         );
       },
@@ -440,7 +438,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
   }
 
   Widget _buildDanmaku() {
-    if (widget.danmuWidget == null || !widget.full) {
+    if (!widget.danmakuEnabled || !widget.full) {
       return const SizedBox.shrink();
     }
     return ValueListenableBuilder<PlayerOverlayState>(
@@ -448,7 +446,11 @@ class _BakaPlayerState extends State<BakaPlayer> {
       builder: (context, overlay, _) => overlay.showDanmaku
           ? Positioned.fill(
               top: 10,
-              child: RepaintBoundary(child: widget.danmuWidget!),
+              child: RepaintBoundary(
+                child: DanmakuView(
+                  controller: widget.controller.danmakuController,
+                ),
+              ),
             )
           : const SizedBox.shrink(),
     );
@@ -543,22 +545,19 @@ class _BakaPlayerState extends State<BakaPlayer> {
           _triggerFullScreen();
           return KeyEventResult.handled;
         }
-      }
-      else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
         final timeline = controller.timeline.value;
         final newPosition = timeline.position - _seekStep;
         controller.seek(newPosition.clamp(Duration.zero, timeline.duration));
         return KeyEventResult.handled;
-      }
-      else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
         _doubleSpeedTimer ??= Timer(_longPressDelay, () {
           if (!controller.overlay.value.doubleSpeed) {
             controller.setDoubleSpeed(true);
           }
         });
         return KeyEventResult.handled;
-      }
-      else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
         if (Instances.isTV) {
           return KeyEventResult.ignored;
         }
@@ -568,8 +567,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
         );
         _setVerticalLevel(_VerticalControl.volume, newVolume);
         return KeyEventResult.handled;
-      }
-      else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
         if (Instances.isTV) {
           return KeyEventResult.ignored;
         }
@@ -579,8 +577,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
         );
         _setVerticalLevel(_VerticalControl.volume, newVolume);
         return KeyEventResult.handled;
-      }
-      else if (event.logicalKey == LogicalKeyboardKey.space) {
+      } else if (event.logicalKey == LogicalKeyboardKey.space) {
         widget.controller.togglePlayback();
         return KeyEventResult.handled;
       }
@@ -779,14 +776,8 @@ class _BakaPlayerState extends State<BakaPlayer> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildPlayerTitleOrLogo(
-                        mediaInfo.title.isNotEmpty
-                            ? mediaInfo.title
-                            : (widget.detail?['title']?.toString() ?? ''),
-                        mediaInfo.logoUrl.isNotEmpty
-                            ? mediaInfo.logoUrl
-                            : (widget.detail?['logoUrl']?.toString() ??
-                                  widget.detail?['logo']?.toString() ??
-                                  ''),
+                        mediaInfo.title.isNotEmpty ? mediaInfo.title : '',
+                        mediaInfo.logoUrl.isNotEmpty ? mediaInfo.logoUrl : '',
                         isWide,
                       ),
                     ],
@@ -1017,7 +1008,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
 
   /// 构建弹幕栏（输入框入口和设置按钮）
   Widget? _buildDanmakuBar(bool isWide) {
-    if (widget.danmuWidget == null || !widget.full) return null;
+    if (!widget.danmakuEnabled || !widget.full) return null;
     final controller = widget.controller;
 
     return ValueListenableBuilder<PlayerOverlayState>(
@@ -1063,16 +1054,13 @@ class _BakaPlayerState extends State<BakaPlayer> {
                     ),
                     onTap: () {
                       final mediaInfo = widget.controller.mediaInfo.value;
-                      final title =
-                          widget.detail?['title']?.toString() ??
-                          mediaInfo.title;
                       final epIndex = mediaInfo.episodeIndex >= 0
                           ? mediaInfo.episodeIndex + 1
                           : 1;
                       NavigationService.showDanmakuSettings(
                         context,
                         widget.controller.danmakuController,
-                        defaultTitle: title,
+                        defaultTitle: mediaInfo.title,
                         defaultEpisode: epIndex,
                       );
                     },
@@ -1196,14 +1184,10 @@ class _BakaPlayerState extends State<BakaPlayer> {
   }
 
   void _navigateToSearch() {
-    final detail = widget.detail;
-    if (detail == null) return;
+    final title = widget.controller.mediaInfo.value.title;
+    if (title.isEmpty) return;
 
-    NavigationService.toSearch(
-      context,
-      keyword: detail['title'],
-      initialSource: 2,
-    );
+    NavigationService.toSearch(context, keyword: title, initialSource: 2);
   }
 
   String _getCurrentTime() {

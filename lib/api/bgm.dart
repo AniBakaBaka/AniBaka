@@ -60,22 +60,25 @@ Future<List<Map<String, dynamic>>> getBgmRelatedSubjects(int subjectId) {
   );
 }
 
-Future<Response> getTrendingSubjects({
+Future<List<Map<String, dynamic>>> getTrendingSubjects({
   int type = 2,
   int limit = 24,
   int offset = 0,
-}) {
-  return _get(
+}) async {
+  final response = await _get(
     '$_bgmNextBase/p1/trending/subjects?type=$type&limit=$limit&offset=$offset',
   );
+  return _mapList(_jsonMap(response.data)['data']);
 }
 
 /// BGM 每日放送（一周更新表）。
 ///
 /// 返回以星期为 key（1=周一 … 7=周日）的 Map，值为
 /// `[{subject: {...}, watchers: n}]`，subject 与 trending 接口同构。
-Future<Response> getBgmCalendar() {
-  return _get('$_bgmNextBase/p1/calendar');
+Future<Map<String, List<Map<String, dynamic>>>> getBgmCalendar() async {
+  final response = await _get('$_bgmNextBase/p1/calendar');
+  final data = _jsonMap(response.data);
+  return {for (final entry in data.entries) entry.key: _mapList(entry.value)};
 }
 
 Future<Response> getBgmSubjectComments(
@@ -117,26 +120,30 @@ Future<Response> getBgmCharacterComments(int characterId) {
 /// 使用 BGM v0 搜索 API (POST /v0/search/subjects)
 /// [tags] BGM 标签列表（AND 关系）
 /// [sort] 排序：rank(排名) / heat(热度) / score(评分) / match(相关)
-Future<Response> searchBgmByTag(
+Future<List<Map<String, dynamic>>> searchBgmByTag(
   List<String> tags, {
   int limit = 25,
   int offset = 0,
   String sort = 'rank',
   List<String>? airDate,
-}) {
+}) async {
   final filter = <String, dynamic>{
     'type': [2],
   };
   if (tags.isNotEmpty) filter['tag'] = tags;
   if (airDate != null && airDate.isNotEmpty) filter['air_date'] = airDate;
 
-  return _post('$_bgmApiBase/v0/search/subjects?limit=$limit&offset=$offset', {
-    // Bangumi now rejects an empty keyword. `*` keeps this as a filter-only
-    // search, so the home "最新" feed and category filters still return data.
-    'keyword': '*',
-    'sort': sort,
-    'filter': filter,
-  });
+  final response = await _post(
+    '$_bgmApiBase/v0/search/subjects?limit=$limit&offset=$offset',
+    {
+      // Bangumi now rejects an empty keyword. `*` keeps this as a filter-only
+      // search, so the home "最新" feed and category filters still return data.
+      'keyword': '*',
+      'sort': sort,
+      'filter': filter,
+    },
+  );
+  return _mapList(_jsonMap(response.data)['data']);
 }
 
 Future<Response> _get(String url) async {

@@ -73,8 +73,6 @@ class PlaybackController {
   Timer? _hideControlsTimer;
   Timer? _skipCancelHideTimer;
   Timer? _jumpPromptTimer;
-  Timer? _errorDebounceTimer;
-  Timer? _bufferingDebounceTimer;
   Timer? _reversePlaybackTimer;
 
   Future<void>? _initializeFuture;
@@ -91,7 +89,6 @@ class PlaybackController {
   int _lastTimelineBucket = -1;
   bool _listenersBound = false;
   bool _disposed = false;
-  bool _hasPlaybackProgress = false;
   bool _eofReached = false;
   DateTime? _seekStartedAt;
   Duration? _pendingSeekTarget;
@@ -99,11 +96,8 @@ class PlaybackController {
   bool _seekRecoveryInFlight = false;
   int _seekRecoveryCount = 0;
   int _seekGeneration = 0;
-  int _openRetryCount = 0;
-  int _openGeneration = 0;
   String? _lastOpenUri;
   Map<String, String>? _lastOpenHeaders;
-  bool _lastOpenAutoplay = true;
   HlsSeekSession? _hlsSeekSession;
   Future<HlsSeekSession?>? _hlsSeekSessionFuture;
   Duration _hlsTimelineOffset = Duration.zero;
@@ -146,16 +140,16 @@ class PlaybackController {
     _hlsTimelineOffset = Duration.zero;
     _hlsPositionFloor = null;
     _hlsReopenInFlight = false;
-    _openGeneration++;
     _lastOpenUri = uri;
-    _lastOpenHeaders = httpHeaders == null
-        ? null
-        : Map<String, String>.from(httpHeaders);
-    _lastOpenAutoplay = autoplay;
-    _hasPlaybackProgress = false;
-    _openRetryCount = 0;
+    _lastOpenHeaders = httpHeaders;
     try {
-      await _openCurrent();
+      _resetPlaybackState();
+      await initialize();
+      if (_backend.currentMediaUri != null) await _backend.stop();
+      await _configurePlayer(preferences.value.defaultPlaybackSpeed);
+      await _backend.open(uri, autoplay: autoplay, httpHeaders: httpHeaders);
+      await _reapplyHwdec();
+      if (!_disposed) core.value = core.value.copyWith(loading: false);
     } catch (error) {
       final safeError = sanitizePlaybackError(error);
       if (!_disposed) {
@@ -168,22 +162,6 @@ class PlaybackController {
       }
       throw Exception(safeError);
     }
-  }
-
-  /// open 与错误自动重试共用的打开序列（initialize 已记忆化，重复调用无害）。
-  Future<void> _openCurrent() async {
-    _resetPlaybackState();
-    await initialize();
-    if (_backend.currentMediaUri != null) await _backend.stop();
-    await _configurePlayer(preferences.value.defaultPlaybackSpeed);
-    await _backend.open(
-      _lastOpenUri!,
-      autoplay: _lastOpenAutoplay,
-      httpHeaders: _lastOpenHeaders,
-    );
-    await _reapplyHwdec();
-    if (_disposed) return;
-    core.value = core.value.copyWith(loading: false);
   }
 
   /// 重新固定 hwdec：AndroidVideoController 初始化会覆盖它，必须在媒体
@@ -200,11 +178,6 @@ class PlaybackController {
     } catch (error) {
       debugPrint('重新应用 hwdec 失败: $error');
     }
-  }
-
-  Future<void> applyPlaybackConfiguration() async {
-    await initialize();
-    await _configurePlayer(preferences.value.defaultPlaybackSpeed);
   }
 
   void attachDanmaku(DanmakuController controller) {
@@ -291,8 +264,7 @@ class PlaybackController {
       if (position < positionFloor) return;
       _hlsPositionFloor = null;
     }
-    if (!_hasPlaybackProgress && position > Duration.zero) {
-      _hasPlaybackProgress = true;
+    if (position > Duration.zero) {
       final coreState = core.value;
       if (coreState.loading ||
           coreState.buffering ||
@@ -421,87 +393,22 @@ class PlaybackController {
   }
 
   void _onBufferingChanged(bool buffering) {
-    if (_disposed) return;
-    if (_hlsReopenInFlight) {
-      _bufferingDebounceTimer?.cancel();
-      _bufferingDebounceTimer = null;
+    if (_disposed || _hlsReopenInFlight || core.value.buffering == buffering) {
       return;
     }
-    _bufferingDebounceTimer?.cancel();
-    _bufferingDebounceTimer = null;
-
-    if (!buffering) {
-      if (core.value.buffering) {
-        core.value = core.value.copyWith(buffering: false);
-      }
-      _syncDanmakuActivity();
-      return;
-    }
-    if (!core.value.playing) {
-      if (!core.value.buffering) {
-        core.value = core.value.copyWith(buffering: true);
-      }
-      _syncDanmakuActivity();
-      return;
-    }
-
-    // 疑似卡顿：core.buffering 尚未置位，先停弹幕，600ms 确认后再同步。
-    _danmakuController?.pause();
-    final position = _backend.currentPosition;
-    _bufferingDebounceTimer = Timer(const Duration(milliseconds: 600), () {
-      if (_disposed) return;
-      final stalled = _backend.currentPosition <= position;
-      if (core.value.buffering != stalled) {
-        core.value = core.value.copyWith(buffering: stalled);
-      }
-      _syncDanmakuActivity();
-    });
+    core.value = core.value.copyWith(buffering: buffering);
+    _syncDanmakuActivity();
   }
 
   void _onError(String error) {
     if (_disposed) return;
     final safeError = sanitizePlaybackError(error);
     AppLogger.instance.warning('Playback error: $safeError', tag: 'Playback');
-    final openGeneration = _openGeneration;
-    _errorDebounceTimer?.cancel();
-    _errorDebounceTimer = Timer(const Duration(milliseconds: 300), () {
-      if (_disposed || openGeneration != _openGeneration) return;
-      final hasPlaybackProgress =
-          _hasPlaybackProgress ||
-          _backend.currentPosition > Duration.zero ||
-          timeline.value.position > Duration.zero;
-      if (hasPlaybackProgress && _backend.isPlaying) {
-        debugPrint('播放中忽略非致命错误: $safeError');
-        return;
-      }
-      if (!hasPlaybackProgress &&
-          _backend.isPlaying &&
-          _openRetryCount == 0 &&
-          _lastOpenUri != null) {
-        _openRetryCount = 1;
-        debugPrint('媒体尚未开始播放，自动重试打开: $safeError');
-        unawaited(_retryLastOpen(openGeneration));
-        return;
-      }
-      _setPlaybackFailed(safeError);
-    });
-  }
-
-  Future<void> _retryLastOpen(int openGeneration) async {
-    try {
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      if (_disposed ||
-          _hasPlaybackProgress ||
-          openGeneration != _openGeneration) {
-        return;
-      }
-      if (_lastOpenUri == null) return;
-      await _openCurrent();
-    } catch (error) {
-      if (!_disposed && openGeneration == _openGeneration) {
-        _setPlaybackFailed(sanitizePlaybackError(error));
-      }
+    if (_backend.isPlaying) {
+      debugPrint('播放中忽略非致命错误: $safeError');
+      return;
     }
+    _setPlaybackFailed(safeError);
   }
 
   void _setPlaybackFailed(String error) {
@@ -1208,7 +1115,7 @@ class PlaybackController {
       httpHeaders: _lastOpenHeaders,
     );
     if (_disposed) return;
-    // 同 _openCurrent：新 VideoController 创建后会重置 hwdec，重新固定。
+    // 新 VideoController 创建后会重置 hwdec，因此重新应用。
     await _reapplyHwdec();
     if (position > Duration.zero) {
       await _backend.seek(position);
@@ -1247,8 +1154,6 @@ class PlaybackController {
     _stopReversePlayback();
     _skipCancelHideTimer?.cancel();
     _jumpPromptTimer?.cancel();
-    _errorDebounceTimer?.cancel();
-    _bufferingDebounceTimer?.cancel();
     enhancement.value = VideoEnhancementState(
       requestedMode: preferences.value.videoEnhancementMode,
     );
@@ -1283,8 +1188,6 @@ class PlaybackController {
     _hideControlsTimer?.cancel();
     _skipCancelHideTimer?.cancel();
     _jumpPromptTimer?.cancel();
-    _errorDebounceTimer?.cancel();
-    _bufferingDebounceTimer?.cancel();
     _reversePlaybackTimer?.cancel();
     _longPressRevision++;
     await _longPressTask;

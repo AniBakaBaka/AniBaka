@@ -19,7 +19,8 @@ class ActiveDownloadIndicator extends StatefulWidget {
 
 class _ActiveDownloadIndicatorState extends State<ActiveDownloadIndicator> {
   late final VoidCallback _listener;
-  List<DownloadTask> _activeTasks = [];
+  DownloadTask? _currentTask;
+  int _activeTaskCount = 0;
 
   @override
   void initState() {
@@ -37,28 +38,32 @@ class _ActiveDownloadIndicatorState extends State<ActiveDownloadIndicator> {
   }
 
   void _refresh() {
-    final all = DownloadService.instance.tasks;
-    final active = all
-        .where(
-          (t) =>
-              t.id.startsWith(widget.taskIdPrefix) &&
-              t.status != DownloadStatus.completed,
-        )
-        .toList();
-    if (mounted) setState(() => _activeTasks = active);
+    DownloadTask? first;
+    DownloadTask? downloading;
+    var count = 0;
+    for (final task in DownloadService.instance.tasks) {
+      if (!task.id.startsWith(widget.taskIdPrefix) ||
+          task.status == DownloadStatus.completed) {
+        continue;
+      }
+      first ??= task;
+      if (task.status == DownloadStatus.downloading) downloading ??= task;
+      count++;
+    }
+    if (mounted) {
+      setState(() {
+        _currentTask = downloading ?? first;
+        _activeTaskCount = count;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_activeTasks.isEmpty) return const SizedBox.shrink();
+    final current = _currentTask;
+    if (current == null) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
-    final downloading = _activeTasks.where(
-      (t) => t.status == DownloadStatus.downloading,
-    );
-    final current = downloading.isNotEmpty
-        ? downloading.first
-        : _activeTasks.first;
 
     return GestureDetector(
       onTap: () => NavigationService.showDownloadManager(context),
@@ -108,7 +113,7 @@ class _ActiveDownloadIndicatorState extends State<ActiveDownloadIndicator> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    '${_activeTasks.length} 个任务',
+                    '$_activeTaskCount 个任务',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,

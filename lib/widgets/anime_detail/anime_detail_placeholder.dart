@@ -24,7 +24,7 @@ import 'package:baka/widgets/anime_detail/anime_detail_comments.dart';
 import 'package:baka/widgets/anime_detail/anime_detail_related.dart';
 
 class AnimeDetailPlaceholder extends StatefulWidget {
-  final Map data;
+  final Map<String, dynamic> data;
 
   const AnimeDetailPlaceholder({required this.data, super.key});
 
@@ -88,11 +88,10 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   }
 
   void _startWatching() {
-    final playerData = Map<String, dynamic>.from(widget.data);
     if (_detail.logoUrl.isNotEmpty) {
-      playerData['logoUrl'] = _detail.logoUrl;
+      widget.data['logoUrl'] = _detail.logoUrl;
     }
-    NavigationService.toPlayer(context, playerData, autoMatch: true);
+    NavigationService.toPlayer(context, widget.data, autoMatch: true);
   }
 
   Future<void> _loadInitialData() async {

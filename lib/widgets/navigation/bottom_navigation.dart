@@ -1,5 +1,3 @@
-import 'dart:ui' show ImageFilter;
-
 import 'package:baka/instance.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -113,13 +111,7 @@ class _AppBottomNavigationState extends State<AppBottomNavigation> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  if (reduceMotion)
-                    DecoratedBox(decoration: bgDecoration)
-                  else
-                    BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                      child: DecoratedBox(decoration: bgDecoration),
-                    ),
+                  DecoratedBox(decoration: bgDecoration),
                   LayoutBuilder(
                     builder: (context, constraints) {
                       return GestureDetector(

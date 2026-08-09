@@ -2,7 +2,6 @@ import 'dart:collection';
 import 'dart:convert';
 
 import 'package:baka/api/post.dart';
-import 'package:baka/services/bgm_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:flutter/foundation.dart';
@@ -14,73 +13,34 @@ class DanmakuService {
   static const String _blockWordsKey = 'danmaku_block_words';
   static const String _blockRepeatKey = 'danmaku_block_repeat';
   static const String _blockColorKey = 'danmaku_block_color';
-  static const int maxCachedEpisodes = 8;
-  static const int maxCachedItems = 20000;
+  static const int maxCachedEpisodes = 3;
+  static const int maxCachedItems = 8000;
 
   static final LinkedHashMap<String, List<DanmakuItem>> _cache =
       LinkedHashMap<String, List<DanmakuItem>>();
+  static final Map<String, Future<List<DanmakuItem>>> _loads = {};
   static int _cachedItemCount = 0;
 
-  static Future<List<DanmakuItem>> getDanmakuItems({
-    required String bgmId,
-    required int episodeIndex,
-    required String originalTitle,
-  }) async {
-    final cacheKey = '$bgmId-$episodeIndex';
-    final cached = _readCache(cacheKey);
-    if (cached != null) return cached;
-
-    final subjectId = int.tryParse(bgmId);
-    if (subjectId == null || subjectId <= 0) return const [];
-    final subject = await BgmService.resolveSubject(
-      bgmId: bgmId,
-      title: originalTitle,
-      withDetail: true,
-    );
-    final titles =
-        subject?.searchTitles ?? BgmUtils.buildSearchTitles([originalTitle]);
-    if (titles.isEmpty) return const [];
-
-    final raw = await _fetchFirstAvailableDanmaku(
-      subjectId,
-      episodeIndex,
-      titles,
-    );
-    if (raw == null) return const [];
-    final parsed = await parseItems(raw);
-    if (parsed.isNotEmpty) _putCache(cacheKey, parsed);
-    return parsed;
-  }
-
-  static Future<List<DanmakuItem>> fetchDanmakuBySubjectAndEpisode({
+  static Future<List<DanmakuItem>> fetch({
     required int subjectId,
     required int episodeIndex,
-    String? title,
+    required Iterable<String> titles,
   }) async {
     final cacheKey = '$subjectId-$episodeIndex';
     final cached = _readCache(cacheKey);
     if (cached != null) return cached;
+    final pending = _loads[cacheKey];
+    if (pending != null) return pending;
 
-    final subject = await BgmService.resolveSubject(
-      bgmId: subjectId.toString(),
-      title: title ?? '',
-      withDetail: true,
-    );
-    final searchTitles =
-        subject?.searchTitles ??
-        (title != null && title.isNotEmpty
-            ? BgmUtils.buildSearchTitles([title])
-            : const []);
-
-    final raw = await _fetchFirstAvailableDanmaku(
-      subjectId,
-      episodeIndex,
-      searchTitles.isNotEmpty ? searchTitles : [''],
-    );
-    if (raw == null) return const [];
-    final parsed = await parseItems(raw);
-    if (parsed.isNotEmpty) _putCache(cacheKey, parsed);
-    return parsed;
+    final load = _fetchFirstAvailableDanmaku(subjectId, episodeIndex, titles);
+    _loads[cacheKey] = load;
+    try {
+      final items = await load;
+      if (items.isNotEmpty) _putCache(cacheKey, items);
+      return items;
+    } finally {
+      if (identical(_loads[cacheKey], load)) _loads.remove(cacheKey);
+    }
   }
 
   static List<DanmakuItem>? _readCache(String key) {
@@ -104,40 +64,29 @@ class DanmakuService {
     }
   }
 
-  static Future<List<dynamic>?> _fetchFirstAvailableDanmaku(
+  static Future<List<DanmakuItem>> _fetchFirstAvailableDanmaku(
     int bgmId,
     int episodeIndex,
-    List<String> titles,
+    Iterable<String> titles,
   ) async {
     for (final title in titles) {
       try {
-        final parsed = _parseResponse(
-          await getDanmu(bgmId, episodeIndex, title),
-        );
-        if (parsed != null && parsed.isNotEmpty) return parsed;
+        final response = await getDanmu(bgmId, episodeIndex, title);
+        final items = await decode(response.data as String);
+        if (items.isNotEmpty) return items;
       } catch (error) {
         debugPrint('fetch danmaku error: $error');
       }
     }
-    return null;
+    return const [];
   }
 
-  static List<dynamic>? _parseResponse(dynamic response) {
-    final rawData = response?.data;
-    if (rawData is! String || rawData.isEmpty) return null;
-    try {
-      final decoded = jsonDecode(rawData);
-      final data = decoded is Map ? decoded['data'] : null;
-      return data is List ? List<dynamic>.from(data) : null;
-    } catch (error) {
-      debugPrint('parse danmaku response failed: $error');
-      return null;
-    }
-  }
-
-  static Future<List<DanmakuItem>> parseItems(List<dynamic> rawItems) {
-    if (rawItems.isEmpty) return SynchronousFuture(const []);
-    return compute(_parseDanmakuItems, rawItems);
+  /// Decodes the API `{data: [...]}` payload and the local `[...]` file format.
+  /// Passing the response text to the worker avoids decoding a second dynamic
+  /// object graph on the UI isolate before producing the typed list.
+  static Future<List<DanmakuItem>> decode(String raw) {
+    if (raw.isEmpty) return SynchronousFuture(const []);
+    return compute(_decodeDanmakuItems, raw);
   }
 
   static Future<void> loadSettings(DanmakuController controller) async {
@@ -191,29 +140,29 @@ class DanmakuService {
     ]);
   }
 
-  static void startPlay({
-    required DanmakuController controller,
-    required List<DanmakuItem> items,
-  }) {
-    controller.reset();
-    if (items.isNotEmpty) controller.setItems(items);
-  }
-
-  static List<Map<String, String>> serializeItems(List<DanmakuItem> items) {
-    return items
-        .map(
-          (item) => <String, String>{
-            'm': item.text,
-            'p':
-                '${item.time / 1000},${item.type},${item.color.toARGB32() & 0xFFFFFF}',
-          },
-        )
-        .toList(growable: false);
+  static String encode(List<DanmakuItem> items) {
+    final output = StringBuffer('[');
+    for (var index = 0; index < items.length; index++) {
+      if (index != 0) output.write(',');
+      final item = items[index];
+      output
+        ..write('{"m":')
+        ..write(jsonEncode(item.text))
+        ..write(',"p":"')
+        ..write(item.time / 1000)
+        ..write(',')
+        ..write(item.type)
+        ..write(',')
+        ..write(item.color.toARGB32() & 0xFFFFFF)
+        ..write('"}');
+    }
+    return (output..write(']')).toString();
   }
 
   @visibleForTesting
   static void clearCache() {
     _cache.clear();
+    _loads.clear();
     _cachedItemCount = 0;
   }
 
@@ -223,14 +172,16 @@ class DanmakuService {
 
   @visibleForTesting
   static void cacheItems(String key, List<DanmakuItem> items) {
-    _putCache(key, List<DanmakuItem>.unmodifiable(items));
+    _putCache(key, items);
   }
 
   @visibleForTesting
-  static List<String> get cachedKeys => List<String>.unmodifiable(_cache.keys);
+  static Iterable<String> get cachedKeys => _cache.keys;
 }
 
-List<DanmakuItem> _parseDanmakuItems(List<dynamic> rawItems) {
+List<DanmakuItem> _decodeDanmakuItems(String raw) {
+  final decoded = jsonDecode(raw);
+  final rawItems = decoded is List ? decoded : (decoded as Map)['data'] as List;
   final items = <DanmakuItem>[];
   var sorted = true;
   var previousTime = -1;
@@ -238,24 +189,73 @@ List<DanmakuItem> _parseDanmakuItems(List<dynamic> rawItems) {
     if (raw is! Map) continue;
     final text = raw['m']?.toString();
     if (text == null || text.isEmpty) continue;
-    final parameters = raw['p']?.toString().split(',');
-    if (parameters == null || parameters.length < 3) continue;
-    final seconds = double.tryParse(parameters[0]);
-    if (seconds == null) continue;
-    final type = int.tryParse(parameters[1]) ?? 1;
-    if (type != 1 && type != 3 && type != 4 && type != 5) continue;
-    final time = (seconds * 1000).round();
+    final parameters = raw['p'];
+    if (parameters is! String) continue;
+    final firstComma = parameters.indexOf(',');
+    final secondComma = parameters.indexOf(',', firstComma + 1);
+    if (firstComma <= 0 || secondComma <= firstComma + 1) continue;
+    final time = _parseMilliseconds(parameters, firstComma);
+    if (time == null) continue;
+    final type = _parseUnsignedInt(parameters, firstComma + 1, secondComma);
+    if (type == null || (type != 1 && type != 3 && type != 4 && type != 5)) {
+      continue;
+    }
+    final colorEnd = parameters.indexOf(',', secondComma + 1);
+    final color = _parseUnsignedInt(
+      parameters,
+      secondComma + 1,
+      colorEnd < 0 ? parameters.length : colorEnd,
+    );
+    if (color == null) continue;
     if (time < previousTime) sorted = false;
     previousTime = time;
     items.add(
       DanmakuItem(
         text,
         time: time,
-        color: Color(0xFF000000 | (int.tryParse(parameters[2]) ?? 0xFFFFFF)),
+        color: Color(0xFF000000 | color),
         type: type,
       ),
     );
   }
   if (!sorted) items.sort((left, right) => left.time.compareTo(right.time));
-  return List<DanmakuItem>.unmodifiable(items);
+  return items;
+}
+
+int? _parseMilliseconds(String value, int end) {
+  var whole = 0;
+  var fraction = 0;
+  var fractionDigits = 0;
+  var decimal = false;
+  for (var index = 0; index < end; index++) {
+    final code = value.codeUnitAt(index);
+    if (code == 46 && !decimal) {
+      decimal = true;
+      continue;
+    }
+    if (code < 48 || code > 57) return null;
+    final digit = code - 48;
+    if (!decimal) {
+      whole = whole * 10 + digit;
+    } else if (fractionDigits < 3) {
+      fraction = fraction * 10 + digit;
+      fractionDigits++;
+    }
+  }
+  while (fractionDigits < 3) {
+    fraction *= 10;
+    fractionDigits++;
+  }
+  return whole * 1000 + fraction;
+}
+
+int? _parseUnsignedInt(String value, int start, int end) {
+  if (start >= end) return null;
+  var result = 0;
+  for (var index = start; index < end; index++) {
+    final code = value.codeUnitAt(index);
+    if (code < 48 || code > 57) return null;
+    result = result * 10 + code - 48;
+  }
+  return result;
 }

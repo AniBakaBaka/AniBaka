@@ -7,7 +7,6 @@ import 'package:baka/models/playback_episode.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/utils/app_logger.dart';
 import 'package:baka/widgets/baka_player/index.dart';
-import 'package:baka/widgets/danmaku/view.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/widgets/platform/tv/tv_focusable.dart';
@@ -300,7 +299,8 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
         currentIndex: widget.currPlayIndex,
         currUrl: widget.currUrl,
         sourceNames: widget.sourceNames,
-        bgmId: BgmUtils.toInt(widget.data['bgmId']) ??
+        bgmId:
+            BgmUtils.toInt(widget.data['bgmId']) ??
             BgmUtils.toInt(widget.data['id']),
         tmdbId: BgmUtils.toInt(widget.data['tmdbId']),
         tvdbId: widget.data['tvdbId']?.toString(),
@@ -346,11 +346,8 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
         }
         if (!widget.inited) return _buildLoadingState();
         return BakaPlayer(
-          detail: widget.data,
-          danmuWidget: DanmakuView(
-            controller: widget.danmakuController,
-            created: (e) async {},
-          ),
+          canSearchSource: true,
+          danmakuEnabled: true,
           controller: ctr,
           full: true,
           focusNode: _playerFocusNode,

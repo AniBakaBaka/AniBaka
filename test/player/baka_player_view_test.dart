@@ -12,17 +12,15 @@ void main() {
   test('fullscreen view receives the existing player arguments', () async {
     final controller = PlaybackController();
     const header = SizedBox(key: Key('header'));
-    const danmaku = SizedBox(key: Key('danmaku'));
-    final detail = <String, Object>{'id': 1};
     void pickEpisode() {}
     void nextEpisode() {}
     void fullscreenChanged(bool value) {}
 
     final source = BakaPlayer(
       controller: controller,
-      detail: detail,
+      canSearchSource: true,
       headerControl: header,
-      danmuWidget: danmaku,
+      danmakuEnabled: true,
       onPickEpisode: pickEpisode,
       hasNextEpisode: true,
       onNextEpisode: nextEpisode,
@@ -32,9 +30,9 @@ void main() {
 
     expect(fullscreen.full, isTrue);
     expect(fullscreen.controller, same(controller));
-    expect(fullscreen.detail, same(detail));
+    expect(fullscreen.canSearchSource, isTrue);
     expect(fullscreen.headerControl, same(header));
-    expect(fullscreen.danmuWidget, same(danmaku));
+    expect(fullscreen.danmakuEnabled, isTrue);
     expect(fullscreen.onPickEpisode, same(pickEpisode));
     expect(fullscreen.hasNextEpisode, isTrue);
     expect(fullscreen.onNextEpisode, same(nextEpisode));

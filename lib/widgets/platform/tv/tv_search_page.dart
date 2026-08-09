@@ -534,7 +534,11 @@ class _TvSearchResultCard extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  buildCachedImage(imageUrl, double.infinity, double.infinity),
+                  buildNetworkImage(
+                    imageUrl ?? '',
+                    double.infinity,
+                    double.infinity,
+                  ),
                   Positioned(
                     top: 8,
                     right: 8,

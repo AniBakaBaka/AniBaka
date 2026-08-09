@@ -21,7 +21,6 @@ import 'package:baka/widgets/comment/comment_widget.dart';
 import 'package:baka/widgets/common/tab_indicator.dart';
 import 'package:baka/widgets/common/scale_button.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
-import 'package:baka/widgets/danmaku/view.dart';
 import 'package:baka/widgets/episode/episode_list_dialog.dart';
 import 'package:baka/widgets/episode/episode_widgets.dart';
 import 'package:baka/widgets/anime_detail/anime_detail_placeholder.dart';
@@ -111,11 +110,15 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
   bool _isStale(int requestId) => !mounted || requestId != _playbackGeneration;
 
   VideoSourceSearchController? _autoMatchController;
+  VideoSourceSearchController? _sourceSearchController;
 
   @override
   void initState() {
     super.initState();
     _svc = PlayerService(data: widget.data, posIndex: widget.posIndex);
+    _sourceSearchController = VideoSourceSearchController.takeCachedFor(
+      seedData: _svc.data,
+    );
     _session = PlaybackSessionCoordinator(
       controller: ctr,
       danmakuController: danmakuController,
@@ -124,11 +127,11 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       onPreviousEpisode: _playPreviousEpisode,
     );
     _tabController = TabController(length: 2, vsync: this);
-    final source = widget.data['source']?.toString() ?? '';
-    final id = widget.data['id'];
+    final source = _svc.data['source']?.toString() ?? '';
+    final id = _svc.data['id'];
     _taskIdPrefix = source.isNotEmpty ? '${source}_${id}_' : '${id}_';
     _updateCachedTagsFromBgm();
-    final raw = widget.data['content'] as String?;
+    final raw = _svc.data['content'] as String?;
     final cut = raw?.indexOf('>') ?? -1;
     _fixedSummary = raw == null
         ? ''
@@ -159,10 +162,12 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
             '[Player] auto-match ready in ${elapsed.inMilliseconds}ms',
           );
         }
-        _autoMatchController?.cancelSearch();
+        final controller = _autoMatchController;
         _autoMatchController = null;
+        controller?.cancelSearch();
+        controller?.dispose();
         // 匹配成功：直接用预取媒体开播（等同手动点选后的路径）。
-        _svc.adoptPrefetchedPlayback(resolvedData);
+        _svc.adoptPlaybackData(resolvedData);
         _bumpPageData();
         initVideoController(_nextPlaybackGeneration());
         // 元数据后台补齐，不与匹配抢网。
@@ -170,7 +175,9 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       },
       onMatchFailed: () {
         if (!mounted) return;
+        final controller = _autoMatchController;
         _autoMatchController = null;
+        controller?.dispose();
         // 仅失败时才走原片 loadDetail，避免匹配阶段双倍带宽。
         _loadInitialData();
       },
@@ -250,12 +257,12 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       }
     }
 
-    final rawTags = (widget.data['tag']?.toString().split(' ') ?? const [])
+    final rawTags = (_svc.data['tag']?.toString().split(' ') ?? const [])
         .map((t) => t.trim())
         .where((t) => t.isNotEmpty)
         .toList();
-    final sourceDisplayName = widget.data['sourceDisplayName']?.toString();
-    final sourceVal = widget.data['source']?.toString();
+    final sourceDisplayName = _svc.data['sourceDisplayName']?.toString();
+    final sourceVal = _svc.data['source']?.toString();
     _cachedTags = rawTags
         .where((t) {
           if (t == sourceDisplayName || t == sourceVal) return false;
@@ -271,6 +278,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     ctr.core.removeListener(_onPlaybackCoreChanged);
     _autoMatchController?.cancelSearch();
     _autoMatchController?.dispose();
+    _sourceSearchController?.dispose();
     unawaited(
       _session.dispose().whenComplete(() async {
         await ctr.dispose();
@@ -300,7 +308,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       backgroundColor: Colors.transparent,
       builder: (ctx) => DlnaCastPanel(
         datasource: castUrl,
-        animeTitle: widget.data['title']?.toString() ?? '',
+        animeTitle: _svc.data['title']?.toString() ?? '',
         videoList: videoList,
         currentEpisodeIndex: currPlayIndex,
         urlResolver: (idx) => _svc.resolveEpisodeUrl(idx),
@@ -314,6 +322,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
   Future<void> initVideoController(int requestId) async {
     if (_isStale(requestId)) return;
     _resolvedUrl = '';
+    Duration? resumePosition;
     try {
       final localPath = _isLocalSource ? _svc.localFilePath : null;
       if (_isLocalSource && localPath == null) return;
@@ -328,13 +337,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         if (ctr.preferences.value.rememberLastPosition) {
           final position = _svc.getSavedProgress();
           if (position.inSeconds > 10) {
-            unawaited(
-              Future.delayed(const Duration(seconds: 1), () {
-                if (!_isStale(requestId)) {
-                  ctr.showJumpToPositionPrompt(position);
-                }
-              }),
-            );
+            resumePosition = position;
           }
         }
       }
@@ -398,25 +401,20 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       await _svc.rememberCurrentEpisode();
       if (_isStale(requestId)) return;
       if (!inited) _initedNotifier.value = true;
+      if (resumePosition != null) {
+        ctr.showJumpToPositionPrompt(resumePosition);
+      }
 
       if (localPath != null) {
         final content = await _svc.readLocalDanmakuFile(localPath);
         if (!_isStale(requestId) && content != null) {
-          DanmakuService.startPlay(
-            controller: danmakuController,
-            items: await DanmakuService.parseItems(
-              BgmUtils.parseJsonList(content),
-            ),
-          );
+          danmakuController.setItems(await DanmakuService.decode(content));
         }
       } else {
         final episodeIndex = currPlayIndex;
         final danmaku = await _svc.fetchDanmakuData(episodeIndex);
         if (!_isStale(requestId) && episodeIndex == currPlayIndex) {
-          DanmakuService.startPlay(
-            controller: danmakuController,
-            items: danmaku,
-          );
+          danmakuController.setItems(danmaku);
         }
       }
     } catch (e) {
@@ -442,20 +440,20 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     _isAutoSwitchingSource = true;
 
     try {
-      final currentSourceKey = widget.data['source']?.toString() ?? '';
+      final currentSourceKey = _svc.data['source']?.toString() ?? '';
       if (currentSourceKey.isNotEmpty) {
         _failedSourceKeys.add(currentSourceKey);
       }
       final currentSeriesId =
-          widget.data['seriesId'] ?? widget.data['id'] ?? widget.data['url'];
+          _svc.data['seriesId'] ?? _svc.data['id'] ?? _svc.data['url'];
       if (currentSourceKey.isNotEmpty && currentSeriesId != null) {
         _failedSourceKeys.add('$currentSourceKey|$currentSeriesId');
       }
 
       // 清除历史无效匹配记忆 + 失效预取，避免再次命中死链
       _svc.clearPrefetchedPlaybackMedia();
-      final bgmId = BgmUtils.toInt(widget.data['bgmId']);
-      final title = widget.data['title']?.toString() ?? '';
+      final bgmId = BgmUtils.toInt(_svc.data['bgmId']);
+      final title = _svc.data['title']?.toString() ?? '';
       if (title.isNotEmpty) {
         await MatchMemoryService.remove(bgmId: bgmId, title: title);
       }
@@ -470,12 +468,10 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
 
       // 2. 全自动自动匹配并无缝切换至下一个有效视频源
       final seedData = _svc.buildSourceSeedData();
-      final controller =
-          _autoMatchController ??
-          VideoSourceSearchController.sharedFor(seedData: seedData);
+      final controller = _sourceSearchController ??=
+          VideoSourceSearchController.takeSharedFor(seedData: seedData);
 
-      if (controller.resultsNotifier.value.isEmpty &&
-          !controller.isSearchingNotifier.value) {
+      if (controller.results.isEmpty && !controller.isSearching) {
         unawaited(controller.startSearch());
       }
 
@@ -492,7 +488,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
             nextCandidateData['source'] ??
             '下一个匹配源';
         showSnackBar('当前视频源播放失败，已自动为您切换至：$nextSource');
-        _svc.adoptPrefetchedPlayback(nextCandidateData);
+        _svc.adoptPlaybackData(nextCandidateData);
         _bumpPageData();
         await initVideoController(_nextPlaybackGeneration());
         return;
@@ -540,7 +536,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     return ListenableBuilder(
       listenable: _pageDataVersion,
       builder: (context, _) {
-        final source = widget.data['source']?.toString().trim();
+        final source = _svc.data['source']?.toString().trim();
         final isPureBgmSubject =
             source == null || source.isEmpty || source == 'bgm';
 
@@ -548,8 +544,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
             !widget.autoMatch &&
             _autoMatchController == null) {
           return Instances.isTV
-              ? TvAnimeDetailPlaceholder(data: widget.data)
-              : AnimeDetailPlaceholder(data: widget.data);
+              ? TvAnimeDetailPlaceholder(data: _svc.data)
+              : AnimeDetailPlaceholder(data: _svc.data);
         }
         if (Instances.isTV) return _buildTvLayout(context);
         if (isWindows || context.isTablet) {
@@ -565,7 +561,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       valueListenable: _initedNotifier,
       builder: (context, isInited, _) {
         return TvPlayerLayout(
-          data: widget.data,
+          data: _svc.data,
           videoList: videoList,
           currPlayIndex: currPlayIndex,
           currUrl: currUrl,
@@ -587,7 +583,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         listenable: _initedNotifier,
         builder: (context, _) {
           return WindowsPlayerLayout(
-            data: widget.data,
+            data: _svc.data,
             videoList: videoList,
             currPlayIndex: currPlayIndex,
             currUrl: currUrl,
@@ -642,9 +638,9 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
   }
 
   String get _currentSourceName {
-    final displayName = widget.data['sourceDisplayName']?.toString().trim();
+    final displayName = _svc.data['sourceDisplayName']?.toString().trim();
     if (displayName != null && displayName.isNotEmpty) return displayName;
-    final source = widget.data['source']?.toString().trim();
+    final source = _svc.data['source']?.toString().trim();
     if (source != null && source.isNotEmpty) return source;
     return '播放源';
   }
@@ -662,33 +658,33 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
 
     final seedData = _svc.buildSourceSeedData();
 
-    final searchController = VideoSourceSearchController.sharedFor(
-      seedData: seedData,
-    );
+    final searchController = _sourceSearchController ??=
+        VideoSourceSearchController.takeSharedFor(seedData: seedData);
 
     final selection = await SourceSwitchSheet.show(
       context,
       seedData: seedData,
       currentEpisodeIndex: currPlayIndex,
       currentLineIndex: currUrl,
-      currentSource: widget.data['source']?.toString(),
+      currentSource: _svc.data['source']?.toString(),
       searchController: searchController,
     );
     if (!mounted || selection == null) return;
 
-    final nextData = Map<String, dynamic>.from(selection.data)
+    final nextData = selection
       ..['currPlayIndex'] = currPlayIndex
-      ..['currUrl'] = selection.lineIndex;
+      ..['currUrl'] = BgmUtils.toInt(selection['currUrl']) ?? currUrl;
 
     final isSameSource =
-        widget.data['source'] == nextData['source'] &&
-        widget.data['seriesUrl'] == nextData['seriesUrl'];
-    final isSameLine = currUrl == selection.lineIndex;
+        _svc.data['source'] == nextData['source'] &&
+        _svc.data['seriesUrl'] == nextData['seriesUrl'];
+    final selectedLine = BgmUtils.toInt(nextData['currUrl']) ?? currUrl;
+    final isSameLine = currUrl == selectedLine;
 
     if (isSameSource) {
-      _svc.adoptPrefetchedPlayback(nextData);
+      _svc.adoptPlaybackData(nextData);
       if (!isSameLine) {
-        changeUrl(selection.lineIndex);
+        changeUrl(selectedLine);
       }
       return;
     }
@@ -739,7 +735,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
                     onPressed: () => PlayerSettingsPage.show(context, ctr),
                   ),
                 ),
-                danmuWidget: DanmakuView(controller: danmakuController),
+                danmakuEnabled: true,
               );
             }
             if (_svc.localFilePath != null) {
@@ -787,11 +783,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
                         if (isInited) {
                           return BakaPlayer(
                             controller: ctr,
-                            detail: widget.data,
-                            danmuWidget: DanmakuView(
-                              controller: danmakuController,
-                              created: (e) async => await ctr.play(),
-                            ),
+                            canSearchSource: true,
+                            danmakuEnabled: true,
                             headerControl: _buildImmersiveHeader(context),
                             onPickEpisode: () => _showEpisodePicker(),
                             hasNextEpisode:
@@ -985,7 +978,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     // 外站源以 bgmId 为 postId（gv bgmid），让不同来源共用评论区
     final effectivePostId = (_isAdapter && _bgmInfo.subjectId != null)
         ? _bgmInfo.subjectId!
-        : (int.tryParse(widget.data['id'].toString()) ?? 11);
+        : (int.tryParse(_svc.data['id'].toString()) ?? 11);
     return CIslandCommentWidget(
       key: const ValueKey('commentTab'),
       postId: effectivePostId,
@@ -1010,11 +1003,11 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       context: context,
       videoList: videoList,
       currentIndex: currPlayIndex,
-      videoId: widget.data['id'].toString(),
+      videoId: _svc.data['id'].toString(),
       isFullScreen: downloadMode
           ? _playerFullscreen.value
           : _playerFullscreen.value && !isWindows,
-      postDetail: widget.data,
+      postDetail: _svc.data,
       urlResolver: _svc.resolveEpisodeUrl,
       startInDownloadMode: downloadMode,
       currentLineIndex: downloadMode ? null : currUrl,
@@ -1043,7 +1036,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       child: Column(
         children: [
           VideoDetailCard(
-            detail: widget.data,
+            detail: _svc.data,
             bgmInfo: _bgmInfo,
             followNotifier: _followNotifier,
             cachedTags: _cachedTags,
@@ -1096,8 +1089,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
                               _sortAscendingNotifier.value = !sortAscending,
                           onShowVideoList: () => _showEpisodePicker(),
                           videoList: videoList,
-                          updateTime: widget.data['time'],
-                          content: widget.data['content'],
+                          updateTime: _svc.data['time'],
+                          content: _svc.data['content'],
                         ),
                       ],
                     ),
@@ -1117,7 +1110,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
                             videoList: videoList,
                             filteredList: visibleEpisodeIndexes,
                             currPlayIndex: currPlayIndex,
-                            videoId: widget.data['id'].toString(),
+                            videoId: _svc.data['id'].toString(),
                             onEpisodeChanged: changePlayIndex,
                           ),
                   ),

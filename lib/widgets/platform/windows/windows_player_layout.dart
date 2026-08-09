@@ -5,7 +5,6 @@ import 'package:baka/models/playback_state.dart';
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/widgets/platform/windows/windows_episode_list.dart';
 import 'package:baka/widgets/baka_player/index.dart';
-import 'package:baka/widgets/danmaku/view.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:url_launcher/url_launcher_string.dart';
@@ -119,7 +118,6 @@ class WindowsPlayerLayout extends StatelessWidget {
                           onShowDetail: onShowDetail,
                           isSearching: isSearching,
                         ),
-
                       ),
                       const SliverToBoxAdapter(
                         child: _DesktopBtProgressIndicator(),
@@ -209,8 +207,8 @@ class _PlayerArea extends StatelessWidget {
               }
               if (!inited) return _buildLoadingState();
               return BakaPlayer(
-                detail: data,
-                danmuWidget: DanmakuView(controller: danmakuController),
+                canSearchSource: true,
+                danmakuEnabled: true,
                 headerControl: Padding(
                   padding: const EdgeInsets.all(10),
                   child: Row(

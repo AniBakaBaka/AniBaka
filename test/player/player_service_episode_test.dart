@@ -55,6 +55,16 @@ class _KeepAliveAdapter extends AdapterBase {
 }
 
 void main() {
+  test('accepts an untyped route map without copying its data', () {
+    final routeData = <dynamic, dynamic>{'source': 'internal', 'title': 'A'};
+    final service = PlayerService(data: routeData);
+
+    service.data['title'] = 'B';
+    expect(routeData['title'], 'B');
+    routeData['id'] = 42;
+    expect(service.data['id'], 42);
+  });
+
   test(
     'player service keeps typed episodes and clamps line selection',
     () async {

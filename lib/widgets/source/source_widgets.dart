@@ -471,20 +471,12 @@ class SourceReorderSection<T> extends StatelessWidget {
   }
 }
 
-class SourceSubscriptionSheet extends StatefulWidget {
+class SourceSubscriptionSheet extends StatelessWidget {
   final RuleRepositoryService repo;
 
   const SourceSubscriptionSheet({required this.repo, super.key});
 
-  @override
-  State<SourceSubscriptionSheet> createState() =>
-      _SourceSubscriptionSheetState();
-}
-
-class _SourceSubscriptionSheetState extends State<SourceSubscriptionSheet> {
-  late List<String> _subscriptions = widget.repo.subscriptions;
-
-  Future<void> _add() async {
+  Future<void> _add(BuildContext context) async {
     final controller = TextEditingController();
     final confirmed = await showSourceDialog<bool>(
       context: context,
@@ -516,21 +508,22 @@ class _SourceSubscriptionSheetState extends State<SourceSubscriptionSheet> {
     controller.dispose();
     if (confirmed != true || url.trim().isEmpty) return;
 
-    final added = await widget.repo.addSubscription(url);
-    if (!mounted) return;
-    setState(() => _subscriptions = widget.repo.subscriptions);
+    final added = await repo.addSubscription(url);
+    if (!context.mounted) return;
     showSnackBar(added ? '已添加订阅' : '地址无效或已存在', isError: !added);
   }
 
-  Future<void> _remove(String url) async {
-    await widget.repo.removeSubscription(url);
-    if (mounted) {
-      setState(() => _subscriptions = widget.repo.subscriptions);
-    }
-  }
+  Future<void> _remove(String url) => repo.removeSubscription(url);
 
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: repo,
+      builder: (context, _) => _buildContent(context, repo.subscriptions),
+    );
+  }
+
+  Widget _buildContent(BuildContext context, List<String> subscriptions) {
     return Container(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
       decoration: BoxDecoration(
@@ -560,7 +553,7 @@ class _SourceSubscriptionSheetState extends State<SourceSubscriptionSheet> {
                   ),
                   const Spacer(),
                   TextButton.icon(
-                    onPressed: _add,
+                    onPressed: () => _add(context),
                     icon: const Icon(Icons.add_rounded, size: 18),
                     label: const Text('添加'),
                   ),
@@ -574,10 +567,10 @@ class _SourceSubscriptionSheetState extends State<SourceSubscriptionSheet> {
               child: ListView.separated(
                 shrinkWrap: true,
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                itemCount: _subscriptions.length,
+                itemCount: subscriptions.length,
                 separatorBuilder: (_, _) => const SizedBox(height: 8),
                 itemBuilder: (context, index) {
-                  final url = _subscriptions[index];
+                  final url = subscriptions[index];
                   final isDefault =
                       url == RuleRepositoryService.defaultSubscription;
                   return ListTile(

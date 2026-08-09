@@ -44,7 +44,7 @@ class _MinePageState extends State<MinePage>
       parent: _controller,
       curve: Curves.easeOut,
     );
-    _loginWorker = ever(Get.find<AppState>().loginTrigger, (_) {
+    _loginWorker = ever(Get.find<AppState>().userInfo, (_) {
       if (mounted) setState(() {});
     });
     _controller.forward();

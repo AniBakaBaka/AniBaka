@@ -10,7 +10,7 @@ class RankSection extends StatelessWidget {
   static const _goldColor = Color(0xFFFFD700);
   static const _rankNames = ['总榜', '季榜', '月榜', '日榜'];
 
-  final List<dynamic> items;
+  final List<Map> items;
   final int selectedIndex;
   final Function(int) onTypeChanged;
 
@@ -53,14 +53,10 @@ class RankSection extends StatelessWidget {
         physics: const NeverScrollableScrollPhysics(),
         itemCount: 5,
         separatorBuilder: (_, _) => const SizedBox(width: 12),
-        itemBuilder: (context, index) => _buildRankItem(
-          context,
-          const {
-            'name': '排行动画标题',
-            'images': {'common': ''},
-          },
-          index,
-        ),
+        itemBuilder: (context, index) => _buildRankItem(context, const {
+          'title': '排行动画标题',
+          'images': {'common': ''},
+        }, index),
       ),
     );
   }
@@ -149,7 +145,7 @@ class RankSection extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                item['title'] ?? '',
+                item['title'] as String,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(

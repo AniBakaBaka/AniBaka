@@ -13,7 +13,6 @@ class AppState extends GetxService {
     'qq': '',
     'id': 0,
   });
-  final loginTrigger = 0.obs;
 
   final currentPageIndex = 0.obs;
   final isBottomNavVisible = true.obs;
@@ -74,7 +73,7 @@ class AppState extends GetxService {
   void _refreshUserInfo() {
     final u = Instances.sp.getString('userinfo');
     if (u != null) {
-      userInfo.value = Map<String, dynamic>.from(jsonDecode(u));
+      userInfo.value = jsonDecode(u) as Map<String, dynamic>;
     } else {
       userInfo.value = {'name': '点击登录', 'qq': '', 'id': 0};
     }
@@ -82,7 +81,6 @@ class AppState extends GetxService {
 
   void triggerLoginRefresh() {
     _refreshUserInfo();
-    loginTrigger.value++;
   }
 
   void performLogout() {

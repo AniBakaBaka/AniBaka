@@ -93,29 +93,6 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
     super.dispose();
   }
 
-  String _formatProvider(String rawProvider) {
-    final clean = rawProvider.trim().toLowerCase();
-    if (clean.isEmpty || clean == 'dandanplay' || clean == 'dandan') {
-      return 'dandanplay';
-    }
-    if (clean == 'bilibili' || clean == 'bili') {
-      return 'Bilibili';
-    }
-    if (clean == 'tencent' || clean == 'qq') {
-      return '腾讯视频';
-    }
-    if (clean == 'iqiyi') {
-      return '爱奇艺';
-    }
-    if (clean == 'mgtv' || clean == 'hunantv') {
-      return '芒果TV';
-    }
-    if (clean == 'youku') {
-      return '优酷';
-    }
-    return rawProvider;
-  }
-
   Future<void> _doSearch(String keyword) async {
     final clean = keyword.trim();
     if (clean.isEmpty) return;
@@ -191,10 +168,10 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
     setState(() => _loadingEpIndex = epIndex);
 
     try {
-      final items = await DanmakuService.fetchDanmakuBySubjectAndEpisode(
+      final items = await DanmakuService.fetch(
         subjectId: subject.subjectId,
         episodeIndex: epIndex,
-        title: subject.nameCn ?? subject.name,
+        titles: subject.searchTitles,
       );
 
       if (!mounted) return;
@@ -246,7 +223,7 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
       listenable: widget.controller,
       builder: (context, _) {
         final count = widget.controller.items.length;
-        final providerName = _formatProvider(widget.controller.sourceProvider);
+        const providerName = 'dandanplay';
         final animeTitle = widget.defaultTitle?.trim();
 
         return Container(

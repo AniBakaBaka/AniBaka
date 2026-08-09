@@ -12,7 +12,22 @@ auto bdw = bitsdojo_window_configure(BDW_CUSTOM_FRAME);
 namespace {
 
 constexpr wchar_t kAniBakaRegistryKey[] = L"Software\\AniBaka";
+constexpr wchar_t kAniBakaInstanceMutex[] =
+    L"Local\\AniBakaBaka.AniBaka.SingleInstance";
+constexpr wchar_t kFlutterWindowClass[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
 constexpr DWORD kGpuMigrationVersion = 1;
+
+static void ActivateExistingWindow() {
+  HWND window = ::FindWindowW(kFlutterWindowClass, L"Baka");
+  if (window == nullptr || !::IsWindowVisible(window)) {
+    return;
+  }
+
+  if (::IsIconic(window)) {
+    ::ShowWindow(window, SW_RESTORE);
+  }
+  ::SetForegroundWindow(window);
+}
 
 // AniBaka 5.0.1/5.0.2 wrote GpuPreference=2 on every launch. Remove that
 // legacy value once, then leave all future user GPU choices untouched.
@@ -74,8 +89,22 @@ static bool MigrateLegacyGpuPreference() {
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  HANDLE instance_mutex =
+      ::CreateMutexW(nullptr, FALSE, kAniBakaInstanceMutex);
+  if (instance_mutex != nullptr &&
+      ::GetLastError() == ERROR_ALREADY_EXISTS) {
+    WriteStartupLog("Existing AniBaka instance detected; exiting duplicate");
+    ActivateExistingWindow();
+    ::CloseHandle(instance_mutex);
+    return EXIT_SUCCESS;
+  }
+
   InitializeStartupLog();
   WriteStartupLog("Process started");
+  if (instance_mutex == nullptr) {
+    WriteStartupLog("Single-instance guard unavailable; continuing startup");
+  }
+
   if (MigrateLegacyGpuPreference()) {
     WriteStartupLog("Removed legacy forced high-performance GPU preference");
   }
@@ -119,6 +148,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::MessageBoxW(
         nullptr, error_message.c_str(), L"Baka 启动错误",
         MB_OK | MB_ICONERROR | MB_TOPMOST);
+    if (instance_mutex != nullptr) {
+      ::CloseHandle(instance_mutex);
+    }
     return EXIT_FAILURE;
   }
   WriteStartupLog("Flutter window created");
@@ -132,5 +164,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   WriteStartupLog("Process exiting normally");
   ::CoUninitialize();
+  if (instance_mutex != nullptr) {
+    ::CloseHandle(instance_mutex);
+  }
   return EXIT_SUCCESS;
 }

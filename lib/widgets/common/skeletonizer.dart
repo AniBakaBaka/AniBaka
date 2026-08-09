@@ -1,7 +1,6 @@
-import 'dart:async';
-
 import 'package:baka/instance.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 class AppShimmer extends StatefulWidget {
   final Widget child;
@@ -35,99 +34,114 @@ class AppShimmer extends StatefulWidget {
   State<AppShimmer> createState() => _AppShimmerState();
 }
 
-class _AppShimmerState extends State<AppShimmer> with WidgetsBindingObserver {
-  static const _frameInterval = Duration(milliseconds: 33);
-
-  final Stopwatch _clock = Stopwatch();
-  Timer? _timer;
-  double _progress = 0;
-  bool _isAnimating = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-  }
+class _AppShimmerState extends State<AppShimmer> {
+  bool _usesClock = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _syncAnimation();
+    _syncClock();
   }
 
   @override
   void didUpdateWidget(covariant AppShimmer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _syncAnimation();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    _syncAnimation();
+    _syncClock();
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _timer?.cancel();
+    if (_usesClock) _ShimmerClock.instance.detach();
     super.dispose();
   }
 
-  void _syncAnimation() {
-    final lifecycleState = WidgetsBinding.instance.lifecycleState;
-    final shouldAnimate =
-        widget.enabled &&
-        !context.reduceMotion &&
-        TickerMode.of(context) &&
-        (lifecycleState == null || lifecycleState == AppLifecycleState.resumed);
-
-    if (_isAnimating == shouldAnimate) return;
-    _isAnimating = shouldAnimate;
-    _timer?.cancel();
-    _timer = null;
-
-    if (!shouldAnimate) {
-      _clock.stop();
-      return;
+  void _syncClock() {
+    final shouldUseClock =
+        widget.enabled && !context.reduceMotion && TickerMode.of(context);
+    if (_usesClock == shouldUseClock) return;
+    _usesClock = shouldUseClock;
+    if (shouldUseClock) {
+      _ShimmerClock.instance.attach();
+    } else {
+      _ShimmerClock.instance.detach();
     }
-
-    _clock.start();
-    _timer = Timer.periodic(_frameInterval, (_) {
-      if (!mounted) return;
-      final durationMicros = widget.duration.inMicroseconds;
-      final progress = durationMicros <= 0
-          ? 1.0
-          : (_clock.elapsedMicroseconds % durationMicros) / durationMicros;
-      setState(() => _progress = progress);
-    });
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_isAnimating) {
-      return widget.child;
-    }
+    if (!_usesClock) return widget.child;
 
     final theme = Theme.of(context);
     final baseColor = widget.baseColor ?? AppShimmer.defaultBaseColor(theme);
     final highlightColor =
         widget.highlightColor ?? AppShimmer.defaultHighlightColor(theme);
 
-    return RepaintBoundary(
-      child: ShaderMask(
-        blendMode: BlendMode.srcATop,
-        shaderCallback: (bounds) {
-          return LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: [baseColor, highlightColor, baseColor],
-            stops: const [0.1, 0.5, 0.9],
-            transform: _ShimmerGradientTransform(_progress),
-          ).createShader(bounds);
-        },
-        child: widget.child,
-      ),
+    return ValueListenableBuilder<Duration>(
+      valueListenable: _ShimmerClock.instance.elapsed,
+      child: widget.child,
+      builder: (context, elapsed, child) {
+        final durationMicros = widget.duration.inMicroseconds;
+        final progress = durationMicros <= 0
+            ? 1.0
+            : (elapsed.inMicroseconds % durationMicros) / durationMicros;
+        return RepaintBoundary(
+          child: ShaderMask(
+            blendMode: BlendMode.srcATop,
+            shaderCallback: (bounds) => LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [baseColor, highlightColor, baseColor],
+              stops: const [0.1, 0.5, 0.9],
+              transform: _ShimmerGradientTransform(progress),
+            ).createShader(bounds),
+            child: child,
+          ),
+        );
+      },
     );
+  }
+}
+
+/// 所有骨架屏共享一个帧回调，避免列表中每个占位项各自持有 Timer 和 Stopwatch。
+class _ShimmerClock {
+  _ShimmerClock._();
+
+  static final instance = _ShimmerClock._();
+
+  final ValueNotifier<Duration> elapsed = ValueNotifier(Duration.zero);
+  int _users = 0;
+  int? _frameCallbackId;
+  Duration? _startedAt;
+
+  void attach() {
+    _users++;
+    if (_users == 1) _scheduleFrame();
+  }
+
+  void detach() {
+    if (_users == 0) return;
+    _users--;
+    if (_users != 0) return;
+
+    final callbackId = _frameCallbackId;
+    if (callbackId != null) {
+      SchedulerBinding.instance.cancelFrameCallbackWithId(callbackId);
+    }
+    _frameCallbackId = null;
+    _startedAt = null;
+    elapsed.value = Duration.zero;
+  }
+
+  void _scheduleFrame() {
+    _frameCallbackId = SchedulerBinding.instance.scheduleFrameCallback(_tick);
+  }
+
+  void _tick(Duration timestamp) {
+    _frameCallbackId = null;
+    if (_users == 0) return;
+    final startedAt = _startedAt ??= timestamp;
+    elapsed.value = timestamp - startedAt;
+    _scheduleFrame();
   }
 }
 
@@ -157,18 +171,13 @@ class AppSkeletonizer extends StatelessWidget {
         baseColor: base,
         highlightColor: highlightColor,
         child: ColorFiltered(
-          colorFilter: ColorFilter.mode(
-            base,
-            BlendMode.srcIn,
-          ),
+          colorFilter: ColorFilter.mode(base, BlendMode.srcIn),
           child: child,
         ),
       ),
     );
   }
 }
-
-typedef Skeletonizer = AppSkeletonizer;
 
 class _ShimmerGradientTransform extends GradientTransform {
   final double percent;

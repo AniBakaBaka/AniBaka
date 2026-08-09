@@ -213,11 +213,11 @@ class _TvHomePageState extends State<TvHomePage> {
 
   /// 主视图：固定顶部 Header 展台 + 下方独立无限瀑布流网格
   Widget _buildFixedHeaderWaterfallView() {
-    return ValueListenableBuilder<List<dynamic>>(
+    return ValueListenableBuilder<HomeItems>(
       valueListenable: widget.svc.feed,
       builder: (context, items, _) {
         final currentFocused =
-            _focusedItem ?? (items.isNotEmpty ? items.first as Map : null);
+            _focusedItem ?? (items.isNotEmpty ? items.first : null);
 
         if (currentFocused != null) {
           _loadAnimeDetail(currentFocused);
@@ -284,7 +284,7 @@ class _TvHomePageState extends State<TvHomePage> {
                             context,
                             index,
                           ) {
-                            final item = items[index] as Map;
+                            final item = items[index];
                             final isFocused = (currentFocused == item);
 
                             return _TvPosterCard(

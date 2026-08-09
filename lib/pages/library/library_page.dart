@@ -133,7 +133,7 @@ class _LibraryPageState extends State<LibraryPage> {
       cancelText: '取消',
       isDestructive: true,
     );
-    if (confirmed == DialogAction.confirm) {
+    if (confirmed) {
       await PlayHistorySyncService.clearHistory();
       if (_isLoggedIn) {
         AniBakaApi.clearPlayHistory().catchError((_) => false);

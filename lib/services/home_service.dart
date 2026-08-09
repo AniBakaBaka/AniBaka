@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 
 import 'package:baka/api/bgm.dart';
@@ -6,6 +8,9 @@ import 'package:baka/api/post.dart';
 import 'package:baka/services/app_storage.dart';
 import 'package:baka/services/bgm_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
+
+typedef HomeItem = Map;
+typedef HomeItems = List<HomeItem>;
 
 /// 首页的数据与请求状态。各板块独立通知 UI，网络结果缓存 24 小时。
 class HomeDataService {
@@ -23,15 +28,15 @@ class HomeDataService {
   static const List<String> baseTags = [recommendTag, latestTag, pureTag];
 
   static const String _swiperTag = '幻灯';
-  static const String _swiperCacheKey = 'home_swiper_backdrop_v1';
-  static final Map<String, Future<dynamic>> _requests = {};
+  static const String _swiperCacheKey = 'home_swiper_backdrop_v2';
+  static final Map<String, Future<Object>> _requests = {};
 
   final _feed = _FeedNotifier();
-  final ValueNotifier<List<dynamic>> swipers = ValueNotifier(const []);
-  final ValueNotifier<List<List<dynamic>>> schedule = ValueNotifier(
+  final ValueNotifier<HomeItems> swipers = ValueNotifier(const []);
+  final ValueNotifier<List<HomeItems>> schedule = ValueNotifier(
     _emptyGroups(7),
   );
-  final ValueNotifier<List<List<dynamic>>> ranks = ValueNotifier(
+  final _HomeGroupsNotifier _ranks = _HomeGroupsNotifier(
     _emptyGroups(rankDays.length),
   );
   final ValueNotifier<int> week = ValueNotifier(DateTime.now().weekday - 1);
@@ -43,7 +48,8 @@ class HomeDataService {
   bool _loadingFeed = false;
   Future<void>? _firstPageTask;
 
-  ValueNotifier<List<dynamic>> get feed => _feed;
+  ValueNotifier<HomeItems> get feed => _feed;
+  ValueNotifier<List<HomeItems>> get ranks => _ranks;
 
   HomeDataService() {
     final cachedFeed = _readCache(
@@ -54,25 +60,25 @@ class HomeDataService {
     final cachedRank = _readCache('home_rank_bgm_0', allowExpired: true);
     final cachedSchedule = _readCache('home_xinfan_bgm_v2', allowExpired: true);
 
-    if (cachedFeed is List) {
-      _feed.value = List<dynamic>.of(cachedFeed);
-    }
-    if (cachedSwipers is List) swipers.value = List<dynamic>.of(cachedSwipers);
+    if (cachedFeed is List) _feed.value = cachedFeed.cast<Map>();
+    if (cachedSwipers is List) swipers.value = cachedSwipers.cast<Map>();
     if (cachedRank is List) {
-      ranks.value = [
-        List<dynamic>.of(cachedRank),
+      _ranks.value = [
+        cachedRank.cast<Map>(),
         ..._emptyGroups(rankDays.length - 1),
       ];
     }
     if (cachedSchedule is List && cachedSchedule.length == 7) {
-      schedule.value = cachedSchedule
-          .map<List<dynamic>>(_listOf)
-          .toList(growable: false);
+      schedule.value = List.generate(
+        7,
+        (index) => (cachedSchedule[index] as List).cast<Map>(),
+        growable: false,
+      );
     }
   }
 
-  static List<List<dynamic>> _emptyGroups(int count) =>
-      List.generate(count, (_) => <dynamic>[]);
+  static List<HomeItems> _emptyGroups(int count) =>
+      List.generate(count, (_) => <Map>[]);
 
   List<String> get displayTags =>
       baseTags.contains(tag.value) ? baseTags : [...baseTags, tag.value];
@@ -81,7 +87,7 @@ class HomeDataService {
     _feed.dispose();
     swipers.dispose();
     schedule.dispose();
-    ranks.dispose();
+    _ranks.dispose();
     week.dispose();
     rankIndex.dispose();
     tag.dispose();
@@ -103,7 +109,7 @@ class HomeDataService {
     try {
       final items = await _fetchFeed(selectedTag, 1, force: force);
       if (request != _feedRequest) return;
-      _feed.value = List<dynamic>.of(items);
+      _feed.value = items;
       _nextPage = 2;
     } catch (error) {
       debugPrint('home feed: $error');
@@ -151,14 +157,14 @@ class HomeDataService {
     await loadFeed();
   }
 
-  Future<List<dynamic>> _fetchFeed(
+  Future<HomeItems> _fetchFeed(
     String selectedTag,
     int page, {
     bool force = false,
   }) async {
     const pageSize = 21;
 
-    Future<List<dynamic>> fetch() async {
+    Future<HomeItems> fetch() async {
       final offset = (page - 1) * pageSize;
       switch (selectedTag) {
         case pureTag:
@@ -166,33 +172,31 @@ class HomeDataService {
             (await getPost('', recommendTag, page, 50)).data,
           );
         case recommendTag:
-          final response = await getTrendingSubjects(
+          final subjects = await getTrendingSubjects(
             type: 2,
             limit: pageSize,
             offset: offset,
           );
-          return BgmService.convertTrendingToAppFormat(
-            _responseItems(response.data),
-          );
+          return BgmService.convertTrendingToAppFormat(subjects);
         case latestTag:
-          final response = await searchBgmByTag(
+          final subjects = await searchBgmByTag(
             const [],
             limit: pageSize,
             offset: offset,
             sort: 'heat',
             airDate: ['>=${DateTime.now().year}-01-01'],
           );
-          return BgmService.convertSearchResponseToAppFormat(response.data);
+          return BgmService.convertSearchToAppFormat(subjects);
         default:
           final (tags, airDate) = _parseTag(selectedTag);
-          final response = await searchBgmByTag(
+          final subjects = await searchBgmByTag(
             tags,
             limit: pageSize,
             offset: offset,
             sort: 'rank',
             airDate: airDate,
           );
-          return BgmService.convertSearchResponseToAppFormat(response.data);
+          return BgmService.convertSearchToAppFormat(subjects);
       }
     }
 
@@ -200,7 +204,7 @@ class HomeDataService {
     final cacheKey = selectedTag == recommendTag
         ? 'home_feed_$selectedTag'
         : 'home_feed_filter_v2_$selectedTag';
-    return _listOf(await _cached(cacheKey, fetch, force: force));
+    return _itemList(await _cached(cacheKey, fetch, force: force));
   }
 
   /// 年份和年代从标签中转为 Bangumi 的放送日期范围。
@@ -239,7 +243,7 @@ class HomeDataService {
 
   Future<void> loadSwipers({bool force = false}) async {
     try {
-      swipers.value = _listOf(
+      swipers.value = _itemList(
         await _cached(_swiperCacheKey, _fetchSwipers, force: force),
       );
     } catch (error) {
@@ -247,11 +251,11 @@ class HomeDataService {
     }
   }
 
-  static Future<List<dynamic>> _fetchSwipers() async {
+  static Future<HomeItems> _fetchSwipers() async {
     final items = _responseItems((await getPost('', _swiperTag, 1, 6)).data);
 
     await Future.wait(
-      items.whereType<Map>().map((item) async {
+      items.map((item) async {
         var bgmId = BgmUtils.toInt(item['bgmId']);
         if (bgmId == null) {
           final subject = await BgmService.resolveSubject(
@@ -267,26 +271,31 @@ class HomeDataService {
         if (url != null) item['backdropUrl'] = url;
       }),
     );
+    for (final item in items) {
+      item['bannerImageUrl'] =
+          BgmUtils.trimmed(item['backdropUrl']) ??
+          BgmUtils.trimmed(item['posterUrl']) ??
+          BgmUtils.resolveCoverImage(item) ??
+          '';
+    }
     return items;
   }
 
   Future<void> loadRank({bool force = false}) async {
     final index = rankIndex.value;
     try {
-      final items = _listOf(
+      final items = _itemList(
         await _cached('home_rank_bgm_$index', () async {
-          final response = await searchBgmByTag(
+          final subjects = await searchBgmByTag(
             const [],
             limit: 21,
             sort: 'rank',
             airDate: _rankAirDateFilter(rankDays[index]),
           );
-          return BgmService.convertSearchResponseToAppFormat(response.data);
+          return BgmService.convertSearchToAppFormat(subjects);
         }, force: force),
       );
-      final updated = List<List<dynamic>>.of(ranks.value);
-      updated[index] = items;
-      ranks.value = updated;
+      _ranks.replaceAt(index, items);
     } catch (error) {
       debugPrint('home rank $index: $error');
     }
@@ -317,30 +326,31 @@ class HomeDataService {
 
   /// 新番更新表与更新时间表页面共用同一份缓存。
   /// 数据源为 BGM 每日放送（p1/calendar），key 1=周一 … 7=周日。
-  static Future<List<List<dynamic>>> loadSharedXinfan({
-    bool force = false,
-  }) async {
+  static Future<List<HomeItems>> loadSharedXinfan({bool force = false}) async {
     final raw = await _cached('home_xinfan_bgm_v2', () async {
       final groups = _emptyGroups(7);
-      final days = BgmUtils.parseJsonMap((await getBgmCalendar()).data);
-      if (days == null) return groups;
+      final days = await getBgmCalendar();
 
       days.forEach((key, value) {
         final day = int.tryParse(key);
-        if (day == null || day < 1 || day > 7 || value is! List) return;
+        if (day == null || day < 1 || day > 7) return;
         groups[day - 1] = BgmService.convertTrendingToAppFormat(value);
       });
       return groups;
     }, force: force);
 
-    if (raw is! List || raw.length != 7) return _emptyGroups(7);
-    return raw.map<List<dynamic>>(_listOf).toList(growable: false);
+    final groups = raw as List;
+    return List.generate(
+      7,
+      (index) => (groups[index] as List).cast<Map>(),
+      growable: false,
+    );
   }
 
   /// 读取缓存，并合并同一 key 的并发网络请求。
-  static Future<dynamic> _cached(
+  static Future<Object> _cached(
     String key,
-    Future<dynamic> Function() loader, {
+    Future<Object> Function() loader, {
     bool force = false,
   }) {
     if (!force) {
@@ -360,21 +370,30 @@ class HomeDataService {
         });
   }
 
-  static dynamic _readCache(String key, {bool allowExpired = false}) =>
+  static Object? _readCache(String key, {bool allowExpired = false}) =>
       _homeCache.read(key, allowExpired: allowExpired);
 
-  static List<dynamic> _listOf(dynamic value) =>
-      value is List ? value : <dynamic>[];
+  static HomeItems _itemList(Object? value) => (value as List).cast<Map>();
 
-  static List<dynamic> _responseItems(dynamic response) =>
-      _listOf(BgmUtils.parseJsonMap(response)?['data']);
+  static HomeItems _responseItems(String response) =>
+      ((jsonDecode(response) as Map<String, dynamic>)['data'] as List)
+          .cast<Map>();
 }
 
-class _FeedNotifier extends ValueNotifier<List<dynamic>> {
-  _FeedNotifier() : super(<dynamic>[]);
+class _FeedNotifier extends ValueNotifier<HomeItems> {
+  _FeedNotifier() : super(<Map>[]);
 
-  void appendAll(List<dynamic> items) {
+  void appendAll(HomeItems items) {
     value.addAll(items);
+    notifyListeners();
+  }
+}
+
+class _HomeGroupsNotifier extends ValueNotifier<List<HomeItems>> {
+  _HomeGroupsNotifier(super.value);
+
+  void replaceAt(int index, HomeItems items) {
+    value[index] = items;
     notifyListeners();
   }
 }

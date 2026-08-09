@@ -38,6 +38,11 @@ void main() {
       identical(VideoSourceSearchController.globalCached, replacement),
       isTrue,
     );
+
+    final taken = VideoSourceSearchController.takeSharedFor(title: 'Other');
+    addTearDown(taken.dispose);
+    expect(identical(taken, replacement), isTrue);
+    expect(VideoSourceSearchController.globalCached, isNull);
   });
 
   test('reuses an already verified switch candidate', () async {
@@ -139,7 +144,6 @@ class _ProbeCountingController extends VideoSourceSearchController {
     required int preferredLine,
     bool resolveMedia = true,
     bool raceMode = false,
-    bool probeDirect = true,
   }) {
     calls++;
     final probe = probes[item.key]!..status = SourceProbeStatus.resolving;

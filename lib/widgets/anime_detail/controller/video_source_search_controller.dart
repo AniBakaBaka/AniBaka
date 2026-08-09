@@ -22,33 +22,6 @@ final _reBrackets = RegExp(r'[（(].*?[）)]');
 String _norm(String value) =>
     value.toLowerCase().replaceAll(RegExp(r'\s+'), '');
 
-class ProgressState {
-  final Set<String> progressingSources;
-  final Set<String> finishedSources;
-  final List<String> searchErrors;
-
-  const ProgressState({
-    required this.progressingSources,
-    required this.finishedSources,
-    required this.searchErrors,
-  });
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is ProgressState &&
-          setEquals(progressingSources, other.progressingSources) &&
-          setEquals(finishedSources, other.finishedSources) &&
-          listEquals(searchErrors, other.searchErrors);
-
-  @override
-  int get hashCode => Object.hash(
-    Object.hashAllUnordered(progressingSources),
-    Object.hashAllUnordered(finishedSources),
-    Object.hashAll(searchErrors),
-  );
-}
-
 class SearchResultItem {
   SearchResultItem({
     required String title,
@@ -167,7 +140,7 @@ class DirectSourceGroup {
 }
 
 /// 视频源搜索与切换逻辑控制器
-class VideoSourceSearchController {
+class VideoSourceSearchController extends ChangeNotifier {
   static VideoSourceSearchController? globalCached;
   static String? globalCachedTitle;
 
@@ -183,26 +156,40 @@ class VideoSourceSearchController {
   static bool isGlobalCached(VideoSourceSearchController controller) =>
       identical(globalCached, controller);
 
-  static String resolveTitle({String? title, Map<String, dynamic>? seedData}) {
-    final explicit = title?.trim();
-    if (explicit != null && explicit.isNotEmpty) return explicit;
-    return seedData?['title']?.toString().trim() ?? '';
+  /// The global slot only transfers a completed search from detail to player.
+  /// Once consumed, the player owns and disposes the controller.
+  static VideoSourceSearchController takeSharedFor({
+    Map<String, dynamic>? seedData,
+    String? title,
+  }) {
+    return takeCachedFor(seedData: seedData, title: title) ??
+        VideoSourceSearchController(
+          seedData: seedData,
+          title: resolveTitle(title: title, seedData: seedData),
+        );
   }
 
-  static VideoSourceSearchController sharedFor({
+  static VideoSourceSearchController? takeCachedFor({
     Map<String, dynamic>? seedData,
     String? title,
   }) {
     final resolved = resolveTitle(title: title, seedData: seedData);
-    if (globalCachedTitle != resolved || globalCached == null) {
-      globalCached?.dispose();
-      globalCached = VideoSourceSearchController(
-        seedData: seedData,
-        title: resolved,
-      );
-      globalCachedTitle = resolved;
+    final cached = globalCached;
+    if (cached != null && globalCachedTitle == resolved) {
+      globalCached = null;
+      globalCachedTitle = null;
+      return cached;
     }
-    return globalCached!;
+    cached?.dispose();
+    globalCached = null;
+    globalCachedTitle = null;
+    return null;
+  }
+
+  static String resolveTitle({String? title, Map<String, dynamic>? seedData}) {
+    final explicit = title?.trim();
+    if (explicit != null && explicit.isNotEmpty) return explicit;
+    return seedData?['title']?.toString().trim() ?? '';
   }
 
   final String title;
@@ -212,19 +199,15 @@ class VideoSourceSearchController {
   final ValueChanged<Map<String, dynamic>>? onMatchFound;
   final VoidCallback? onMatchFailed;
 
-  final isSearchingNotifier = ValueNotifier(false);
-  final resultsNotifier = ValueNotifier<List<SearchResultItem>>(const []);
-  final progressNotifier = ValueNotifier(
-    const ProgressState(
-      progressingSources: {},
-      finishedSources: {},
-      searchErrors: [],
-    ),
-  );
-  final manualAliasesNotifier = ValueNotifier<List<String>>(const []);
-  final automaticAliasesNotifier = ValueNotifier<List<String>>(const []);
-  final activeAutoAliasesNotifier = ValueNotifier<Set<String>>({});
-  final candidateRevisionNotifier = ValueNotifier(0);
+  bool isSearching = false;
+  List<String> manualAliases = const [];
+  late final List<String> automaticAliases;
+  final Set<String> activeAutoAliases = {};
+
+  Iterable<SearchResultItem> get results => _results.values;
+  Set<String> get progressingSources => _progressing;
+  Set<String> get finishedSources => _finished;
+  List<String> get searchErrors => _errors;
 
   final _adapter = SourceAdapterService.instance;
   final _engine = const SourceMatchEngine();
@@ -305,21 +288,16 @@ class VideoSourceSearchController {
       final String id when id.isNotEmpty => 'bgm:$id',
       _ => 'title:${_norm(this.title)}',
     };
-    manualAliasesNotifier.value = _readManualAliases();
-    automaticAliasesNotifier.value = _buildAutoAliases();
+    manualAliases = _readManualAliases();
+    automaticAliases = _buildAutoAliases();
   }
 
+  @override
   void dispose() {
     if (_disposed) return;
     _disposed = true;
     _runId++;
-    isSearchingNotifier.dispose();
-    resultsNotifier.dispose();
-    progressNotifier.dispose();
-    manualAliasesNotifier.dispose();
-    automaticAliasesNotifier.dispose();
-    activeAutoAliasesNotifier.dispose();
-    candidateRevisionNotifier.dispose();
+    super.dispose();
   }
 
   List<String> _buildAutoAliases() {
@@ -370,18 +348,17 @@ class VideoSourceSearchController {
   }
 
   Future<void> toggleAutoAlias(String alias) async {
-    if (isSearchingNotifier.value) return;
-    final next = Set<String>.of(activeAutoAliasesNotifier.value);
-    if (!next.remove(alias)) {
-      next.add(alias);
+    if (isSearching) return;
+    if (!activeAutoAliases.remove(alias)) {
+      activeAutoAliases.add(alias);
     }
-    activeAutoAliasesNotifier.value = next;
+    notifyListeners();
     await startSearch();
   }
 
   Future<bool> addManualAlias(String value) async {
-    if (isSearchingNotifier.value) return false;
-    final next = List<String>.of(manualAliasesNotifier.value);
+    if (isSearching) return false;
+    final next = List<String>.of(manualAliases);
     final seen = {_norm(_primary), for (final a in next) _norm(a)};
     var added = false;
     for (final part in value.split(_reAliasSep)) {
@@ -392,21 +369,20 @@ class VideoSourceSearchController {
       }
     }
     if (!added) return false;
-    manualAliasesNotifier.value = next;
+    manualAliases = next;
+    notifyListeners();
     await AliasStorageService.saveAliases(_aliasKey, next);
     await startSearch();
     return true;
   }
 
   Future<void> removeManualAlias(String alias) async {
-    if (isSearchingNotifier.value) return;
-    manualAliasesNotifier.value = manualAliasesNotifier.value
+    if (isSearching) return;
+    manualAliases = manualAliases
         .where((a) => _norm(a) != _norm(alias))
         .toList();
-    await AliasStorageService.saveAliases(
-      _aliasKey,
-      manualAliasesNotifier.value,
-    );
+    notifyListeners();
+    await AliasStorageService.saveAliases(_aliasKey, manualAliases);
     await startSearch();
   }
 
@@ -417,7 +393,7 @@ class VideoSourceSearchController {
     _autoMatchStartedAt = autoMatchMode ? DateTime.now() : null;
     _autoMatchGate = autoMatchMode ? Completer<bool>() : null;
     _resetState();
-    isSearchingNotifier.value = true;
+    isSearching = true;
     _emitProgress();
 
     await ensureAdapterReady();
@@ -432,10 +408,8 @@ class VideoSourceSearchController {
         ? <String>[_primary]
         : <String>[
             _primary,
-            ...manualAliasesNotifier.value.take(3),
-            ...automaticAliasesNotifier.value
-                .where(activeAutoAliasesNotifier.value.contains)
-                .take(3),
+            ...manualAliases.take(3),
+            ...automaticAliases.where(activeAutoAliases.contains).take(3),
           ];
 
     // 自动匹配跳过站内源：站内需二次 play API，拖慢 first-ready。
@@ -490,7 +464,7 @@ class VideoSourceSearchController {
       unawaited(searchFuture);
       _completeAutoMatchGate(true);
       if (!_disposed) {
-        isSearchingNotifier.value = false;
+        isSearching = false;
         _emitProgress();
       }
       return;
@@ -517,7 +491,7 @@ class VideoSourceSearchController {
         onMatchFailed?.call();
       }
       if (!_disposed) {
-        isSearchingNotifier.value = false;
+        isSearching = false;
         _emitProgress();
       }
       return;
@@ -609,7 +583,7 @@ class VideoSourceSearchController {
     if (!_alive(runId)) return;
 
     if (!_disposed && !autoMatchMode) {
-      isSearchingNotifier.value = false;
+      isSearching = false;
       _emitProgress();
     }
     // autoMatch 的失败回调由 startSearch 的 gate 统一处理，避免重复。
@@ -620,7 +594,7 @@ class VideoSourceSearchController {
   void cancelSearch() {
     _runId++;
     if (!_disposed) {
-      isSearchingNotifier.value = false;
+      isSearching = false;
       _emitProgress();
     }
   }
@@ -660,16 +634,10 @@ class VideoSourceSearchController {
     _errors.clear();
     _finished.clear();
     _progressing.clear();
-    resultsNotifier.value = const [];
   }
 
   void _emitProgress() {
-    final next = ProgressState(
-      progressingSources: Set.unmodifiable(_progressing),
-      finishedSources: Set.unmodifiable(_finished),
-      searchErrors: List.unmodifiable(_errors),
-    );
-    if (next != progressNotifier.value) progressNotifier.value = next;
+    if (!_disposed) notifyListeners();
   }
 
   Future<void> _searchSource({
@@ -847,7 +815,7 @@ class VideoSourceSearchController {
     }
     if (accepted == 0) return;
 
-    resultsNotifier.value = List.unmodifiable(_results.values);
+    if (!_disposed) notifyListeners();
 
     if (autoMatchMode && !_userSelected && !_autoMatched) {
       // first-ready：每条高置信立刻按「手动 prepare」路径开探，不批处理等待。
@@ -1106,8 +1074,8 @@ class VideoSourceSearchController {
         : 0;
     return SourceMatchContext(
       primaryTitle: _primary,
-      manualAliases: manualAliasesNotifier.value,
-      automaticAliases: automaticAliasesNotifier.value,
+      manualAliases: manualAliases,
+      automaticAliases: automaticAliases,
       bgmEpisodeCount: declared ?? (loaded > 0 ? loaded : null),
       bgmCompleted: declared != null && loaded >= declared,
       currentSource: currentSource,
@@ -1226,9 +1194,7 @@ class VideoSourceSearchController {
       resolveMedia: true,
       raceMode: false,
     );
-    if (probe.data == null) return null;
-    // 即使媒体解析失败，仍返回目录数据让播放器自行重试线路。
-    return Map<String, dynamic>.from(probe.data!);
+    return probe.isReady ? probe.data : null;
   }
 
   int _statusRank(SourceProbeStatus s) => switch (s) {
@@ -1247,9 +1213,8 @@ class VideoSourceSearchController {
     required int preferredLine,
     bool resolveMedia = true,
     bool raceMode = false,
-    @Deprecated('Use resolveMedia') bool probeDirect = true,
   }) {
-    final wantMedia = resolveMedia && probeDirect;
+    final wantMedia = resolveMedia;
     final probe = _probeFor(item, episodeIndex, preferredLine);
 
     // 已有即点即播结果，直接复用。
@@ -1335,7 +1300,7 @@ class VideoSourceSearchController {
     bool raceMode = false,
   }) async {
     probe.status = SourceProbeStatus.resolving;
-    candidateRevisionNotifier.value++;
+    _emitProgress();
 
     try {
       final catalogTimeout = raceMode
@@ -1349,7 +1314,7 @@ class VideoSourceSearchController {
       if (rawEpisodes.isEmpty) {
         probe.status = SourceProbeStatus.failed;
         probe.error = '未找到可播放剧集';
-        candidateRevisionNotifier.value++;
+        _emitProgress();
         return probe;
       }
 
@@ -1378,7 +1343,7 @@ class VideoSourceSearchController {
         final token = episodeItem.lineAt(lineIndex);
         probe.routeKey = _routeKeyFor(token);
         probe.status = SourceProbeStatus.playable;
-        candidateRevisionNotifier.value++;
+        _emitProgress();
         return probe;
       }
 
@@ -1393,7 +1358,7 @@ class VideoSourceSearchController {
     } catch (e) {
       probe.status = SourceProbeStatus.failed;
       probe.error = e.toString();
-      candidateRevisionNotifier.value++;
+      _emitProgress();
       return probe;
     }
   }
@@ -1408,14 +1373,14 @@ class VideoSourceSearchController {
     }
 
     probe.status = SourceProbeStatus.resolving;
-    candidateRevisionNotifier.value++;
+    _emitProgress();
 
     try {
       final rawEpisodes = PlaybackEpisodeCatalog.episodesOf(data);
       if (rawEpisodes.isEmpty) {
         probe.status = SourceProbeStatus.failed;
         probe.error = '未找到可播放剧集';
-        candidateRevisionNotifier.value++;
+        _emitProgress();
         return probe;
       }
 
@@ -1431,7 +1396,7 @@ class VideoSourceSearchController {
           : 1;
       probe.resolvedLineIndex = lineIndex;
 
-      final readyData = Map<String, dynamic>.from(data)
+      final readyData = data
         ..['currPlayIndex'] = epIndex
         ..['currUrl'] = lineIndex;
 
@@ -1446,7 +1411,7 @@ class VideoSourceSearchController {
     } catch (e) {
       probe.status = SourceProbeStatus.failed;
       probe.error = e.toString();
-      candidateRevisionNotifier.value++;
+      _emitProgress();
       return probe;
     }
   }
@@ -1466,7 +1431,7 @@ class VideoSourceSearchController {
       probe.status = SourceProbeStatus.failed;
       probe.error = '无线路可播';
       probe.data = readyData;
-      candidateRevisionNotifier.value++;
+      _emitProgress();
       return probe;
     }
 
@@ -1496,22 +1461,32 @@ class VideoSourceSearchController {
         probe.status = SourceProbeStatus.playable;
       }
       _resolvedCache[probe.item.key] = readyData;
-      candidateRevisionNotifier.value++;
+      _emitProgress();
       return probe;
     }
 
     // 竞速只扫 1~2 线；手动点选可多扫几条。
     final maxLines = raceMode ? _autoMatchMaxLines : _manualMaxLines;
-    final order = <int>[
-      if (preferredLineIndex >= 1 && preferredLineIndex <= lineCount)
-        preferredLineIndex,
-      for (var i = 1; i <= lineCount; i++)
-        if (i != preferredLineIndex) i,
-    ].take(maxLines).toList();
-
     final lineTimeout = raceMode ? _mediaTimeout : _manualMediaTimeout;
     Object? lastError;
-    for (final lineIndex in order) {
+    final preferred = preferredLineIndex >= 1 && preferredLineIndex <= lineCount
+        ? preferredLineIndex
+        : 1;
+    var nextLine = 1;
+    for (
+      var attempt = 0;
+      attempt < maxLines && attempt < lineCount;
+      attempt++
+    ) {
+      final int lineIndex;
+      if (attempt == 0) {
+        lineIndex = preferred;
+      } else {
+        while (nextLine == preferred) {
+          nextLine++;
+        }
+        lineIndex = nextLine++;
+      }
       // 整候选已超时则立刻放弃剩余线路。
       if (raceMode && _autoMatchTimedOut) break;
 
@@ -1548,7 +1523,7 @@ class VideoSourceSearchController {
         probe.data = readyData;
         probe.status = SourceProbeStatus.direct;
         _resolvedCache[probe.item.key] = readyData;
-        candidateRevisionNotifier.value++;
+        _emitProgress();
         return probe;
       } catch (e) {
         lastError = e;
@@ -1559,7 +1534,7 @@ class VideoSourceSearchController {
     probe.data = readyData;
     probe.status = SourceProbeStatus.failed;
     probe.error = lastError?.toString() ?? '无法解析播放地址';
-    candidateRevisionNotifier.value++;
+    _emitProgress();
     return probe;
   }
 
@@ -1573,7 +1548,6 @@ class VideoSourceSearchController {
     final reachTimeout = raceMode
         ? _reachTimeout
         : const Duration(milliseconds: 2500);
-    final maxAttempts = raceMode ? 1 : 2;
 
     if (kind == MediaTokenKind.torrent) {
       return (url: lineToken, httpHeaders: const <String, String>{});
@@ -1600,12 +1574,12 @@ class VideoSourceSearchController {
 
     // 必须校验：不可达则返回空，上层换线/换源，绝不预取死链。
     if (adapter == null) {
-      return (url: '', httpHeaders: const <String, String>{});
+      throw StateError('Source adapter is unavailable: $sourceKey');
     }
     return adapter.resolvePlaybackMedia(
       lineToken,
       skipValidation: false,
-      maxAttempts: maxAttempts,
+      maxAttempts: 1,
       reachTimeout: reachTimeout,
     );
   }
@@ -1655,7 +1629,12 @@ class VideoSourceSearchController {
   ) async {
     final videoData = item.sourceType == 'internal'
         ? item.data
-        : await _adapter.buildPlayerData(item.data) ?? item.data;
+        : await _adapter.buildPlayerData(item.data);
+    if (videoData == null) {
+      throw StateError(
+        'Source returned no playback catalog: ${item.sourceType}',
+      );
+    }
     videoData['source'] = item.sourceType;
     videoData['sourceDisplayName'] =
         item.data['sourceDisplayName'] ?? _sourceDisplayName(item.sourceType);

@@ -2,14 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:baka/widgets/anime_detail/controller/video_source_search_controller.dart';
 import 'package:baka/widgets/anime_detail/video_source_search_sheet.dart';
 
-export 'package:baka/widgets/anime_detail/video_source_search_sheet.dart'
-    show SourceSwitchSelection;
-
 class SourceSwitchSheet {
   SourceSwitchSheet._();
 
   /// 展示字段统一从 [seedData] 解析，避免调用方重复拆 title/cover。
-  static Future<SourceSwitchSelection?> show(
+  static Future<Map<String, dynamic>?> show(
     BuildContext context, {
     required Map<String, dynamic> seedData,
     required int currentEpisodeIndex,

@@ -105,6 +105,7 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
   late final Set<String> _queuedIds;
   late final String _taskIdPrefix;
   late final List<int> _selectableIndexes;
+  late List<int> _visibleIndexes;
 
   @override
   void initState() {
@@ -126,6 +127,7 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
       _taskIdPrefix = '';
       _selectableIndexes = const [];
     }
+    _refreshVisibleIndexes();
   }
 
   @override
@@ -136,11 +138,13 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
 
   String _taskId(int index) => '$_taskIdPrefix${index + 1}';
 
-  List<int> get _visibleIndexes => PlaybackEpisodeCatalog.filterIndexes(
-    widget.videoList,
-    searchQuery: _searchQuery,
-    ascending: _sortAscending,
-  );
+  void _refreshVisibleIndexes() {
+    _visibleIndexes = PlaybackEpisodeCatalog.filterIndexes(
+      widget.videoList,
+      searchQuery: _searchQuery,
+      ascending: _sortAscending,
+    );
+  }
 
   bool get _isAllSelected =>
       _selectableIndexes.isNotEmpty &&
@@ -194,21 +198,22 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
 
   void _submitDownload() {
     if (_selected.isEmpty) return;
-    final indices = _selected.toList()..sort();
+    final indices = [
+      for (final index in _selectableIndexes)
+        if (_selected.contains(index)) index,
+    ];
     HapticFeedback.mediumImpact();
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text('开始在后台解析 ${indices.length} 集')));
     Navigator.pop(context);
-    _resolveAndEnqueue(indices);
+    _resolveAndEnqueue(indices).ignore();
   }
 
   Future<void> _resolveAndEnqueue(List<int> indices) async {
     final service = DownloadService.instance;
     final detail = widget.postDetail!;
-    final bgmId = (await BgmService.resolveFromData(
-      detail,
-    )).subjectId?.toString();
+    final bgmId = (await BgmService.resolveFromData(detail)).subjectId;
 
     final sourceName = detail['sourceDisplayName']?.toString() ?? '';
     final title = (detail['title'] ?? '未知标题').toString();
@@ -220,6 +225,7 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
         : '${title}_';
     final subtitlePrefix = sourceName.isNotEmpty ? '$sourceName · ' : '';
 
+    final tasks = <DownloadTask>[];
     for (final index in indices) {
       try {
         final resolvedUrl = await widget.urlResolver!(index);
@@ -227,7 +233,7 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
         final episodeTitle = widget.videoList[index].title;
         final kind = DownloadTask.inferKind(resolvedUrl);
         final extension = kind == DownloadTaskKind.hls ? 'm3u8' : 'mp4';
-        service.addTasks([
+        tasks.add(
           DownloadTask(
             id: _taskId(index),
             url: resolvedUrl,
@@ -239,9 +245,12 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
             episodeIndex: index + 1,
             kind: kind,
           ),
-        ]);
-      } catch (_) {}
+        );
+      } catch (error) {
+        debugPrint('resolve download episode ${index + 1}: $error');
+      }
     }
+    service.addTasks(tasks);
   }
 
   @override
@@ -357,7 +366,10 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
           )
         else
           IconButton(
-            onPressed: () => setState(() => _sortAscending = !_sortAscending),
+            onPressed: () => setState(() {
+              _sortAscending = !_sortAscending;
+              _refreshVisibleIndexes();
+            }),
             icon: Icon(
               _sortAscending ? Icons.arrow_upward : Icons.arrow_downward,
               size: 20,
@@ -436,7 +448,10 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
       height: 36,
       child: TextField(
         controller: _searchController,
-        onChanged: (value) => setState(() => _searchQuery = value),
+        onChanged: (value) => setState(() {
+          _searchQuery = value;
+          _refreshVisibleIndexes();
+        }),
         style: TextStyle(color: textColor, fontSize: 13),
         decoration: InputDecoration(
           hintText: '搜索剧集',
@@ -454,7 +469,10 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
               : IconButton(
                   onPressed: () {
                     _searchController.clear();
-                    setState(() => _searchQuery = '');
+                    setState(() {
+                      _searchQuery = '';
+                      _refreshVisibleIndexes();
+                    });
                   },
                   icon: Icon(
                     Icons.close,

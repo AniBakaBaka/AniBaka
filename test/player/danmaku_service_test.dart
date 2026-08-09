@@ -7,12 +7,14 @@ void main() {
   tearDown(DanmakuService.clearCache);
 
   test('parses, filters and sorts only when input is out of order', () async {
-    final items = await DanmakuService.parseItems([
-      {'m': 'later', 'p': '2.5,1,16711680'},
-      {'m': 'bottom', 'p': '1.0,4,255'},
-      {'m': '', 'p': '0,1,1'},
-      {'m': 'unsupported', 'p': '0,8,1'},
-    ]);
+    final items = await DanmakuService.decode(
+      '{"data":['
+      '{"m":"later","p":"2.5,1,16711680"},'
+      '{"m":"bottom","p":"1.0,4,255"},'
+      '{"m":"","p":"0,1,1"},'
+      '{"m":"unsupported","p":"0,8,1"}'
+      ']}',
+    );
     expect(items.map((item) => item.text), ['bottom', 'later']);
     expect(items.first.time, 1000);
     expect(items.first.type, 4);
@@ -26,8 +28,8 @@ void main() {
       type: 5,
       color: Color(0xFF00FF00),
     );
-    final raw = DanmakuService.serializeItems([item]);
-    final reparsed = await DanmakuService.parseItems(raw);
+    final raw = DanmakuService.encode([item]);
+    final reparsed = await DanmakuService.decode(raw);
     expect(reparsed.single.text, 'hello');
     expect(reparsed.single.time, 1250);
     expect(reparsed.single.type, 5);

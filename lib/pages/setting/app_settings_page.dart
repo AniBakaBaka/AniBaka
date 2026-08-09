@@ -63,7 +63,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
       confirmText: '清理',
     );
 
-    if (action == DialogAction.confirm) {
+    if (action) {
       setState(() => _isClearing = true);
       final success = await AppStorage.clearAllCache();
       if (mounted) {
@@ -150,11 +150,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
   Future<void> _showUpdateDialog(String title, String key) async {
     HapticFeedback.selectionClick();
     final result = await showAppInputDialog(context, title: title);
-    if (result?.isConfirmed == true &&
-        result!.value != null &&
-        result.value!.isNotEmpty) {
-      await _updateUser(key, result.value!);
-    }
+    if (result != null && result.isNotEmpty) await _updateUser(key, result);
   }
 
   Future<void> _updateUser(String key, String value) async {
@@ -188,7 +184,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
       confirmText: '退出',
       isDestructive: true,
     );
-    if (action != DialogAction.confirm || !mounted) return;
+    if (!action || !mounted) return;
     _appState.performLogout();
     Navigator.pop(context);
   }

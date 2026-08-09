@@ -8,7 +8,6 @@ class RefreshWrapper extends StatefulWidget {
   final RefreshCallback onRefresh;
   final LoadMoreCallback onLoadMore;
   final Listenable? loadMoreResetListenable;
-  final String? errorInfo;
   final bool showInitialIndicator;
 
   const RefreshWrapper({
@@ -16,22 +15,18 @@ class RefreshWrapper extends StatefulWidget {
     required this.onRefresh,
     required this.onLoadMore,
     this.loadMoreResetListenable,
-    this.errorInfo,
     this.showInitialIndicator = true,
     super.key,
   });
 
   @override
-  State<StatefulWidget> createState() {
-    return _RefreshWrapperState();
-  }
+  State<RefreshWrapper> createState() => _RefreshWrapperState();
 }
 
 class _RefreshWrapperState extends State<RefreshWrapper> {
   final _refreshIndicatorKey = GlobalKey<RefreshIndicatorState>();
   Future<bool>? _loadMoreTask;
   bool _isRefreshing = false;
-  bool _hasError = false;
   bool _hasMore = true;
   int _loadMoreGeneration = 0;
 
@@ -79,7 +74,6 @@ class _RefreshWrapperState extends State<RefreshWrapper> {
       if (generation == _loadMoreGeneration) _hasMore = hasMore;
     } catch (e) {
       debugPrint('load more error: $e');
-      if (generation == _loadMoreGeneration) _hasMore = false;
     } finally {
       if (identical(_loadMoreTask, task)) _loadMoreTask = null;
     }
@@ -88,14 +82,10 @@ class _RefreshWrapperState extends State<RefreshWrapper> {
   Future<void> _onRefresh() async {
     if (_isRefreshing || _loadMoreTask != null) return;
     _isRefreshing = true;
-    if (_hasError) setState(() => _hasError = false);
     _resetLoadMore();
 
     try {
       await widget.onRefresh();
-    } catch (e) {
-      debugPrint('refresh error $e');
-      if (mounted) setState(() => _hasError = true);
     } finally {
       _isRefreshing = false;
     }
@@ -103,14 +93,6 @@ class _RefreshWrapperState extends State<RefreshWrapper> {
 
   @override
   Widget build(BuildContext context) {
-    if (_hasError) {
-      return TextButton(
-        onPressed: _onRefresh,
-        child: Center(child: Text(widget.errorInfo ?? '网络不通，科学上网试试::>_<::')),
-      );
-    }
-
-    // 优化的滚动监听，支持CustomScrollView + Sliver组件
     return RefreshIndicator(
       key: _refreshIndicatorKey,
       onRefresh: _onRefresh,

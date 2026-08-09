@@ -70,7 +70,8 @@ class PlayerService {
 
   void clearPrefetchedPlaybackMedia() => clearPrefetchFrom(data);
 
-  PlayerService({required this.data, this.posIndex}) {
+  PlayerService({required Map data, this.posIndex})
+    : data = data.cast<String, dynamic>() {
     sourceNames = _parseSourceNames(data['sourceNames']);
     if (!isLocalSource) {
       bgmInfo = BgmUtils.readFromData(data);
@@ -84,7 +85,7 @@ class PlayerService {
     }
   }
 
-  final Map data;
+  final Map<String, dynamic> data;
   final int? posIndex;
 
   List<PlaybackEpisode> videoList = const [];
@@ -158,20 +159,15 @@ class PlayerService {
   /// 换源 / 自动匹配共用的 seed：title、身份字段、BGM 元数据一次打包，
   /// 避免 PlayerPage / Sheet 各自再拆 title/cover/score。
   Map<String, dynamic> buildSourceSeedData() {
-    final seed = <String, dynamic>{'title': title};
-    for (final key in const ['seriesId', 'seriesUrl', 'id', 'url']) {
-      final value = data[key];
-      if (value != null) seed[key] = value;
-    }
     final subjectId = bgmInfo.subjectId;
-    if (subjectId != null) seed['bgmId'] = subjectId;
+    if (subjectId != null) data['bgmId'] = subjectId;
     final score = bgmInfo.score;
-    if (score != null) seed['score'] = score;
+    if (score != null) data['score'] = score;
     final cover = coverImageUrl;
-    if (cover != null && cover.isNotEmpty) seed['bgmImageUrl'] = cover;
+    if (cover != null && cover.isNotEmpty) data['bgmImageUrl'] = cover;
     final detail = bgmDetailData;
-    if (detail != null) seed['bgmDetailData'] = detail;
-    return seed;
+    if (detail != null) data['bgmDetailData'] = detail;
+    return data;
   }
 
   String get logoUrl {
@@ -422,8 +418,8 @@ class PlayerService {
     _playbackKeepAliveAdapter = null;
   }
 
-  /// 从另一份视频数据搬运预取直链与完整的源与剧集元数据（如换源面板或自动匹配返回的数据）。
-  void adoptPrefetchedPlayback(Map from) {
+  /// 将选中的播放源写回播放器持有的唯一数据对象。
+  void adoptPlaybackData(Map from) {
     final v = from[_prefetchedPlaybackKey];
     if (v != null) data[_prefetchedPlaybackKey] = v;
 
@@ -572,10 +568,10 @@ class PlayerService {
     final bgmId = info.subjectId;
     if (bgmId == null) return const [];
 
-    return DanmakuService.getDanmakuItems(
-      bgmId: bgmId.toString(),
+    return DanmakuService.fetch(
+      subjectId: bgmId,
       episodeIndex: episodeIndex + 1,
-      originalTitle: title,
+      titles: BgmUtils.buildSearchTitles([title]),
     );
   }
 

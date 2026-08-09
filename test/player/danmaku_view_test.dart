@@ -77,7 +77,7 @@ class _ProbeDanmakuListener implements DanmakuListener {
   @override
   void onDanmakuTimeSync(Duration position) => lastPosition = position;
   @override
-  void onDanmakuInject(List<DanmakuItem> items) {}
+  void onDanmakuInject(DanmakuItem item) {}
   @override
   void onDanmakuItemsChanged() {}
   @override

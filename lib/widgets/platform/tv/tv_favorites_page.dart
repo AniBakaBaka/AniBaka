@@ -269,7 +269,7 @@ class _TvFavoriteCard extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  buildCachedImage(
+                  buildNetworkImage(
                     item.displayCover,
                     double.infinity,
                     double.infinity,

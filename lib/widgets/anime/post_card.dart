@@ -13,7 +13,7 @@ const _kTagTextStyle = TextStyle(
   fontWeight: FontWeight.bold,
 );
 
-typedef PostCardMeta = ({String displayTag, String? scoreText});
+typedef PostCardMeta = ({String tagText, String? scoreText});
 typedef ProgressInfo = ({
   double progress,
   String watchTimeText,
@@ -25,14 +25,14 @@ PostCardMeta resolvePostCardMeta(Map data) {
   final scoreText = _resolveScoreText(data['score']);
   final source = data['source']?.toString();
 
-  final displayTag = switch (source) {
-    'bgm' => _buildBgmTag(data['info']?.toString(), scoreText),
+  final tagText = switch (source) {
+    'bgm' => _episodeTag(data['info'] as String?),
     _ when AdapterRegistry.isAdapterSource(source) =>
       data['tag']?.toString() ?? '番剧',
     _ => '',
   };
 
-  return (displayTag: displayTag, scoreText: scoreText);
+  return (tagText: tagText, scoreText: scoreText);
 }
 
 ProgressInfo resolveProgressInfo(Map data) {
@@ -55,33 +55,33 @@ ProgressInfo resolveProgressInfo(Map data) {
   );
 }
 
-String? _resolveScoreText(dynamic value) {
+String? _resolveScoreText(Object? value) {
   if (value == null) return null;
   final score = _asDouble(value);
   return score > 0 ? score.toStringAsFixed(1) : null;
 }
 
-String _buildBgmTag(String? info, String? scoreText) {
-  String? ep;
-  if (info != null) {
-    for (final p in info.split('/')) {
-      if (p.contains('话')) {
-        ep = p.trim();
-        break;
-      }
+String _episodeTag(String? info) {
+  if (info == null) return '';
+  var start = 0;
+  while (start < info.length) {
+    var end = info.indexOf('/', start);
+    if (end < 0) end = info.length;
+    if (info.indexOf('话', start) < end) {
+      return info.substring(start, end).trim();
     }
+    start = end + 1;
   }
-  if (ep != null && scoreText != null) return '$ep · $scoreText';
-  return ep ?? (scoreText != null ? '评分 $scoreText' : '');
+  return '';
 }
 
-double _asDouble(dynamic value) {
+double _asDouble(Object? value) {
   if (value is num) return value.toDouble();
   if (value is String) return double.tryParse(value) ?? 0.0;
   return 0.0;
 }
 
-String _formatWatchTime(dynamic watchTimeMs) {
+String _formatWatchTime(Object? watchTimeMs) {
   final watchTimeValue = _asDouble(watchTimeMs).toInt();
   if (watchTimeValue <= 0) return '';
 
@@ -94,14 +94,14 @@ String _formatWatchTime(dynamic watchTimeMs) {
   return '刚刚';
 }
 
-String _formatPosition(dynamic positionMs) {
+String _formatPosition(Object? positionMs) {
   final position = _asDouble(positionMs);
   if (position <= 0) return '';
   final secs = (position / 1000).round();
   return '${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')}';
 }
 
-double _resolveProgress(dynamic position, dynamic duration) {
+double _resolveProgress(Object? position, Object? duration) {
   final total = _asDouble(duration);
   return total > 0 ? (_asDouble(position) / total).clamp(0.0, 1.0) : 0.0;
 }
@@ -118,26 +118,33 @@ void navigateToDetail(BuildContext context, Map data, {int? posIndex}) {
 }
 
 Widget buildCachedImage(
-  Object? imageUrl,
+  Map data,
   double width,
   double height, {
   BoxFit fit = BoxFit.cover,
 }) {
-  final resolvedUrl = imageUrl is Map
-      ? BgmUtils.resolveCoverImage(imageUrl) ?? getSuo(imageUrl['content'])
-      : getSuo(imageUrl?.toString() ?? '');
+  final resolvedUrl =
+      BgmUtils.resolveCoverImage(data) ?? getSuo(data['content']);
+  return buildNetworkImage(resolvedUrl, width, height, fit: fit);
+}
+
+Widget buildNetworkImage(
+  String imageUrl,
+  double width,
+  double height, {
+  BoxFit fit = BoxFit.cover,
+}) {
   return CachedNetworkImage(
     memCacheWidth: 300,
-    imageUrl: resolvedUrl,
+    imageUrl: imageUrl,
     width: width,
     height: height,
     fit: fit,
     useOldImageOnUrlChange: true,
     fadeInDuration: Duration.zero,
     fadeOutDuration: Duration.zero,
-    placeholder: (context, url) => Container(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        ),
+    placeholder: (context, url) =>
+        Container(color: Theme.of(context).colorScheme.surfaceContainerHighest),
     errorWidget: (context, url, error) {
       final theme = Theme.of(context);
       return ColoredBox(
@@ -169,7 +176,7 @@ class PostCard extends StatelessWidget {
       child: Instances.isWindows
           ? WindowsCard(
               data: data,
-              displayTag: meta.displayTag,
+              tagText: meta.tagText,
               scoreText: meta.scoreText,
               heroTag: coverHeroTag(data),
               image: buildCachedImage(data, double.infinity, double.infinity),
@@ -187,6 +194,11 @@ class _MobileCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final label = meta.tagText.isNotEmpty
+        ? (meta.scoreText == null
+              ? meta.tagText
+              : '${meta.tagText} · ${meta.scoreText}')
+        : (meta.scoreText == null ? '' : '评分 ${meta.scoreText}');
     final cover = AspectRatio(
       aspectRatio: 2 / 3,
       child: ClipRRect(
@@ -198,7 +210,7 @@ class _MobileCard extends StatelessWidget {
               tag: coverHeroTag(data),
               child: buildCachedImage(data, double.infinity, double.infinity),
             ),
-            if (meta.displayTag.isNotEmpty)
+            if (label.isNotEmpty)
               Positioned(
                 left: 0,
                 right: 0,
@@ -217,7 +229,7 @@ class _MobileCard extends StatelessWidget {
                       vertical: 6,
                     ),
                     child: Text(
-                      meta.displayTag,
+                      label,
                       style: _kTagTextStyle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

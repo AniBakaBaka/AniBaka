@@ -1,5 +1,7 @@
 ﻿import 'package:flutter/foundation.dart';
 
+import 'package:baka/utils/bgm_utils.dart';
+
 enum DownloadStatus { waiting, downloading, paused, completed, failed }
 
 enum DownloadTaskKind { file, hls }
@@ -11,7 +13,7 @@ class DownloadTask {
   final String title;
   final String? subtitle;
   final String? thumbnail;
-  final String? bgmId;
+  final int? bgmId;
   final int? episodeIndex;
   final DownloadTaskKind kind;
   String? danmakuPath;
@@ -85,7 +87,7 @@ class DownloadTask {
     title: json['title'],
     subtitle: json['subtitle'],
     thumbnail: json['thumbnail'],
-    bgmId: json['bgmId'] ?? json['videoId'],
+    bgmId: BgmUtils.toInt(json['bgmId'] ?? json['videoId']),
     episodeIndex: json['episodeIndex'],
     kind: _kindFromJson(json),
     danmakuPath: json['danmakuPath'],

@@ -1,18 +1,5 @@
 import 'package:flutter/material.dart';
 
-/// 对话框返回结果枚举
-enum DialogAction { confirm, cancel }
-
-/// 输入对话框结果
-class InputDialogResult {
-  final DialogAction action;
-  final String? value;
-
-  const InputDialogResult(this.action, [this.value]);
-
-  bool get isConfirmed => action == DialogAction.confirm;
-}
-
 /// 选择对话框选项
 class SelectionOption<T> {
   final T value;
@@ -140,7 +127,7 @@ class AppDialog extends StatelessWidget {
 }
 
 /// App输入对话框
-class AppInputDialog extends StatefulWidget {
+class _InputDialog extends StatefulWidget {
   final String title;
   final String? hintText;
   final String? initialValue;
@@ -150,9 +137,8 @@ class AppInputDialog extends StatefulWidget {
   final TextInputType? keyboardType;
   final bool obscureText;
 
-  const AppInputDialog({
+  const _InputDialog({
     required this.title,
-    super.key,
     this.hintText = '请输入...',
     this.initialValue,
     this.maxLines = 1,
@@ -163,10 +149,10 @@ class AppInputDialog extends StatefulWidget {
   });
 
   @override
-  State<AppInputDialog> createState() => _AppInputDialogState();
+  State<_InputDialog> createState() => _InputDialogState();
 }
 
-class _AppInputDialogState extends State<AppInputDialog> {
+class _InputDialogState extends State<_InputDialog> {
   late final TextEditingController _controller;
   late final FocusNode _focusNode;
 
@@ -188,10 +174,7 @@ class _AppInputDialogState extends State<AppInputDialog> {
   }
 
   void _handleConfirm() {
-    Navigator.pop(
-      context,
-      InputDialogResult(DialogAction.confirm, _controller.text),
-    );
+    Navigator.pop(context, _controller.text);
   }
 
   void _handleCancel() => Navigator.pop(context);
@@ -288,17 +271,16 @@ Widget _buildDialogActionRow(
 }
 
 /// App确认对话框
-class AppConfirmDialog extends StatelessWidget {
+class _ConfirmDialog extends StatelessWidget {
   final String title;
   final String content;
   final String confirmText;
   final String cancelText;
   final bool isDestructive;
 
-  const AppConfirmDialog({
+  const _ConfirmDialog({
     required this.title,
     required this.content,
-    super.key,
     this.confirmText = '确定',
     this.cancelText = '取消',
     this.isDestructive = false,
@@ -314,8 +296,8 @@ class AppConfirmDialog extends StatelessWidget {
           context,
           cancelText: cancelText,
           confirmText: confirmText,
-          onCancel: () => Navigator.pop(context, DialogAction.cancel),
-          onConfirm: () => Navigator.pop(context, DialogAction.confirm),
+          onCancel: () => Navigator.pop(context, false),
+          onConfirm: () => Navigator.pop(context, true),
           isDestructive: isDestructive,
         ),
       ],
@@ -324,15 +306,14 @@ class AppConfirmDialog extends StatelessWidget {
 }
 
 /// App信息对话框（单按钮）
-class AppInfoDialog extends StatelessWidget {
+class _InfoDialog extends StatelessWidget {
   final String title;
   final String content;
   final String buttonText;
 
-  const AppInfoDialog({
+  const _InfoDialog({
     required this.title,
     required this.content,
-    super.key,
     this.buttonText = '我知道了',
   });
 
@@ -356,10 +337,8 @@ class AppInfoDialog extends StatelessWidget {
   }
 }
 
-/// 显示App输入对话框
-///
-/// 返回 [InputDialogResult]，可通过 `isConfirmed` 判断是否确认
-Future<InputDialogResult?> showAppInputDialog(
+/// 显示输入对话框。确认时返回输入内容，取消时返回 null。
+Future<String?> showAppInputDialog(
   BuildContext context, {
   required String title,
   String? hintText,
@@ -371,10 +350,10 @@ Future<InputDialogResult?> showAppInputDialog(
   bool obscureText = false,
   bool barrierDismissible = true,
 }) {
-  return showDialog<InputDialogResult>(
+  return showDialog<String>(
     context: context,
     barrierDismissible: barrierDismissible,
-    builder: (context) => AppInputDialog(
+    builder: (context) => _InputDialog(
       title: title,
       hintText: hintText,
       initialValue: initialValue,
@@ -387,10 +366,8 @@ Future<InputDialogResult?> showAppInputDialog(
   );
 }
 
-/// 显示App确认对话框
-///
-/// 返回 [DialogAction]，确认返回 `DialogAction.confirm`，取消返回 `DialogAction.cancel`
-Future<DialogAction?> showAppConfirmDialog(
+/// 显示确认对话框。确认返回 true，取消或关闭返回 false。
+Future<bool> showAppConfirmDialog(
   BuildContext context, {
   required String title,
   required String content,
@@ -398,18 +375,19 @@ Future<DialogAction?> showAppConfirmDialog(
   String cancelText = '取消',
   bool isDestructive = false,
   bool barrierDismissible = false,
-}) {
-  return showDialog<DialogAction>(
-    context: context,
-    barrierDismissible: barrierDismissible,
-    builder: (context) => AppConfirmDialog(
-      title: title,
-      content: content,
-      confirmText: confirmText,
-      cancelText: cancelText,
-      isDestructive: isDestructive,
-    ),
-  );
+}) async {
+  return await showDialog<bool>(
+        context: context,
+        barrierDismissible: barrierDismissible,
+        builder: (context) => _ConfirmDialog(
+          title: title,
+          content: content,
+          confirmText: confirmText,
+          cancelText: cancelText,
+          isDestructive: isDestructive,
+        ),
+      ) ??
+      false;
 }
 
 /// 显示App信息对话框
@@ -424,18 +402,18 @@ Future<void> showAppInfoDialog(
     context: context,
     barrierDismissible: barrierDismissible,
     builder: (context) =>
-        AppInfoDialog(title: title, content: content, buttonText: buttonText),
+        _InfoDialog(title: title, content: content, buttonText: buttonText),
   );
 }
 
 /// App选择对话框
-class AppSelectionDialog<T> extends StatelessWidget {
+class _SelectionDialog<T> extends StatelessWidget {
   final String title;
   final List<SelectionOption<T>> options;
   final T? currentValue;
   final String cancelText;
 
-  const AppSelectionDialog({
+  const _SelectionDialog({
     required this.title,
     required this.options,
     this.currentValue,
@@ -542,7 +520,7 @@ Future<T?> showAppSelectionDialog<T>(
   return showDialog<T>(
     context: context,
     barrierDismissible: barrierDismissible,
-    builder: (context) => AppSelectionDialog<T>(
+    builder: (context) => _SelectionDialog<T>(
       title: title,
       options: options,
       currentValue: currentValue,
@@ -578,30 +556,23 @@ Widget _buildFormattedContent(
 
   for (final match in matches) {
     if (match.start > lastMatchEnd) {
-      spans.add(TextSpan(
-        text: content.substring(lastMatchEnd, match.start),
-        style: style,
-      ));
+      spans.add(
+        TextSpan(
+          text: content.substring(lastMatchEnd, match.start),
+          style: style,
+        ),
+      );
     }
     final boldText = match.group(1);
     if (boldText != null && boldText.isNotEmpty) {
-      spans.add(TextSpan(
-        text: boldText,
-        style: boldStyle,
-      ));
+      spans.add(TextSpan(text: boldText, style: boldStyle));
     }
     lastMatchEnd = match.end;
   }
 
   if (lastMatchEnd < content.length) {
-    spans.add(TextSpan(
-      text: content.substring(lastMatchEnd),
-      style: style,
-    ));
+    spans.add(TextSpan(text: content.substring(lastMatchEnd), style: style));
   }
 
-  return Text.rich(
-    TextSpan(children: spans),
-    style: style,
-  );
+  return Text.rich(TextSpan(children: spans), style: style);
 }

@@ -61,7 +61,7 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
       confirmText: '验证并连接',
       obscureText: true,
     );
-    if (result?.isConfirmed != true) return;
+    if (result == null) return;
 
     setState(() {
       _busy = true;
@@ -69,7 +69,7 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
       _report = null;
     });
     try {
-      final account = await _service.connect(result!.value ?? '');
+      final account = await _service.connect(result);
       if (!mounted) return;
       setState(() {
         _account = account;
@@ -112,7 +112,7 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
       confirmText: '断开连接',
       isDestructive: true,
     );
-    if (action != DialogAction.confirm) return;
+    if (!action) return;
     await _service.disconnect();
     if (!mounted) return;
     setState(() {
@@ -805,4 +805,3 @@ class _SyncCard extends StatelessWidget {
     );
   }
 }
-

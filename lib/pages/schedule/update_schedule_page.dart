@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 class UpdateScheduleController extends GetxController {
-  final scheduleData = RxList<List>(List.generate(7, (_) => []));
+  final scheduleData = RxList<HomeItems>(List.generate(7, (_) => <Map>[]));
   final hasLoaded = false.obs;
   final selectedDay = (DateTime.now().weekday - 1).obs;
 
@@ -27,7 +27,7 @@ class UpdateScheduleController extends GetxController {
     }
   }
 
-  List getDataForDay(int dayIndex) => scheduleData[dayIndex];
+  HomeItems getDataForDay(int dayIndex) => scheduleData[dayIndex];
 
   void selectDay(int day) => selectedDay.value = day;
 

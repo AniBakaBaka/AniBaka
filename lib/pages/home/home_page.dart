@@ -354,7 +354,7 @@ class _HomePageState extends State<HomePage>
   }
 
   Widget _buildBanner() {
-    return ValueListenableBuilder<List<dynamic>>(
+    return ValueListenableBuilder<HomeItems>(
       valueListenable: _svc.swipers,
       builder: (context, swipers, _) {
         if (swipers.isEmpty) {
@@ -394,7 +394,7 @@ class _HomePageState extends State<HomePage>
           child: ValueListenableBuilder<int>(
             valueListenable: _svc.rankIndex,
             builder: (context, index, _) =>
-                ValueListenableBuilder<List<List<dynamic>>>(
+                ValueListenableBuilder<List<HomeItems>>(
                   valueListenable: _svc.ranks,
                   builder: (context, ranks, _) => RankSection(
                     items: ranks[index],
@@ -485,7 +485,7 @@ class _HomePageState extends State<HomePage>
   }
 
   Widget _buildFeedGrid() {
-    return ValueListenableBuilder<List<dynamic>>(
+    return ValueListenableBuilder<HomeItems>(
       valueListenable: _svc.feed,
       builder: (context, items, _) {
         final width = MediaQuery.sizeOf(context).width;
@@ -508,7 +508,7 @@ class _HomePageState extends State<HomePage>
             ),
             delegate: SliverChildBuilderDelegate(
               (_, index) {
-                final item = items[index] as Map;
+                final item = items[index];
                 return PostCard(
                   item,
                   key: ValueKey('feed_${item['bgmId'] ?? item['id'] ?? index}'),
