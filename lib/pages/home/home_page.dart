@@ -100,7 +100,7 @@ class _HomePageState extends State<HomePage>
       body: RefreshWrapper(
         onLoadMore: _svc.loadMore,
         onRefresh: _refresh,
-        loadMoreResetListenable: _svc.feed,
+        loadMoreResetListenable: _svc.tag,
         showInitialIndicator: false,
         child: CustomScrollView(
           controller: _scrollController,

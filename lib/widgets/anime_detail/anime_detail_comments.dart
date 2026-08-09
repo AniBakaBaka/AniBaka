@@ -3,7 +3,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import 'package:baka/api/bgm.dart';
-import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/date_util.dart';
 import 'package:baka/widgets/common/skeletonizer.dart';
 
@@ -70,9 +69,9 @@ class _AnimeCommentsTabState extends State<AnimeCommentsTab>
         offset: _comments.length,
       );
       if (!mounted) return;
-      final parsed = BgmUtils.asMap(jsonDecode(response.data));
-      if (parsed == null) return;
-      final data = BgmUtils.asMapList(parsed['data']);
+      final parsed = jsonDecode(response) as Map<String, dynamic>;
+      final data = (parsed['data'] as List<dynamic>)
+          .cast<Map<String, dynamic>>();
       final total = (parsed['total'] as num?)?.toInt() ?? 0;
       setState(() {
         if (loadMore) {
@@ -125,7 +124,10 @@ class _AnimeCommentsTabState extends State<AnimeCommentsTab>
                 enabled: true,
                 child: _CommentItem(
                   comment: const {
-                    'user': {'nickname': '用户名称占位符', 'avatar': {'large': ''}},
+                    'user': {
+                      'nickname': '用户名称占位符',
+                      'avatar': {'large': ''},
+                    },
                     'rate': 8,
                     'comment': '这是一条用于自动骨架遮罩的评论内容占位文本...',
                     'updated_at': '2026-08-06 12:00:00',
@@ -167,7 +169,10 @@ class _AnimeCommentsTabState extends State<AnimeCommentsTab>
                 enabled: true,
                 child: _CommentItem(
                   comment: const {
-                    'user': {'nickname': '用户名称占位符', 'avatar': {'large': ''}},
+                    'user': {
+                      'nickname': '用户名称占位符',
+                      'avatar': {'large': ''},
+                    },
                     'rate': 8,
                     'comment': '这是一条用于自动骨架遮罩的评论内容占位文本...',
                     'updated_at': '2026-08-06 12:00:00',
@@ -279,13 +284,13 @@ class _CommentItem extends StatelessWidget {
   }
 
   Widget get _avatarPlaceholder => Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: isDark ? Colors.white12 : Colors.black12,
-          shape: BoxShape.circle,
-        ),
-      );
+    width: 32,
+    height: 32,
+    decoration: BoxDecoration(
+      color: isDark ? Colors.white12 : Colors.black12,
+      shape: BoxShape.circle,
+    ),
+  );
 
   Widget _buildRateBadge(int rate) {
     return Container(

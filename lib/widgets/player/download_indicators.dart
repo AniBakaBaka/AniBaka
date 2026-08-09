@@ -27,13 +27,13 @@ class _ActiveDownloadIndicatorState extends State<ActiveDownloadIndicator> {
     super.initState();
     DownloadService.instance.init();
     _listener = _refresh;
-    DownloadService.instance.tasksNotifier.addListener(_listener);
+    DownloadService.instance.tasksListenable.addListener(_listener);
     _refresh();
   }
 
   @override
   void dispose() {
-    DownloadService.instance.tasksNotifier.removeListener(_listener);
+    DownloadService.instance.tasksListenable.removeListener(_listener);
     super.dispose();
   }
 
@@ -211,16 +211,12 @@ class MobileBtProgressIndicator extends StatelessWidget {
         if (stats == null || stats.state == TorrentState.idle) {
           return const SizedBox.shrink();
         }
-        return _buildIndicator(context, torrent, stats);
+        return _buildIndicator(context, stats);
       },
     );
   }
 
-  Widget _buildIndicator(
-    BuildContext context,
-    TorrentService torrent,
-    TorrentStats stats,
-  ) {
+  Widget _buildIndicator(BuildContext context, TorrentStats stats) {
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
     final bodyColor = theme.textTheme.bodyMedium?.color;
@@ -247,7 +243,7 @@ class MobileBtProgressIndicator extends StatelessWidget {
         stateIcon = Icons.check_circle_outline_rounded;
         stateColor = readyColor;
       case TorrentState.error:
-        stateText = torrent.engine?.errorMessage ?? '错误';
+        stateText = stats.errorMessage ?? '错误';
         stateIcon = Icons.error_outline_rounded;
         stateColor = theme.colorScheme.error;
       default:

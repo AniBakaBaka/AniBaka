@@ -130,8 +130,8 @@ class _BangumiOAuthBroker {
     return data;
   }
 
-  static Map<String, dynamic>? _parseBrokerResponse(dynamic response) {
-    final root = BgmUtils.parseJsonMap(response?.data);
+  static Map<String, dynamic>? _parseBrokerResponse(String response) {
+    final root = BgmUtils.parseJsonMap(response);
     if (root == null) return null;
     if (BgmUtils.toInt(root['code']) != 0) {
       throw BangumiSyncException(root['message']?.toString() ?? 'Bangumi 登录失败');

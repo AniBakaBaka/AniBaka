@@ -113,8 +113,15 @@ String coverHeroTag(Map data) {
   return '${base}_${data.hashCode}';
 }
 
-void navigateToDetail(BuildContext context, Map data, {int? posIndex}) {
-  NavigationService.toDetail(context, data, posIndex: posIndex);
+void navigateToDetail(
+  BuildContext context,
+  Map data, {
+  int? posIndex,
+  Object? heroTag,
+}) {
+  final detailData = Map<String, dynamic>.from(data);
+  detailData['_heroTag'] = heroTag ?? coverHeroTag(data);
+  NavigationService.toDetail(context, detailData, posIndex: posIndex);
 }
 
 Widget buildCachedImage(

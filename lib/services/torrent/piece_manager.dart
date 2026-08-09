@@ -1,186 +1,175 @@
-﻿import 'dart:async';
+import 'dart:async';
+import 'dart:collection';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+
 import 'package:baka/services/torrent/torrent_model.dart';
 
-/// 待请求的 block 描述
 class BlockRequest {
+  const BlockRequest(this.pieceIndex, this.begin, this.length);
+
   final int pieceIndex;
   final int begin;
   final int length;
-  const BlockRequest(this.pieceIndex, this.begin, this.length);
 }
 
-/// 分片状态
 enum PieceState { pending, downloading, completed }
 
-/// 分片管理器 — 顺序下载优先，管理已下载数据
+/// Downloads only the selected media file and stores verified pieces on disk.
+/// In-flight block maps are sparse, so idle torrent pieces allocate no maps.
 class PieceManager {
-  final TorrentMetadata metadata;
-  final int targetFileIndex;
-
-  static const int blockSize = 16384; // 16 KB
-  static const int maxPeerRequestSize = 128 * 1024;
-  static const Duration _requestTimeout = Duration(seconds: 8);
-  static const int _bufferTarget = 2 * 1024 * 1024; // 2 MB
-
-  /// 每个分片的状态
-  late final List<PieceState> _pieceStates;
-
-  /// 每个分片中已下载的 block 数据 (begin offset → data)
-  late final List<Map<int, Uint8List>> _pieceBlocks;
-
-  /// 每个分片中已发出的 block 请求，避免多个 peer 重复请求同一段。
-  late final List<Map<int, DateTime>> _requestedBlocks;
-
-  /// 已完成且校验通过的分片数据
-  final Map<int, Uint8List> _completedPieces = {};
-
-  /// 目标文件覆盖的分片范围
-  late final int _firstPiece;
-  late final int _lastPiece;
-  late final int _firstPieceOffset;
-
-  int _downloadedBytes = 0;
-  int _torrentDownloadedBytes = 0;
-
-  /// 进度信号：每收到一个 block 后触发，stream_server 用于事件驱动等待。
-  Completer<void> _nextEvent = Completer<void>();
-
-  /// 进度回调
-  void Function(int downloadedBytes, int totalBytes)? onProgress;
-
-  /// 分片完成且校验通过时触发，用于向 peer 发送 have。
-  void Function(int pieceIndex, Uint8List data)? onPieceCompleted;
-
   PieceManager({required this.metadata, required this.targetFileIndex}) {
     final file = metadata.files[targetFileIndex];
     _firstPiece = file.offset ~/ metadata.pieceLength;
     _lastPiece = (file.end - 1) ~/ metadata.pieceLength;
     _firstPieceOffset = file.offset % metadata.pieceLength;
-
-    final totalPieces = metadata.pieceCount;
-    _pieceStates = List.filled(totalPieces, PieceState.pending);
-    _pieceBlocks = List.generate(totalPieces, (_) => <int, Uint8List>{});
-    _requestedBlocks = List.generate(totalPieces, (_) => <int, DateTime>{});
+    _pieceStates = List<PieceState>.filled(
+      _lastPiece - _firstPiece + 1,
+      PieceState.pending,
+    );
+    _pieceStatesView = UnmodifiableListView(_pieceStates);
+    _cacheFile = File(
+      '${Directory.systemTemp.path}${Platform.pathSeparator}'
+      'anibaka-${metadata.infoHashHex}-$targetFileIndex.part',
+    );
+    _cache = _cacheFile.openSync(mode: FileMode.write);
   }
+
+  static const int blockSize = 16 * 1024;
+  static const int maxPeerRequestSize = 128 * 1024;
+  static const Duration _requestTimeout = Duration(seconds: 8);
+  static const int _bufferTarget = 2 * 1024 * 1024;
+
+  final TorrentMetadata metadata;
+  final int targetFileIndex;
+  late final int _firstPiece;
+  late final int _lastPiece;
+  late final int _firstPieceOffset;
+  late final List<PieceState> _pieceStates;
+  late final List<PieceState> _pieceStatesView;
+  late final File _cacheFile;
+  late final RandomAccessFile _cache;
+
+  final Map<int, Map<int, Uint8List>> _pieceBlocks = {};
+  final Map<int, Map<int, DateTime>> _requestedBlocks = {};
+  int _downloadedBytes = 0;
+  int _torrentDownloadedBytes = 0;
+  Completer<void> _nextEvent = Completer<void>();
+  bool _disposed = false;
+
+  void Function(int downloadedBytes, int totalBytes)? onProgress;
+  void Function(int pieceIndex)? onPieceCompleted;
 
   TorrentFile get targetFile => metadata.files[targetFileIndex];
-
-  /// 暴露分片范围和状态（供 UI 方格图使用）
   int get firstPiece => _firstPiece;
   int get lastPiece => _lastPiece;
-  List<PieceState> get pieceStates => _pieceStates;
-
+  List<PieceState> get pieceStates => _pieceStatesView;
   int get downloadedBytes => _downloadedBytes;
   int get torrentDownloadedBytes => _torrentDownloadedBytes;
-
   int get bufferRequiredBytes => math.min(_bufferTarget, targetFile.length);
-
   bool get isReadyToPlay => contiguousBytes >= bufferRequiredBytes;
-
-  /// 下载进度（0.0 ~ 1.0）— 基于已收字节数。
   double get progress => targetFile.length == 0
-      ? 1.0
-      : (_downloadedBytes / targetFile.length).clamp(0.0, 1.0);
+      ? 1
+      : (_downloadedBytes / targetFile.length).clamp(0, 1);
 
-  /// 目标视频是否已全部完成。
   bool get isTargetComplete {
     for (var i = _firstPiece; i <= _lastPiece; i++) {
-      if (_pieceStates[i] != PieceState.completed) return false;
+      if (_stateOf(i) != PieceState.completed) return false;
     }
     return true;
   }
 
-  /// 整个 torrent 是否已全部完成，完成后才算真正进入做种。
-  bool get isComplete {
-    for (final state in _pieceStates) {
-      if (state != PieceState.completed) return false;
+  bool get isComplete => isTargetComplete;
+
+  Iterable<int> get completedPieceIndices sync* {
+    for (var i = _firstPiece; i <= _lastPiece; i++) {
+      if (_stateOf(i) == PieceState.completed) yield i;
     }
-    return true;
   }
 
-  Iterable<int> get completedPieceIndices => _completedPieces.keys;
+  bool hasPiece(int pieceIndex) =>
+      pieceIndex >= _firstPiece &&
+      pieceIndex <= _lastPiece &&
+      _stateOf(pieceIndex) == PieceState.completed;
 
-  bool hasPiece(int pieceIndex) => _completedPieces.containsKey(pieceIndex);
-
-  /// 文件开头连续已下载字节数（用于判断是否可以开始播放）
   int get contiguousBytes {
     var bytes = 0;
     for (var i = _firstPiece; i <= _lastPiece; i++) {
-      if (_pieceStates[i] != PieceState.completed) break;
+      if (_stateOf(i) != PieceState.completed) break;
       bytes +=
           metadata.pieceSize(i) - (i == _firstPiece ? _firstPieceOffset : 0);
     }
     return math.min(bytes, targetFile.length);
   }
 
-  /// 下一次进度事件（每收到一个 block 后完成并旋转为新 Completer）。
   Future<void> get nextProgress => _nextEvent.future;
 
-  /// 顺序优先策略选取下一个待请求 block。
-  BlockRequest? nextBlock({required Set<int> availablePieces}) {
+  BlockRequest? nextBlock({
+    required bool Function(int pieceIndex) peerHasPiece,
+  }) {
+    if (_disposed || isTargetComplete) return null;
     final now = DateTime.now();
-    final startPiece = isTargetComplete ? 0 : _firstPiece;
-    final endPiece = isTargetComplete ? metadata.pieceCount - 1 : _lastPiece;
-
-    for (var i = startPiece; i <= endPiece; i++) {
-      if (_pieceStates[i] == PieceState.completed) continue;
-      if (!availablePieces.contains(i)) continue;
-
-      final pieceSize = metadata.pieceSize(i);
-      final blocks = _pieceBlocks[i];
-      final requested = _requestedBlocks[i];
-
+    for (var piece = _firstPiece; piece <= _lastPiece; piece++) {
+      if (_stateOf(piece) == PieceState.completed || !peerHasPiece(piece)) {
+        continue;
+      }
+      final blocks = _pieceBlocks[piece];
+      final requested = _requestedBlocks[piece];
+      final pieceSize = metadata.pieceSize(piece);
       for (var offset = 0; offset < pieceSize; offset += blockSize) {
-        if (blocks.containsKey(offset)) continue;
-        final at = requested[offset];
-        if (at != null && now.difference(at) < _requestTimeout) continue;
-
-        final len = math.min(blockSize, pieceSize - offset);
-        _pieceStates[i] = PieceState.downloading;
-        requested[offset] = now;
-        return BlockRequest(i, offset, len);
+        if (blocks?.containsKey(offset) == true) continue;
+        final requestedAt = requested?[offset];
+        if (requestedAt != null &&
+            now.difference(requestedAt) < _requestTimeout) {
+          continue;
+        }
+        _setState(piece, PieceState.downloading);
+        (_requestedBlocks[piece] ??= {})[offset] = now;
+        return BlockRequest(
+          piece,
+          offset,
+          math.min(blockSize, pieceSize - offset),
+        );
       }
     }
     return null;
   }
 
-  /// 取消一个尚未收到的 block 请求，使其他 peer 可以立即接手。
   void cancelBlockRequest(int pieceIndex, int begin) {
-    if (pieceIndex < 0 || pieceIndex >= metadata.pieceCount || begin < 0) {
-      return;
-    }
-    _requestedBlocks[pieceIndex].remove(begin);
+    _requestedBlocks[pieceIndex]?.remove(begin);
   }
 
-  /// 收到一个 block 数据
   void onBlockReceived(int pieceIndex, int begin, Uint8List data) {
-    if (pieceIndex < 0 || pieceIndex >= metadata.pieceCount) return;
-    if (begin < 0) return;
-    if (_pieceStates[pieceIndex] == PieceState.completed) return;
-
+    if (_disposed ||
+        pieceIndex < _firstPiece ||
+        pieceIndex > _lastPiece ||
+        begin < 0 ||
+        _stateOf(pieceIndex) == PieceState.completed) {
+      return;
+    }
     final pieceSize = metadata.pieceSize(pieceIndex);
     if (data.isEmpty || begin + data.length > pieceSize) return;
 
-    final blocks = _pieceBlocks[pieceIndex];
-    _requestedBlocks[pieceIndex].remove(begin);
-    if (blocks.containsKey(begin)) return; // 已有同一 block，丢弃重复包
-
+    final blocks = _pieceBlocks[pieceIndex] ??= {};
+    _requestedBlocks[pieceIndex]?.remove(begin);
+    if (blocks.containsKey(begin)) return;
     blocks[begin] = data;
     _downloadedBytes += _targetOverlapBytes(pieceIndex, begin, data.length);
     _torrentDownloadedBytes += data.length;
 
     if (_blockBytes(blocks) >= pieceSize) {
-      final assembled = _assemblePiece(pieceIndex, pieceSize);
+      final assembled = _assemblePiece(blocks, pieceSize);
       if (_verifyPiece(pieceIndex, assembled)) {
-        _pieceStates[pieceIndex] = PieceState.completed;
-        _completedPieces[pieceIndex] = assembled;
-        blocks.clear();
-        _requestedBlocks[pieceIndex].clear();
-        onPieceCompleted?.call(pieceIndex, assembled);
+        _cache
+          ..setPositionSync(pieceIndex * metadata.pieceLength)
+          ..writeFromSync(assembled);
+        _setState(pieceIndex, PieceState.completed);
+        _pieceBlocks.remove(pieceIndex);
+        _requestedBlocks.remove(pieceIndex);
+        onPieceCompleted?.call(pieceIndex);
       } else {
         for (final entry in blocks.entries) {
           _downloadedBytes -= _targetOverlapBytes(
@@ -190,26 +179,75 @@ class PieceManager {
           );
           _torrentDownloadedBytes -= entry.value.length;
         }
-        blocks.clear();
-        _requestedBlocks[pieceIndex].clear();
-        _pieceStates[pieceIndex] = PieceState.pending;
+        _pieceBlocks.remove(pieceIndex);
+        _requestedBlocks.remove(pieceIndex);
+        _setState(pieceIndex, PieceState.pending);
       }
     }
 
-    onProgress?.call(_downloadedBytes, metadata.totalSize);
+    onProgress?.call(_downloadedBytes, targetFile.length);
     _signalProgress();
   }
 
+  Uint8List? readFileData(int fileOffset, int length) {
+    if (_disposed ||
+        fileOffset < 0 ||
+        length <= 0 ||
+        fileOffset + length > targetFile.length) {
+      return null;
+    }
+    final globalStart = targetFile.offset + fileOffset;
+    final globalEnd = globalStart + length;
+    final first = globalStart ~/ metadata.pieceLength;
+    final last = (globalEnd - 1) ~/ metadata.pieceLength;
+    for (var piece = first; piece <= last; piece++) {
+      if (!hasPiece(piece)) return null;
+    }
+    _cache.setPositionSync(globalStart);
+    final bytes = _cache.readSync(length);
+    return bytes.length == length ? bytes : null;
+  }
+
+  Uint8List? readPieceBlock(int pieceIndex, int begin, int length) {
+    if (_disposed ||
+        !hasPiece(pieceIndex) ||
+        begin < 0 ||
+        length <= 0 ||
+        length > maxPeerRequestSize ||
+        begin + length > metadata.pieceSize(pieceIndex)) {
+      return null;
+    }
+    _cache.setPositionSync(pieceIndex * metadata.pieceLength + begin);
+    final bytes = _cache.readSync(length);
+    return bytes.length == length ? bytes : null;
+  }
+
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    _signalProgress();
+    _pieceBlocks.clear();
+    _requestedBlocks.clear();
+    _cache.closeSync();
+    if (_cacheFile.existsSync()) _cacheFile.deleteSync();
+  }
+
   void _signalProgress() {
-    final c = _nextEvent;
+    final event = _nextEvent;
     _nextEvent = Completer<void>();
-    if (!c.isCompleted) c.complete();
+    if (!event.isCompleted) event.complete();
+  }
+
+  PieceState _stateOf(int pieceIndex) => _pieceStates[pieceIndex - _firstPiece];
+
+  void _setState(int pieceIndex, PieceState state) {
+    _pieceStates[pieceIndex - _firstPiece] = state;
   }
 
   static int _blockBytes(Map<int, Uint8List> blocks) {
     var total = 0;
-    for (final v in blocks.values) {
-      total += v.length;
+    for (final block in blocks.values) {
+      total += block.length;
     }
     return total;
   }
@@ -222,9 +260,8 @@ class PieceManager {
     return math.max(0, overlapEnd - overlapStart);
   }
 
-  Uint8List _assemblePiece(int pieceIndex, int pieceSize) {
+  static Uint8List _assemblePiece(Map<int, Uint8List> blocks, int pieceSize) {
     final result = Uint8List(pieceSize);
-    final blocks = _pieceBlocks[pieceIndex];
     for (final entry in blocks.entries) {
       result.setRange(entry.key, entry.key + entry.value.length, entry.value);
     }
@@ -238,38 +275,5 @@ class PieceManager {
       if (expected[i] != actual[i]) return false;
     }
     return true;
-  }
-
-  /// 从指定文件偏移量读取数据（用于流媒体服务器）。
-  /// 当请求范围内任一分片尚未就绪时返回 null。
-  Uint8List? readFileData(int fileOffset, int length) {
-    final globalStart = targetFile.offset + fileOffset;
-    final globalEnd = globalStart + length;
-
-    final result = Uint8List(length);
-    var pos = globalStart;
-    var written = 0;
-    while (pos < globalEnd) {
-      final pieceData = _completedPieces[pos ~/ metadata.pieceLength];
-      if (pieceData == null) return null;
-
-      final pieceOffset = pos % metadata.pieceLength;
-      final copyLen = math.min(pieceData.length - pieceOffset, globalEnd - pos);
-      result.setRange(written, written + copyLen, pieceData, pieceOffset);
-      written += copyLen;
-      pos += copyLen;
-    }
-    return result;
-  }
-
-  /// 读取完整分片中的一段数据，用于响应 peer 的 request 消息。
-  Uint8List? readPieceBlock(int pieceIndex, int begin, int length) {
-    if (pieceIndex < 0 || pieceIndex >= metadata.pieceCount) return null;
-    if (begin < 0 || length <= 0 || length > maxPeerRequestSize) return null;
-
-    final pieceData = _completedPieces[pieceIndex];
-    if (pieceData == null || begin + length > pieceData.length) return null;
-
-    return Uint8List.sublistView(pieceData, begin, begin + length);
   }
 }

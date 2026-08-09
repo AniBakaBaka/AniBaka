@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' show min;
 
@@ -21,14 +21,15 @@ class TorrentStats {
   final int downloadedBytes;
   final int uploadedBytes;
   final int totalBytes;
-  final int torrentTotalBytes;
   final int contiguousBytes;
   final int bufferRequiredBytes;
   final bool readyToPlay;
-  final String? targetFileName;
-  final String? streamUrl;
   final double downloadSpeed;
   final double uploadSpeed;
+  final String? errorMessage;
+  final int firstPiece;
+  final int lastPiece;
+  final List<PieceState> pieceStates;
 
   const TorrentStats({
     this.state = TorrentState.idle,
@@ -37,14 +38,15 @@ class TorrentStats {
     this.downloadedBytes = 0,
     this.uploadedBytes = 0,
     this.totalBytes = 0,
-    this.torrentTotalBytes = 0,
     this.contiguousBytes = 0,
     this.bufferRequiredBytes = 0,
     this.readyToPlay = false,
-    this.targetFileName,
-    this.streamUrl,
     this.downloadSpeed = 0.0,
     this.uploadSpeed = 0.0,
+    this.errorMessage,
+    this.firstPiece = 0,
+    this.lastPiece = -1,
+    this.pieceStates = const <PieceState>[],
   });
 }
 
@@ -72,7 +74,6 @@ class TorrentEngine {
   Timer? _peerCheckTimer;
   ServerSocket? _peerServer;
   bool _isConnectingPeers = false;
-  bool _completedAnnounced = false;
   int _listenPort = TrackerClient.defaultListenPort;
 
   TorrentState _state = TorrentState.idle;
@@ -81,19 +82,9 @@ class TorrentEngine {
   String? _errorMessage;
   String? get errorMessage => _errorMessage;
 
-  TorrentMetadata? get metadata => _metadata;
-  PieceManager? get pieceManager => _pieceManager;
-  TorrentStreamServer get streamServer => _streamServer;
+  bool get isReadyToPlay => _pieceManager?.isReadyToPlay == true;
 
-  /// 进度回调
-  void Function(double progress, int downloadedBytes, int totalBytes)?
-  onProgress;
-
-  /// 状态变化回调
-  void Function(TorrentState state)? onStateChanged;
-
-  /// 缓冲就绪回调（可以开始播放）
-  void Function(String streamUrl)? onReadyToPlay;
+  void Function()? onChanged;
 
   bool _readyNotified = false;
   static const int _minBufferBytes = 2 * 1024 * 1024; // 2MB 最小缓冲
@@ -115,7 +106,7 @@ class TorrentEngine {
         _setError('下载 .torrent 文件失败');
         return null;
       }
-      final bytes = Uint8List.fromList(response.data!);
+      final bytes = _responseBytes(response.data!);
       _metadata = TorrentMetadata.fromBytes(bytes);
       return await _startDownload();
     } catch (e) {
@@ -132,7 +123,7 @@ class TorrentEngine {
 
       _metadata = await _resolveMagnetMetadata(magnet);
       if (_metadata == null) {
-        _setError('无法通过 BEP 9 或公开缓存获取种子元数据');
+        _setError('无法通过 BEP 9 或 magnet 精确来源获取种子元数据');
         return null;
       }
 
@@ -147,7 +138,6 @@ class TorrentEngine {
     final completer = Completer<TorrentMetadata?>();
     final tasks = <Future<TorrentMetadata?>>[
       _fetchMetadataViaPeers(magnet),
-      _fetchMetadataFromCache(magnet),
       if (magnet.exactSources.isNotEmpty)
         _fetchMetadataFromExactSources(magnet),
     ];
@@ -193,24 +183,20 @@ class TorrentEngine {
 
     _pieceManager = PieceManager(metadata: meta, targetFileIndex: videoIndex);
 
-    _pieceManager!.onProgress = (downloaded, total) {
-      final targetSize = _pieceManager!.targetFile.length;
-      final progress = targetSize > 0 ? downloaded / targetSize : 0.0;
-      onProgress?.call(progress, downloaded, targetSize);
-
+    _pieceManager!.onProgress = (_, _) {
       if (!_readyNotified && _pieceManager!.isReadyToPlay) {
         _readyNotified = true;
-        onReadyToPlay?.call(_streamServer.streamUrl);
       }
+      onChanged?.call();
     };
-    _pieceManager!.onPieceCompleted = (pieceIndex, _) {
+    _pieceManager!.onPieceCompleted = (pieceIndex) {
       for (final peer in _peers) {
         peer.announcePiece(pieceIndex);
       }
       if (_pieceManager?.isComplete == true) {
         _setState(TorrentState.seeding);
-        _announceCompleted();
       }
+      onChanged?.call();
     };
 
     await _streamServer.start(_pieceManager!);
@@ -225,11 +211,6 @@ class TorrentEngine {
       _setError('无法找到可用的 peer');
       return null;
     }
-
-    _announceTimer = Timer.periodic(
-      const Duration(minutes: 5),
-      (_) => _connectToPeers(),
-    );
 
     _peerCheckTimer = Timer.periodic(
       const Duration(seconds: 10),
@@ -252,13 +233,15 @@ class TorrentEngine {
 
     _isConnectingPeers = true;
     try {
-      final peers = await TrackerClient.announceMetadata(
+      final announce = await TrackerClient.announceMetadata(
         metadata: meta,
         downloaded: pm.torrentDownloadedBytes,
         uploaded: _totalUploadedBytes(),
         port: _listenPort,
         event: event,
       );
+      _scheduleAnnounce(announce.interval);
+      final peers = announce.peers;
       debugPrint('[TorrentEngine] 从 tracker 获取到 ${peers.length} 个 peer');
 
       final freeSlots = _maxPeers - _peers.length;
@@ -270,8 +253,12 @@ class TorrentEngine {
           .toList(growable: false);
       if (candidates.isEmpty) return 0;
 
-      final results = await Future.wait(
-        candidates.map((addr) async {
+      var nextCandidate = 0;
+      var connectedCount = 0;
+
+      Future<void> connectWorker() async {
+        while (nextCandidate < candidates.length && _peers.length < _maxPeers) {
+          final addr = candidates[nextCandidate++];
           final peer = PeerConnection(
             address: addr,
             infoHash: meta.infoHash,
@@ -287,21 +274,32 @@ class TorrentEngine {
               _peers.length >= _maxPeers ||
               _peers.any((item) => item.address == addr)) {
             peer.disconnect();
-            return false;
+            continue;
           }
 
           _peers.add(peer);
+          connectedCount++;
           peer.fillRequestPipeline();
-          return true;
-        }),
-      );
-      return results.where((connected) => connected).length;
+        }
+      }
+
+      await Future.wait([
+        for (var i = 0; i < min(8, candidates.length); i++) connectWorker(),
+      ]);
+      return connectedCount;
     } catch (e) {
       debugPrint('[TorrentEngine] Tracker announce 失败: $e');
       return 0;
     } finally {
       _isConnectingPeers = false;
     }
+  }
+
+  void _scheduleAnnounce(Duration? interval) {
+    _announceTimer?.cancel();
+    _announceTimer = interval == null
+        ? null
+        : Timer(interval, () => unawaited(_connectToPeers()));
   }
 
   Future<void> _startPeerListener(
@@ -388,18 +386,7 @@ class TorrentEngine {
     if (_peers.length < 5) unawaited(_connectToPeers());
     if (_pieceManager?.isComplete == true) {
       _setState(TorrentState.seeding);
-      _announceCompleted();
     }
-  }
-
-  void _announceCompleted() {
-    if (_completedAnnounced) return;
-    if (_isConnectingPeers) {
-      Future.delayed(const Duration(seconds: 2), _announceCompleted);
-      return;
-    }
-    _completedAnnounced = true;
-    unawaited(_connectToPeers(event: 'completed'));
   }
 
   Future<void> _announceStopped() async {
@@ -419,73 +406,56 @@ class TorrentEngine {
 
   Future<TorrentMetadata?> _fetchMetadataViaPeers(MagnetLink magnet) async {
     _setState(TorrentState.connecting);
-    final peers = await TrackerClient.announceFromMagnet(
+    final announce = await TrackerClient.announceFromMagnet(
       magnet: magnet,
       port: _listenPort,
     );
+    final peers = announce.peers;
     debugPrint('[TorrentEngine] BEP 9 metadata 候选 peer: ${peers.length}');
     if (peers.isEmpty) return null;
 
     final completer = Completer<TorrentMetadata?>();
-    var remaining = 0;
-    for (final addr in peers.take(24)) {
-      remaining++;
-      unawaited(() async {
+    final infoHash = magnet.infoHashBytes;
+    final limit = min(peers.length, 24);
+    final workerCount = min(limit, 6);
+    var next = 0;
+    var activeWorkers = workerCount;
+
+    Future<void> worker() async {
+      while (!completer.isCompleted) {
+        final index = next++;
+        if (index >= limit) break;
         try {
           final infoBytes = await MetadataPeerConnection(
-            address: addr,
-            infoHash: magnet.infoHashBytes,
+            address: peers[index],
+            infoHash: infoHash,
             peerId: TrackerClient.peerId,
-          ).fetch();
-          if (infoBytes != null && !completer.isCompleted) {
-            final metadata = TorrentMetadata.fromInfoBytes(
-              infoBytes,
-              trackers: magnet.trackers,
-            );
-            if (metadata.infoHashHex == magnet.infoHash) {
-              completer.complete(metadata);
-              return;
-            }
-          }
-        } catch (_) {
-          // 单个 peer 失败时继续等待其他候选。
-        }
-        remaining--;
-        if (remaining == 0 && !completer.isCompleted) {
-          completer.complete(null);
-        }
-      }());
-    }
-
-    return completer.future.timeout(
-      const Duration(seconds: 30),
-      onTimeout: () => null,
-    );
-  }
-
-  /// 尝试从公开缓存获取 metadata。
-  Future<TorrentMetadata?> _fetchMetadataFromCache(MagnetLink magnet) async {
-    final cacheUrls = [
-      'https://itorrents.org/torrent/${magnet.infoHash.toUpperCase()}.torrent',
-      'https://torrage.info/torrent.php?h=${magnet.infoHash.toUpperCase()}',
-      'https://btcache.me/torrent/${magnet.infoHash.toUpperCase()}',
-    ];
-
-    for (final url in cacheUrls) {
-      try {
-        final response = await _dio.get<List<int>>(url);
-        if (response.statusCode == 200 && response.data != null) {
-          final metadata = TorrentMetadata.fromBytes(
-            Uint8List.fromList(response.data!),
+          ).fetch(timeout: const Duration(seconds: 10));
+          if (infoBytes == null || completer.isCompleted) continue;
+          final metadata = TorrentMetadata.fromInfoBytes(
+            infoBytes,
+            trackers: magnet.trackers,
           );
-          if (metadata.infoHashHex == magnet.infoHash) return metadata;
-        }
-      } catch (_) {
-        continue;
+          if (metadata.infoHashHex == magnet.infoHash) {
+            completer.complete(metadata);
+            return;
+          }
+        } catch (_) {}
+      }
+      activeWorkers--;
+      if (activeWorkers == 0 && !completer.isCompleted) {
+        completer.complete(null);
       }
     }
 
-    return null;
+    for (var i = 0; i < workerCount; i++) {
+      unawaited(worker());
+    }
+    final timer = Timer(const Duration(seconds: 30), () {
+      if (!completer.isCompleted) completer.complete(null);
+    });
+    unawaited(completer.future.whenComplete(timer.cancel));
+    return completer.future;
   }
 
   Future<TorrentMetadata?> _fetchMetadataFromExactSources(
@@ -496,7 +466,7 @@ class TorrentEngine {
         final response = await _dio.get<List<int>>(url);
         if (response.statusCode != 200 || response.data == null) continue;
         final metadata = TorrentMetadata.fromBytes(
-          Uint8List.fromList(response.data!),
+          _responseBytes(response.data!),
         );
         if (metadata.infoHashHex == magnet.infoHash) return metadata;
       } catch (_) {
@@ -509,7 +479,7 @@ class TorrentEngine {
   void _setState(TorrentState newState) {
     if (_state == newState) return;
     _state = newState;
-    onStateChanged?.call(newState);
+    onChanged?.call();
   }
 
   void _setError(String message) {
@@ -529,7 +499,6 @@ class TorrentEngine {
     _peerServer = null;
     _listenPort = TrackerClient.defaultListenPort;
     _isConnectingPeers = false;
-    _completedAnnounced = false;
 
     for (final peer in _peers) {
       peer.disconnect();
@@ -537,6 +506,7 @@ class TorrentEngine {
     _peers.clear();
 
     await _streamServer.stop();
+    _pieceManager?.dispose();
     _pieceManager = null;
     _metadata = null;
     _readyNotified = false;
@@ -581,18 +551,22 @@ class TorrentEngine {
       downloadedBytes: pm?.downloadedBytes ?? 0,
       uploadedBytes: _totalUploadedBytes(),
       totalBytes: targetFile?.length ?? 0,
-      torrentTotalBytes: _metadata?.totalSize ?? 0,
       contiguousBytes: pm?.contiguousBytes ?? 0,
       bufferRequiredBytes:
           pm?.bufferRequiredBytes ??
           min(_minBufferBytes, targetFile?.length ?? _minBufferBytes),
       readyToPlay: pm?.isReadyToPlay ?? false,
-      targetFileName: targetFile?.path,
-      streamUrl: _streamServer.isRunning ? _streamServer.streamUrl : null,
       downloadSpeed: _downloadSpeed,
       uploadSpeed: _uploadSpeed,
+      errorMessage: _errorMessage,
+      firstPiece: pm?.firstPiece ?? 0,
+      lastPiece: pm?.lastPiece ?? -1,
+      pieceStates: pm?.pieceStates ?? const <PieceState>[],
     );
   }
+
+  static Uint8List _responseBytes(List<int> bytes) =>
+      bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
 
   int _totalUploadedBytes() {
     return _uploadedBytes;

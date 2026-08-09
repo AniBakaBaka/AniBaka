@@ -23,14 +23,13 @@ Future<List<Map<String, dynamic>>> searchBgmAnime(String title) async {
       },
     },
   );
-  return _mapList(_jsonMap(response.data)['data']);
+  return _mapList(_jsonMap(response)['data']);
 }
 
 Future<Map<String, dynamic>> getBgmSubject(int subjectId) {
   return _subjectCache.get(
     subjectId,
-    () async =>
-        _jsonMap((await _get('$_bgmApiBase/v0/subjects/$subjectId')).data),
+    () async => _jsonMap(await _get('$_bgmApiBase/v0/subjects/$subjectId')),
   );
 }
 
@@ -39,23 +38,21 @@ Future<List<Map<String, dynamic>>> getBgmEpisodes(int subjectId) {
     final response = await _get(
       '$_bgmApiBase/v0/episodes?subject_id=$subjectId&type=0&limit=200',
     );
-    return _mapList(_jsonMap(response.data)['data']);
+    return _mapList(_jsonMap(response)['data']);
   });
 }
 
 /// 角色响应通常远大于条目本身，只由角色页按需读取，不驻留全局缓存。
 Future<List<Map<String, dynamic>>> getBgmCharacters(int subjectId) async {
   final response = await _get('$_bgmApiBase/v0/subjects/$subjectId/characters');
-  return _mapList(jsonDecode(response.data));
+  return _mapList(jsonDecode(response));
 }
 
 Future<List<Map<String, dynamic>>> getBgmRelatedSubjects(int subjectId) {
   return _relatedCache.get(
     subjectId,
     () async => _mapList(
-      jsonDecode(
-        (await _get('$_bgmApiBase/v0/subjects/$subjectId/subjects')).data,
-      ),
+      jsonDecode(await _get('$_bgmApiBase/v0/subjects/$subjectId/subjects')),
     ),
   );
 }
@@ -68,7 +65,7 @@ Future<List<Map<String, dynamic>>> getTrendingSubjects({
   final response = await _get(
     '$_bgmNextBase/p1/trending/subjects?type=$type&limit=$limit&offset=$offset',
   );
-  return _mapList(_jsonMap(response.data)['data']);
+  return _mapList(_jsonMap(response)['data']);
 }
 
 /// BGM 每日放送（一周更新表）。
@@ -77,41 +74,35 @@ Future<List<Map<String, dynamic>>> getTrendingSubjects({
 /// `[{subject: {...}, watchers: n}]`，subject 与 trending 接口同构。
 Future<Map<String, List<Map<String, dynamic>>>> getBgmCalendar() async {
   final response = await _get('$_bgmNextBase/p1/calendar');
-  final data = _jsonMap(response.data);
+  final data = _jsonMap(response);
   return {for (final entry in data.entries) entry.key: _mapList(entry.value)};
 }
 
-Future<Response> getBgmSubjectComments(
+Future<String> getBgmSubjectComments(
   int subjectId, {
   int limit = 20,
   int offset = 0,
 }) {
   final cacheKey = '$subjectId:$limit:$offset';
-  return _subjectCommentsCache
-      .get(
-        cacheKey,
-        () async => (await _get(
-          '$_bgmNextBase/p1/subjects/$subjectId/comments?limit=$limit&offset=$offset',
-        )).data,
-      )
-      .then(Response.new);
+  return _subjectCommentsCache.get(
+    cacheKey,
+    () => _get(
+      '$_bgmNextBase/p1/subjects/$subjectId/comments?limit=$limit&offset=$offset',
+    ),
+  );
 }
 
-Future<Response> getBgmEpisodeComments(int episodeId) {
-  return _episodeCommentsCache
-      .get(
-        episodeId,
-        () async =>
-            (await _get('$_bgmNextBase/p1/episodes/$episodeId/comments')).data,
-      )
-      .then(Response.new);
-}
+Future<String> getBgmEpisodeComments(int episodeId) =>
+    _episodeCommentsCache.get(
+      episodeId,
+      () => _get('$_bgmNextBase/p1/episodes/$episodeId/comments'),
+    );
 
-Future<Response> getBgmCharacterInfo(int characterId) {
+Future<String> getBgmCharacterInfo(int characterId) {
   return _get('$_bgmNextBase/p1/characters/$characterId');
 }
 
-Future<Response> getBgmCharacterComments(int characterId) {
+Future<String> getBgmCharacterComments(int characterId) {
   return _get('$_bgmNextBase/p1/characters/$characterId/comments');
 }
 
@@ -143,16 +134,13 @@ Future<List<Map<String, dynamic>>> searchBgmByTag(
       'filter': filter,
     },
   );
-  return _mapList(_jsonMap(response.data)['data']);
+  return _mapList(_jsonMap(response)['data']);
 }
 
-Future<Response> _get(String url) async {
-  return await NetUtils.get(url) as Response;
-}
+Future<String> _get(String url) => NetUtils.get(url);
 
-Future<Response> _post(String url, Map<String, dynamic> body) async {
-  return await NetUtils.post(url, body) as Response;
-}
+Future<String> _post(String url, Map<String, dynamic> body) =>
+    NetUtils.post(url, body);
 
 Map<String, dynamic> _jsonMap(String source) =>
     jsonDecode(source) as Map<String, dynamic>;

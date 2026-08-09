@@ -4,7 +4,7 @@ import 'package:baka/utils/bgm_utils.dart';
 
 String get host => ApiConfig.host;
 
-Future getPost(
+Future<String> getPost(
   String sort,
   String tag,
   int page,
@@ -19,29 +19,34 @@ Future getPost(
   return res;
 }
 
-Future getPostDetail<T>(int pid) {
+Future<String> getPostDetail(int pid) {
   return NetUtils.get('$host/post/$pid');
 }
 
-dynamic getPlayUrl(String url) {
+Future<String> getPlayUrl(String url) {
   return NetUtils.get('$host/play?url=$url');
 }
 
-Future getSearch(String? key) {
+Future<String> getSearch(String? key) {
   return NetUtils.get('$host/search/posts?key=$key');
 }
 
-Future getRank(int day) {
+Future<String> getRank(int day) {
   return NetUtils.get('$host/rank?day=$day');
 }
 
-Future getComments(int? pid, int pageSize, String? runame, {int page = 1}) {
+Future<String> getComments(
+  int? pid,
+  int pageSize,
+  String? runame, {
+  int page = 1,
+}) {
   return NetUtils.get(
     '$host/comments?pid=$pid&runame=$runame&page=$page&pageSize=$pageSize',
   );
 }
 
-Future getDanmu(int bgmId, int episodeIndex, String? title) {
+Future<String> getDanmu(int bgmId, int episodeIndex, String? title) {
   final season = title == null ? null : BgmUtils.extractSeason(title);
   final uri = Uri.https('danmu.anibaka.com', '/danmu/list', {
     'gv': '$bgmId',
@@ -52,26 +57,26 @@ Future getDanmu(int bgmId, int episodeIndex, String? title) {
   return NetUtils.get(uri.toString());
 }
 
-Future login(dynamic data) {
+Future<String> login(Map<String, Object?> data) {
   return NetUtils.post('$host/user/login', data);
 }
 
-Future register(dynamic data) {
+Future<String> register(Map<String, Object?> data) {
   return NetUtils.post('$host/user/register', data);
 }
 
-Future addComment(dynamic data) {
+Future<String> addComment(Map<String, Object?> data) {
   return NetUtils.post('$host/comment/add', data);
 }
 
-Future checkAppUpdateApi() {
+Future<String> checkAppUpdateApi() {
   return NetUtils.get('https://version.anibaka.com/');
 }
 
-Future getGonggao() {
+Future<String> getGonggao() {
   return NetUtils.get('$host/post/1');
 }
 
-Future updateCommentUv(dynamic cid, dynamic name) {
+Future<String> updateCommentUv(Object cid, Object? name) {
   return NetUtils.post('$host/comment/uv?cid=$cid&name=$name', {});
 }

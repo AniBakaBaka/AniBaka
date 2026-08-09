@@ -2,11 +2,11 @@ import 'dart:collection';
 import 'dart:convert';
 
 import 'package:baka/api/post.dart';
+import 'package:baka/instance.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class DanmakuService {
   static const String _settingsKey = 'danmaku_settings';
@@ -72,7 +72,7 @@ class DanmakuService {
     for (final title in titles) {
       try {
         final response = await getDanmu(bgmId, episodeIndex, title);
-        final items = await decode(response.data as String);
+        final items = await decode(response);
         if (items.isNotEmpty) return items;
       } catch (error) {
         debugPrint('fetch danmaku error: $error');
@@ -90,7 +90,7 @@ class DanmakuService {
   }
 
   static Future<void> loadSettings(DanmakuController controller) async {
-    final preferences = await SharedPreferences.getInstance();
+    final preferences = Instances.sp;
     final option = _parseOption(
       BgmUtils.parseJsonMap(preferences.getString(_settingsKey)) ?? const {},
     );
@@ -119,7 +119,7 @@ class DanmakuService {
 
   static Future<void> saveSettings(DanmakuController controller) async {
     final option = controller.option;
-    final preferences = await SharedPreferences.getInstance();
+    final preferences = Instances.sp;
     await Future.wait([
       preferences.setString(
         _settingsKey,

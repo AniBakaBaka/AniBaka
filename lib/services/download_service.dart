@@ -26,8 +26,9 @@ class DownloadService {
   static final _illegalPathCharsRe = RegExp(r'[\\/:*?"<>|\r\n]+');
   static final _whitespaceRe = RegExp(r'\s+');
 
-  final ValueNotifier<List<DownloadTask>> tasksNotifier = ValueNotifier([]);
-  List<DownloadTask> get tasks => tasksNotifier.value;
+  final _DownloadTasksNotifier _tasks = _DownloadTasksNotifier();
+  ValueListenable<List<DownloadTask>> get tasksListenable => _tasks;
+  List<DownloadTask> get tasks => _tasks.value;
 
   bool _initialized = false;
   final _readyCompleter = Completer<void>();
@@ -45,7 +46,7 @@ class DownloadService {
   );
 
   final Map<String, CancelToken> _cancelTokens = {};
-  Timer? _saveTimer;
+  bool _saveScheduled = false;
 
   Future<void> init() async {
     if (_initialized) return;
@@ -59,7 +60,7 @@ class DownloadService {
     try {
       final storedTasks = AppStorage.downloadTasksBox.get(_storageKey);
       if (storedTasks is List) {
-        tasksNotifier.value = _restoreTasks(storedTasks);
+        _tasks.value = _restoreTasks(storedTasks);
       }
     } catch (e) {
       if (kDebugMode) debugPrint('DownloadService load error: $e');
@@ -79,15 +80,19 @@ class DownloadService {
   }
 
   void _scheduleSave() {
-    _saveTimer?.cancel();
-    _saveTimer = Timer(const Duration(seconds: 2), _save);
+    if (_saveScheduled) return;
+    _saveScheduled = true;
+    scheduleMicrotask(() {
+      _saveScheduled = false;
+      unawaited(_save());
+    });
   }
 
   Future<void> _save() async {
     try {
       await AppStorage.downloadTasksBox.put(
         _storageKey,
-        tasks.map((task) => task.toJson()).toList(),
+        tasks.map((task) => task.toJson()).toList(growable: false),
       );
     } catch (e) {
       if (kDebugMode) debugPrint('DownloadService save error: $e');
@@ -95,20 +100,22 @@ class DownloadService {
   }
 
   void _notifyAndSave() {
-    tasksNotifier.value = List.from(tasks);
+    _tasks.changed();
     _scheduleSave();
   }
 
   int addTasks(List<DownloadTask> newTasks) {
     final existingIds = tasks.map((e) => e.id).toSet();
-    final filtered = newTasks
-        .where((task) => !existingIds.contains(task.id))
-        .toList();
-    if (filtered.isEmpty) return 0;
-    tasks.addAll(filtered);
+    var added = 0;
+    for (final task in newTasks) {
+      if (!existingIds.add(task.id)) continue;
+      tasks.add(task);
+      added++;
+    }
+    if (added == 0) return 0;
     _notifyAndSave();
     _processQueue();
-    return filtered.length;
+    return added;
   }
 
   void pause(DownloadTask task) {
@@ -721,6 +728,12 @@ class DownloadService {
       type: DioExceptionType.cancel,
     );
   }
+}
+
+class _DownloadTasksNotifier extends ValueNotifier<List<DownloadTask>> {
+  _DownloadTasksNotifier() : super(<DownloadTask>[]);
+
+  void changed() => notifyListeners();
 }
 
 class _M3u8Playlist {

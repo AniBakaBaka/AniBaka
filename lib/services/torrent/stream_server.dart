@@ -24,9 +24,7 @@ class TorrentStreamServer {
   PieceManager? _pieceManager;
   int _port = 0;
 
-  int get port => _port;
   String get streamUrl => 'http://127.0.0.1:$_port/stream.video';
-  bool get isRunning => _server != null;
 
   Future<void> start(PieceManager pieceManager) async {
     await stop();

@@ -33,7 +33,7 @@ const _maxMetadataSize = 8 * 1024 * 1024;
 abstract class _PeerBase {
   final PeerAddress address;
   final Uint8List infoHash;
-  final String peerId;
+  final Uint8List peerId;
 
   Socket? _socket;
   bool _connected = false;
@@ -105,13 +105,15 @@ abstract class _PeerBase {
     if (!_connected || _socket == null || _sentHandshake) return;
     final reserved = Uint8List(8);
     reserved[5] |= _extensionProtocolMask;
-    final padded = utf8.encode(peerId.padRight(20)).sublist(0, 20);
+    if (peerId.length != 20) {
+      throw StateError('BitTorrent peer id must be exactly 20 bytes');
+    }
     final buf = BytesBuilder()
       ..addByte(19)
       ..add(utf8.encode(_protocolName))
       ..add(reserved)
       ..add(infoHash)
-      ..add(padded);
+      ..add(peerId);
     _sentHandshake = true;
     _socket!.add(buf.toBytes());
   }
@@ -156,7 +158,7 @@ abstract class _PeerBase {
         return;
       }
       if (bytes[0] != 19 ||
-          utf8.decode(bytes.sublist(1, 20)) != _protocolName ||
+          utf8.decode(Uint8List.sublistView(bytes, 1, 20)) != _protocolName ||
           !_bytesEqual(Uint8List.sublistView(bytes, 28, 48), infoHash)) {
         _handshake?.complete(false);
         disconnect();
@@ -249,11 +251,9 @@ class PeerConnection extends _PeerBase {
   bool _choked = true;
   bool _amChoking = true;
   final Map<({int pieceIndex, int begin}), DateTime> _pendingRequests = {};
-  int _uploadedBytes = 0;
 
-  final Set<int> _peerPieces = {};
+  Uint8List? _peerBitfield;
   bool _receivedBitfield = false;
-  Set<int>? _allPieces;
 
   Timer? _keepAliveTimer;
 
@@ -267,7 +267,6 @@ class PeerConnection extends _PeerBase {
   }) : metadataBytes = metadataBytes ?? pieceManager.metadata.rawInfoBytes;
 
   bool get isChoked => _choked;
-  int get uploadedBytes => _uploadedBytes;
 
   /// 主动连接 + 握手。
   Future<bool> connect() async {
@@ -303,9 +302,8 @@ class PeerConnection extends _PeerBase {
   void fillRequestPipeline() {
     if (_choked || !_connected || pieceManager.isComplete) return;
     _expirePendingRequests();
-    final pieces = _availablePieces;
     while (_pendingRequests.length < _maxPendingRequests) {
-      final block = pieceManager.nextBlock(availablePieces: pieces);
+      final block = pieceManager.nextBlock(peerHasPiece: _peerHasPiece);
       if (block == null) break;
       if (!_sendRequest(block.pieceIndex, block.begin, block.length)) {
         pieceManager.cancelBlockRequest(block.pieceIndex, block.begin);
@@ -329,12 +327,12 @@ class PeerConnection extends _PeerBase {
     _releasePendingRequests();
   }
 
-  /// 已知 peer 拥有的分片：未收到 bitfield/have 时假设其全有。
-  Set<int> get _availablePieces {
-    if (_receivedBitfield || _peerPieces.isNotEmpty) return _peerPieces;
-    return _allPieces ??= {
-      for (var i = 0; i < pieceManager.metadata.pieceCount; i++) i,
-    };
+  bool _peerHasPiece(int pieceIndex) {
+    final bitfield = _peerBitfield;
+    if (bitfield == null) return !_receivedBitfield;
+    final byteIndex = pieceIndex ~/ 8;
+    return byteIndex < bitfield.length &&
+        bitfield[byteIndex] & (0x80 >> (pieceIndex % 8)) != 0;
   }
 
   @override
@@ -367,7 +365,6 @@ class PeerConnection extends _PeerBase {
 
   void _recordUploaded(int bytes) {
     if (bytes <= 0) return;
-    _uploadedBytes += bytes;
     onUploaded?.call(bytes);
   }
 
@@ -413,33 +410,28 @@ class PeerConnection extends _PeerBase {
       case BtMessage.have:
         if (payload != null && payload.length >= 4) {
           final piece = ByteData.sublistView(payload).getUint32(0);
-          if (piece < pieceManager.metadata.pieceCount) _peerPieces.add(piece);
+          if (piece < pieceManager.metadata.pieceCount) {
+            final bitfield = _peerBitfield ??= Uint8List(
+              (pieceManager.metadata.pieceCount + 7) ~/ 8,
+            );
+            _receivedBitfield = true;
+            bitfield[piece ~/ 8] |= 0x80 >> (piece % 8);
+          }
         }
       case BtMessage.bitfield:
         if (payload != null) {
-          _peerPieces.clear();
-          _parseBitfield(payload);
-          _receivedBitfield = true;
-          _releaseUnavailableRequests();
+          final expected = (pieceManager.metadata.pieceCount + 7) ~/ 8;
+          if (payload.length == expected) {
+            _peerBitfield = Uint8List.fromList(payload);
+            _receivedBitfield = true;
+            _releaseUnavailableRequests();
+          }
         }
         if (!_choked) fillRequestPipeline();
       case BtMessage.request:
         _handleRequest(payload);
       case BtMessage.piece:
         _handlePieceData(payload);
-    }
-  }
-
-  void _parseBitfield(Uint8List bitfield) {
-    final totalPieces = pieceManager.metadata.pieceCount;
-    for (var byteIdx = 0; byteIdx < bitfield.length; byteIdx++) {
-      final b = bitfield[byteIdx];
-      if (b == 0) continue;
-      for (var bitIdx = 0; bitIdx < 8; bitIdx++) {
-        if (b & (0x80 >> bitIdx) == 0) continue;
-        final pieceIndex = byteIdx * 8 + bitIdx;
-        if (pieceIndex < totalPieces) _peerPieces.add(pieceIndex);
-      }
     }
   }
 
@@ -480,7 +472,7 @@ class PeerConnection extends _PeerBase {
 
   void _releaseUnavailableRequests() {
     final unavailable = _pendingRequests.keys
-        .where((request) => !_peerPieces.contains(request.pieceIndex))
+        .where((request) => !_peerHasPiece(request.pieceIndex))
         .toList(growable: false);
     for (final request in unavailable) {
       _pendingRequests.remove(request);

@@ -31,7 +31,7 @@ class _CustomSourceEditPageState extends State<CustomSourceEditPage> {
   };
 
   final _formKey = GlobalKey<FormState>();
-  final _manager = SourceAdapterService.instance;
+  final _catalog = SourceCatalog.instance;
 
   late final TextEditingController _nameController;
   late final TextEditingController _baseUrlController;
@@ -175,8 +175,8 @@ class _CustomSourceEditPageState extends State<CustomSourceEditPage> {
     try {
       final config = _buildConfig(_parsePipeline()!);
       final saved = _isEditing
-          ? await _manager.updateCustomSource(config)
-          : await _manager.addCustomSource(config);
+          ? await _catalog.updateCustomSource(config)
+          : await _catalog.addCustomSource(config);
       if (!mounted) return;
       if (!saved) {
         showSnackBar(_isEditing ? '图源不存在，无法更新' : '图源 ID 已存在', isError: true);

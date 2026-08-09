@@ -223,7 +223,7 @@ class CommentListState extends State<CommentList> {
 
     try {
       final response = await getComments(widget.pid, widget.size ?? 80, '');
-      final decoded = jsonDecode(response.data);
+      final decoded = jsonDecode(response);
       result = processCommentsList(
         decoded is Map ? decoded['data'] as List? : null,
       );
@@ -500,7 +500,7 @@ class CommentListState extends State<CommentList> {
                         userName,
                       );
                       if (!mounted) return;
-                      comment['uv'] = jsonDecode(response.data)['msg'];
+                      comment['uv'] = jsonDecode(response)['msg'];
                       setState(() {});
                     } catch (_) {
                       showSnackBar('操作失败');
@@ -739,7 +739,7 @@ class CommentListState extends State<CommentList> {
         'runame': runame,
         'read': 0,
       });
-      if (jsonDecode(response.data)['code'] == 200) {
+      if (jsonDecode(response)['code'] == 200) {
         showSnackBar('发射成功');
         await _loadComments();
       }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
@@ -226,8 +227,7 @@ class VideoSourceSearchController extends ChangeNotifier {
   final _rankCache = <String, SourceMatchScore>{};
   final _triedProbes = <String>{};
   final _probeQueue = <_ProbeJob>[];
-  bool _probePumpRunning = false;
-  int _activeProbeWorkers = 0;
+  Future<void>? _probePumpFuture;
   DateTime? _autoMatchStartedAt;
   Completer<bool>? _autoMatchGate;
 
@@ -335,13 +335,14 @@ class VideoSourceSearchController extends ChangeNotifier {
   }
 
   List<String> _readManualAliases() {
-    final store = AliasStorageService.readStore();
-    final raw = store[_aliasKey] ?? store['title:${_norm(title)}'];
-    if (raw is! List) return const [];
+    final raw = AliasStorageService.readAliases(
+      _aliasKey,
+      fallbackKey: 'title:${_norm(title)}',
+    );
     final seen = {_norm(_primary)};
     return [
       for (final item in raw)
-        if (item?.toString().trim() case final String a
+        if (item.trim() case final String a
             when a.isNotEmpty && seen.add(_norm(a)))
           a,
     ];
@@ -628,7 +629,6 @@ class VideoSourceSearchController extends ChangeNotifier {
     _rankCache.clear();
     _triedProbes.clear();
     _probeQueue.clear();
-    _probePumpRunning = false;
     _results.clear();
     _sourceCounts.clear();
     _errors.clear();
@@ -778,12 +778,10 @@ class VideoSourceSearchController extends ChangeNotifier {
 
   Future<List<Map<String, dynamic>>> _loadInternal(String keyword) async {
     final response = await getSearch(keyword);
-    final raw = BgmUtils.parseJsonMap(response.data)?['data'];
-    if (raw is! List) return const [];
+    final raw = (jsonDecode(response) as Map<String, dynamic>)['data'] as List;
     return [
       for (final item in raw)
-        if (item is Map && item['videos'] != null)
-          Map<String, dynamic>.from(item),
+        if (item is Map && item['videos'] != null) item as Map<String, dynamic>,
     ];
   }
 
@@ -826,12 +824,8 @@ class VideoSourceSearchController extends ChangeNotifier {
         return sb.compareTo(sa);
       });
       for (final item in freshHigh) {
-        final conf = _rankCache[item.key]?.confidence ?? 0;
-        _enqueueAutoProbe(
-          runId,
-          item,
-          priority: conf >= AutoMatchStrategy.priorityProbeConfidence,
-        );
+        final score = _rankCache[item.key]!;
+        _enqueueAutoProbe(runId, item, priority: score.isHighConfidenceTitle);
       }
     } else if (!autoMatchMode) {
       // 手动搜索：后台预解析前几名，点选时尽量零等待。
@@ -893,7 +887,7 @@ class VideoSourceSearchController extends ChangeNotifier {
     } else {
       _probeQueue.add(job);
     }
-    unawaited(_pumpAutoProbes());
+    _ensureProbePump();
   }
 
   bool get _autoMatchTimedOut {
@@ -902,63 +896,52 @@ class VideoSourceSearchController extends ChangeNotifier {
     return DateTime.now().difference(started) >= _autoMatchWallClock;
   }
 
-  Future<void> _pumpAutoProbes() async {
-    if (_probePumpRunning) return;
-    _probePumpRunning = true;
-    try {
-      final workers = List.generate(
-        _autoProbeConcurrency,
-        (_) => _autoProbeWorker(),
-      );
-      await Future.wait(workers);
-    } finally {
-      _probePumpRunning = false;
-      // 泵期间又有新任务则续跑
-      if (_probeQueue.isNotEmpty &&
-          !_autoMatched &&
-          !_disposed &&
-          !_autoMatchTimedOut) {
-        unawaited(_pumpAutoProbes());
-      }
-    }
+  void _ensureProbePump() {
+    if (_probePumpFuture != null) return;
+    _probePumpFuture =
+        Future.wait([
+          for (var i = 0; i < _autoProbeConcurrency; i++) _autoProbeWorker(),
+        ]).whenComplete(() {
+          _probePumpFuture = null;
+          if (_probeQueue.isNotEmpty &&
+              !_autoMatched &&
+              !_disposed &&
+              !_autoMatchTimedOut) {
+            _ensureProbePump();
+          }
+        });
   }
 
   Future<void> _autoProbeWorker() async {
-    _activeProbeWorkers++;
-    try {
-      while (!_disposed && !_autoMatched && !_userSelected) {
-        if (_autoMatchTimedOut) {
+    while (!_disposed && !_autoMatched && !_userSelected) {
+      if (_autoMatchTimedOut) {
+        _probeQueue.clear();
+        return;
+      }
+      if (_probeQueue.isEmpty) return;
+      final job = _probeQueue.removeAt(0);
+      if (!_alive(job.runId) || _autoMatched || _userSelected) return;
+      final probeKey = '${job.item.key}|$_ep|1';
+      if (_triedProbes.contains(probeKey)) continue;
+      _triedProbes.add(probeKey);
+
+      try {
+        final probe = await ensureCandidatePlayable(
+          job.item,
+          episodeIndex: _ep,
+          preferredLine: 1,
+          resolveMedia: true,
+          raceMode: true,
+        ).timeout(_candidateBudget);
+        if (!_alive(job.runId) || _userSelected || _autoMatched) return;
+        if (probe.isInstantPlayable && probe.data != null) {
+          _claimAutoMatch(job.runId, job.item, probe.data!);
           _probeQueue.clear();
           return;
         }
-        if (_probeQueue.isEmpty) return;
-        final job = _probeQueue.removeAt(0);
-        if (!_alive(job.runId) || _autoMatched || _userSelected) return;
-        final probeKey = '${job.item.key}|$_ep|1';
-        if (_triedProbes.contains(probeKey)) continue;
-        _triedProbes.add(probeKey);
-
-        try {
-          // 竞速：严格单候选预算，超时即放弃该源。
-          final probe = await ensureCandidatePlayable(
-            job.item,
-            episodeIndex: _ep,
-            preferredLine: 1,
-            resolveMedia: true,
-            raceMode: true,
-          ).timeout(_candidateBudget);
-          if (!_alive(job.runId) || _userSelected || _autoMatched) return;
-          if (probe.isInstantPlayable && probe.data != null) {
-            _claimAutoMatch(job.runId, job.item, probe.data!);
-            _probeQueue.clear();
-            return;
-          }
-        } catch (_) {
-          // 单候选失败/超时：继续竞速其他源
-        }
+      } catch (_) {
+        // One candidate failing must not cancel the remaining sources.
       }
-    } finally {
-      _activeProbeWorkers--;
     }
   }
 
@@ -979,12 +962,8 @@ class VideoSourceSearchController extends ChangeNotifier {
     final bySource = <String, List<SearchResultItem>>{};
     for (final s in ranked) {
       final pass = finalPass
-          ? s.confidence >= AutoMatchStrategy.finalProbeConfidence &&
-                !s.seasonConflict &&
-                !s.severeEpisodeConflict
-          : s.confidence >= AutoMatchStrategy.immediateProbeConfidence &&
-                !s.seasonConflict &&
-                !s.severeEpisodeConflict;
+          ? s.shouldProbeOnFinalPass
+          : s.shouldProbeImmediately;
       if (!pass) continue;
       final item = _results[s.candidate.key];
       if (item == null) continue;
@@ -1008,19 +987,16 @@ class VideoSourceSearchController extends ChangeNotifier {
       _enqueueAutoProbe(
         runId,
         item,
-        priority:
-            (_rankCache[item.key]?.confidence ?? 0) >=
-            AutoMatchStrategy.priorityProbeConfidence,
+        priority: _rankCache[item.key]?.isHighConfidenceTitle ?? false,
       );
     }
 
-    // 等待当前队列抽干 / 认领 / 墙钟超时
-    while ((_probePumpRunning ||
-            _probeQueue.isNotEmpty ||
-            _activeProbeWorkers > 0) &&
-        !_autoMatchTimedOut) {
+    // Await the active worker batch directly; no polling delay.
+    while (!_autoMatchTimedOut) {
       if (!_alive(runId) || _autoMatched || _userSelected) return;
-      await Future<void>.delayed(const Duration(milliseconds: 25));
+      final pump = _probePumpFuture;
+      if (pump == null) return;
+      await pump;
     }
   }
 
@@ -1052,7 +1028,7 @@ class VideoSourceSearchController extends ChangeNotifier {
         ).timeout(_candidateBudget);
         if (probe.isInstantPlayable && probe.data != null) {
           unawaited(persistMatchMemory(item, probe.data!));
-          return Map<String, dynamic>.from(probe.data!);
+          return probe.data!;
         }
       } catch (_) {}
     }

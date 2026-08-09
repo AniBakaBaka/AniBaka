@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:baka/instance.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/models/subtitle_config.dart';
-import 'package:baka/widgets/baka_player/mpv_config.dart';
 import 'package:flutter/painting.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -60,6 +59,26 @@ class PlaybackSettingsService {
   static final videoRendererOptions = videoRendererLabels.keys.toList(
     growable: false,
   );
+  static const _tvHwdecModeOptions = <String>[
+    'auto-safe',
+    'mediacodec-copy',
+    'no',
+  ];
+  static const _tvHwdecModeLabels = <String, String>{
+    'auto-safe': '安全模式',
+    'mediacodec-copy': '硬解复制',
+    'no': '软件解码',
+  };
+  static const _androidRendererOptions = <String>['gpu', 'mediacodec_embed'];
+  static const _androidRendererLabels = <String, String>{
+    'gpu': 'gpu',
+    'mediacodec_embed': 'mediacodec_embed',
+  };
+  static const _desktopRendererOptions = <String>['gpu', 'gpu-next'];
+  static const _desktopRendererLabels = <String, String>{
+    'gpu': 'gpu',
+    'gpu-next': 'gpu-next',
+  };
 
   /// 当前平台可选的硬解模式。
   ///
@@ -67,40 +86,22 @@ class PlaybackSettingsService {
   /// [normalizeHwdecMode] 会把它改写成 `mediacodec-copy`；选项列表同步去掉
   /// `auto`，避免 UI 出现不可达档位。
   static List<String> get hwdecModeOptionsForPlatform {
-    if (!Instances.isTV) return hwdecModeOptions;
-    return hwdecModeOptions
-        .where((mode) => mode != 'auto')
-        .toList(growable: false);
+    return Instances.isTV ? _tvHwdecModeOptions : hwdecModeOptions;
   }
 
   static Map<String, String> get hwdecModeLabelsForPlatform {
-    if (!Instances.isTV) return hwdecModeLabels;
-    return Map.unmodifiable(<String, String>{
-      for (final entry in hwdecModeLabels.entries)
-        if (entry.key != 'auto') entry.key: entry.value,
-    });
+    return Instances.isTV ? _tvHwdecModeLabels : hwdecModeLabels;
   }
 
   /// 当前平台可选的渲染器。
   static List<String> get videoRendererOptionsForPlatform {
-    final isAndroid = Platform.isAndroid;
-    return videoRendererOptions
-        .where(
-          (renderer) =>
-              (isAndroid && renderer != 'gpu-next') ||
-              (!isAndroid && renderer != mediacodecEmbedRenderer),
-        )
-        .toList(growable: false);
+    return Platform.isAndroid
+        ? _androidRendererOptions
+        : _desktopRendererOptions;
   }
 
   static Map<String, String> get videoRendererLabelsForPlatform {
-    final isAndroid = Platform.isAndroid;
-    return Map.unmodifiable(<String, String>{
-      for (final entry in videoRendererLabels.entries)
-        if ((isAndroid && entry.key != 'gpu-next') ||
-            (!isAndroid && entry.key != mediacodecEmbedRenderer))
-          entry.key: entry.value,
-    });
+    return Platform.isAndroid ? _androidRendererLabels : _desktopRendererLabels;
   }
 
   /// 旧渲染档位迁移到真实 vo 名称：自动/兼容 → gpu，高质量 → gpu-next。

@@ -36,8 +36,8 @@ class HlsByteRange {
 /// - fMP4 / CMAF：`#EXT-X-MAP` init + 若干 `moof/mdat` 分片 → `video.mp4`
 /// - MPEG-TS：顺序拼接分片 → `video.ts`
 abstract final class HlsOfflineRemux {
-  static const remuxedMp4Name = 'video.mp4';
-  static const remuxedTsName = 'video.ts';
+  static const _remuxedMp4Name = 'video.mp4';
+  static const _remuxedTsName = 'video.ts';
 
   static final _mapUriRe = RegExp(
     r'URI=(?:"([^"]+)"|([^,\s]+))',
@@ -51,35 +51,6 @@ abstract final class HlsOfflineRemux {
     r'BYTERANGE=(?:"([^"]+)"|([^,\s]+))',
     caseSensitive: false,
   );
-
-  /// 是否为本机 m3u8 路径。
-  static bool isLocalM3u8Path(String? path) {
-    if (path == null || path.isEmpty) return false;
-    final lower = path.toLowerCase();
-    if (lower.startsWith('http://') || lower.startsWith('https://')) {
-      return false;
-    }
-    final bare = lower.split('?').first;
-    return bare.endsWith('.m3u8') || bare.endsWith('.m3u');
-  }
-
-  /// 若 [path] 是离线 m3u8，合并后返回单文件路径；否则原样返回。
-  ///
-  /// 已合并过（同目录存在 `video.mp4` / `video.ts`）时直接返回单文件，
-  /// 即使清单已被清理。
-  static Future<String> ensurePlayablePath(String path) async {
-    if (!isLocalM3u8Path(path)) return path;
-    final manifestPath = _toFileSystemPath(path);
-    final dir = File(manifestPath).parent;
-    final existing = await _existingRemux(dir);
-    if (existing != null) return existing;
-
-    final manifest = File(manifestPath);
-    if (!await manifest.exists()) return path;
-
-    final remuxed = await remuxManifest(manifestPath);
-    return remuxed ?? path;
-  }
 
   /// 将清单对应分片合并为单文件，成功返回输出路径。
   static Future<String?> remuxManifest(String manifestPath) async {
@@ -103,7 +74,7 @@ abstract final class HlsOfflineRemux {
       }
     }
 
-    final outName = plan.isFmp4 ? remuxedMp4Name : remuxedTsName;
+    final outName = plan.isFmp4 ? _remuxedMp4Name : _remuxedTsName;
     final outPath = _join(dir.path, outName);
     final outFile = File(outPath);
     final partial = File('$outPath.partial');
@@ -137,29 +108,32 @@ abstract final class HlsOfflineRemux {
   }
 
   /// 将 [file] 裁剪为 byterange 指定的内容。已是目标长度则跳过。
-  static Future<bool> sliceFileToByteRange(File file, HlsByteRange range) async {
+  static Future<bool> sliceFileToByteRange(
+    File file,
+    HlsByteRange range,
+  ) async {
     if (!await file.exists()) return false;
     final length = await file.length();
     if (length == range.length) return false;
     final end = range.offset + range.length;
     if (length < end) return false;
-    final raf = await file.open();
+    final partial = File('${file.path}.range');
     try {
-      await raf.setPosition(range.offset);
-      final bytes = await raf.read(range.length);
-      await raf.close();
-      await file.writeAsBytes(bytes, flush: true);
+      if (await partial.exists()) await partial.delete();
+      await file
+          .openRead(range.offset, end)
+          .pipe(partial.openWrite(mode: FileMode.writeOnly));
+      await file.delete();
+      await partial.rename(file.path);
       return true;
     } catch (_) {
-      try {
-        await raf.close();
-      } catch (_) {}
+      if (await partial.exists()) await partial.delete();
       return false;
     }
   }
 
   static Future<String?> _existingRemux(Directory dir) async {
-    for (final name in [remuxedMp4Name, remuxedTsName]) {
+    for (final name in [_remuxedMp4Name, _remuxedTsName]) {
       final f = File(_join(dir.path, name));
       if (await f.exists() && await f.length() > 0) return f.path;
     }
@@ -170,9 +144,10 @@ abstract final class HlsOfflineRemux {
     Directory dir,
     String content,
   ) async {
-    final lines = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split(
-      '\n',
-    );
+    final lines = content
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .split('\n');
     final parts = <_RemuxPart>[];
     String? mapUri;
     HlsByteRange? mapRange;
@@ -201,12 +176,7 @@ abstract final class HlsOfflineRemux {
 
       if (line.startsWith('#')) continue;
 
-      parts.add(
-        _RemuxPart(
-          path: _join(dir.path, line),
-          range: pendingRange,
-        ),
-      );
+      parts.add(_RemuxPart(path: _join(dir.path, line), range: pendingRange));
       pendingRange = null;
     }
 
@@ -246,7 +216,7 @@ abstract final class HlsOfflineRemux {
     try {
       final header = await raf.read(12);
       if (header.length < 8) return false;
-      final tag = String.fromCharCodes(header.sublist(4, 8));
+      final tag = String.fromCharCodes(header, 4, 8);
       return tag == 'ftyp' || tag == 'moof' || tag == 'styp';
     } catch (_) {
       return false;
@@ -258,16 +228,6 @@ abstract final class HlsOfflineRemux {
   static String _join(String parent, String child) {
     if (parent.endsWith('/') || parent.endsWith(r'\')) return '$parent$child';
     return '$parent${Platform.pathSeparator}$child';
-  }
-
-  static String _toFileSystemPath(String path) {
-    final lower = path.toLowerCase();
-    if (!lower.startsWith('file:')) return path;
-    try {
-      return Uri.parse(path).toFilePath();
-    } catch (_) {
-      return path.replaceFirst(RegExp(r'^file:///?', caseSensitive: false), '');
-    }
   }
 }
 

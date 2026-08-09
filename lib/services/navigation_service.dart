@@ -40,19 +40,21 @@ class NavigationService {
     );
   }
 
-  /// 导航到番剧详情/播放页面（pushAndRemoveUntil，保留首页）
+  /// 导航到番剧详情页，并保留当前页面以便正常返回。
   static void toDetail(
     BuildContext context,
     Map data, {
     int? posIndex,
     bool autoMatch = false,
   }) {
-    Navigator.pushAndRemoveUntil(
+    // PlayerService enriches its data with resolved source/episode state.
+    // Keep that route-local so returning to the same card still opens detail.
+    final routeData = Map<String, dynamic>.from(data);
+    Navigator.push(
       context,
       _slideRoute(
-        PlayerPage(data: data, posIndex: posIndex, autoMatch: autoMatch),
+        PlayerPage(data: routeData, posIndex: posIndex, autoMatch: autoMatch),
       ),
-      (route) => route.isFirst,
     );
   }
 
@@ -66,10 +68,13 @@ class NavigationService {
   }) {
     final navigator = Navigator.of(context);
     if (popFirst) navigator.pop();
+    // Playback selection mutates the page data as episodes and lines change.
+    // Do not leak that state back into a detail page or search result card.
+    final routeData = Map<String, dynamic>.from(data);
     final PageRoute<void> route = fade
         ? platformPageRoute<void>(
             builder: (_) => PlayerPage(
-              data: data,
+              data: routeData,
               posIndex: posIndex,
               autoMatch: autoMatch,
             ),
@@ -78,7 +83,11 @@ class NavigationService {
             transitionDuration: const Duration(milliseconds: 300),
           )
         : _slideRoute(
-            PlayerPage(data: data, posIndex: posIndex, autoMatch: autoMatch),
+            PlayerPage(
+              data: routeData,
+              posIndex: posIndex,
+              autoMatch: autoMatch,
+            ),
           );
     navigator.push(route);
   }

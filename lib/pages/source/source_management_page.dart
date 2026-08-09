@@ -115,7 +115,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
 
   Future<void> _toggleCustomSource(CustomSourceConfig source) async {
     HapticFeedback.lightImpact();
-    await _sources.updateCustomSource(
+    await _catalog.updateCustomSource(
       source.copyWith(enabled: !source.enabled),
     );
   }
@@ -131,7 +131,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
     );
     if (!confirmed || !mounted) return;
 
-    final deleted = await _sources.deleteCustomSource(source.id);
+    final deleted = await _catalog.deleteCustomSource(source.id);
     if (!mounted) return;
     showSnackBar(deleted ? '已删除“${source.name}”' : '删除失败', isError: !deleted);
   }
@@ -146,7 +146,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
     );
     if (!confirmed || !mounted) return;
 
-    await _sources.clearAllCustomSources();
+    await _catalog.clearCustomSources();
     if (!mounted) return;
     setState(() => _editing = false);
     showSnackBar('已清空全部自定义源');
@@ -265,7 +265,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
     if (confirmed != true || text.isEmpty) return;
 
     try {
-      final count = await _sources.importCustomSource(text);
+      final count = await _catalog.importCustomSource(text);
       if (mounted) {
         showSnackBar(count > 0 ? '导入成功' : '配置格式无效', isError: count == 0);
       }
@@ -789,7 +789,7 @@ class _HubRule {
   });
 
   String get catalogKey =>
-      '${item.id}\n${item.name}\n${item.baseUrl ?? ''}\n${item.file ?? ''}';
+      '${item.id}\n${item.name}\n${item.baseUrl ?? ''}\n${item.file}';
 
   String get operationKey => '$indexUrl\n${item.installKey}';
 }

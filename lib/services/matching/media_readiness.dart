@@ -1,4 +1,5 @@
 import 'package:baka/source/video_url_extractor.dart';
+import 'package:baka/services/torrent/torrent_model.dart';
 
 /// 线路 token / 媒体 URL 的就绪分类。
 ///
@@ -21,16 +22,11 @@ enum MediaTokenKind {
 class MediaReadiness {
   MediaReadiness._();
 
-  static final RegExp _torrentUrlPattern = RegExp(
-    r'\.torrent(?:[?#&]|$)',
-    caseSensitive: false,
-  );
-
   /// 分类单条线路 token。
   static MediaTokenKind classify(String? token) {
     final value = token?.trim() ?? '';
     if (value.isEmpty) return MediaTokenKind.empty;
-    if (_isBtLink(value)) return MediaTokenKind.torrent;
+    if (isTorrentLink(value)) return MediaTokenKind.torrent;
     if (_looksLikeDirectMedia(value)) return MediaTokenKind.directMedia;
     return MediaTokenKind.needsResolve;
   }
@@ -42,17 +38,12 @@ class MediaReadiness {
   static bool isAcceptablePlaybackUrl(String? url) {
     final value = url?.trim() ?? '';
     if (value.isEmpty) return false;
-    if (_isBtLink(value)) return true;
+    if (isTorrentLink(value)) return true;
     if (VideoUrlExtractor.isPlayable(value)) return true;
     if (VideoUrlExtractor.isVideoUrl(value)) return true;
     // 少数源返回无扩展名的 https 流地址，只要不像 HTML 页就放行。
     if (_looksLikeBareStream(value)) return true;
     return false;
-  }
-
-  static bool _isBtLink(String value) {
-    final lower = value.toLowerCase();
-    return lower.startsWith('magnet:') || _torrentUrlPattern.hasMatch(lower);
   }
 
   static bool isDirectMedia(String? token) =>

@@ -9,7 +9,7 @@ import 'package:baka/services/download_service.dart';
 
 class DownloadManagerController extends GetxController {
   final service = DownloadService.instance;
-  final tasks = <DownloadTask>[].obs;
+  final revision = 0.obs;
 
   late final VoidCallback _listener;
 
@@ -17,34 +17,28 @@ class DownloadManagerController extends GetxController {
   void onInit() {
     super.onInit();
     service.init();
-    _listener = () => tasks.value = List.from(service.tasksNotifier.value);
-    service.tasksNotifier.addListener(_listener);
-    _listener();
+    _listener = () => revision.value++;
+    service.tasksListenable.addListener(_listener);
   }
 
   @override
   void onClose() {
-    service.tasksNotifier.removeListener(_listener);
+    service.tasksListenable.removeListener(_listener);
     super.onClose();
   }
 
-  List<DownloadTask> get activeTasks => tasks.reversed
-      .where((t) => t.status != DownloadStatus.completed)
-      .toList();
-
-  List<DownloadTask> get completedTasks => tasks.reversed
-      .where((t) => t.status == DownloadStatus.completed)
-      .toList();
-
-  Map<String, List<DownloadTask>> get groupedCompletedTasks {
+  ({List<DownloadTask> active, Map<String, List<DownloadTask>> completed})
+  buildView() {
+    final active = <DownloadTask>[];
     final grouped = <String, List<DownloadTask>>{};
-    for (final task in completedTasks) {
-      if (!grouped.containsKey(task.title)) {
-        grouped[task.title] = [];
+    for (final task in service.tasks.reversed) {
+      if (task.status != DownloadStatus.completed) {
+        active.add(task);
+      } else {
+        (grouped[task.title] ??= <DownloadTask>[]).add(task);
       }
-      grouped[task.title]!.add(task);
     }
-    return grouped;
+    return (active: active, completed: grouped);
   }
 
   void pauseAll() => service.pauseAll();
@@ -86,10 +80,12 @@ class DownloadManagerPage extends StatelessWidget {
         ],
       ),
       body: Obx(() {
-        final active = c.activeTasks;
-        final groups = c.groupedCompletedTasks.entries.toList();
+        c.revision.value;
+        final view = c.buildView();
+        final active = view.active;
+        final groups = view.completed.entries;
 
-        if (c.tasks.isEmpty) {
+        if (c.service.tasks.isEmpty) {
           return Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -463,7 +459,8 @@ class _AnimeGroupPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(title)),
       body: Obx(() {
-        final groupTasks = c.completedTasks
+        c.revision.value;
+        final groupTasks = c.service.tasks.reversed
             .where((t) => t.title == title)
             .toList();
 

@@ -66,11 +66,3 @@ void showActionSnackBar(
     );
   }
 }
-
-void cancelSnackBar() {
-  if (Platform.isWindows || Platform.isMacOS) {
-    scaffoldMessengerKey.currentState?.clearSnackBars();
-  } else {
-    Fluttertoast.cancel();
-  }
-}

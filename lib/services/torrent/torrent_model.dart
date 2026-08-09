@@ -4,6 +4,16 @@ import 'package:baka/services/torrent/bencode.dart';
 
 const _videoExts = {'.mkv', '.mp4', '.avi', '.wmv', '.flv', '.webm', '.ts'};
 
+final RegExp _torrentUrlPattern = RegExp(
+  r'\.torrent(?:[?#&]|$)',
+  caseSensitive: false,
+);
+
+bool isTorrentLink(String value) {
+  final lower = value.trim().toLowerCase();
+  return lower.startsWith('magnet:') || _torrentUrlPattern.hasMatch(lower);
+}
+
 /// Torrent 元数据模型
 class TorrentMetadata {
   /// Info hash (20 字节 SHA1)
@@ -53,8 +63,10 @@ class TorrentMetadata {
     final decoded = Bencode.decodeWithRange(data, 'info');
     final root = decoded.root;
     final info = root['info'] as Map<String, dynamic>;
-    final rawInfoBytes = Uint8List.fromList(
-      data.sublist(decoded.start, decoded.end),
+    final rawInfoBytes = Uint8List.sublistView(
+      data,
+      decoded.start,
+      decoded.end,
     );
 
     final infoHash = Uint8List.fromList(sha1.convert(rawInfoBytes).bytes);
@@ -92,7 +104,7 @@ class TorrentMetadata {
     return _fromInfo(
       info: decoded,
       infoHash: Uint8List.fromList(sha1.convert(infoBytes).bytes),
-      rawInfoBytes: Uint8List.fromList(infoBytes),
+      rawInfoBytes: infoBytes,
       trackers: trackers,
     );
   }
@@ -132,11 +144,10 @@ class TorrentMetadata {
       pieces: pieces,
       files: files,
       totalSize: totalSize,
-      trackers: trackers
-          .map((t) => t.trim())
-          .where((t) => t.isNotEmpty)
-          .toSet()
-          .toList(),
+      trackers: {
+        for (final tracker in trackers)
+          if (tracker.trim().isNotEmpty) tracker.trim(),
+      }.toList(growable: false),
     );
   }
 

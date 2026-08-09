@@ -55,7 +55,7 @@ class AppStorage {
       if (!error.message.contains('Cannot read, unknown typeId:')) rethrow;
 
       final backupPath = await _backupBox(name, hiveDirectory);
-      await _deleteBoxWithRetry(name);
+      await Hive.deleteBoxFromDisk(name);
       await _openHiveBox<T>(name);
       recoveries.add(HiveBoxRecovery(name, backupPath, error.message));
     }
@@ -108,36 +108,10 @@ class AppStorage {
     return backup.path;
   }
 
-  static Future<void> _deleteBoxWithRetry(String name) async {
-    Object? lastError;
-    StackTrace? lastStackTrace;
-    for (var attempt = 0; attempt < 3; attempt++) {
-      try {
-        await Hive.deleteBoxFromDisk(name);
-        return;
-      } catch (error, stackTrace) {
-        lastError = error;
-        lastStackTrace = stackTrace;
-        await Future<void>.delayed(Duration(milliseconds: 50 * (attempt + 1)));
-      }
-    }
-    Error.throwWithStackTrace(lastError!, lastStackTrace!);
-  }
-
   // ---- 文件缓存（图片 / 临时文件）统计与清理 ----
 
-  static const Duration _cacheSizeMemoTtl = Duration(seconds: 30);
-  static ({int bytes, DateTime at})? _cacheSizeMemo;
-
-  /// 获取缓存大小（字节）。30 秒内重复调用直接返回上次结果，
-  /// 避免设置页来回切换时反复遍历整个缓存目录。
+  /// 获取当前缓存大小（字节）。仅在设置页显式请求时扫描。
   static Future<int> getCacheSize() async {
-    final memo = _cacheSizeMemo;
-    if (memo != null &&
-        DateTime.now().difference(memo.at) < _cacheSizeMemoTtl) {
-      return memo.bytes;
-    }
-
     var totalSize = 0;
     try {
       for (final directory in await _getCacheDirectories()) {
@@ -146,7 +120,6 @@ class AppStorage {
     } catch (e) {
       debugPrint('获取缓存大小失败: $e');
     }
-    _cacheSizeMemo = (bytes: totalSize, at: DateTime.now());
     return totalSize;
   }
 
@@ -159,7 +132,6 @@ class AppStorage {
       for (final directory in await _getCacheDirectories()) {
         await _clearDirectory(directory);
       }
-      _cacheSizeMemo = null;
       return true;
     } catch (e) {
       debugPrint('清理缓存失败: $e');

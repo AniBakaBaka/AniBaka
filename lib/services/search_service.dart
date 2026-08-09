@@ -7,9 +7,9 @@ import 'package:baka/source/source_registry.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/services/bgm_service.dart';
 import 'package:baka/models/custom_source_config.dart';
+import 'package:baka/instance.dart';
 import 'package:baka/services/source_adapter_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class SearchService {
   static const int gvMinLength = 2;
@@ -56,7 +56,7 @@ class SearchService {
   bool get isVerticalLayout => isVerticalLayoutNotifier.value;
   set isVerticalLayout(bool v) {
     isVerticalLayoutNotifier.value = v;
-    _prefs?.setBool(_isVerticalLayoutKey, v);
+    Instances.sp.setBool(_isVerticalLayoutKey, v);
   }
 
   int activeSearchId = 0;
@@ -66,13 +66,9 @@ class SearchService {
       SourceAdapterService.instance;
   List<CustomSourceConfig> customSources = [];
   List<AdapterDescriptor> builtinAdapterSources = [];
-  SharedPreferences? _prefs;
-
   Future<void> init({int? initialSource, String? initialKeyword}) async {
-    _prefs = await SharedPreferences.getInstance();
-    if (_disposed) return;
     isVerticalLayoutNotifier.value =
-        _prefs?.getBool(_isVerticalLayoutKey) ?? false;
+        Instances.sp.getBool(_isVerticalLayoutKey) ?? false;
     await reloadCustomSources();
     if (_disposed) return;
 
@@ -136,7 +132,7 @@ class SearchService {
     final gv = int.tryParse(query.substring(2));
     if (gv == null) return const [];
 
-    final response = jsonDecode((await getPostDetail(gv)).data);
+    final response = jsonDecode(await getPostDetail(gv));
     final detail = response['data'] as Map<String, dynamic>?;
     return detail == null ? const [] : [detail];
   }
@@ -171,12 +167,11 @@ class SearchService {
 
       final builtinIndex = selectedSourceIndex - 1;
       if (builtinIndex >= 0 && builtinIndex < builtinAdapterSources.length) {
-        final results = await _sourceAdapterService.search(
+        return _sourceAdapterService.search(
           builtinAdapterSources[builtinIndex].key,
           searchKey,
           fallbackDescription: noDescriptionText,
         );
-        return _prepareAdapterResults(results);
       }
 
       final customIndex = builtinIndex - builtinAdapterSources.length;
@@ -184,35 +179,23 @@ class SearchService {
         return const [];
       }
 
-      final results = await _sourceAdapterService.search(
+      return _sourceAdapterService.search(
         AdapterRegistry.customSourceKey(customSources[customIndex].id),
         searchKey,
         fallbackDescription: noDescriptionText,
         skipBgmEnhancement: true,
       );
-      return _prepareAdapterResults(results);
     } catch (error) {
       debugPrint('Search failed for $selectedSourceLabel: $error');
       return const [];
     }
   }
 
-  List<Map<String, dynamic>> _prepareAdapterResults(
-    List<Map<String, dynamic>> results,
-  ) {
-    for (final data in results) {
-      data['content'] = data['image'];
-      data['subtitle'] = data['description'];
-      data['tag'] = data['sourceDisplayName'];
-    }
-    return results;
-  }
-
   Future<Map<String, dynamic>?> buildPlayerData(Map<String, dynamic> item) =>
       _sourceAdapterService.buildPlayerData(item);
 
   List<String> _loadHistory() {
-    final historyJson = _prefs?.getString(_searchHistoryKey);
+    final historyJson = Instances.sp.getString(_searchHistoryKey);
     if (historyJson == null) return const [];
 
     try {
@@ -230,7 +213,7 @@ class SearchService {
   void _persistHistory(List<String> history) {
     if (_disposed) return;
     searchHistory = history;
-    _prefs?.setString(_searchHistoryKey, jsonEncode(history));
+    Instances.sp.setString(_searchHistoryKey, jsonEncode(history));
   }
 
   void addSearchHistory(String value) {
@@ -256,7 +239,7 @@ class SearchService {
 
   void clearSearchHistory() {
     if (_disposed) return;
-    _prefs?.remove(_searchHistoryKey);
+    Instances.sp.remove(_searchHistoryKey);
     searchHistory = const [];
   }
 

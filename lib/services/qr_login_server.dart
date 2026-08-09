@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+
+import 'package:baka/services/network_service.dart';
 
 /// TV 端扫码登录服务
 ///
@@ -32,7 +35,7 @@ class QrLoginServer {
   /// 启动服务器
   Future<void> start() async {
     _sessionId = _generateSessionId();
-    _localIp = await _getLocalIp();
+    _localIp = (await LanAddress.findIpv4())?.address;
 
     _server = await HttpServer.bind(
       InternetAddress.anyIPv4,
@@ -114,26 +117,10 @@ class QrLoginServer {
     _server = null;
   }
 
-  /// 获取本机局域网 IPv4 地址
-  Future<String?> _getLocalIp() async {
-    try {
-      final interfaces = await NetworkInterface.list(
-        type: InternetAddressType.IPv4,
-      );
-      for (final iface in interfaces) {
-        for (final addr in iface.addresses) {
-          if (!addr.isLoopback) {
-            return addr.address;
-          }
-        }
-      }
-    } catch (_) {}
-    return null;
-  }
-
   String _generateSessionId() {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final random = DateTime.now().microsecondsSinceEpoch % 100000;
-    return '$now$random';
+    final random = Random.secure();
+    return base64UrlEncode(
+      List<int>.generate(18, (_) => random.nextInt(256)),
+    ).replaceAll('=', '');
   }
 }

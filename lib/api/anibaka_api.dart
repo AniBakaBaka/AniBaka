@@ -143,29 +143,29 @@ final class AniBakaApi {
   }
 
   static Future<T?> _readObject<T>(
-    Future<dynamic> request,
+    Future<String> request,
     T Function(Map<String, dynamic>) parse,
   ) async {
     final data = await _data(request);
     return data == null ? null : parse(data as Map<String, dynamic>);
   }
 
-  static Future<Map<String, dynamic>?> _readMap(Future<dynamic> request) async {
+  static Future<Map<String, dynamic>?> _readMap(Future<String> request) async {
     final data = await _data(request);
     return data == null ? null : data as Map<String, dynamic>;
   }
 
-  static Future<Object?> _data(Future<dynamic> request) async {
-    final response = await request as Response;
-    if (response.data.isEmpty) return null;
-    final json = jsonDecode(response.data) as Map<String, dynamic>;
+  static Future<Object?> _data(Future<String> request) async {
+    final response = await request;
+    if (response.isEmpty) return null;
+    final json = jsonDecode(response) as Map<String, dynamic>;
     return json['code'] == 0 ? json['data'] : null;
   }
 
-  static Future<bool> _succeeds(Future<dynamic> request) async {
-    final response = await request as Response;
-    if (response.data.isEmpty) return false;
-    return (jsonDecode(response.data) as Map<String, dynamic>)['code'] == 0;
+  static Future<bool> _succeeds(Future<String> request) async {
+    final response = await request;
+    if (response.isEmpty) return false;
+    return (jsonDecode(response) as Map<String, dynamic>)['code'] == 0;
   }
 
   static Future<V?> _remember<K, V>(

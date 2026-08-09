@@ -98,30 +98,26 @@ class AliasStorageService {
   AliasStorageService._();
 
   static const _storeKey = 'video_source_search_aliases';
-  static Map<String, dynamic>? _cache;
+  static Map<String, List<String>>? _cache;
 
-  static Map<String, dynamic> readStore() {
+  static Map<String, List<String>> _readStore() {
     if (_cache != null) return _cache!;
     final raw = Instances.sp.getString(_storeKey);
     if (raw == null || raw.isEmpty) return _cache = {};
-    try {
-      final decoded = jsonDecode(raw);
-      return _cache = (decoded is Map<String, dynamic> ? decoded : {});
-    } catch (_) {
-      return _cache = {};
-    }
+    final decoded = jsonDecode(raw) as Map<String, dynamic>;
+    return _cache = {
+      for (final entry in decoded.entries)
+        entry.key: (entry.value as List<dynamic>).cast<String>(),
+    };
   }
 
-  static List<String> readAliases(String aliasKey) {
-    final raw = readStore()[aliasKey];
-    if (raw is List) {
-      return raw.map((e) => e.toString()).toList();
-    }
-    return [];
-  }
+  static List<String> readAliases(String aliasKey, {String? fallbackKey}) =>
+      _readStore()[aliasKey] ??
+      (fallbackKey == null ? null : _readStore()[fallbackKey]) ??
+      const [];
 
   static Future<void> saveAliases(String aliasKey, List<String> aliases) async {
-    final store = readStore();
+    final store = _readStore();
     if (aliases.isEmpty) {
       store.remove(aliasKey);
     } else {

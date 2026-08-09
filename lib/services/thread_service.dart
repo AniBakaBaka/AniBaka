@@ -23,8 +23,6 @@ class ThreadTab {
 
   /// 已成功加载的页数；0 表示尚未加载
   int page = 0;
-  DateTime? lastLoadTime;
-
   ThreadTab(this.channel);
 
   int get pid => channel.pid;
@@ -37,7 +35,6 @@ class ThreadTab {
 /// 避免「每次把 pageSize 加大再整表重拉」的 O(n²) 网络与处理开销。
 class ThreadService {
   static const int pageSize = 20;
-  static const Duration loadThrottle = Duration(milliseconds: 400);
 
   /// 评论缓存 1 小时（首页缓存忽略过期，供冷启动快速填充）。
   static final TtlCache _commentsCache = TtlCache(
@@ -85,7 +82,7 @@ class ThreadService {
 
   Future<List> _fetchPage(int pid, int page) async {
     final response = await getComments(pid, pageSize, '', page: page);
-    final decoded = jsonDecode(response.data);
+    final decoded = jsonDecode(response);
     final data = decoded is Map ? decoded['data'] : null;
     return CommentListState.processCommentsList(data is List ? data : null);
   }
@@ -121,7 +118,6 @@ class ThreadService {
       _resetSeenIds(tab);
       tab.page = 1;
       tab.hasMore = list.length >= pageSize;
-      tab.lastLoadTime = DateTime.now();
       await _writeCache(tab.pid, list);
       return list;
     } catch (e) {
@@ -135,13 +131,7 @@ class ThreadService {
   bool canLoadMore(int tabIndex) {
     final tab = tabs[tabIndex];
     // page == 0 表示首页还没成功加载过，此时没有「下一页」可言。
-    if (tab.page == 0 ||
-        tab.isLoadingMore ||
-        !tab.hasMore) {
-      return false;
-    }
-    final last = tab.lastLoadTime;
-    return last == null || DateTime.now().difference(last) >= loadThrottle;
+    return tab.page > 0 && !tab.isLoadingMore && tab.hasMore;
   }
 
   /// 加载下一页并 append。无新数据时返回 null。
@@ -171,7 +161,6 @@ class ThreadService {
       tab.comments.addAll(fresh);
       tab.page = nextPage;
       tab.hasMore = page.length >= pageSize;
-      tab.lastLoadTime = DateTime.now();
       return tab.comments;
     } catch (e) {
       debugPrint('加载更多评论失败: $e');
@@ -184,7 +173,7 @@ class ThreadService {
   Future<Map?> resolveGvLink(String gvId) async {
     try {
       final response = await getPostDetail(int.parse(gvId));
-      final decoded = jsonDecode(response.data);
+      final decoded = jsonDecode(response);
       return decoded is Map ? decoded['data'] as Map? : null;
     } catch (e) {
       debugPrint('解析 gv 链接失败: $e');

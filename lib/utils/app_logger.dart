@@ -11,7 +11,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 enum _LogLevel {
-  debug('DEBUG', 500),
   info('INFO', 800),
   warning('WARN', 900),
   error('ERROR', 1000);
@@ -91,19 +90,6 @@ class AppLogger {
     _installGlobalErrorHandlers();
     info('Logger initialized (${_logFile?.path})', tag: 'Logger');
   }
-
-  void debug(
-    Object? message, {
-    String? tag,
-    Object? error,
-    StackTrace? stackTrace,
-  }) => _log(
-    _LogLevel.debug,
-    message,
-    tag: tag,
-    error: error,
-    stackTrace: stackTrace,
-  );
 
   void info(
     Object? message, {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/scheduler.dart';
 
 typedef LoadMoreCallback = Future<bool> Function();
@@ -100,16 +101,18 @@ class _RefreshWrapperState extends State<RefreshWrapper> {
         child: widget.child,
         onNotification: (ScrollNotification scrollInfo) {
           if (scrollInfo.depth != 0 ||
-              scrollInfo.metrics.axis != Axis.vertical ||
-              (scrollInfo is! ScrollUpdateNotification &&
-                  scrollInfo is! OverscrollNotification)) {
+              scrollInfo.metrics.axis != Axis.vertical) {
             return false;
           }
 
-          final isForwardOverscroll =
-              scrollInfo is OverscrollNotification && scrollInfo.overscroll > 0;
-          if (scrollInfo.metrics.extentAfter <= 200 &&
-              (scrollInfo.metrics.pixels > 0 || isForwardOverscroll)) {
+          final isScrollingTowardEnd =
+              (scrollInfo is ScrollUpdateNotification &&
+                  (scrollInfo.scrollDelta ?? 0) > 0) ||
+              (scrollInfo is OverscrollNotification &&
+                  scrollInfo.overscroll > 0) ||
+              (scrollInfo is UserScrollNotification &&
+                  scrollInfo.direction == ScrollDirection.reverse);
+          if (isScrollingTowardEnd && scrollInfo.metrics.extentAfter <= 200) {
             _onLoadMore();
           }
           return false;

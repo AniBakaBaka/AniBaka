@@ -140,7 +140,6 @@ class _ThreadPageState extends State<ThreadPage>
     await state.sendComment(result, 0, '');
     if (!mounted) return;
     showSnackBar('评论发送成功');
-    await Future.delayed(const Duration(seconds: 1));
     if (mounted) _refresh(_index);
   }
 
@@ -192,7 +191,8 @@ class _ThreadPageState extends State<ThreadPage>
   Widget _page(int i, ThemeData theme) {
     final tab = _svc.tabs[i];
     final ui = _uis[i];
-    final showSkeleton = tab.page == 0 && tab.isRefreshing && tab.comments.isEmpty;
+    final showSkeleton =
+        tab.page == 0 && tab.isRefreshing && tab.comments.isEmpty;
 
     return RefreshIndicator(
       onRefresh: () => _refresh(i),

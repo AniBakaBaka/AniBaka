@@ -168,9 +168,7 @@ class HomeDataService {
       final offset = (page - 1) * pageSize;
       switch (selectedTag) {
         case pureTag:
-          return _responseItems(
-            (await getPost('', recommendTag, page, 50)).data,
-          );
+          return _responseItems(await getPost('', recommendTag, page, 50));
         case recommendTag:
           final subjects = await getTrendingSubjects(
             type: 2,
@@ -252,7 +250,7 @@ class HomeDataService {
   }
 
   static Future<HomeItems> _fetchSwipers() async {
-    final items = _responseItems((await getPost('', _swiperTag, 1, 6)).data);
+    final items = _responseItems(await getPost('', _swiperTag, 1, 6));
 
     await Future.wait(
       items.map((item) async {

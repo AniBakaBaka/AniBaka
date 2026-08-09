@@ -158,7 +158,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
     data['pwd'] = '';
     data[key] = value;
     try {
-      final res = jsonDecode((await register(data)).data);
+      final res = jsonDecode(await register(data));
       showSnackBar(res['msg']);
       if (res['code'] == 200) {
         final updated = Map<String, dynamic>.from(_userInfo!)..[key] = value;

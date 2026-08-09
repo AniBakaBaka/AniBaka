@@ -495,7 +495,7 @@ class CIslandCommentWidgetState extends State<CIslandCommentWidget>
       }
 
       final response = await getBgmEpisodeComments(episode!.episodeId!);
-      final decoded = jsonDecode(response.data);
+      final decoded = jsonDecode(response);
       final comments = <_BgmComment>[];
       if (decoded is List) {
         for (final value in decoded.take(30)) {

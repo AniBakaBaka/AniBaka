@@ -13,16 +13,13 @@ class MatchMemoryEntry {
     this.sourceDisplayName,
   });
 
-  factory MatchMemoryEntry.fromJson(dynamic raw) {
-    if (raw is! Map) {
-      return const MatchMemoryEntry(source: '', seriesId: '', updatedAtMs: 0);
-    }
+  factory MatchMemoryEntry.fromJson(Map<String, dynamic> raw) {
     return MatchMemoryEntry(
-      source: raw['source']?.toString() ?? '',
-      seriesId: raw['seriesId']?.toString() ?? '',
-      updatedAtMs: (raw['updatedAtMs'] as num?)?.toInt() ?? 0,
-      title: raw['title']?.toString(),
-      sourceDisplayName: raw['sourceDisplayName']?.toString(),
+      source: raw['source'] as String,
+      seriesId: raw['seriesId'] as String,
+      updatedAtMs: raw['updatedAtMs'] as int,
+      title: raw['title'] as String?,
+      sourceDisplayName: raw['sourceDisplayName'] as String?,
     );
   }
 
@@ -34,8 +31,8 @@ class MatchMemoryEntry {
 
   bool get isValid => source.isNotEmpty && seriesId.isNotEmpty;
 
-  bool get isFresh {
-    final ageMs = DateTime.now().millisecondsSinceEpoch - updatedAtMs;
+  bool isFreshAt(int nowMs) {
+    final ageMs = nowMs - updatedAtMs;
     return ageMs >= 0 && ageMs < MatchMemoryService.ttl.inMilliseconds;
   }
 
@@ -62,8 +59,11 @@ class MatchMemoryService {
   static MatchMemoryEntry? read({required String title, int? bgmId}) {
     final entry = _readAll()[keyFor(bgmId: bgmId, title: title)];
     if (entry == null) return null;
-    if (entry.isFresh && entry.isValid) return entry;
-    remove(bgmId: bgmId, title: title);
+    if (entry.isFreshAt(DateTime.now().millisecondsSinceEpoch) &&
+        entry.isValid) {
+      return entry;
+    }
+    _readAll().remove(keyFor(bgmId: bgmId, title: title));
     return null;
   }
 
@@ -110,10 +110,11 @@ class MatchMemoryService {
 
     try {
       final decoded = jsonDecode(raw);
-      if (decoded is! Map) return _cache = {};
-      return _cache = decoded.map(
-        (key, value) =>
-            MapEntry(key.toString(), MatchMemoryEntry.fromJson(value)),
+      return _cache = (decoded as Map<String, dynamic>).map(
+        (key, value) => MapEntry(
+          key,
+          MatchMemoryEntry.fromJson(value as Map<String, dynamic>),
+        ),
       );
     } catch (_) {
       return _cache = {};
@@ -121,7 +122,8 @@ class MatchMemoryService {
   }
 
   static void _prune(Map<String, MatchMemoryEntry> map) {
-    map.removeWhere((_, entry) => !entry.isFresh || !entry.isValid);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    map.removeWhere((_, entry) => !entry.isFreshAt(now) || !entry.isValid);
     if (map.length <= maxEntries) return;
 
     final entries = map.entries.toList()
@@ -133,9 +135,6 @@ class MatchMemoryService {
 
   static Future<void> _persist(Map<String, MatchMemoryEntry> map) {
     _cache = map;
-    final json = jsonEncode({
-      for (final entry in map.entries) entry.key: entry.value.toJson(),
-    });
-    return Instances.sp.setString(_storageKey, json);
+    return Instances.sp.setString(_storageKey, jsonEncode(map));
   }
 }

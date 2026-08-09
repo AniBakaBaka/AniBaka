@@ -1,5 +1,9 @@
+import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
 import 'package:test/test.dart';
 
+import 'package:baka/services/torrent/piece_manager.dart';
 import 'package:baka/services/torrent/torrent_service.dart';
 import 'package:baka/services/torrent/torrent_model.dart';
 
@@ -28,7 +32,7 @@ void main() {
         ' $direct ',
       );
       expect(resolved, direct);
-      expect(TorrentService.instance.engine, isNull);
+      expect(TorrentService.instance.statsNotifier.value, isNull);
     },
   );
 
@@ -46,5 +50,38 @@ void main() {
 
     expect(magnet.trackers, ['udp://tracker.example:80/announce']);
     expect(magnet.exactSources, ['https://cdn.example/file.torrent']);
+  });
+
+  test('verified pieces are streamed from the disk cache', () {
+    final data = Uint8List.fromList(
+      List<int>.generate(24 * 1024, (index) => index & 0xff),
+    );
+    final metadata = TorrentMetadata(
+      infoHash: Uint8List(20),
+      rawInfoBytes: Uint8List(0),
+      name: 'video.bin',
+      pieceLength: data.length,
+      pieces: Uint8List.fromList(sha1.convert(data).bytes),
+      files: [TorrentFile(path: 'video.mp4', length: data.length, offset: 0)],
+      totalSize: data.length,
+      trackers: const [],
+    );
+    final manager = PieceManager(metadata: metadata, targetFileIndex: 0);
+    addTearDown(manager.dispose);
+
+    manager.onBlockReceived(
+      0,
+      0,
+      Uint8List.sublistView(data, 0, PieceManager.blockSize),
+    );
+    manager.onBlockReceived(
+      0,
+      PieceManager.blockSize,
+      Uint8List.sublistView(data, PieceManager.blockSize),
+    );
+
+    expect(manager.isComplete, isTrue);
+    expect(manager.readFileData(0, data.length), data);
+    expect(manager.completedPieceIndices, [0]);
   });
 }

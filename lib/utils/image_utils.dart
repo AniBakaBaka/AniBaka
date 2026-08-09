@@ -30,9 +30,8 @@ class ImageUtils {
             ? CachedNetworkImage(
                 imageUrl: imagePath,
                 fit: BoxFit.contain,
-                placeholder: (_, _) => const Center(
-                  child: CircularProgressIndicator(),
-                ),
+                placeholder: (_, _) =>
+                    const Center(child: CircularProgressIndicator()),
                 errorWidget: (_, _, _) => const Icon(
                   Icons.broken_image_outlined,
                   color: Colors.white70,
@@ -154,11 +153,12 @@ class ImageUtils {
       if (bytes == null || bytes.isEmpty) {
         throw Exception('Image download failed');
       }
+      final imageBytes = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
 
       final contentType = response.headers.value(Headers.contentTypeHeader);
       final fileName = _resolveFileName(imagePath, contentType);
       return (
-        bytes: Uint8List.fromList(bytes),
+        bytes: imageBytes,
         fileName: fileName,
         extension: _fileExtension(fileName),
       );

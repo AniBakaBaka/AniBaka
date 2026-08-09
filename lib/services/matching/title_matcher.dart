@@ -71,4 +71,3 @@ class TitleFingerprint {
     return modMismatch ? (score * 0.7).clamp(0.0, 1.0) : score;
   }
 }
-

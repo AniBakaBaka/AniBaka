@@ -1,6 +1,7 @@
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/utils/bgm_utils.dart';
 
+import 'auto_match_strategy.dart';
 import 'title_matcher.dart';
 
 /// 参与匹配的候选条目。特征惰性计算，同一实例可复用多轮排序。
@@ -29,18 +30,7 @@ class SourceMatchCandidate {
 
   static int? _episodeCount(Map<String, dynamic> data) {
     final counted = PlaybackEpisodeCatalog.countFrom(data);
-    if (counted > 0) return counted;
-
-    for (final key in const [
-      'episodeCount',
-      'eps',
-      'total_episodes',
-      'totalEpisodes',
-    ]) {
-      final value = BgmUtils.toInt(data[key]);
-      if (value != null && value > 0) return value;
-    }
-    return null;
+    return counted > 0 ? counted : null;
   }
 }
 
@@ -64,15 +54,21 @@ class SourceMatchContext {
   final String? currentSource;
   final int? _explicitSeason;
 
+  late final List<String> titles = [
+    primaryTitle,
+    ...manualAliases,
+    ...automaticAliases,
+  ];
+
   late final List<TitleFingerprint> queryFingerprints = [
-    for (final title in [primaryTitle, ...manualAliases, ...automaticAliases])
+    for (final title in titles)
       if (title.trim().isNotEmpty) TitleFingerprint(title),
   ];
 
   late final int? querySeason = _explicitSeason ?? _seasonFromTitles();
 
   int? _seasonFromTitles() {
-    for (final title in [primaryTitle, ...manualAliases, ...automaticAliases]) {
+    for (final title in titles) {
       final season = BgmUtils.extractSeason(title);
       if (season != null) return season;
     }
@@ -102,15 +98,21 @@ class SourceMatchScore {
 
   /// 结果刚到时立刻发起「目录 + 媒体」探针（竞速优先）。
   bool get shouldProbeImmediately =>
-      confidence >= 0.70 && !seasonConflict && !severeEpisodeConflict;
+      confidence >= AutoMatchStrategy.immediateProbeConfidence &&
+      !seasonConflict &&
+      !severeEpisodeConflict;
 
   /// 全源搜索结束后的兜底探针阈值（略放宽，仍拒绝季/集硬冲突）。
   bool get shouldProbeOnFinalPass =>
-      confidence >= 0.60 && !seasonConflict && !severeEpisodeConflict;
+      confidence >= AutoMatchStrategy.finalProbeConfidence &&
+      !seasonConflict &&
+      !severeEpisodeConflict;
 
   /// 标题极高置信：优先插队探测。
   bool get isHighConfidenceTitle =>
-      confidence >= 0.82 && !seasonConflict && !severeEpisodeConflict;
+      confidence >= AutoMatchStrategy.priorityProbeConfidence &&
+      !seasonConflict &&
+      !severeEpisodeConflict;
 }
 
 /// 候选源排序：标题相似度为主，季度/集数/类型做有界修正。
@@ -129,7 +131,9 @@ class SourceMatchEngine {
   /// 排序比较器：置信度降序，相同时按标题相似度降序。
   static int compareScores(SourceMatchScore a, SourceMatchScore b) {
     final byConf = b.confidence.compareTo(a.confidence);
-    return byConf != 0 ? byConf : b.titleSimilarity.compareTo(a.titleSimilarity);
+    return byConf != 0
+        ? byConf
+        : b.titleSimilarity.compareTo(a.titleSimilarity);
   }
 
   SourceMatchScore score(

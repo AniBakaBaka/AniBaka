@@ -53,9 +53,9 @@ class Bencode {
     } else if (value is Uint8List) {
       _encodeBytes(value, builder);
     } else if (value is List<int>) {
-      _encodeBytes(Uint8List.fromList(value), builder);
+      _encodeBytes(value, builder);
     } else if (value is String) {
-      _encodeBytes(Uint8List.fromList(utf8.encode(value)), builder);
+      _encodeBytes(utf8.encode(value), builder);
     } else if (value is List) {
       builder.addByte(0x6c); // l
       for (final item in value) {
@@ -64,10 +64,12 @@ class Bencode {
       builder.addByte(0x65); // e
     } else if (value is Map) {
       builder.addByte(0x64); // d
-      final entries = value.entries.toList()
-        ..sort((a, b) => _compareBytes(_keyBytes(a.key), _keyBytes(b.key)));
+      final entries = [
+        for (final entry in value.entries)
+          (key: _keyBytes(entry.key), value: entry.value),
+      ]..sort((a, b) => _compareBytes(a.key, b.key));
       for (final entry in entries) {
-        _encodeBytes(_keyBytes(entry.key), builder);
+        _encodeBytes(entry.key, builder);
         _encodeValue(entry.value, builder);
       }
       builder.addByte(0x65); // e
@@ -76,18 +78,18 @@ class Bencode {
     }
   }
 
-  static Uint8List _keyBytes(dynamic key) {
+  static List<int> _keyBytes(dynamic key) {
     if (key is Uint8List) return key;
-    if (key is List<int>) return Uint8List.fromList(key);
-    return Uint8List.fromList(utf8.encode(key.toString()));
+    if (key is List<int>) return key;
+    return utf8.encode(key.toString());
   }
 
-  static void _encodeBytes(Uint8List bytes, BytesBuilder builder) {
+  static void _encodeBytes(List<int> bytes, BytesBuilder builder) {
     builder.add(utf8.encode('${bytes.length}:'));
     builder.add(bytes);
   }
 
-  static int _compareBytes(Uint8List a, Uint8List b) {
+  static int _compareBytes(List<int> a, List<int> b) {
     final len = a.length < b.length ? a.length : b.length;
     for (var i = 0; i < len; i++) {
       final diff = a[i] - b[i];
@@ -180,17 +182,7 @@ class _Reader {
   }
 }
 
-/// 辅助：将 bencode 解码的值安全转为字符串
-String bencodeString(dynamic value) {
-  if (value is Uint8List) return utf8.decode(value, allowMalformed: true);
-  if (value is String) return value;
-  return value.toString();
-}
+String bencodeString(Object? value) =>
+    utf8.decode(value as Uint8List, allowMalformed: true);
 
-/// 辅助：将 bencode 解码的值安全转为 int
-int bencodeInt(dynamic value) {
-  if (value is int) return value;
-  if (value is String) return int.parse(value);
-  if (value is Uint8List) return int.parse(utf8.decode(value));
-  return 0;
-}
+int bencodeInt(Object? value) => value as int;

@@ -16,6 +16,7 @@ void main() {
 
   late Directory hiveDirectory;
   late SourceAdapterService service;
+  late SourceCatalog catalog;
 
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
@@ -27,13 +28,38 @@ void main() {
 
     service = SourceAdapterService.instance;
     await service.init();
-    await service.clearAllCustomSources();
+    catalog = SourceCatalog.instance;
+    await catalog.clearCustomSources();
   });
 
   tearDownAll(() async {
-    await service.clearAllCustomSources();
+    await catalog.clearCustomSources();
     await Hive.close();
     await hiveDirectory.delete(recursive: true);
+  });
+
+  test('rule hub uses the GitHub mirror by default', () async {
+    expect(
+      RuleRepositoryService.defaultSubscription,
+      RuleRepositoryService.mirrorSubscription,
+    );
+    expect(
+      RuleRepositoryService.resolveRuleUrl(
+        RuleRepositoryService.defaultSubscription,
+        'rules/example.json',
+      ),
+      '${RuleRepositoryService.githubMirrorPrefix}'
+      'https://raw.githubusercontent.com/AniBakaBaka/AniBakaRule/main/'
+      'rules/example.json',
+    );
+
+    await Instances.sp.setStringList('rule_hub_subscriptions', const [
+      RuleRepositoryService.directSubscription,
+    ]);
+    expect(RuleRepositoryService.instance.subscriptions, const [
+      RuleRepositoryService.mirrorSubscription,
+    ]);
+    await Instances.sp.remove('rule_hub_subscriptions');
   });
 
   test('custom adapter cache follows the current rule revision', () async {
@@ -49,7 +75,7 @@ void main() {
       createdAt: DateTime.utc(2026),
       updatedAt: DateTime.utc(2026),
     );
-    expect(await service.addCustomSource(source), isTrue);
+    expect(await catalog.addCustomSource(source), isTrue);
 
     final first = service.adapterFor(
       AdapterRegistry.customSourceKey(source.id),
@@ -57,7 +83,7 @@ void main() {
     expect(first, isNotNull);
 
     final updated = source.copyWith(name: 'Updated Cache Test');
-    expect(await service.updateCustomSource(updated), isTrue);
+    expect(await catalog.updateCustomSource(updated), isTrue);
 
     final second = service.adapterFor(
       AdapterRegistry.customSourceKey(source.id),
@@ -66,10 +92,10 @@ void main() {
     expect(second, isNot(same(first)));
     expect(second!.name, 'Updated Cache Test');
 
-    expect(await service.deleteCustomSource(source.id), isTrue);
+    expect(await catalog.deleteCustomSource(source.id), isTrue);
   });
 
-  test('rule hub matches all items with one indexed source scan', () async {
+  test('rule hub matches official entries by their stable key', () async {
     final source = CustomSourceConfig(
       id: 'bulk-match',
       name: 'Bulk Match',
@@ -82,52 +108,46 @@ void main() {
       createdAt: DateTime.utc(2026),
       updatedAt: DateTime.utc(2026),
     );
-    expect(await service.addCustomSource(source), isTrue);
+    expect(await catalog.addCustomSource(source), isTrue);
 
-    const byId = RuleHubItem(id: 'bulk-match', name: 'By Id', version: 2);
-    const byName = RuleHubItem(id: '', name: 'Bulk Match', version: 2);
-    const byUrl = RuleHubItem(
-      id: '',
-      name: 'By Url',
-      baseUrl: 'https://bulk.example.com',
+    const byId = RuleHubItem(
+      id: 'bulk-match',
+      name: 'By Id',
+      file: 'bulk-match.json',
       version: 2,
     );
-    const missing = RuleHubItem(id: 'missing', name: 'Missing');
+    const missing = RuleHubItem(
+      id: 'missing',
+      name: 'Missing',
+      file: 'missing.json',
+    );
 
     final result = RuleRepositoryService.instance.inspectItems(const [
       byId,
-      byName,
-      byUrl,
       missing,
     ]);
 
     expect(result[byId]!.source?.id, source.id);
-    expect(result[byName]!.source?.id, source.id);
-    expect(result[byUrl]!.source?.id, source.id);
     expect(result[byId]!.status, InstallStatus.updateAvailable);
     expect(result[missing]!.status, InstallStatus.notInstalled);
 
-    expect(await service.deleteCustomSource(source.id), isTrue);
+    expect(await catalog.deleteCustomSource(source.id), isTrue);
   });
 
   test(
     'rule hub treats a bundled rule as installed and updates it in place',
     () async {
-      const current = RuleHubItem(id: 'akianime', name: 'AkiAnime', version: 4);
+      const current = RuleHubItem(
+        id: 'akianime',
+        name: 'AkiAnime',
+        file: 'akianime.json',
+        version: 4,
+      );
       const newer = RuleHubItem(
         id: 'akianime',
         name: 'AkiAnime',
+        file: 'akianime.json',
         version: 5,
-        inline: {
-          'format': 'anx-rule/2',
-          'id': 'akianime',
-          'name': 'AkiAnime Updated',
-          'baseUrl': 'https://updated.akianime.example',
-          'iconUrl': 'https://updated.akianime.example/icon.png',
-          'search': <Map<String, dynamic>>[],
-          'detail': <Map<String, dynamic>>[],
-          'play': <Map<String, dynamic>>[],
-        },
       );
 
       await Instances.sp.remove('rule_hub_version:akianime');
@@ -142,7 +162,7 @@ void main() {
       final previousAdapter = service.adapterFor('akianime');
       final result = await RuleRepositoryService.instance.install(
         newer,
-        indexUrl: 'https://rules.example/index.json',
+        indexUrl: 'asset://assets/rules/index.json',
       );
 
       expect(result, RuleInstallResult.updated);
@@ -155,15 +175,15 @@ void main() {
       );
       expect(
         SourceCatalog.instance.builtinSourceById('akianime')?.baseUrl,
-        'https://updated.akianime.example',
+        'https://www.akianime.com',
       );
       expect(
         SourceCatalog.instance.builtinSourceById('akianime')?.iconUrl,
-        'https://updated.akianime.example/icon.png',
+        'https://www.akianime.com/template/dsn2/static/img/ico.png',
       );
       final updatedAdapter = service.adapterFor('akianime');
       expect(updatedAdapter, isNot(same(previousAdapter)));
-      expect(updatedAdapter?.baseUrl, 'https://updated.akianime.example');
+      expect(updatedAdapter?.baseUrl, 'https://www.akianime.com');
       expect(
         RuleRepositoryService.instance.inspectItems(const [
           newer,
@@ -171,7 +191,7 @@ void main() {
         InstallStatus.upToDate,
       );
 
-      expect(await service.resetBuiltinSource('akianime'), isTrue);
+      expect(await catalog.resetBuiltinSource('akianime'), isTrue);
       await Instances.sp.remove('rule_hub_version:akianime');
       await Instances.sp.remove('rule_hub_source_id:akianime');
     },

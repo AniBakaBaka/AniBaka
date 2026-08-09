@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:baka/services/network_service.dart';
 import 'package:baka/utils/app_logger.dart';
 
 class TvLogExportSession {
@@ -28,7 +29,7 @@ class TvLogExportSession {
     }
 
     final archive = await _createArchive();
-    final address = await (_findAddress?.call() ?? _findLanAddress());
+    final address = await (_findAddress?.call() ?? LanAddress.findIpv4());
     if (address == null) {
       throw StateError('未找到可用的局域网地址，请检查电视网络连接');
     }
@@ -100,33 +101,6 @@ class TvLogExportSession {
       );
       await request.response.close();
     }
-  }
-
-  Future<InternetAddress?> _findLanAddress() async {
-    final interfaces = await NetworkInterface.list(
-      type: InternetAddressType.IPv4,
-      includeLoopback: false,
-    );
-    final addresses = [
-      for (final interface in interfaces)
-        for (final address in interface.addresses)
-          if (!address.isLoopback && !address.isLinkLocal) address,
-    ];
-    if (addresses.isEmpty) return null;
-    return addresses.cast<InternetAddress?>().firstWhere(
-      (address) => _isPrivateAddress(address!.address),
-      orElse: () => addresses.first,
-    );
-  }
-
-  bool _isPrivateAddress(String address) {
-    final parts = address.split('.');
-    if (parts.length != 4) return false;
-    final first = int.tryParse(parts[0]);
-    final second = int.tryParse(parts[1]);
-    return first == 10 ||
-        (first == 172 && second != null && second >= 16 && second <= 31) ||
-        (first == 192 && second == 168);
   }
 
   String _createToken() {

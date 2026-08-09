@@ -73,7 +73,6 @@ class _TvSearchPageState extends State<TvSearchPage> {
   void _activateSearchField() async {
     if (!_textFieldFocusNode.hasFocus) {
       FocusScope.of(context).requestFocus(_textFieldFocusNode);
-      await Future<void>.delayed(Duration.zero);
     }
     await SystemChannels.textInput.invokeMethod<void>('TextInput.show');
   }

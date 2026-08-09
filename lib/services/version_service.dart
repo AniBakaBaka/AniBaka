@@ -15,21 +15,32 @@ String _todayString() => DateTime.now().toIso8601String().substring(0, 10);
 
 /// 按语义化版本比较，remote 比 local 新时返回 true。
 bool _isVersionNewer(String remoteVersion, String localVersion) {
-  final remote = remoteVersion
-      .split('.')
-      .map((e) => int.tryParse(e) ?? 0)
-      .toList();
-  final local = localVersion
-      .split('.')
-      .map((e) => int.tryParse(e) ?? 0)
-      .toList();
-  final maxLength = remote.length > local.length ? remote.length : local.length;
-
-  for (int i = 0; i < maxLength; i++) {
-    final r = i < remote.length ? remote[i] : 0;
-    final l = i < local.length ? local[i] : 0;
+  var remoteOffset = 0;
+  var localOffset = 0;
+  while (remoteOffset < remoteVersion.length ||
+      localOffset < localVersion.length) {
+    final remoteEnd = remoteVersion.indexOf('.', remoteOffset);
+    final localEnd = localVersion.indexOf('.', localOffset);
+    final r =
+        int.tryParse(
+          remoteVersion.substring(
+            remoteOffset,
+            remoteEnd < 0 ? remoteVersion.length : remoteEnd,
+          ),
+        ) ??
+        0;
+    final l =
+        int.tryParse(
+          localVersion.substring(
+            localOffset,
+            localEnd < 0 ? localVersion.length : localEnd,
+          ),
+        ) ??
+        0;
     if (r > l) return true;
     if (r < l) return false;
+    remoteOffset = remoteEnd < 0 ? remoteVersion.length : remoteEnd + 1;
+    localOffset = localEnd < 0 ? localVersion.length : localEnd + 1;
   }
   return false;
 }
@@ -44,37 +55,29 @@ class VersionService {
   }
 
   static Future<UpdateInfo> checkUpdateInfo() async {
-    final response = await checkAppUpdateApi();
-    final data = response.data;
     final appInfo =
-        (data is String ? jsonDecode(data) : data) as Map<String, dynamic>;
+        jsonDecode(await checkAppUpdateApi()) as Map<String, dynamic>;
     final localVersion = Instances.appVersion;
 
-    final appUpdate = appInfo['app_update'] as Map<String, dynamic>? ?? {};
-    final platformConfig =
-        (appUpdate['platforms'] as Map<String, dynamic>?)?[_currentPlatform]
-            as Map<String, dynamic>? ??
-        {};
-
-    final latestVersion =
-        platformConfig['latest_version'] as String? ??
-        appInfo['version'] as String? ??
-        localVersion;
+    final appUpdate = appInfo['app_update'] as Map<String, dynamic>;
+    final platforms = appUpdate['platforms'] as Map<String, dynamic>;
+    final platformConfig = platforms[_currentPlatform] as Map<String, dynamic>?;
+    if (platformConfig == null) {
+      return UpdateInfo(
+        hasUpdate: false,
+        forceUpdate: false,
+        changelog: '',
+        downloadUrl: '',
+        latestVersion: localVersion,
+      );
+    }
+    final latestVersion = platformConfig['latest_version'] as String;
 
     return UpdateInfo(
       hasUpdate: _isVersionNewer(latestVersion, localVersion),
-      forceUpdate:
-          platformConfig['force'] as bool? ??
-          appUpdate['force'] as bool? ??
-          false,
-      changelog:
-          platformConfig['changelog'] as String? ??
-          appUpdate['changelog'] as String? ??
-          '',
-      downloadUrl:
-          platformConfig['download_url'] as String? ??
-          appUpdate['download_url'] as String? ??
-          'https://app.anibaka.com',
+      forceUpdate: platformConfig['force'] as bool,
+      changelog: platformConfig['changelog'] as String,
+      downloadUrl: platformConfig['download_url'] as String,
       latestVersion: latestVersion,
     );
   }
@@ -92,9 +95,7 @@ class VersionService {
       final lastCheckTime = Instances.sp.getInt(_kLastCheckTimeKey) ?? 0;
       final now = DateTime.now().millisecondsSinceEpoch;
       if ((now - lastCheckTime) > 86400000) {
-        final response = await getGonggao();
-        final data = response.data;
-        final map = data is String ? jsonDecode(data) : data;
+        final map = jsonDecode(await getGonggao()) as Map<String, dynamic>;
         announcementContent = map['data']['content'] as String? ?? '';
         await Instances.sp.setInt(_kLastCheckTimeKey, now);
         await Instances.sp.setString(

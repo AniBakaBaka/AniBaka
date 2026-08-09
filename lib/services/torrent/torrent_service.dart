@@ -1,173 +1,128 @@
-import 'package:flutter/foundation.dart';
 import 'dart:async';
 
-import 'package:baka/services/torrent/torrent_engine.dart';
+import 'package:flutter/foundation.dart';
 
-/// Global BT download and streaming service.
+import 'package:baka/services/torrent/torrent_engine.dart';
+import 'package:baka/services/torrent/torrent_model.dart';
+
+/// Owns the single active BT session and exposes one shared UI snapshot.
 class TorrentService {
   TorrentService._();
-  static final TorrentService instance = TorrentService._();
 
+  static final TorrentService instance = TorrentService._();
   static const Duration defaultBufferTimeout = Duration(seconds: 30);
-  static const Duration _bufferPollInterval = Duration(milliseconds: 200);
   static const Duration _statsPublishInterval = Duration(milliseconds: 500);
-  static final RegExp _torrentUrlPattern = RegExp(
-    r'\.torrent(?:[?#&]|$)',
-    caseSensitive: false,
-  );
 
   TorrentEngine? _engine;
   Timer? _statsTimer;
   DateTime? _lastStatsPublishedAt;
+  Completer<void> _nextUpdate = Completer<void>();
 
   final ValueNotifier<TorrentStats?> statsNotifier = ValueNotifier(null);
 
-  /// Current torrent engine.
-  TorrentEngine? get engine => _engine;
+  static bool isBtLink(String value) => isTorrentLink(value);
 
-  /// Current state.
-  TorrentState get state => _engine?.state ?? TorrentState.idle;
-
-  /// Download progress callback.
-  void Function(double progress, int downloadedBytes, int totalBytes)?
-  onProgress;
-
-  /// State change callback.
-  void Function(TorrentState state)? onStateChanged;
-
-  /// Buffer-ready callback.
-  void Function(String streamUrl)? onReadyToPlay;
-
-  /// Whether the URL or episode id points to a BT source.
-  static bool isBtLink(String value) {
-    final lower = value.toLowerCase().trim();
-    return lower.startsWith('magnet:') || _torrentUrlPattern.hasMatch(lower);
-  }
-
-  static bool isMagnetLink(String value) =>
-      value.toLowerCase().trim().startsWith('magnet:');
-
-  /// Start streaming from a magnet or torrent URL.
-  Future<String?> startStream(String url) async {
+  Future<String?> _startStream(String url) async {
     await stopStream();
-
     final target = url.trim();
-    if (!isBtLink(target)) {
-      debugPrint('[TorrentService] Unsupported BT link: $target');
-      return null;
-    }
+    if (!isTorrentLink(target)) return null;
 
     final engine = TorrentEngine();
     _engine = engine;
-    _bindCallbacks(engine);
+    engine.onChanged = () {
+      if (!identical(_engine, engine)) return;
+      _signalUpdate();
+      _scheduleStatsPublish(engine);
+    };
+    _publishStats(engine);
 
-    final streamUrl = isMagnetLink(target)
+    final streamUrl = target.toLowerCase().startsWith('magnet:')
         ? await engine.startFromMagnet(target)
         : await engine.startFromTorrentUrl(target);
-
-    return _finalizeStart(engine, streamUrl);
+    if (!identical(_engine, engine)) {
+      unawaited(engine.stop());
+      return null;
+    }
+    return streamUrl;
   }
 
-  /// Resolve a regular media URL unchanged, or turn a magnet/torrent URL into
-  /// the loopback HTTP stream consumed by the player.
-  ///
-  /// Failed starts, terminal engine errors, cancellations, and buffer timeouts
-  /// clean up the engine before surfacing [TorrentPlaybackException].
   Future<String> resolvePlaybackUrl(
     String url, {
     Duration bufferTimeout = defaultBufferTimeout,
   }) async {
     final target = url.trim();
-    if (target.isEmpty || !isBtLink(target)) return target;
+    if (!isTorrentLink(target)) return target;
 
-    final streamUrl = await startStream(target);
-    final activeEngine = _engine;
-    if (streamUrl == null || activeEngine == null) {
-      final message = activeEngine?.errorMessage ?? 'BT stream failed to start';
-      if (activeEngine != null && identical(_engine, activeEngine)) {
-        await stopStream();
-      }
+    final streamUrl = await _startStream(target);
+    final engine = _engine;
+    if (streamUrl == null || engine == null) {
+      final message = engine?.errorMessage ?? 'BT stream failed to start';
+      if (engine != null && identical(_engine, engine)) await stopStream();
       throw TorrentPlaybackException(message);
     }
 
     try {
-      await _waitUntilBuffered(activeEngine, bufferTimeout);
+      await _waitUntilBuffered(engine, bufferTimeout);
       return streamUrl;
     } catch (_) {
-      if (identical(_engine, activeEngine)) await stopStream();
+      if (identical(_engine, engine)) await stopStream();
       rethrow;
     }
   }
 
-  /// Stop the current streaming/download engine.
   Future<void> stopStream() async {
     final engine = _engine;
     if (engine == null) return;
-
     _engine = null;
+    engine.onChanged = null;
     _statsTimer?.cancel();
     _statsTimer = null;
     _lastStatsPublishedAt = null;
     statsNotifier.value = null;
+    _signalUpdate();
     await engine.stop();
   }
 
-  /// Current download stats.
-  TorrentStats? getStats() => _engine?.getStats();
-
-  /// Current target-file download progress.
-  double get progress => _engine?.pieceManager?.progress ?? 0.0;
-
   Future<void> _waitUntilBuffered(
-    TorrentEngine activeEngine,
+    TorrentEngine engine,
     Duration timeout,
   ) async {
     final deadline = DateTime.now().add(timeout);
     while (true) {
-      if (!identical(_engine, activeEngine)) {
+      if (!identical(_engine, engine)) {
         throw const TorrentPlaybackException('BT stream was stopped');
       }
-      if (activeEngine.state == TorrentState.error) {
+      if (engine.state == TorrentState.error) {
         throw TorrentPlaybackException(
-          activeEngine.errorMessage ?? 'BT stream entered an error state',
+          engine.errorMessage ?? 'BT stream entered an error state',
         );
       }
-      if (activeEngine.pieceManager?.isReadyToPlay == true) return;
+      if (engine.isReadyToPlay) return;
 
       final remaining = deadline.difference(DateTime.now());
-      if (remaining.isNegative || remaining == Duration.zero) {
+      if (remaining <= Duration.zero) {
         throw TorrentPlaybackException(
           'BT buffer timed out after ${timeout.inSeconds}s',
         );
       }
-      await Future.delayed(
-        remaining < _bufferPollInterval ? remaining : _bufferPollInterval,
-      );
+      try {
+        await _nextUpdate.future.timeout(remaining);
+      } on TimeoutException {
+        throw TorrentPlaybackException(
+          'BT buffer timed out after ${timeout.inSeconds}s',
+        );
+      }
     }
   }
 
-  void _bindCallbacks(TorrentEngine engine) {
-    engine.onProgress = (progress, downloaded, total) {
-      if (_engine != engine) return;
-      onProgress?.call(progress, downloaded, total);
-      _scheduleStatsPublish(engine);
-    };
-    engine.onStateChanged = (state) {
-      if (_engine != engine) return;
-      onStateChanged?.call(state);
-      _publishStats(engine);
-    };
-    engine.onReadyToPlay = (streamUrl) {
-      if (_engine != engine) return;
-      onReadyToPlay?.call(streamUrl);
-      _publishStats(engine);
-    };
-    _publishStats(engine);
+  void _signalUpdate() {
+    final update = _nextUpdate;
+    _nextUpdate = Completer<void>();
+    if (!update.isCompleted) update.complete();
   }
 
   void _scheduleStatsPublish(TorrentEngine engine) {
     if (_statsTimer != null) return;
-
     final now = DateTime.now();
     final elapsed = _lastStatsPublishedAt == null
         ? _statsPublishInterval
@@ -176,7 +131,6 @@ class TorrentService {
       _publishStats(engine);
       return;
     }
-
     _statsTimer = Timer(_statsPublishInterval - elapsed, () {
       _statsTimer = null;
       _publishStats(engine);
@@ -189,19 +143,6 @@ class TorrentService {
     _statsTimer = null;
     _lastStatsPublishedAt = DateTime.now();
     statsNotifier.value = engine.getStats();
-  }
-
-  String? _finalizeStart(TorrentEngine engine, String? streamUrl) {
-    if (_engine != engine) {
-      engine.stop();
-      return null;
-    }
-    if (streamUrl == null) {
-      debugPrint(
-        '[TorrentService] Failed to start stream: ${engine.errorMessage}',
-      );
-    }
-    return streamUrl;
   }
 }
 

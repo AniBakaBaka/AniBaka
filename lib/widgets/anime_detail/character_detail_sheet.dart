@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:baka/api/bgm.dart';
@@ -232,13 +233,12 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
       ]);
       if (!mounted) return;
 
-      // 使用安全解析与提取（支持 { code: 200, data: {...} } 包装结构）
-      final infoData = BgmUtils.parseJsonMap(results[0].data);
-      final rawComments = BgmUtils.parseJsonList(results[1].data);
-      final commentsList = BgmUtils.asMapList(rawComments);
+      final infoData = jsonDecode(results[0]) as Map<String, dynamic>;
+      final commentsList = (jsonDecode(results[1]) as List<dynamic>)
+          .cast<Map<String, dynamic>>();
 
       setState(() {
-        if (infoData != null && infoData.isNotEmpty) {
+        if (infoData.isNotEmpty) {
           _charInfo = {
             if (_charInfo != null) ..._charInfo!,
             ...infoData,
@@ -624,5 +624,3 @@ class _CharCommentItem extends StatelessWidget {
     );
   }
 }
-
-

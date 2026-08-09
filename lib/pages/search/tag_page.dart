@@ -35,8 +35,7 @@ class _TagPageState extends State<TagPage> {
         posts = BgmService.convertSearchToAppFormat(subjects);
       } else if (widget.uid != 0) {
         final response = await getPost('', '', page, 15, uid: widget.uid);
-        posts = ((jsonDecode(response.data) as Map)['data'] as List)
-            .cast<Map>();
+        posts = ((jsonDecode(response) as Map)['data'] as List).cast<Map>();
       }
 
       if (!mounted) return posts.isNotEmpty;

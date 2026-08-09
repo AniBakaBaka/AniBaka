@@ -62,12 +62,8 @@ class BgmUtils {
 
   static Map<String, dynamic>? parseJsonMap(dynamic raw) {
     if (raw is Map<String, dynamic>) return raw;
-    if (raw is Map) return Map<String, dynamic>.from(raw);
     if (raw is String && raw.isNotEmpty) {
-      try {
-        final decoded = jsonDecode(raw);
-        if (decoded is Map) return Map<String, dynamic>.from(decoded);
-      } catch (_) {}
+      return jsonDecode(raw) as Map<String, dynamic>;
     }
     return null;
   }
@@ -75,34 +71,19 @@ class BgmUtils {
   static List<dynamic> parseJsonList(dynamic raw) {
     if (raw is List) return raw;
     if (raw is String && raw.isNotEmpty) {
-      try {
-        final decoded = jsonDecode(raw);
-        if (decoded is List) return decoded;
-        if (decoded is Map && decoded['data'] is List) {
-          return decoded['data'] as List;
-        }
-      } catch (_) {}
+      return jsonDecode(raw) as List<dynamic>;
     }
     return const [];
   }
 
   static Map<String, dynamic>? asMap(dynamic value) {
     if (value is Map<String, dynamic>) return value;
-    if (value is Map) return Map<String, dynamic>.from(value);
     return null;
   }
 
   static List<Map<String, dynamic>> asMapList(dynamic value) {
     if (value is! List) return const [];
-    final out = <Map<String, dynamic>>[];
-    for (final item in value) {
-      if (item is Map<String, dynamic>) {
-        out.add(item);
-      } else if (item is Map) {
-        out.add(Map<String, dynamic>.from(item));
-      }
-    }
-    return out;
+    return value.cast<Map<String, dynamic>>();
   }
 
   static int? toInt(dynamic value) {

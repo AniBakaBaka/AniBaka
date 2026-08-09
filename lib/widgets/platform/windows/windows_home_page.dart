@@ -1,5 +1,4 @@
 import 'package:baka/services/home_service.dart';
-import 'package:baka/services/navigation_service.dart';
 import 'package:baka/widgets/anime/post_card.dart';
 import 'package:baka/widgets/common/refresh.dart';
 import 'package:baka/widgets/home/rank_section.dart';
@@ -27,7 +26,7 @@ class WindowsHomePage extends StatelessWidget {
       body: RefreshWrapper(
         onLoadMore: svc.loadMore,
         onRefresh: onRefresh,
-        loadMoreResetListenable: svc.feed,
+        loadMoreResetListenable: svc.tag,
         showInitialIndicator: false,
         child: CustomScrollView(
           slivers: [
@@ -218,11 +217,13 @@ class WindowsHomePage extends StatelessWidget {
   }
 
   Widget _buildScrollCard(BuildContext context, Map data) {
+    final heroTag = 'home_${coverHeroTag(data)}';
     return InkWell(
-      onTap: () => NavigationService.toDetail(
+      onTap: () => navigateToDetail(
         context,
         data,
         posIndex: data['index'] ?? 0,
+        heroTag: heroTag,
       ),
       borderRadius: BorderRadius.circular(16),
       child: Container(
@@ -238,7 +239,7 @@ class WindowsHomePage extends StatelessWidget {
           ],
         ),
         child: Hero(
-          tag: 'home_${coverHeroTag(data)}',
+          tag: heroTag,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(16),
             child: Stack(

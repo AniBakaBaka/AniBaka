@@ -579,16 +579,12 @@ class _DesktopBtProgressIndicator extends StatelessWidget {
         if (stats == null || stats.state == TorrentState.idle) {
           return const SizedBox.shrink();
         }
-        return _buildIndicator(context, torrent, stats);
+        return _buildIndicator(context, stats);
       },
     );
   }
 
-  Widget _buildIndicator(
-    BuildContext context,
-    TorrentService torrent,
-    TorrentStats stats,
-  ) {
+  Widget _buildIndicator(BuildContext context, TorrentStats stats) {
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
     final bodyColor = theme.textTheme.bodyMedium?.color;
@@ -616,7 +612,7 @@ class _DesktopBtProgressIndicator extends StatelessWidget {
         readyColor,
       ),
       TorrentState.error => (
-        torrent.engine?.errorMessage ?? '错误',
+        stats.errorMessage ?? '错误',
         Icons.error_outline_rounded,
         theme.colorScheme.error,
       ),
@@ -729,7 +725,7 @@ class _DesktopBtProgressIndicator extends StatelessWidget {
                 ],
               ],
             ),
-            _buildPieceGrid(theme, stateColor),
+            _buildPieceGrid(theme, stateColor, stats),
             const SizedBox(height: 6),
             Text(
               readyToPlay
@@ -746,16 +742,17 @@ class _DesktopBtProgressIndicator extends StatelessWidget {
     );
   }
 
-  Widget _buildPieceGrid(ThemeData theme, Color stateColor) {
-    final pm = TorrentService.instance.engine?.pieceManager;
-    if (pm == null) return const SizedBox.shrink();
-
-    final firstPiece = pm.firstPiece;
-    final lastPiece = pm.lastPiece;
+  Widget _buildPieceGrid(
+    ThemeData theme,
+    Color stateColor,
+    TorrentStats stats,
+  ) {
+    final firstPiece = stats.firstPiece;
+    final lastPiece = stats.lastPiece;
     final totalTargetPieces = lastPiece - firstPiece + 1;
     if (totalTargetPieces <= 0) return const SizedBox.shrink();
 
-    final states = pm.pieceStates;
+    final states = stats.pieceStates;
 
     return Padding(
       padding: const EdgeInsets.only(top: 8),
@@ -763,10 +760,7 @@ class _DesktopBtProgressIndicator extends StatelessWidget {
         spacing: 1,
         runSpacing: 1,
         children: List.generate(totalTargetPieces, (i) {
-          final pieceIdx = firstPiece + i;
-          final state = pieceIdx < states.length
-              ? states[pieceIdx]
-              : PieceState.pending;
+          final state = i < states.length ? states[i] : PieceState.pending;
           final color = switch (state) {
             PieceState.completed => const Color(0xFF34C759),
             PieceState.downloading => stateColor.withValues(alpha: 0.6),

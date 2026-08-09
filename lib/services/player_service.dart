@@ -276,13 +276,11 @@ class PlayerService {
       if (postId != null && postId > 0) {
         try {
           final response = await getPostDetail(postId);
-          if (response != null && response.data != null) {
-            final resData = response.data is String
-                ? jsonDecode(response.data)
-                : response.data;
-            final postDetail = resData['data'];
-            if (postDetail is Map) {
-              data.addAll(Map<String, dynamic>.from(postDetail));
+          if (response.isNotEmpty) {
+            final postDetail =
+                (jsonDecode(response) as Map<String, dynamic>)['data'] as Map?;
+            if (postDetail != null) {
+              data.addAll(postDetail.cast<String, dynamic>());
             }
           }
         } catch (e) {
@@ -481,10 +479,9 @@ class PlayerService {
     final response = await getPlayUrl(
       episodeId,
     ).timeout(const Duration(seconds: 15));
-    final rawData = response?.data;
-    if (rawData == null) return null;
-    final jsonData = rawData is String ? jsonDecode(rawData) : rawData;
-    return jsonData?['data']?['url'];
+    if (response.isEmpty) return null;
+    final jsonData = jsonDecode(response) as Map<String, dynamic>;
+    return (jsonData['data'] as Map<String, dynamic>?)?['url'] as String?;
   }
 
   Future<String?> resolveEpisodeUrl(int episodeIndex) async {

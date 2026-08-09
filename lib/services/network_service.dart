@@ -11,12 +11,6 @@ import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:baka/instance.dart';
 
-class Response {
-  Response(this.data);
-
-  String data;
-}
-
 class HttpClient extends http.BaseClient {
   final http.Client _inner;
 
@@ -102,7 +96,7 @@ class NetUtils {
     }
   }
 
-  static Future<Response> _send(
+  static Future<String> _send(
     String method,
     String url, {
     data,
@@ -116,7 +110,7 @@ class NetUtils {
     if (!isRetry && !isAuthRequest && _tokenExpiresSoon()) {
       if (!await _tryRefreshToken()) {
         Get.find<AppState>().performLogout();
-        return Response('');
+        return '';
       }
     }
 
@@ -156,7 +150,7 @@ class NetUtils {
       if (notifyOnError) {
         showSnackBar('网络连接失败，请检查网络和线路＞︿＜', isError: true);
       }
-      return Response('');
+      return '';
     }
 
     if (httpResponse.statusCode == 401 && !isAuthRequest) {
@@ -175,13 +169,13 @@ class NetUtils {
       }
       debugPrint('[NetUtils] Token无效，需要重新登录');
       Get.find<AppState>().performLogout();
-      return Response('');
+      return '';
     }
 
-    return Response(httpResponse.body);
+    return httpResponse.body;
   }
 
-  static Future get(
+  static Future<String> get(
     String url, {
     Duration? timeout,
     bool notifyOnError = true,
@@ -189,22 +183,55 @@ class NetUtils {
     return _send('GET', url, timeout: timeout, notifyOnError: notifyOnError);
   }
 
-  static Future post(String url, data) {
+  static Future<String> post(String url, Object? data) {
     return _send('POST', url, data: data);
   }
 
-  static Future put(String url, data) {
+  static Future<String> put(String url, Object? data) {
     return _send('PUT', url, data: data);
   }
 
-  static Future delete(String url, {data}) {
+  static Future<String> delete(String url, {Object? data}) {
     return _send('DELETE', url, data: data);
   }
 }
 
-dynamic getUserInfo() {
+/// Shared LAN address selection for QR login and TV log export.
+final class LanAddress {
+  LanAddress._();
+
+  static Future<InternetAddress?> findIpv4() async {
+    final interfaces = await NetworkInterface.list(
+      type: InternetAddressType.IPv4,
+      includeLoopback: false,
+    );
+    InternetAddress? first;
+    for (final interface in interfaces) {
+      for (final address in interface.addresses) {
+        if (address.isLoopback || address.isLinkLocal) continue;
+        first ??= address;
+        if (_isPrivate(address.address)) return address;
+      }
+    }
+    return first;
+  }
+
+  static bool _isPrivate(String address) {
+    final parts = address.split('.');
+    if (parts.length != 4) return false;
+    final first = int.tryParse(parts[0]);
+    final second = int.tryParse(parts[1]);
+    return first == 10 ||
+        (first == 172 && second != null && second >= 16 && second <= 31) ||
+        (first == 192 && second == 168);
+  }
+}
+
+Map<String, dynamic> getUserInfo() {
   final u = Instances.sp.getString('userinfo');
-  return u != null ? jsonDecode(u) : {'id': 0};
+  return u != null
+      ? jsonDecode(u) as Map<String, dynamic>
+      : <String, dynamic>{'id': 0};
 }
 
 /// 登录 / 注册业务服务。
@@ -226,7 +253,7 @@ class LoginService {
         'platform': 'app',
       });
 
-      final res = jsonDecode(response.data);
+      final res = jsonDecode(response) as Map<String, dynamic>;
       if (res['code'] != 200) {
         return (
           success: false,
@@ -234,7 +261,7 @@ class LoginService {
         );
       }
 
-      await NetUtils.saveTokenResponse(Map<String, dynamic>.from(res));
+      await NetUtils.saveTokenResponse(res);
       await Instances.sp.setString('userinfo', jsonEncode(res['user']));
       _appState.triggerLoginRefresh();
 
@@ -258,7 +285,7 @@ class LoginService {
         'qq': qq.trim(),
       });
 
-      final res = jsonDecode(response.data);
+      final res = jsonDecode(response) as Map<String, dynamic>;
       final bool ok = res['code'] == 200;
       final String msg = res['msg']?.toString() ?? (ok ? '注册成功' : '注册失败');
 

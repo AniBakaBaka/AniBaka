@@ -15,7 +15,14 @@ void main() {
       key: key,
       title: title,
       sourceType: source,
-      data: {'title': title, 'episodeCount': episodes},
+      data: {
+        'title': title,
+        'videoList': List<String>.generate(
+          episodes,
+          (index) => '${index + 1}#episode-${index + 1}',
+          growable: false,
+        ),
+      },
     );
   }
 
@@ -87,22 +94,25 @@ void main() {
     expect(movieScore.confidence, lessThan(0.70));
   });
 
-  test('caps confidence score strictly under 0.35 for severe episode conflict', () {
-    final context = SourceMatchContext(
-      primaryTitle: 'Test Anime',
-      bgmEpisodeCount: 12,
-      bgmCompleted: true,
-    );
+  test(
+    'caps confidence score strictly under 0.35 for severe episode conflict',
+    () {
+      final context = SourceMatchContext(
+        primaryTitle: 'Test Anime',
+        bgmEpisodeCount: 12,
+        bgmCompleted: true,
+      );
 
-    final ranked = engine.rank([
-      candidate('mismatch', 'Test Anime', source: 's1', episodes: 100),
-    ], context);
+      final ranked = engine.rank([
+        candidate('mismatch', 'Test Anime', source: 's1', episodes: 100),
+      ], context);
 
-    expect(ranked.first.severeEpisodeConflict, isTrue);
-    expect(ranked.first.confidence, lessThanOrEqualTo(0.32));
-    expect(ranked.first.shouldProbeImmediately, isFalse);
-    expect(ranked.first.shouldProbeOnFinalPass, isFalse);
-  });
+      expect(ranked.first.severeEpisodeConflict, isTrue);
+      expect(ranked.first.confidence, lessThanOrEqualTo(0.32));
+      expect(ranked.first.shouldProbeImmediately, isFalse);
+      expect(ranked.first.shouldProbeOnFinalPass, isFalse);
+    },
+  );
 
   test('exposes early and final probe tiers', () {
     final context = SourceMatchContext(primaryTitle: 'Example 第二季');

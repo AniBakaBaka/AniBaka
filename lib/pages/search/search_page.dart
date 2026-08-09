@@ -658,15 +658,15 @@ class _SearchPageState extends State<SearchPage> {
 
           if (source == 'bgm') {
             onTap = () {
-              final playerData = <String, dynamic>{
+              final detailData = <String, dynamic>{
                 'title': data['title'],
                 'bgmId': data['bgmId'],
-                '_heroTag': data['_heroTag'],
+                '_heroTag': coverHeroTag(data),
                 if (data['bgmImageUrl'] != null)
                   'bgmImageUrl': data['bgmImageUrl'],
                 if (data['score'] != null) 'score': data['score'],
               };
-              NavigationService.toPlayer(context, playerData, autoMatch: true);
+              NavigationService.toDetail(context, detailData);
             };
           } else if (source != null && source.isNotEmpty) {
             onTap = () => _openSeries(data);

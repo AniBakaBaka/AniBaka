@@ -19,7 +19,9 @@ import 'package:baka/source/store/rule_migrator.dart';
 /// 适配器缓存失效的变更操作（增删改源、导入、重置）。
 /// 所有调用方共享一个适配器 LRU，避免重复缓存 Cookie、DOM 和请求连接。
 class SourceAdapterService {
-  SourceAdapterService._();
+  SourceAdapterService._() {
+    _catalog.addListener(_pruneAdapters);
+  }
 
   static final SourceAdapterService instance = SourceAdapterService._();
   static const int _maxCachedAdapters = 24;
@@ -32,54 +34,6 @@ class SourceAdapterService {
 
   Future<void> init() async {
     await Future.wait<void>([BundledRuleStore.load(), _catalog.init()]);
-  }
-
-  Future<bool> addCustomSource(CustomSourceConfig source) async {
-    if (AdapterRegistry.isBuiltinSource(source.id)) {
-      return updateBuiltinSource(source.id, source);
-    }
-    return _catalog.addCustomSource(source);
-  }
-
-  Future<bool> updateCustomSource(CustomSourceConfig source) async {
-    if (AdapterRegistry.isBuiltinSource(source.id)) {
-      return updateBuiltinSource(source.id, source);
-    }
-    return _catalog.updateCustomSource(source);
-  }
-
-  Future<bool> deleteCustomSource(String id) async {
-    final ok = await _catalog.deleteCustomSource(id);
-    if (ok) _removeAdapter(AdapterRegistry.customSourceKey(id));
-    return ok;
-  }
-
-  Future<int> importCustomSource(String input) async {
-    final count = await _catalog.importCustomSource(input);
-    if (count > 0) {
-      _removeAdaptersWhere(AdapterRegistry.isBuiltinSource);
-    }
-    return count;
-  }
-
-  Future<void> clearAllCustomSources() async {
-    await _catalog.clearCustomSources();
-    _removeAdaptersWhere(AdapterRegistry.isCustomSource);
-  }
-
-  Future<bool> updateBuiltinSource(
-    String key,
-    CustomSourceConfig source,
-  ) async {
-    final updated = await _catalog.updateBuiltinSource(key, source);
-    if (updated) _removeAdapter(key);
-    return updated;
-  }
-
-  Future<bool> resetBuiltinSource(String key) async {
-    final reset = await _catalog.resetBuiltinSource(key);
-    if (reset) _removeAdapter(key);
-    return reset;
   }
 
   AdapterBase? _createAdapterFor(String source) {
@@ -109,8 +63,11 @@ class SourceAdapterService {
 
   AdapterBase? _customAdapter(String id) {
     final config = _catalog.customSourceById(id);
-    if (config == null) return null;
     final sourceKey = AdapterRegistry.customSourceKey(id);
+    if (config == null) {
+      _removeAdapter(sourceKey);
+      return null;
+    }
 
     return _getOrCreateAdapter(
       sourceKey,
@@ -138,9 +95,12 @@ class SourceAdapterService {
           'title': series.name,
           'seriesId': series.seriesId,
           'description': series.description ?? fallbackDescription,
+          'subtitle': series.description ?? fallbackDescription,
           'image': series.image,
+          'content': series.image,
           'source': sourceKey,
           'sourceDisplayName': displayName,
+          'tag': displayName,
           if (series.bgmId != null) 'bgmId': series.bgmId,
           if (series.score != null) 'score': series.score,
           if (series.image?.isNotEmpty ?? false) 'bgmImageUrl': series.image,
@@ -235,9 +195,16 @@ class SourceAdapterService {
     _adapterCache.remove(key)?.adapter.dispose();
   }
 
-  void _removeAdaptersWhere(bool Function(String key) test) {
+  void _pruneAdapters() {
     _adapterCache.removeWhere((key, entry) {
-      if (!test(key)) return false;
+      final revision = AdapterRegistry.isCustomSource(key)
+          ? _catalog
+                .customSourceById(
+                  key.substring(AdapterRegistry.customSourcePrefix.length),
+                )
+                ?.updatedAt
+          : _catalog.builtinOverrideById(key)?.updatedAt;
+      if (revision == entry.revision) return false;
       entry.adapter.dispose();
       return true;
     });

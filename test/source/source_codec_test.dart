@@ -28,21 +28,6 @@ void main() {
     expect(SourceCodec.decode(encrypted), config);
   });
 
-  test('decoder keeps legacy base64 JSON compatibility', () {
-    final legacy = base64.encode(utf8.encode(jsonEncode(config)));
-
-    expect(SourceCodec.decode('${SourceCodec.scheme}$legacy'), config);
-  });
-
-  test('decoder unwraps a packed JSON document', () {
-    final wrapped = jsonEncode({
-      'name': 'Visible metadata',
-      SourceCodec.packField: SourceCodec.encrypt(config),
-    });
-
-    expect(SourceCodec.decode(wrapped), config);
-  });
-
   test('decoder accepts naked JSON collections', () {
     expect(SourceCodec.decode(jsonEncode([config])), [config]);
   });
@@ -50,5 +35,10 @@ void main() {
   test('decoder rejects empty and malformed input', () {
     expect(() => SourceCodec.decode(''), throwsFormatException);
     expect(() => SourceCodec.decode('not-a-rule'), throwsFormatException);
+    final legacy = base64.encode(utf8.encode(jsonEncode(config)));
+    expect(
+      () => SourceCodec.decode('${SourceCodec.scheme}$legacy'),
+      throwsA(anything),
+    );
   });
 }
