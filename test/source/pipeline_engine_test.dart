@@ -5,6 +5,7 @@ import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:test/test.dart';
 
 import 'package:baka/models/custom_source_config.dart';
+import 'package:baka/source/models/episode.dart';
 import 'package:baka/source/models/series.dart';
 import 'package:baka/source/models/source.dart';
 import 'package:baka/source/engine/pipeline_host.dart';
@@ -104,6 +105,23 @@ class FakeHost implements PipelineHost {
   }) async => '';
   @override
   Future<String> sniffWithWebview(String url) async => '';
+}
+
+class ReverseEpisodesHost extends FakeHost {
+  ReverseEpisodesHost() : super(const {'https://example.com/detail': 'html'});
+
+  @override
+  List<Source> parseEpisodesXPath(
+    String html, {
+    required String roadsXPath,
+    required String itemsXPath,
+  }) => [
+    Source([
+      Episode('/episode/3', 0, '第3集'),
+      Episode('/episode/2', 1, '第2集'),
+      Episode('/episode/1', 2, '第1集'),
+    ], '主线'),
+  ];
 }
 
 class VerifyCheckHost extends FakeHost {
@@ -377,6 +395,42 @@ void main() {
     expect(sources.first.episodes.first.episodeId, '/watch/e1');
     expect(sources.first.episodes[1].name, '第2集');
   });
+
+  test(
+    'episodes can reverse a newest-first list and rebuild indexes',
+    () async {
+      final host = ReverseEpisodesHost();
+      final rule = SourceRule.fromJson({
+        'format': kSourceRuleFormatV2,
+        'id': 'reverse-episodes',
+        'name': 'Reverse episodes',
+        'baseUrl': 'https://example.com',
+        'search': [],
+        'detail': [
+          {'op': 'follow'},
+          {
+            'op': 'episodes',
+            'roadsXPath': '//section',
+            'itemsXPath': './/a',
+            'reverseEpisodes': true,
+          },
+        ],
+        'play': [],
+      });
+
+      final sources = await interp.runDetail(rule, host, '/detail');
+      expect(sources.single.episodes.map((episode) => episode.name), [
+        '第1集',
+        '第2集',
+        '第3集',
+      ]);
+      expect(sources.single.episodes.map((episode) => episode.episode), [
+        0,
+        1,
+        2,
+      ]);
+    },
+  );
 
   test('jsonEpisodes 的 id 快路径保留变量回退语义', () async {
     final host = FakeHost({

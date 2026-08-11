@@ -12,16 +12,16 @@
   "search": [
     {
       "op": "fetch",
-      "url": "/videos?keyword={keyword}"
+      "url": "/api/videos/search?q={keyword}"
     },
     {
-      "op": "searchList",
-      "selectors": [
-        "a[href*=\"/video/\"]",
-        ".video-item",
-        ".video-list li"
-      ],
-      "detailPattern": "/video/"
+      "op": "jsonSeries",
+      "listPath": "data.videos",
+      "idKey": "id",
+      "nameKey": "name",
+      "imageKey": "pic",
+      "descKey": "remarks",
+      "detailUrlTemplate": "/api/videos/{id}"
     }
   ],
   "detail": [
@@ -29,22 +29,26 @@
       "op": "follow"
     },
     {
-      "op": "episodes",
-      "listSelectors": [
-        "body"
-      ],
-      "tabSelectors": [
-        "a[href*=\"source=\"]"
-      ]
+      "op": "jsonEpisodes",
+      "sourcesPath": "data.playSources",
+      "episodesKey": "episodes",
+      "sourceNameKey": "name",
+      "episodeNameKey": "name",
+      "episodeIdTemplate": "{id:raw}"
     }
   ],
   "play": [
     {
-      "op": "sniff",
-      "goal": "video",
-      "url": "{episodeId:raw}",
-      "timeoutMs": 60000,
-      "settleMs": 1000
+      "op": "fetch",
+      "url": "/api/videos/resolve-play-url?episodeId={episodeId}"
+    },
+    {
+      "op": "setMediaHeaders",
+      "jsonPath": "data.headers"
+    },
+    {
+      "op": "json",
+      "path": "data.url"
     }
   ]
 }

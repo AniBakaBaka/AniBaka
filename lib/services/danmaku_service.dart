@@ -200,11 +200,18 @@ List<DanmakuItem> _decodeDanmakuItems(String raw) {
     if (type == null || (type != 1 && type != 3 && type != 4 && type != 5)) {
       continue;
     }
-    final colorEnd = parameters.indexOf(',', secondComma + 1);
+    // Standard danmaku parameters are
+    // time,type,fontSize,color,... . Older locally exported files used the
+    // shortened time,type,color form, so keep accepting both layouts.
+    final thirdComma = parameters.indexOf(',', secondComma + 1);
+    final colorStart = thirdComma < 0 ? secondComma + 1 : thirdComma + 1;
+    final fourthComma = thirdComma < 0
+        ? -1
+        : parameters.indexOf(',', thirdComma + 1);
     final color = _parseUnsignedInt(
       parameters,
-      secondComma + 1,
-      colorEnd < 0 ? parameters.length : colorEnd,
+      colorStart,
+      fourthComma < 0 ? parameters.length : fourthComma,
     );
     if (color == null) continue;
     if (time < previousTime) sorted = false;

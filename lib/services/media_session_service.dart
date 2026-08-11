@@ -11,8 +11,7 @@ import 'package:baka/widgets/baka_player/controller.dart';
 ///
 /// Android/iOS/macOS: audio_service (MediaSession / MPNowPlayingInfoCenter)
 class MediaSessionService extends GetxService {
-  MediaSessionService({PlaybackAudioHandler? audioHandler})
-    : _audioHandler = audioHandler;
+  MediaSessionService({this._audioHandler});
 
   PlaybackAudioHandler? _audioHandler;
   StreamSubscription<Duration>? _seekSubscription;

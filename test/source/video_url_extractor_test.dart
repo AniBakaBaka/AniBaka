@@ -3,6 +3,15 @@ import 'package:test/test.dart';
 import 'package:baka/source/video_url_extractor.dart';
 
 void main() {
+  test('recognizes E站 listres endpoint as disguised HLS', () {
+    const url =
+        'https://player.ezdmw.com/index/listres/resource_name/demo/'
+        'key/demo/sign/abc.webp?lineOne=true';
+
+    expect(VideoUrlExtractor.isVideoUrl(url), isTrue);
+    expect(VideoUrlExtractor.isPlayable(url), isTrue);
+  });
+
   test('31dm signed MP4 keeps encoded path and signature bytes', () {
     const url =
         'https://r2.31dm.com/2024%2F%E7%95%AA%E5%89%A7%2F%E7%AC%AC01%E9%9B%86.mp4'

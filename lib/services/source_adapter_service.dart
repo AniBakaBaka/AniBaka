@@ -531,13 +531,12 @@ class SourceCatalog extends ChangeNotifier {
   /// Returns null when indices are invalid / no-op.
   static List<T>? _reorderList<T>(List<T> list, int oldIndex, int newIndex) {
     if (oldIndex < 0 || oldIndex >= list.length) return null;
-    var target = newIndex;
-    if (target > list.length) target = list.length;
-    if (oldIndex < target) target -= 1;
-    if (target < 0 || target >= list.length || oldIndex == target) return null;
+    if (newIndex < 0 || newIndex >= list.length || oldIndex == newIndex) {
+      return null;
+    }
     final copy = List<T>.of(list);
     final item = copy.removeAt(oldIndex);
-    copy.insert(target, item);
+    copy.insert(newIndex, item);
     return copy;
   }
 }

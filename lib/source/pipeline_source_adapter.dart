@@ -906,9 +906,14 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
   @override
   Future<String> sniffWithWebview(String url) async {
     try {
+      final cookieHeader = rule.headers.entries
+          .where((entry) => entry.key.toLowerCase() == 'cookie')
+          .map((entry) => entry.value.trim())
+          .firstWhere((value) => value.isNotEmpty, orElse: () => '');
       return await WebViewAdapter.extractVideoUrl(
             url,
             userAgent: requestUserAgent,
+            cookieHeader: cookieHeader.isEmpty ? null : cookieHeader,
             followEmbeddedPlayer: _followsEmbeddedPlayer,
             taskScope: _webViewTaskScope ??= WebViewTaskScope(),
           ) ??

@@ -4,7 +4,7 @@
 
 跨平台番剧聚合、媒体播放与弹幕客户端
 
-[![Flutter](https://img.shields.io/badge/Flutter-3.38.10-02569B?logo=flutter)](https://flutter.dev/)
+[![Flutter](https://img.shields.io/badge/Flutter-3.44.9-02569B?logo=flutter)](https://flutter.dev/)
 [![Dart](https://img.shields.io/badge/Dart-%3E%3D3.8%20%3C%3D4.0-0175C2?logo=dart)](https://dart.dev/)
 [![CI](https://github.com/AniBakaBaka/AniBaka/actions/workflows/dart.yml/badge.svg)](https://github.com/AniBakaBaka/AniBaka/actions/workflows/dart.yml)
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
@@ -65,7 +65,7 @@ Free code signing on Windows is provided by [SignPath.io](https://signpath.io/),
 
 ### 环境要求
 
-- Flutter `3.38.10`，建议使用 [FVM](https://fvm.app/)
+- Flutter `3.44.9`，项目通过 `.fvmrc` 固定版本，建议使用 [FVM](https://fvm.app/)
 - Dart `>=3.8.0 <=4.0.0`
 - 对应目标平台的 Flutter 桌面或移动端开发工具链
 - Android 构建需要 JDK 17 和 Android SDK 36
@@ -75,6 +75,7 @@ Free code signing on Windows is provided by [SignPath.io](https://signpath.io/),
 ```bash
 git clone https://github.com/AniBakaBaka/AniBaka.git
 cd AniBaka
+fvm install
 fvm flutter pub get
 fvm flutter run
 ```
@@ -102,14 +103,14 @@ fvm flutter build ios --release --no-codesign
 ## 开发与测试
 
 ```bash
-dart analyze
-flutter test
+fvm flutter analyze
+fvm flutter test
 ```
 
 真实站点规则测试默认跳过。需要联网验证规则时运行：
 
 ```bash
-flutter test test/source/live_new_rules_test.dart --dart-define=LIVE=true
+fvm flutter test test/source/live_new_rules_test.dart --dart-define=LIVE=true
 ```
 
 第三方站点接口和页面结构可能随时变化。修改规则时，请至少验证搜索、详情、播放清单及实际媒体分片。

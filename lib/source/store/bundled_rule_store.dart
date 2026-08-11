@@ -26,6 +26,7 @@ class BundledRuleStore {
     'xifanacg': 'assets/rules/xifanacg.json',
     'tvtfun': 'assets/rules/tvtfun.json',
     'moonci': 'assets/rules/moonci.json',
+    'silisili': 'assets/rules/silisili.json',
   };
 
   /// Rule Hub revisions represented by the bundled copies.
@@ -43,8 +44,9 @@ class BundledRuleStore {
     'mgnacg': 1,
     'ios_mifun': 4,
     'xifanacg': 2,
-    'tvtfun': 6,
+    'tvtfun': 7,
     'moonci': 1,
+    'silisili': 0,
   };
 
   static Map<String, SourceRule> _rules = const <String, SourceRule>{};

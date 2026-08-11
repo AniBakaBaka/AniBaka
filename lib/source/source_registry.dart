@@ -135,6 +135,13 @@ class AdapterRegistry {
       color: const Color(0xFF3949AB),
       factory: () => _createBundledRuleAdapter('moonci'),
     ),
+    AdapterDescriptor(
+      key: 'silisili',
+      displayName: '嘶哩嘶哩',
+      icon: Icons.play_circle_outline_rounded,
+      color: const Color(0xFF7E57C2),
+      factory: () => _createBundledRuleAdapter('silisili'),
+    ),
   ];
 
   static final Map<String, AdapterDescriptor> _builtinSourceMap = {

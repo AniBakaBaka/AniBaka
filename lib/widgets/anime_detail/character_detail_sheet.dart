@@ -240,7 +240,7 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
       setState(() {
         if (infoData.isNotEmpty) {
           _charInfo = {
-            if (_charInfo != null) ..._charInfo!,
+            ...?_charInfo,
             ...infoData,
           };
         }

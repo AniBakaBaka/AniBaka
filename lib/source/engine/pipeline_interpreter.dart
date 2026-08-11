@@ -1114,6 +1114,25 @@ class PipelineInterpreter {
             : step.strList('tabSelectors'),
       );
     }
+    if (step.flag('reverseEpisodes')) {
+      sources = sources
+          .map((source) {
+            final reversed = source.episodes.reversed.toList(growable: false);
+            return Source(
+              List<Episode>.generate(
+                reversed.length,
+                (index) => Episode(
+                  reversed[index].episodeId,
+                  index,
+                  reversed[index].episodeName,
+                ),
+                growable: false,
+              ),
+              source.sourceName,
+            );
+          })
+          .toList(growable: false);
+    }
     if (step.flag('reverse')) {
       sources = sources.reversed.toList(growable: false);
     }

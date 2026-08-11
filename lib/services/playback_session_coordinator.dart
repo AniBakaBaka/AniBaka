@@ -16,8 +16,8 @@ class PlaybackSessionCoordinator {
     required this.content,
     required this.onNextEpisode,
     required this.onPreviousEpisode,
-    MediaSessionService? mediaSession,
-  }) : _mediaSession = mediaSession;
+    this._mediaSession,
+  });
 
   static const _progressThrottle = Duration(seconds: 30);
 

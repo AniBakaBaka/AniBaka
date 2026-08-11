@@ -240,7 +240,9 @@ abstract class AdapterBase {
 
     try {
       final headers = mediaValidationHeaders;
-      final isHls = url.toLowerCase().contains('.m3u8');
+      final lowerUrl = url.toLowerCase();
+      final isHls =
+          lowerUrl.contains('.m3u8') || lowerUrl.contains('/index/listres/');
 
       // m3u8：Range 小 GET，很多 CDN 对 HEAD 一律 403，对列表片段才如实。
       if (isHls) {

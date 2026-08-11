@@ -403,7 +403,7 @@ class SourceReorderSection<T> extends StatelessWidget {
                 physics: const NeverScrollableScrollPhysics(),
                 padding: EdgeInsets.zero,
                 itemCount: items.length,
-                onReorder: (oldIndex, newIndex) async {
+                onReorderItem: (oldIndex, newIndex) async {
                   HapticFeedback.lightImpact();
                   await onReorder(oldIndex, newIndex);
                 },

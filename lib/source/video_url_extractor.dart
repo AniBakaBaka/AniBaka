@@ -73,6 +73,7 @@ class VideoUrlExtractor {
     return _videoExtRegex.hasMatch(lower) ||
         lower.contains('type=m3u8') ||
         lower.contains('/hls/') ||
+        lower.contains('/index/listres/') ||
         lower.contains('/video/tos/') ||
         lower.contains('mime_type=video') ||
         lower.contains('mime=video');
@@ -108,6 +109,7 @@ class VideoUrlExtractor {
     final lower = url.toLowerCase();
     if (lower.startsWith('blob:') || lower == 'about:blank') return false;
     if (lower.contains('mime=image') || lower.contains('image/')) return false;
+    if (lower.contains('/index/listres/')) return true;
     final signed =
         _cdnSignedRegex.hasMatch(lower) || _hasExpiringSign(url, lower);
     if (!signed && _nonVideoRegex.hasMatch(lower)) return false;

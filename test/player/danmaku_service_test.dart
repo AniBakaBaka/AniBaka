@@ -21,6 +21,20 @@ void main() {
     expect(items.last.color, const Color(0xFFFF0000));
   });
 
+  test('parses color from standard parameters after font size', () async {
+    final items = await DanmakuService.decode(
+      '{"data":['
+      '{"m":"white","p":"0.0,1,25,16777215,source"},'
+      '{"m":"red","p":"1.0,1,25,16711680,source"}'
+      ']}',
+    );
+
+    expect(items.map((item) => item.color), [
+      const Color(0xFFFFFFFF),
+      const Color(0xFFFF0000),
+    ]);
+  });
+
   test('serializes typed items for local download compatibility', () async {
     const item = DanmakuItem(
       'hello',

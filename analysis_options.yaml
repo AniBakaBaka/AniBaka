@@ -45,7 +45,6 @@ linter:
     unnecessary_nullable_for_final_variable_declarations: true
     unnecessary_string_interpolations: true
     avoid_init_to_null: true
-    avoid_null_checks_in_equality_operators: true
     avoid_return_types_on_setters: true
     avoid_shadowing_type_parameters: true
     avoid_types_as_parameter_names: true

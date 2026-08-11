@@ -19,7 +19,7 @@ class SwiperBanner extends StatefulWidget {
 }
 
 class _SwiperBannerState extends State<SwiperBanner> {
-  late final PageController _pageController = PageController();
+  late final CarouselController _carouselController = CarouselController();
   final ValueNotifier<int> _currentIndexNotifier = ValueNotifier<int>(0);
   Timer? _timer;
   bool _showSwiper = !SwiperSettingsService.isHidden;
@@ -44,9 +44,11 @@ class _SwiperBannerState extends State<SwiperBanner> {
     _currentIndexNotifier.value = index;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted &&
-          _pageController.hasClients &&
+          _carouselController.hasClients &&
           widget.swiperData.isNotEmpty) {
-        _pageController.jumpToPage(index);
+        unawaited(
+          _carouselController.animateToItem(index, duration: Duration.zero),
+        );
       }
     });
     _restartAutoPlay();
@@ -56,7 +58,7 @@ class _SwiperBannerState extends State<SwiperBanner> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final reduceVisualEffects = context.reduceMotion;
-    final tickerEnabled = TickerMode.of(context);
+    final tickerEnabled = TickerMode.valuesOf(context).enabled;
     if (_reduceVisualEffects == reduceVisualEffects &&
         _tickerEnabled == tickerEnabled) {
       return;
@@ -69,7 +71,7 @@ class _SwiperBannerState extends State<SwiperBanner> {
   @override
   void dispose() {
     _timer?.cancel();
-    _pageController.dispose();
+    _carouselController.dispose();
     _currentIndexNotifier.dispose();
     super.dispose();
   }
@@ -84,11 +86,13 @@ class _SwiperBannerState extends State<SwiperBanner> {
     }
 
     _timer = Timer.periodic(const Duration(seconds: 6), (_) {
-      if (_isInteracting || !_pageController.hasClients) return;
-      _pageController.animateToPage(
-        (_currentIndexNotifier.value + 1) % widget.swiperData.length,
-        duration: const Duration(milliseconds: 600),
-        curve: Curves.fastOutSlowIn,
+      if (_isInteracting || !_carouselController.hasClients) return;
+      unawaited(
+        _carouselController.animateToItem(
+          (_currentIndexNotifier.value + 1) % widget.swiperData.length,
+          duration: const Duration(milliseconds: 600),
+          curve: Curves.fastOutSlowIn,
+        ),
       );
     });
   }
@@ -182,10 +186,13 @@ class _SwiperBannerState extends State<SwiperBanner> {
             onPointerDown: (_) => _isInteracting = true,
             onPointerUp: (_) => _isInteracting = false,
             onPointerCancel: (_) => _isInteracting = false,
-            child: PageView.builder(
-              controller: _pageController,
+            child: CarouselView.builder(
+              controller: _carouselController,
+              itemExtent: double.infinity,
+              itemSnapping: true,
+              infinite: widget.swiperData.length > 1,
               itemCount: widget.swiperData.length,
-              onPageChanged: (index) {
+              onIndexChanged: (index) {
                 _currentIndexNotifier.value = index;
               },
               itemBuilder: (_, index) => GestureDetector(

@@ -57,7 +57,9 @@ class _AppShimmerState extends State<AppShimmer> {
 
   void _syncClock() {
     final shouldUseClock =
-        widget.enabled && !context.reduceMotion && TickerMode.of(context);
+        widget.enabled &&
+        !context.reduceMotion &&
+        TickerMode.valuesOf(context).enabled;
     if (_usesClock == shouldUseClock) return;
     _usesClock = shouldUseClock;
     if (shouldUseClock) {

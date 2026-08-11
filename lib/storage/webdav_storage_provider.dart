@@ -17,7 +17,7 @@ class WebDavStorageProvider extends StorageProvider {
 </D:propfind>''';
 
   final String _baseUrl;
-  final String _rootPath;
+  final String rootPath;
   final Dio _dio;
 
   @override
@@ -33,10 +33,9 @@ class WebDavStorageProvider extends StorageProvider {
     required String baseUrl,
     required String username,
     required String password,
-    String rootPath = '/',
+    this.rootPath = '/',
     String? name,
   }) : _baseUrl = StoragePath.trimTrailingSlash(baseUrl.trim()),
-       _rootPath = rootPath,
        displayName = name ?? 'WebDAV',
        httpHeaders = username.isEmpty && password.isEmpty
            ? null
@@ -61,7 +60,7 @@ class WebDavStorageProvider extends StorageProvider {
   Future<bool> testConnection() async {
     try {
       final response = await _dio.request<Object?>(
-        _rootPath,
+        rootPath,
         options: Options(method: 'PROPFIND', headers: const {'Depth': '0'}),
       );
       return response.statusCode == 200 || response.statusCode == 207;

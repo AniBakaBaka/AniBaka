@@ -157,6 +157,34 @@ class WebViewAdapter {
     } catch (e) {}
   }
 
+  var framePerfIndex = new WeakMap();
+  function scanFrame(el) {
+    considerFrame(el);
+    if (!el || S.best) return;
+    try {
+      var w = el.contentWindow;
+      var d = el.contentDocument;
+      if (!w || !d) return;
+      consider(w.__bakaSniffer && w.__bakaSniffer.best, 1);
+      var nodes = d.querySelectorAll('video, source, iframe, embed, object');
+      for (var i = 0; i < nodes.length && i < 50; i++) {
+        var node = nodes[i];
+        if (node.tagName === 'IFRAME') {
+          considerFrame(node);
+          continue;
+        }
+        consider(node.currentSrc || node.src || node.data ||
+          (node.getAttribute && (node.getAttribute('src') || node.getAttribute('data-src') || node.getAttribute('data'))), 1);
+      }
+      var globals = [w.info, w.stray, w.player, w.config, w.PlayConfig];
+      for (var g = 0; g < globals.length; g++) scanObj(globals[g], 4);
+      var entries = w.performance.getEntriesByType('resource');
+      var index = framePerfIndex.get(el) || 0;
+      for (; index < entries.length; index++) consider(entries[index].name, 1);
+      framePerfIndex.set(el, index);
+    } catch (e) {}
+  }
+
   function hookSrc(proto) {
     try {
       var d = Object.getOwnPropertyDescriptor(proto, 'src');
@@ -243,7 +271,7 @@ class WebViewAdapter {
       for (var i = 0; i < nodes.length && i < 50; i++) {
         var el = nodes[i];
         if (el.tagName === 'IFRAME') {
-          considerFrame(el);
+          scanFrame(el);
           continue;
         }
         consider(el.currentSrc || el.src || el.data ||
@@ -406,6 +434,68 @@ class WebViewAdapter {
     await controller.loadStringContent(_blankPage).catchError((_) {});
   }
 
+  static List<MapEntry<String, String>> _parseCookieHeader(
+    String? cookieHeader,
+  ) {
+    if (cookieHeader == null || cookieHeader.trim().isEmpty) return const [];
+    return cookieHeader
+        .split(';')
+        .map((part) {
+          final separator = part.indexOf('=');
+          if (separator <= 0) return null;
+          final name = part.substring(0, separator).trim();
+          final value = part.substring(separator + 1).trim();
+          if (name.isEmpty) return null;
+          return MapEntry(name, value);
+        })
+        .whereType<MapEntry<String, String>>()
+        .toList(growable: false);
+  }
+
+  static Future<void> _seedDesktopCookies(
+    webview_windows.WebviewController controller,
+    Uri target,
+    List<MapEntry<String, String>> cookies,
+  ) async {
+    if (cookies.isEmpty || !target.hasScheme || target.host.isEmpty) return;
+    final origin = target.replace(path: '/', query: '', fragment: '');
+    final arrived = controller.url.firstWhere((current) {
+      final uri = Uri.tryParse(current);
+      return uri != null && uri.host == target.host;
+    });
+    final completed = controller.loadingState.firstWhere(
+      (state) => state == webview_windows.LoadingState.navigationCompleted,
+    );
+    await controller.loadUrl(origin.toString());
+    await Future.wait([
+      arrived,
+      completed,
+    ]).timeout(const Duration(seconds: 10));
+    for (final cookie in cookies) {
+      final assignment = '${cookie.key}=${cookie.value}; path=/';
+      await controller.executeScript(
+        'document.cookie=${jsonEncode(assignment)}',
+      );
+    }
+  }
+
+  static Future<void> _seedMobileCookies(
+    Uri target,
+    List<MapEntry<String, String>> cookies,
+  ) async {
+    if (cookies.isEmpty || target.host.isEmpty) return;
+    final manager = WebViewCookieManager();
+    for (final cookie in cookies) {
+      await manager.setCookie(
+        WebViewCookie(
+          name: cookie.key,
+          value: cookie.value,
+          domain: target.host,
+        ),
+      );
+    }
+  }
+
   /// 加载 [url] 后运行 [poll] 直至其返回或超时；结束时复位控制器。
   ///
   /// [poll] 应在 `cancelled()` 为真时尽快退出，避免影响队列中的下一个任务。
@@ -421,6 +511,7 @@ class WebViewAdapter {
     poll,
     required T Function() onTimeout,
     required T Function() onCancelled,
+    String? cookieHeader,
     WebViewTaskScope? taskScope,
   }) {
     // Capture before enqueueing. If the owning adapter is disposed while this
@@ -439,6 +530,10 @@ class WebViewAdapter {
         if (taskCancelled()) return onCancelled();
         try {
           await controller.setUserAgent(userAgent).catchError((_) {});
+          final cookies = _parseCookieHeader(cookieHeader);
+          if (cookies.isNotEmpty) {
+            await _seedDesktopCookies(controller, Uri.parse(url), cookies);
+          }
           await controller.loadUrl(url);
           if (taskCancelled()) return onCancelled();
           final result = poll(controller.executeScript, taskCancelled);
@@ -457,6 +552,10 @@ class WebViewAdapter {
             ? desktopUserAgent
             : userAgent;
         await controller.setUserAgent(effectiveUserAgent);
+        final cookies = _parseCookieHeader(cookieHeader);
+        if (cookies.isNotEmpty) {
+          await _seedMobileCookies(Uri.parse(url), cookies);
+        }
         if (sniff) {
           // 移动端没有文档创建期注入，在导航前后各补一次（脚本幂等）。
           controller.setNavigationDelegate(
@@ -536,7 +635,7 @@ class WebViewAdapter {
   }
 
   static final RegExp _transientChallengePattern = RegExp(
-    r'X-GE-UA-Step|ge_ua_p|DokiDoki CDN|dooki\.cloud|'
+    r'X-GE-UA-Step|DokiDoki CDN|dooki\.cloud|'
     r'<title>\s*(?:安全检查中|Just a moment|身份验证|安全验证)|'
     r'please enable javascript and (?:cookies|refresh)|'
     r'checking your browser before accessing|window\._cf_chl_opt|'
@@ -616,6 +715,7 @@ class WebViewAdapter {
   static Future<String?> extractVideoUrl(
     String playerUrl, {
     String? userAgent,
+    String? cookieHeader,
     bool followEmbeddedPlayer = false,
     WebViewTaskScope? taskScope,
   }) => _run(
@@ -623,6 +723,7 @@ class WebViewAdapter {
     userAgent: userAgent ?? desktopUserAgent,
     timeout: const Duration(seconds: 60),
     sniff: true,
+    cookieHeader: cookieHeader,
     taskScope: taskScope,
     poll: (exec, cancelled) => _pollSniffedUrl(
       exec,

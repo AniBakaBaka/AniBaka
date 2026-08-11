@@ -1,0 +1,57 @@
+{
+  "format": "anx-rule/2",
+  "id": "silisili",
+  "name": "嘶哩嘶哩",
+  "baseUrl": "https://www.silisilifun.com",
+  "iconUrl": "https://www.silisilifun.com/favicon.ico?20190911",
+  "description": "嘶哩嘶哩动漫源。内置站点访问口令对应的会话 Cookie，支持搜索、分集与 WebView 播放解析。",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Referer": "https://www.silisilifun.com/",
+    "Cookie": "silisili=on"
+  },
+  "search": [
+    {
+      "op": "fetch",
+      "url": "/vodsearch/?wd={keyword}"
+    },
+    {
+      "op": "searchList",
+      "selectors": [
+        "#content article",
+        "main article",
+        "article"
+      ],
+      "detailPattern": "/voddetail/"
+    }
+  ],
+  "detail": [
+    {
+      "op": "follow"
+    },
+    {
+      "op": "episodes",
+      "listSelectors": [
+        ".play-pannel-list ul.stui-content__playlist",
+        "ul.stui-content__playlist"
+      ],
+      "tabSelectors": [
+        ".play-pannel_hd .widget-title"
+      ]
+    }
+  ],
+  "play": [
+    {
+      "op": "setMediaHeaders",
+      "headers": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+      }
+    },
+    {
+      "op": "sniff",
+      "goal": "video",
+      "url": "{episodeId:raw}"
+    }
+  ],
+  "useWebview": true
+}

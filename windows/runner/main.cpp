@@ -121,13 +121,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   WriteStartupLog("COM initialized");
 
   flutter::DartProject project(L"data");
-  // Flutter 3.38's Win32 task runner can pace animations at roughly 40 FPS.
-  // Keep Dart on its own thread so continuous overlays such as danmaku are
-  // driven by the engine's precise frame scheduler instead of the Win32
-  // message-loop timer. Remove this after upgrading to an engine containing
-  // flutter/flutter#179249.
-  project.set_ui_thread_policy(
-      flutter::UIThreadPolicy::RunOnSeparateThread);
   project.set_gpu_preference(flutter::GpuPreference::NoPreference);
   WriteStartupLog("Flutter engine using the Windows system GPU preference");
 
