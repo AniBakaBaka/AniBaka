@@ -47,7 +47,7 @@ class VideoUrlExtractor {
   /// `sign=<签名>:<时间戳>` 形式。
   static final _expiringSignRegex = RegExp(r'^.+:\d{9,}$');
 
-  /// `verify=<unix 时间戳>-<签名>` 形式（31dm / Cycani 等 CDN）。
+  /// `verify=<unix 时间戳>-<签名>` 形式（如 31dm CDN）。
   static final _verifyParamRegex = RegExp(r'^\d{9,}');
 
   static final _trailingJunkPattern = RegExp(r'[,;.\s]+$');
@@ -84,8 +84,8 @@ class VideoUrlExtractor {
   }
 
   /// query 中是否带过期型签名参数：
-  /// - `sign=<签名>:<时间戳>`（如 huazidm）
-  /// - `verify=<时间戳>-<签名>`（如 31dm / Cycani）
+  /// - `sign=<签名>:<时间戳>`
+  /// - `verify=<时间戳>-<签名>`（如 31dm）
   static bool _hasExpiringSign(String url, String lower) {
     if (!lower.contains('sign=') && !lower.contains('verify=')) return false;
     try {

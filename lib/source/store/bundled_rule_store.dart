@@ -15,7 +15,6 @@ class BundledRuleStore {
 
   static const Map<String, String> builtinAssets = <String, String>{
     'akianime': 'assets/rules/akianime.json',
-    'cycani': 'assets/rules/cycani.json',
     'anime7': 'assets/rules/anime7.json',
     'dm84': 'assets/rules/dm84.json',
     'fsdm02': 'assets/rules/fsdm02.json',
@@ -35,7 +34,6 @@ class BundledRuleStore {
   /// official Rule Hub entry yet.
   static const Map<String, int> builtinVersions = <String, int>{
     'akianime': 4,
-    'cycani': 2,
     'anime7': 2,
     'dm84': 1,
     'fsdm02': 1,

@@ -40,6 +40,12 @@ const localDemuxerLavfOptions =
     'seg_max_retry=5,strict=experimental,allowed_extensions=ALL,'
     'protocol_whitelist=[file,http,https,tcp,udp,tls,data,crypto,ftp,rtp,rtsp,rtmp,srt]';
 
+/// 网络流（http/https）专用的 lavf 参数：断线重连、HLS 容错，以及
+/// 忽略索引/DTS 以绕过部分在线源的坏时间戳。仅适用于网络媒体。
+const networkDemuxerLavfOptions =
+    'reconnect=1,multiple_requests=1,retry_open=3,hls_wrap=0,hls_allow_cache=1,'
+    'fflags=+igndts+ignidx,tls_verify=0';
+
 const lowMemoryPlayerProperties = <String, String>{
   'cache-secs': '5',
   'demuxer-max-bytes': '8388608',
@@ -68,24 +74,14 @@ Map<String, String> buildPlayerProperties({
   final isNetwork =
       mediaUri != null &&
       (mediaUri.startsWith('http://') || mediaUri.startsWith('https://'));
-  final isHls = isNetwork && mediaUri.toLowerCase().contains('.m3u8');
   return <String, String>{
     ...playerProperties,
     if (lowMemoryMode) ...lowMemoryPlayerProperties,
     'hwdec': effectiveHwdec(hwdecMode, videoRenderer, android: android),
     ...buildVideoRendererProperties(videoRenderer, android: android),
-    // 网络流交还给 mpv/FFmpeg 默认解复用策略；自定义 reconnect、持久连接
-    // 与 HLS 缓存选项会干扰部分签名分片在 seek 后重新建连。
-    'demuxer-lavf-o': isNetwork ? '' : localDemuxerLavfOptions,
-    // A seek-recovery manifest temporarily disables rebasing so its original
-    // fMP4 timestamps remain on the episode timeline. Every normal open must
-    // restore mpv's default before loading the next media.
-    'rebase-start-time': 'yes',
-    // Android 当前打包的 FFmpeg 6.0 在 fMP4 HLS seek 时可能把目标分片开头
-    // 略早于 EXTINF 时间线的关键帧全部丢掉，最终误判 EOF。让 demuxer 从前一
-    // 个常见 HLS 分片开始读取，再由 mpv 精确解码到目标时间。
-    'hr-seek': 'yes',
-    'hr-seek-demuxer-offset': isHls ? '12' : '0',
+    'demuxer-lavf-o': isNetwork
+        ? networkDemuxerLavfOptions
+        : localDemuxerLavfOptions,
   };
 }
 

@@ -204,24 +204,20 @@ class TorrentEngine {
 
     _setState(TorrentState.connecting);
     final peerCount = await _connectToPeers();
-    if (peerCount == 0) {
-      await _streamServer.stop();
-      await _peerServer?.close();
-      _peerServer = null;
-      _setError('无法找到可用的 peer');
-      return null;
-    }
 
+    // Tracker peer lists routinely contain stale endpoints. Keep the local
+    // stream alive and re-announce during the service's buffer window instead
+    // of turning one unsuccessful handshake batch into a fatal error.
     _peerCheckTimer = Timer.periodic(
       const Duration(seconds: 10),
       (_) => _checkPeers(),
     );
 
-    _setState(
-      _pieceManager?.isComplete == true
-          ? TorrentState.seeding
-          : TorrentState.downloading,
-    );
+    if (_pieceManager?.isComplete == true) {
+      _setState(TorrentState.seeding);
+    } else if (peerCount > 0) {
+      _setState(TorrentState.downloading);
+    }
     return _streamServer.streamUrl;
   }
 
@@ -286,6 +282,9 @@ class TorrentEngine {
       await Future.wait([
         for (var i = 0; i < min(8, candidates.length); i++) connectWorker(),
       ]);
+      if (connectedCount > 0 && _state == TorrentState.connecting) {
+        _setState(TorrentState.downloading);
+      }
       return connectedCount;
     } catch (e) {
       debugPrint('[TorrentEngine] Tracker announce 失败: $e');
@@ -357,6 +356,9 @@ class TorrentEngine {
       return;
     }
     _peers.add(peer);
+    if (_state == TorrentState.connecting) {
+      _setState(TorrentState.downloading);
+    }
     peer.fillRequestPipeline();
   }
 

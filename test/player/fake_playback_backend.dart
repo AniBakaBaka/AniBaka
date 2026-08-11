@@ -27,12 +27,10 @@ class FakePlaybackBackend implements PlaybackBackend {
   int openCount = 0;
   int pauseCount = 0;
   int stopCount = 0;
-  int seekCount = 0;
   int rateSetCount = 0;
   int rateSetInFlight = 0;
   int maxRateSetInFlight = 0;
   Duration rateSetDelay = Duration.zero;
-  bool? lastOpenAutoplay;
   final nativeProperties = <String, String>{};
   PlaybackTechnicalInfo technicalInfo = const PlaybackTechnicalInfo();
   int technicalInfoReadCount = 0;
@@ -76,7 +74,6 @@ class FakePlaybackBackend implements PlaybackBackend {
     Map<String, String>? httpHeaders,
   }) async {
     openCount++;
-    lastOpenAutoplay = autoplay;
     _currentMediaUri = uri;
     _isPlaying = autoplay;
     _playing.add(autoplay);
@@ -106,7 +103,6 @@ class FakePlaybackBackend implements PlaybackBackend {
 
   @override
   Future<void> seek(Duration position) async {
-    seekCount++;
     lastSeek = position;
     _currentPosition = position;
     _position.add(position);

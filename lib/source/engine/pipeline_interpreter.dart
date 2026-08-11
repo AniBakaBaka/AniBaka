@@ -785,7 +785,9 @@ class PipelineInterpreter {
         if (name.isEmpty) return false;
         if (kw.isEmpty) return true;
         // 校验 MacCMS ajax 建议结果：若名称与关键词无任何相关重合，判定为 MacCMS 返回的热门榜单并过滤
-        return name.contains(kw) || kw.contains(name) || TitleFingerprint(name).similarityTo(TitleFingerprint(kw)) > 0.10;
+        return name.contains(kw) ||
+            kw.contains(name) ||
+            TitleFingerprint(name).similarityTo(TitleFingerprint(kw)) > 0.10;
       }).toList();
 
       if (filtered.isNotEmpty) {
@@ -884,11 +886,7 @@ class PipelineInterpreter {
       priority: ctx.priority,
     );
     if (!_isMacCmsVerifySuccess(response) || pageUrl.isEmpty) return null;
-    return ctx.host.fetch(
-      pageUrl,
-      referer: pageUrl,
-      priority: ctx.priority,
-    );
+    return ctx.host.fetch(pageUrl, referer: pageUrl, priority: ctx.priority);
   }
 
   /// 执行部分 MacCMS 站点使用的时间戳异或验证流程。
@@ -1247,9 +1245,12 @@ class PipelineInterpreter {
     _PipelineContext ctx, {
     Object? sourceId,
   }) {
-    final epNameKey = step.str('episodeNameKey') ?? step.str('nameKey') ?? 'name';
+    final epNameKey =
+        step.str('episodeNameKey') ?? step.str('nameKey') ?? 'name';
     final idTemplate =
-        step.str('episodeIdTemplate') ?? step.str('detailUrlTemplate') ?? '{id}';
+        step.str('episodeIdTemplate') ??
+        step.str('detailUrlTemplate') ??
+        '{id}';
     final plainIdTemplate = idTemplate == '{id}';
     final rawIdTemplate = idTemplate == '{id:raw}';
     final episodes = <Episode>[];
@@ -1287,7 +1288,9 @@ class PipelineInterpreter {
   void _opVideoUrl(PipelineStep step, _PipelineContext ctx) {
     final raw = ctx.currentString.trim();
     String url = '';
-    if (_httpSchemePattern.hasMatch(raw) && !raw.contains('<html') && !raw.contains('{')) {
+    if (_httpSchemePattern.hasMatch(raw) &&
+        !raw.contains('<html') &&
+        !raw.contains('{')) {
       url = raw;
     } else {
       url = ctx.host.extractVideoUrl(raw, ctx.pageUrl);
@@ -1342,7 +1345,7 @@ class PipelineInterpreter {
   /// 页面把随机字符写入 viewport meta id，并用 charset meta id 的字符顺序
   /// 描述重排方式。重排后的 secret 与规则提供的 `salt` 拼接取 MD5；前 16
   /// 字符作为 IV、后 16 字符作为 key，以 AES-CBC/PKCS7 解密 `config.url`。
-  /// Cycani 与 Mgnacg 共用这一协议，站点差异只保留在规则的 salt 中。
+  /// Mgnacg 使用这一协议，站点差异由规则提供的 salt 表达。
   void _opPlayerDecrypt(PipelineStep step, _PipelineContext ctx) {
     final html = ctx.currentString;
     final salt = _render(step.str('salt') ?? '', ctx);
@@ -1538,10 +1541,7 @@ class PipelineInterpreter {
       step.str('url') ?? 'https://d1zquzjgwo9yb.cloudfront.net/',
       ctx.baseUrl,
     );
-    final payload = await ctx.host.fetch(
-      url,
-      priority: ctx.priority,
-    );
+    final payload = await ctx.host.fetch(url, priority: ctx.priority);
     final results = AnimeRuleOps.parseAnime1Catalog(
       payload,
       keyword,
@@ -1567,10 +1567,7 @@ class PipelineInterpreter {
 
     final tokens = await AnimeRuleOps.collectAnime1EpisodeTokens(
       firstPageUrl: firstPageUrl,
-      fetchPage: (pageUrl) => ctx.host.fetch(
-        pageUrl,
-        priority: ctx.priority,
-      ),
+      fetchPage: (pageUrl) => ctx.host.fetch(pageUrl, priority: ctx.priority),
       itemSelector: step.str('itemSelector') ?? 'video[data-apireq]',
       tokenAttribute: step.str('tokenAttribute') ?? 'data-apireq',
       nextSelector: step.str('nextSelector') ?? '.nav-previous a',

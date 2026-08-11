@@ -969,7 +969,6 @@ void main() {
       'search': [
         {'op': 'regex', 'pattern': '('},
         {'op': 'bogusOp'},
-        {'op': 'aowuSearch'},
       ],
       'detail': [],
       'play': [
@@ -1033,74 +1032,58 @@ void main() {
     expect(PipelineSourceAdapter(rule).useSystemProxy, isFalse);
   });
 
-  test('auto-match validation is declared by the rule', () {
-    SourceRule rule(bool validates) => SourceRule.fromJson({
+  test('media validation timeout survives rule operations', () {
+    final rule = SourceRule.fromJson({
       'format': kSourceRuleFormatV2,
-      'id': 'source',
-      'name': 'source',
+      'id': 'slow-source',
+      'name': 'Slow source',
       'baseUrl': 'https://example.com',
+      'mediaValidationTimeoutMs': 6000,
       'search': const [],
       'detail': const [],
-      'play': [
-        {'op': 'videoUrl', 'validateAutoMatchedUrls': validates},
-      ],
+      'play': const [],
     });
 
-    expect(PipelineSourceAdapter(rule(true)).validateAutoMatchedUrls, isTrue);
-    expect(PipelineSourceAdapter(rule(false)).validateAutoMatchedUrls, isFalse);
+    expect(rule.mediaValidationTimeoutMs, 6000);
+    expect(rule.copyWith().mediaValidationTimeoutMs, 6000);
+    expect(rule.toJson()['mediaValidationTimeoutMs'], 6000);
   });
 
-  test('Cycani uses HTTP search before the WebView fallback', () async {
-    final rule = SourceRule.fromJson(
-      jsonDecode(await File('assets/rules/cycani.json').readAsString())
-          as Map<String, dynamic>,
-    );
-    expect(RuleValidator.validate(rule).errors, isEmpty);
-    final host = FakeHost({
-      'https://example.com/api/videos/search?q=x&page=1&page_size=20':
-          '{"code":0,"msg":"","data":{"list":[{"video_id":3049,"title":"HTTP x result"}]}}',
+  test('a longer media probe retries a cached short timeout', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen((request) async {
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      request.response
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType = ContentType('application', 'vnd.apple.mpegurl')
+        ..write('#EXTM3U\n#EXT-X-ENDLIST\n');
+      try {
+        await request.response.close();
+      } catch (_) {}
     });
-
-    final results = await interp.runSearch(rule, host, 'x');
-
-    expect(results.single.name, 'HTTP x result');
-    expect(results.single.seriesId, 'https://example.com/anime/3049');
-    expect(host.fetched, hasLength(1));
-  });
-
-  test('Cycani detail uses REST API sections data', () async {
-    final rule = SourceRule.fromJson(
-      jsonDecode(await File('assets/rules/cycani.json').readAsString())
-          as Map<String, dynamic>,
-    );
-    final host = FakeHost({
-      'https://example.com/api/videos/3049/sections?player_code=cychub&page=1&page_size=100':
-          jsonEncode({
-            'code': 0,
-            'msg': '',
-            'data': {
-              'list': [
-                {'id': 1001, 'title': '第01集'},
-                {'id': 1002, 'title': '第02集'},
-              ],
-            },
-          }),
+    addTearDown(() async {
+      await subscription.cancel();
+      await server.close(force: true);
     });
+    final url = 'http://${server.address.address}:${server.port}/slow.m3u8';
 
-    final sources = await interp.runDetail(
-      rule,
-      host,
-      'https://www.cycani.org/bangumi/3049.html',
-    );
+    PipelineSourceAdapter adapterWithTimeout(int timeoutMs) =>
+        PipelineSourceAdapter(
+          SourceRule(
+            id: 'slow-$timeoutMs',
+            name: 'Slow source',
+            baseUrl: 'http://${server.address.address}:${server.port}',
+            mediaValidationTimeoutMs: timeoutMs,
+          ),
+        );
 
-    expect(sources, hasLength(1));
-    expect(sources.first.episodes, hasLength(2));
-    expect(sources.first.episodes.first.name, '第01集');
-    expect(
-      sources.first.episodes.first.episodeId,
-      '/api/sections/1001/play-url',
-    );
-    expect(host.fetched, hasLength(1));
+    final shortAdapter = adapterWithTimeout(50);
+    final longAdapter = adapterWithTimeout(500);
+    addTearDown(shortAdapter.dispose);
+    addTearDown(longAdapter.dispose);
+
+    expect(await shortAdapter.isPlaybackUrlReachable(url), isFalse);
+    expect(await longAdapter.isPlaybackUrlReachable(url), isTrue);
   });
 
   test('custom source persistence keeps directConnection', () {

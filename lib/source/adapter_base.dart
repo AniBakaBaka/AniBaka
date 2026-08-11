@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
@@ -74,13 +76,10 @@ abstract class AdapterBase {
   static const Duration _reachCacheTtl = Duration(minutes: 3);
   static const Duration _reachNegCacheTtl = Duration(minutes: 8);
   static const int _reachCacheLimit = 256;
-  static final Map<String, ({bool ok, int expiresAt})> _reachCache = {};
+  static final Map<String, ({bool ok, int expiresAt, int timeoutMs})>
+  _reachCache = {};
 
   bool get validatesOwnUrls => false;
-
-  /// Whether auto-match should perform the normal media HTTP probe before
-  /// accepting and prefetching a direct URL.
-  bool get validateAutoMatchedUrls => false;
 
   Map<String, String> get mediaValidationHeaders => const {
     'User-Agent': defaultUserAgent,
@@ -149,19 +148,23 @@ abstract class AdapterBase {
     }
     if (validatesOwnUrls) return true;
 
+    final probeTimeoutMs = timeout?.inMilliseconds ?? 0;
     final cached = _reachCache[value];
     final now = DateTime.now().millisecondsSinceEpoch;
     if (cached != null) {
-      if (cached.expiresAt > now) return cached.ok;
+      if (cached.expiresAt > now &&
+          (cached.ok || probeTimeoutMs <= cached.timeoutMs)) {
+        return cached.ok;
+      }
       _reachCache.remove(value);
     }
 
     final blocked = await _isDirectUrlBlocked(value, timeout: timeout);
-    _putReachCache(value, !blocked);
+    _putReachCache(value, !blocked, probeTimeoutMs);
     return !blocked;
   }
 
-  static void _putReachCache(String url, bool ok) {
+  static void _putReachCache(String url, bool ok, int timeoutMs) {
     if (_reachCache.length >= _reachCacheLimit) {
       _reachCache.remove(_reachCache.keys.first);
     }
@@ -169,6 +172,7 @@ abstract class AdapterBase {
     _reachCache[url] = (
       ok: ok,
       expiresAt: DateTime.now().millisecondsSinceEpoch + ttl.inMilliseconds,
+      timeoutMs: timeoutMs,
     );
   }
 
@@ -196,13 +200,27 @@ abstract class AdapterBase {
     BaseOptions(
       followRedirects: true,
       maxRedirects: 3,
-      // 匹配竞速场景：连不上就快失败，别拖满 6s。
-      connectTimeout: const Duration(milliseconds: 1800),
+      // The whole request is bounded by each probe's effective timeout below.
+      // Leaving connectTimeout unset lets slow-source rules extend that bound.
       receiveTimeout: const Duration(milliseconds: 2200),
       sendTimeout: const Duration(milliseconds: 1800),
       validateStatus: (_) => true,
     ),
   );
+
+  static Future<Response<dynamic>> _runValidationProbe(
+    Future<Response<dynamic>> Function(CancelToken cancelToken) send,
+    Duration timeout,
+  ) {
+    final cancelToken = CancelToken();
+    return send(cancelToken).timeout(
+      timeout,
+      onTimeout: () {
+        cancelToken.cancel('media reachability probe timed out');
+        throw TimeoutException('media reachability probe timed out', timeout);
+      },
+    );
+  }
 
   Future<bool> _isDirectUrlBlocked(String url, {Duration? timeout}) async {
     if (!url.startsWith('http')) return true;
@@ -226,38 +244,42 @@ abstract class AdapterBase {
 
       // m3u8：Range 小 GET，很多 CDN 对 HEAD 一律 403，对列表片段才如实。
       if (isHls) {
-        final resp = await _validationDio
-            .get(
-              url,
-              options: Options(
-                headers: {
-                  ...headers,
-                  'Range': 'bytes=0-2047',
-                  'Accept':
-                      'application/vnd.apple.mpegurl,application/x-mpegURL,*/*',
-                },
-                responseType: ResponseType.plain,
-                receiveTimeout: probeTimeout,
-                sendTimeout: probeTimeout,
-                // 覆盖 BaseOptions，避免慢网拖满默认值。
-                extra: const {'__reach_probe': true},
-              ),
-            )
-            .timeout(probeTimeout);
+        final resp = await _runValidationProbe(
+          (cancelToken) => _validationDio.get(
+            url,
+            cancelToken: cancelToken,
+            options: Options(
+              headers: {
+                ...headers,
+                'Range': 'bytes=0-2047',
+                'Accept':
+                    'application/vnd.apple.mpegurl,application/x-mpegURL,*/*',
+              },
+              responseType: ResponseType.plain,
+              receiveTimeout: probeTimeout,
+              sendTimeout: probeTimeout,
+              // 覆盖 BaseOptions，避免慢网拖满默认值。
+              extra: const {'__reach_probe': true},
+            ),
+          ),
+          probeTimeout,
+        );
         return !_playlistLooksAlive(resp.statusCode, resp.data?.toString());
       }
 
       // 非 HLS：先 HEAD（快失败），再必要时 Range GET 一轮。
-      var resp = await _validationDio
-          .head(
-            url,
-            options: Options(
-              headers: headers,
-              receiveTimeout: probeTimeout,
-              sendTimeout: probeTimeout,
-            ),
-          )
-          .timeout(probeTimeout);
+      var resp = await _runValidationProbe(
+        (cancelToken) => _validationDio.head(
+          url,
+          cancelToken: cancelToken,
+          options: Options(
+            headers: headers,
+            receiveTimeout: probeTimeout,
+            sendTimeout: probeTimeout,
+          ),
+        ),
+        probeTimeout,
+      );
 
       final status = resp.statusCode ?? 0;
       if (status == 200 || status == 206) return false;
@@ -273,17 +295,19 @@ abstract class AdapterBase {
         final getTimeout = Duration(
           milliseconds: (probeTimeout.inMilliseconds * 0.85).round(),
         );
-        resp = await _validationDio
-            .get(
-              url,
-              options: Options(
-                headers: {...headers, 'Range': 'bytes=0-0'},
-                responseType: ResponseType.bytes,
-                receiveTimeout: getTimeout,
-                sendTimeout: getTimeout,
-              ),
-            )
-            .timeout(getTimeout);
+        resp = await _runValidationProbe(
+          (cancelToken) => _validationDio.get(
+            url,
+            cancelToken: cancelToken,
+            options: Options(
+              headers: {...headers, 'Range': 'bytes=0-0'},
+              responseType: ResponseType.bytes,
+              receiveTimeout: getTimeout,
+              sendTimeout: getTimeout,
+            ),
+          ),
+          getTimeout,
+        );
       }
 
       final code = resp.statusCode ?? 0;

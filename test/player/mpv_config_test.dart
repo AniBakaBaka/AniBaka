@@ -31,25 +31,18 @@ void main() {
     expect(lowMemory['cache-secs'], '5');
   });
 
-  test('network streams use the native demuxer defaults', () {
-    for (final uri in <String>[
-      'https://example.com/video/index.m3u8?token=1',
-      'https://example.com/HLS/master',
-      'https://example.com/play?type=m3u8&id=1',
-      'https://example.com/opaque-signed-playback',
-      'https://example.com/video.mp4',
-    ]) {
-      final properties = buildPlayerProperties(mediaUri: uri);
-      final options = properties['demuxer-lavf-o'];
-      expect(options, isEmpty, reason: uri);
-      expect(properties['rebase-start-time'], 'yes', reason: uri);
-      expect(properties['hr-seek'], 'yes', reason: uri);
-      expect(
-        properties['hr-seek-demuxer-offset'],
-        uri.contains('.m3u8') ? '12' : '0',
-        reason: uri,
-      );
-    }
+  test('network streams use reconnect and timestamp recovery options', () {
+    final properties = buildPlayerProperties(
+      mediaUri: 'https://example.com/stream.m3u8',
+    );
+    final options = properties['demuxer-lavf-o']!;
+
+    expect(options, contains('reconnect=1'));
+    expect(options, contains('igndts'));
+    expect(options, contains('ignidx'));
+    expect(properties, isNot(contains('rebase-start-time')));
+    expect(properties, isNot(contains('hr-seek')));
+    expect(properties, isNot(contains('hr-seek-demuxer-offset')));
   });
 
   test('Android gpu profile pins rgba8 and disables heavy GPU features', () {

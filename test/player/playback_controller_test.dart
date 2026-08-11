@@ -1,9 +1,6 @@
-import 'dart:async';
-
 import 'package:baka/instance.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
-import 'package:baka/widgets/baka_player/hls_seek_session.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
@@ -30,23 +27,6 @@ class _DanmakuSyncCounter implements DanmakuListener {
   void onDanmakuReset() {}
   @override
   void onDanmakuResume() {}
-}
-
-class _FakeHlsSeekSession implements HlsSeekSession {
-  bool disposed = false;
-  Duration? target;
-
-  @override
-  ({String uri, Duration timelineOffset}) openFor(Duration target) {
-    this.target = target;
-    return (
-      uri: 'http://127.0.0.1:1234/manifest.m3u8?start=${target.inSeconds}',
-      timelineOffset: const Duration(minutes: 11, seconds: 55),
-    );
-  }
-
-  @override
-  Future<void> dispose() async => disposed = true;
 }
 
 void main() {
@@ -473,135 +453,7 @@ void main() {
     await controller.dispose();
   });
 
-  test('middle seek EOF is recovered without advancing the episode', () async {
-    final backend = FakePlaybackBackend();
-    final controller = PlaybackController(backend: backend);
-    var completions = 0;
-    final subscription = controller.completed.listen((_) => completions++);
-    await controller.open('https://example.com/video.m3u8');
-    backend.emitDuration(const Duration(minutes: 24));
-    backend.emitPosition(const Duration(minutes: 1));
-
-    await controller.seek(const Duration(minutes: 12), fromSlider: true);
-    backend.emitPosition(const Duration(minutes: 24));
-    backend.emitCompleted();
-    await Future<void>.delayed(Duration.zero);
-    await Future<void>.delayed(Duration.zero);
-
-    expect(completions, 0);
-    expect(backend.seekCount, 2);
-    expect(backend.lastSeek, const Duration(minutes: 12));
-    expect(backend.nativeProperties['hr-seek-demuxer-offset'], '30');
-    expect(backend.playCount, 1);
-
-    await subscription.cancel();
-    await controller.dispose();
-  });
-
-  test(
-    'Android HLS seek reopens a truncated manifest instead of demuxer seek',
-    () async {
-      final backend = FakePlaybackBackend();
-      final session = _FakeHlsSeekSession();
-      final controller = PlaybackController(
-        backend: backend,
-        hlsSeekSessionFactory: (_, _) async => session,
-      );
-      await controller.open('https://example.com/video.m3u8');
-      backend.emitDuration(const Duration(minutes: 24));
-      backend.emitPlaying(true);
-
-      await controller.seek(const Duration(minutes: 12), fromSlider: true);
-
-      expect(backend.seekCount, 0);
-      expect(backend.openCount, 2);
-      expect(session.target, const Duration(minutes: 12));
-      expect(backend.currentMediaUri, startsWith('http://127.0.0.1:1234/'));
-      expect(backend.nativeProperties['rebase-start-time'], 'yes');
-      expect(
-        backend.nativeProperties['demuxer-lavf-o'],
-        'allowed_extensions=ALL',
-      );
-      backend.emitPosition(const Duration(seconds: 2));
-      backend.emitDuration(const Duration(minutes: 12));
-      expect(controller.timeline.value.position, const Duration(minutes: 12));
-      expect(controller.timeline.value.duration, const Duration(minutes: 24));
-
-      await controller.dispose();
-      expect(session.disposed, isTrue);
-    },
-  );
-
-  test(
-    'HLS seek pauses immediately and pins progress while reopening',
-    () async {
-      final backend = FakePlaybackBackend();
-      final session = _FakeHlsSeekSession();
-      final sessionCompleter = Completer<HlsSeekSession?>();
-      final controller = PlaybackController(
-        backend: backend,
-        hlsSeekSessionFactory: (_, _) => sessionCompleter.future,
-      );
-      await controller.open('https://example.com/video.m3u8');
-      backend.emitDuration(const Duration(minutes: 24));
-      backend.emitPosition(const Duration(minutes: 3));
-      backend.emitPlaying(true);
-
-      final seekFuture = controller.seek(
-        const Duration(minutes: 12),
-        fromSlider: true,
-      );
-      await Future<void>.delayed(Duration.zero);
-
-      expect(backend.pauseCount, 1);
-      expect(backend.isPlaying, isFalse);
-      expect(controller.core.value.loading, isTrue);
-      expect(controller.timeline.value.position, const Duration(minutes: 12));
-      expect(
-        controller.timeline.value.previewPosition,
-        const Duration(minutes: 12),
-      );
-
-      // Late events from the old source must not move the slider backwards.
-      backend.emitPosition(const Duration(minutes: 3, seconds: 1));
-      expect(controller.timeline.value.position, const Duration(minutes: 12));
-
-      sessionCompleter.complete(session);
-      await seekFuture;
-
-      expect(backend.lastOpenAutoplay, isFalse);
-      expect(backend.playCount, 1);
-      expect(backend.isPlaying, isTrue);
-      expect(controller.core.value.loading, isFalse);
-
-      // The replacement starts at a segment boundary (11:55 here). Keep the
-      // requested 12:00 position pinned until media time catches up.
-      backend.emitPosition(const Duration(seconds: 2));
-      expect(controller.timeline.value.position, const Duration(minutes: 12));
-      backend.emitPosition(const Duration(seconds: 6));
-      expect(
-        controller.timeline.value.position,
-        const Duration(minutes: 12, seconds: 1),
-      );
-
-      await controller.dispose();
-    },
-  );
-
-  test('completion near the actual end still advances normally', () async {
-    final backend = FakePlaybackBackend();
-    final controller = PlaybackController(backend: backend);
-    final completion = expectLater(controller.completed, emits(null));
-    await controller.open('https://example.com/video.m3u8');
-    backend.emitDuration(const Duration(minutes: 24));
-    backend.emitPosition(const Duration(minutes: 23, seconds: 58));
-    backend.emitCompleted();
-
-    await completion;
-    await controller.dispose();
-  });
-
-  test('local and opaque network media keep timestamp-based seeking', () async {
+  test('local and network media use their normal demuxer options', () async {
     final backend = FakePlaybackBackend();
     final controller = PlaybackController(backend: backend);
     await controller.initialize();
@@ -621,17 +473,10 @@ void main() {
       contains('protocol_whitelist'),
     );
 
-    // 远程 HLS 入口可能不带 m3u8 特征，不能依赖 URL 外形决定 seek 参数。
-    await controller.open('https://example.com/opaque-signed-playback');
-    expect(
-      backend.nativeProperties['demuxer-lavf-o'],
-      isNot(contains('igndts')),
-    );
-    expect(
-      backend.nativeProperties['demuxer-lavf-o'],
-      isNot(contains('ignidx')),
-    );
-    expect(backend.nativeProperties['demuxer-lavf-o'], isEmpty);
+    await controller.open('https://example.com/stream.m3u8');
+    expect(backend.nativeProperties['demuxer-lavf-o'], contains('igndts'));
+    expect(backend.nativeProperties['demuxer-lavf-o'], contains('ignidx'));
+    expect(backend.nativeProperties['demuxer-lavf-o'], contains('reconnect=1'));
 
     await controller.dispose();
   });

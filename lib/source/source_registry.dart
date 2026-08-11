@@ -53,14 +53,6 @@ class AdapterRegistry {
       factory: () => _createBundledRuleAdapter('akianime'),
     ),
     AdapterDescriptor(
-      key: 'cycani',
-      displayName: 'Cycani',
-      idPattern: r'/bangumi/(\d+)',
-      icon: Icons.animation_rounded,
-      color: const Color(0xFF7E57C2),
-      factory: () => _createBundledRuleAdapter('cycani'),
-    ),
-    AdapterDescriptor(
       key: 'anime7',
       displayName: 'Anime7',
       icon: Icons.movie_creation_outlined,

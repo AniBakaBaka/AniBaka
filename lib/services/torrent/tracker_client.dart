@@ -43,7 +43,7 @@ class TrackerClient {
     int port = defaultListenPort,
     String? event,
   }) async {
-    final urls = _normalizeTrackers(trackers);
+    final urls = normalizeTrackers(trackers);
     final results = await Future.wait(
       urls.map(
         (url) => _announceOne(
@@ -104,11 +104,13 @@ class TrackerClient {
     );
   }
 
-  static List<String> _normalizeTrackers(Iterable<String> trackers) {
+  @visibleForTesting
+  static List<String> normalizeTrackers(Iterable<String> trackers) {
     final seen = <String>{};
     final result = <String>[];
-    final source = trackers.isEmpty ? _fallbackTrackers : trackers;
-    for (final raw in source) {
+    // A torrent's embedded tracker list can be years out of date. Always keep
+    // the exact list, then augment it with the maintained public fallbacks.
+    for (final raw in [...trackers, ..._fallbackTrackers]) {
       final url = raw.trim();
       final lower = url.toLowerCase();
       if (url.isEmpty || !seen.add(lower)) continue;

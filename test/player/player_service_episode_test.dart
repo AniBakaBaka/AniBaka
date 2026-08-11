@@ -19,9 +19,6 @@ class _KeepAliveAdapter extends AdapterBase {
   Future<String> getDownloadUrl(String episodeId) async => '';
 
   @override
-  bool get validateAutoMatchedUrls => true;
-
-  @override
   Future<({String url, Map<String, String> httpHeaders})> resolvePlaybackMedia(
     String episodeId, {
     bool skipValidation = false,

@@ -158,10 +158,23 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
     data['pwd'] = '';
     data[key] = value;
     try {
-      final res = jsonDecode(await register(data));
-      showSnackBar(res['msg']);
-      if (res['code'] == 200) {
-        final updated = Map<String, dynamic>.from(_userInfo!)..[key] = value;
+      final decoded = jsonDecode(await register(data));
+      if (decoded is! Map) throw const FormatException('更新响应格式无效');
+
+      final res = Map<String, dynamic>.from(decoded);
+      final success = res['code']?.toString() == '200';
+      final responseMessage = res['msg']?.toString().trim();
+      showSnackBar(
+        responseMessage?.isNotEmpty == true
+            ? responseMessage!
+            : (success ? '更新成功' : '更新失败'),
+        isError: !success,
+      );
+      if (success) {
+        final updated = Map<String, dynamic>.from(_userInfo!);
+        // 仅保留“支持密码修改”的兼容标记，不在本地持久化明文密码。
+        updated['pwd'] = '';
+        if (key != 'pwd') updated[key] = value;
         await Instances.sp.setString('userinfo', jsonEncode(updated));
         // triggerLoginRefresh 会从 SP 重新加载并广播，页面随之重建。
         _appState.triggerLoginRefresh();

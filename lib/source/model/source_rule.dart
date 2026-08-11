@@ -135,6 +135,10 @@ class SourceRule {
   final bool useWebview;
   final bool directConnection;
 
+  /// Optional lower bound for media reachability probes used by slow sources.
+  /// Zero keeps the caller/default timeout unchanged.
+  final int mediaValidationTimeoutMs;
+
   SourceRule({
     required this.id,
     required this.name,
@@ -148,6 +152,7 @@ class SourceRule {
     List<PipelineStep>? play,
     this.useWebview = false,
     this.directConnection = false,
+    this.mediaValidationTimeoutMs = 0,
   }) : headers = Map.unmodifiable(headers ?? const {}),
        recipes = List.unmodifiable(recipes ?? const []),
        search = List.unmodifiable(search ?? const []),
@@ -194,6 +199,8 @@ class SourceRule {
       play: parseSteps(json['play']),
       useWebview: json['useWebview'] == true,
       directConnection: json['directConnection'] == true,
+      mediaValidationTimeoutMs:
+          int.tryParse(json['mediaValidationTimeoutMs']?.toString() ?? '') ?? 0,
     );
   }
 
@@ -211,6 +218,8 @@ class SourceRule {
     'play': play.map((s) => s.toJson()).toList(),
     if (useWebview) 'useWebview': true,
     if (directConnection) 'directConnection': true,
+    if (mediaValidationTimeoutMs > 0)
+      'mediaValidationTimeoutMs': mediaValidationTimeoutMs,
   };
 
   SourceRule copyWith({
@@ -226,6 +235,7 @@ class SourceRule {
     List<PipelineStep>? play,
     bool? useWebview,
     bool? directConnection,
+    int? mediaValidationTimeoutMs,
   }) {
     return SourceRule(
       id: id ?? this.id,
@@ -240,6 +250,8 @@ class SourceRule {
       play: play ?? this.play,
       useWebview: useWebview ?? this.useWebview,
       directConnection: directConnection ?? this.directConnection,
+      mediaValidationTimeoutMs:
+          mediaValidationTimeoutMs ?? this.mediaValidationTimeoutMs,
     );
   }
 }

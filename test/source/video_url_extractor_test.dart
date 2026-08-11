@@ -20,45 +20,14 @@ void main() {
 
   test('expiring sign parameter is treated as a signed CDN URL', () {
     const url =
-        'https://al.huazidm02.top/d/tycc/tv/2022/10/孤独摇滚/01.mp4'
+        'https://signed.example/video/episode-01.mp4'
         '?sign=xhbzK4c0ulTC0VIrc70DFxB5AghRrwM6Hdp7XI8lEKA=:1784510743';
 
     expect(VideoUrlExtractor.isSignedCdnUrl(url), isTrue);
     expect(
       VideoUrlExtractor.normalizeResolvedUrl(
         url,
-        'https://www.huazidm.com/play/1-1.html',
-      ),
-      url,
-    );
-  });
-
-  test('Cycani verify-signed MP4 is treated as a signed CDN URL', () {
-    const url =
-        'https://r2n2kf6ygw.cycmedia.net:8080/cache/'
-        'VEhFIFdPUkxEIElTIERBTkNJTkcg5LiW55WM5Zyo6LW36IieMDF6bS5tcDQ=.mp4'
-        '?verify=1785679788-mvrwhrqUe+2Wsg90sCSsfZ/VbzfLfW98BcU8eTbikmI=';
-
-    expect(VideoUrlExtractor.isSignedCdnUrl(url), isTrue);
-    expect(
-      VideoUrlExtractor.normalizeResolvedUrl(
-        url,
-        'https://www.cycani.org/bangumi/1.html',
-      ),
-      url,
-    );
-  });
-
-  test('Cycani verify-signed MP4 with %2F %2B %3D is recognized as signed CDN URL', () {
-    const url =
-        'https://kthykjrlaz.cycmedia.net:8080/cache/5bm85aWz5oiY6K6wIOesrOS6jOWtozAxem0ubXA0.mp4'
-        '?verify=1785926861-MMK7CCrDRGp7wu8giCs71Xhh%2FTi9%2BnZZevJ5Gb2scgQ%3D';
-
-    expect(VideoUrlExtractor.isSignedCdnUrl(url), isTrue);
-    expect(
-      VideoUrlExtractor.normalizeResolvedUrl(
-        url,
-        'https://www.cycani.org/bangumi/1.html',
+        'https://anime.example/play/1-1.html',
       ),
       url,
     );

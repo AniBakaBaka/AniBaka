@@ -88,7 +88,13 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
   bool get validatesOwnUrls => _playFeatures.validatesWithCookies;
 
   @override
-  bool get validateAutoMatchedUrls => _playFeatures.validateAutoMatchedUrls;
+  Future<bool> isPlaybackUrlReachable(String url, {Duration? timeout}) {
+    final minimumMs = rule.mediaValidationTimeoutMs;
+    final effectiveTimeout = minimumMs > (timeout?.inMilliseconds ?? 0)
+        ? Duration(milliseconds: minimumMs)
+        : timeout;
+    return super.isPlaybackUrlReachable(url, timeout: effectiveTimeout);
+  }
 
   @override
   void dispose() {
@@ -609,7 +615,6 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
     bool usesDynamicMetadata,
     bool usesCookies,
     bool validatesWithCookies,
-    bool validateAutoMatchedUrls,
     bool materializesHls,
     bool resolvesMediaRedirects,
     bool followsEmbeddedPlayer,
@@ -619,7 +624,6 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
     var usesDynamicMetadata = false;
     var usesCookies = false;
     var validatesWithCookies = false;
-    var validateAutoMatchedUrls = false;
     var materializesHls = false;
     var resolvesMediaRedirects = false;
     var followsEmbeddedPlayer = false;
@@ -632,7 +636,6 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
         }
         if (step.op == 'anime1Play') usesCookies = true;
         validatesWithCookies |= step.flag('validateWithCookies');
-        validateAutoMatchedUrls |= step.flag('validateAutoMatchedUrls');
         materializesHls |= step.flag('materializeHls');
         resolvesMediaRedirects |= step.flag('resolveMediaRedirects');
         followsEmbeddedPlayer |= step.flag('followEmbeddedPlayer');
@@ -650,7 +653,6 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
       usesDynamicMetadata: usesDynamicMetadata,
       usesCookies: usesCookies,
       validatesWithCookies: validatesWithCookies,
-      validateAutoMatchedUrls: validateAutoMatchedUrls,
       materializesHls: materializesHls,
       resolvesMediaRedirects: resolvesMediaRedirects,
       followsEmbeddedPlayer: followsEmbeddedPlayer,
