@@ -114,8 +114,8 @@ class AdapterRegistry {
     ),
     AdapterDescriptor(
       key: 'xifanacg',
-      displayName: 'Xifanacg',
-      idPattern: r'/bangumi/(\d+)',
+      displayName: 'Xifanacg Next',
+      idPattern: r'/anime/(\d+)',
       icon: Icons.cloud_circle_outlined,
       color: const Color(0xFF26A69A),
       factory: () => _createBundledRuleAdapter('xifanacg'),

@@ -3,9 +3,11 @@ import 'dart:collection';
 import 'dart:math' as math;
 
 import 'package:baka/instance.dart';
+import 'package:baka/theme.dart';
 import 'package:baka/utils/app_logger.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'controller.dart';
 
@@ -47,6 +49,8 @@ class _DanmakuViewState extends State<DanmakuView>
   double _nextExpiryMs = double.infinity;
   bool? _lastReportedRunning;
   DateTime? _lastDriftLogAt;
+  String? _cachedFontFamily;
+  TextStyle? _cachedFontStyle;
 
   DanmakuController get _controller => widget.controller;
   bool get _hasViewport => _viewWidth > 0 && _viewHeight > 0;
@@ -159,6 +163,7 @@ class _DanmakuViewState extends State<DanmakuView>
   void onDanmakuOptionChanged(DanmakuOption next, DanmakuOption previous) {
     _log(
       'Danmaku option changed: fontSize=${next.fontSize} area=${next.area} '
+      'fontFamily=${next.fontFamily} '
       'opacity=${next.opacity} hideScroll=${next.hideScroll} '
       'hideTop=${next.hideTop} hideBottom=${next.hideBottom}',
     );
@@ -176,6 +181,7 @@ class _DanmakuViewState extends State<DanmakuView>
 
     final styleChanged =
         next.fontSize != previous.fontSize ||
+        next.fontFamily != previous.fontFamily ||
         next.strokeWidth != previous.strokeWidth ||
         next.opacity != previous.opacity;
     if ((styleChanged || next.area != previous.area) && _hasViewport) {
@@ -530,12 +536,36 @@ class _DanmakuViewState extends State<DanmakuView>
     return height;
   }
 
-  TextStyle _fillStyle(Color color, DanmakuOption option) => TextStyle(
-    color: color.withValues(alpha: option.opacity.clamp(0.0, 1.0)),
-    fontSize: option.fontSize,
-    fontWeight: FontWeight.bold,
-    letterSpacing: 2,
-  );
+  TextStyle _fontStyle(String fontFamily) {
+    if (_cachedFontFamily != fontFamily) {
+      _cachedFontFamily = fontFamily;
+      _cachedFontStyle = AppFonts.isSystemFont(fontFamily)
+          ? const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 2)
+          : GoogleFonts.getFont(
+              fontFamily,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 2,
+            );
+      if (!AppFonts.isSystemFont(fontFamily)) {
+        GoogleFonts.pendingFonts().then((_) {
+          if (!mounted || _cachedFontFamily != fontFamily || !_hasViewport) {
+            return;
+          }
+          final option = _controller.option;
+          _rebuildTracks(option);
+          _relayout(option, relayoutText: true);
+          _repaint.value++;
+        });
+      }
+    }
+    return _cachedFontStyle!;
+  }
+
+  TextStyle _fillStyle(Color color, DanmakuOption option) =>
+      _fontStyle(option.fontFamily).copyWith(
+        color: color.withValues(alpha: option.opacity.clamp(0.0, 1.0)),
+        fontSize: option.fontSize,
+      );
 
   TextPainter _textPainter(String text, TextStyle style) => TextPainter(
     text: TextSpan(text: text, style: style),
@@ -554,10 +584,8 @@ class _DanmakuViewState extends State<DanmakuView>
         ? null
         : _textPainter(
             text,
-            TextStyle(
+            _fontStyle(option.fontFamily).copyWith(
               fontSize: option.fontSize,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 2,
               foreground: Paint()
                 ..style = PaintingStyle.stroke
                 ..strokeWidth = option.strokeWidth

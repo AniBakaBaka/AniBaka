@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:baka/api/post.dart';
 import 'package:baka/instance.dart';
+import 'package:baka/theme.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:flutter/foundation.dart';
@@ -91,9 +92,7 @@ class DanmakuService {
 
   static Future<void> loadSettings(DanmakuController controller) async {
     final preferences = Instances.sp;
-    final option = _parseOption(
-      BgmUtils.parseJsonMap(preferences.getString(_settingsKey)) ?? const {},
-    );
+    final option = _readOption();
     controller.blockWords = BgmUtils.parseJsonList(
       preferences.getString(_blockWordsKey),
     ).map((value) => value.toString()).toList();
@@ -102,11 +101,36 @@ class DanmakuService {
     controller.updateOption(option);
   }
 
+  static DanmakuOption _readOption() => _parseOption(
+    BgmUtils.parseJsonMap(Instances.sp.getString(_settingsKey)) ?? const {},
+  );
+
+  static String getSavedFontFamily() => _readOption().fontFamily;
+
+  static Future<void> setFontFamily(String fontFamily) {
+    final normalized = fontFamily == AppFonts.systemFont
+        ? AppFonts.systemFont
+        : AppFonts.normalizeFont(fontFamily);
+    final option = _readOption().copyWith(fontFamily: normalized);
+    return Instances.sp.setString(
+      _settingsKey,
+      jsonEncode(_optionToJson(option)),
+    );
+  }
+
   static DanmakuOption _parseOption(Map<String, dynamic> settings) {
+    final savedFont = settings['fontFamily'];
+    final fontFamily = switch (savedFont) {
+      null => AppFonts.defaultFont,
+      AppFonts.systemFont => AppFonts.systemFont,
+      final String value => AppFonts.normalizeFont(value),
+      _ => AppFonts.defaultFont,
+    };
     return DanmakuOption(
       fontSize:
           BgmUtils.toDouble(settings['fontSize']) ??
           DanmakuOption.defaultFontSize,
+      fontFamily: fontFamily,
       area: BgmUtils.toDouble(settings['area']) ?? 1.0,
       opacity: BgmUtils.toDouble(settings['opacity']) ?? 1.0,
       duration: BgmUtils.toDouble(settings['duration']) ?? 8.0,
@@ -121,24 +145,24 @@ class DanmakuService {
     final option = controller.option;
     final preferences = Instances.sp;
     await Future.wait([
-      preferences.setString(
-        _settingsKey,
-        jsonEncode({
-          'fontSize': option.fontSize,
-          'area': option.area,
-          'opacity': option.opacity,
-          'duration': option.duration,
-          'hideTop': option.hideTop,
-          'hideBottom': option.hideBottom,
-          'hideScroll': option.hideScroll,
-          'strokeWidth': option.strokeWidth,
-        }),
-      ),
+      preferences.setString(_settingsKey, jsonEncode(_optionToJson(option))),
       preferences.setString(_blockWordsKey, jsonEncode(controller.blockWords)),
       preferences.setBool(_blockRepeatKey, controller.blockRepeat),
       preferences.setBool(_blockColorKey, controller.blockColor),
     ]);
   }
+
+  static Map<String, dynamic> _optionToJson(DanmakuOption option) => {
+    'fontSize': option.fontSize,
+    'fontFamily': option.fontFamily,
+    'area': option.area,
+    'opacity': option.opacity,
+    'duration': option.duration,
+    'hideTop': option.hideTop,
+    'hideBottom': option.hideBottom,
+    'hideScroll': option.hideScroll,
+    'strokeWidth': option.strokeWidth,
+  };
 
   static String encode(List<DanmakuItem> items) {
     final output = StringBuffer('[');
@@ -200,9 +224,8 @@ List<DanmakuItem> _decodeDanmakuItems(String raw) {
     if (type == null || (type != 1 && type != 3 && type != 4 && type != 5)) {
       continue;
     }
-    // Standard danmaku parameters are
-    // time,type,fontSize,color,... . Older locally exported files used the
-    // shortened time,type,color form, so keep accepting both layouts.
+    
+    
     final thirdComma = parameters.indexOf(',', secondComma + 1);
     final colorStart = thirdComma < 0 ? secondComma + 1 : thirdComma + 1;
     final fourthComma = thirdComma < 0

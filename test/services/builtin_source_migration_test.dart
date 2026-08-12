@@ -13,7 +13,7 @@ void main() {
   late Directory hiveDirectory;
 
   setUpAll(() async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'rule_hub_version:xifanacg': 3});
     Instances.sp = await SharedPreferences.getInstance();
     hiveDirectory = await Directory.systemTemp.createTemp(
       'baka-builtin-migration-test-',
@@ -61,6 +61,22 @@ void main() {
           'updatedAt': timestamp,
         },
       ]);
+      await AppStorage.customSourcesBox.put('builtin_source_overrides', [
+        {
+          'format': 'anx-rule/2',
+          'id': 'xifanacg',
+          'name': 'Stale Xifanacg',
+          'baseUrl': 'https://anime.xifanacg.com',
+          'pipeline': {
+            'search': <Map<String, dynamic>>[],
+            'detail': <Map<String, dynamic>>[],
+            'play': <Map<String, dynamic>>[],
+          },
+          'enabled': true,
+          'createdAt': timestamp,
+          'updatedAt': timestamp,
+        },
+      ]);
 
       final service = SourceAdapterService.instance;
       await service.init();
@@ -70,6 +86,10 @@ void main() {
       expect(
         SourceCatalog.instance.builtinSourceById('akianime')?.baseUrl,
         'https://migrated.akianime.example',
+      );
+      expect(
+        SourceCatalog.instance.builtinSourceById('xifanacg')?.baseUrl,
+        'https://next.xifanacg.com',
       );
 
       final storedCustom =
@@ -85,6 +105,11 @@ void main() {
         storedOverrides.whereType<Map>().map((source) => source['id']),
         contains('akianime'),
       );
+      expect(
+        storedOverrides.whereType<Map>().map((source) => source['id']),
+        isNot(contains('xifanacg')),
+      );
+      expect(Instances.sp.getInt('rule_hub_version:xifanacg'), isNull);
     },
   );
 }

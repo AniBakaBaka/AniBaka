@@ -104,7 +104,7 @@ class _AppShimmerState extends State<AppShimmer> {
   }
 }
 
-/// 所有骨架屏共享一个帧回调，避免列表中每个占位项各自持有 Timer 和 Stopwatch。
+
 class _ShimmerClock {
   _ShimmerClock._();
 

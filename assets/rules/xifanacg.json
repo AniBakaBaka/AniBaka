@@ -1,41 +1,36 @@
 {
   "format": "anx-rule/2",
   "id": "xifanacg",
-  "name": "Xifanacg",
-  "baseUrl": "https://anime.xifanacg.com",
-  "iconUrl": "https://anime.xifanacg.com/template/dsn2/static/img/fav.png",
-  "description": "Xifanacg动漫视频源，源网址https://anime.xifanacg.com",
+  "name": "Xifanacg Next",
+  "baseUrl": "https://next.xifanacg.com",
+  "iconUrl": "https://next.xifanacg.com/favicon.ico",
+  "description": "稀饭动漫 Next 视频源，源网址 https://next.xifanacg.com/",
   "headers": {
-    "Referer": "https://anime.xifanacg.com/"
+    "Referer": "https://next.xifanacg.com/"
   },
   "search": [
     {
-      "op": "first",
-      "branches": [
-        [
-          {
-            "op": "maccmsSuggest",
-            "headers": {
-              "Accept": "application/json, text/javascript, */*; q=0.01"
-            },
-            "detailUrlTemplate": "/bangumi/{id}.html"
-          }
-        ],
-        [
-          {
-            "op": "fetch",
-            "url": "/search/wd/{keyword}.html"
-          },
-          {
-            "op": "searchList",
-            "selectors": [
-              ".vod-detail.search-list",
-              ".public-list-box"
-            ],
-            "detailPattern": "/bangumi/"
-          }
-        ]
-      ]
+      "op": "fetch",
+      "url": "https://rzmsnqblptbceicadbyd.supabase.co/rest/v1/rpc/search_animes",
+      "method": "POST",
+      "contentType": "application/json",
+      "headers": {
+        "Accept": "application/json",
+        "apikey": "sb_publishable_aCb7uwyLN6H-sMjze4dRGA_2MDuROLF",
+        "Authorization": "Bearer sb_publishable_aCb7uwyLN6H-sMjze4dRGA_2MDuROLF",
+        "Origin": "https://next.xifanacg.com"
+      },
+      "body": {
+        "search_term": "{keyword:raw}"
+      }
+    },
+    {
+      "op": "jsonSeries",
+      "idKey": "id",
+      "nameKey": "title",
+      "imageKey": "cover_url",
+      "descKey": "description",
+      "detailUrlTemplate": "/anime/{id}"
     }
   ],
   "detail": [
@@ -44,26 +39,41 @@
     },
     {
       "op": "episodes",
-      "listSelectors": [
-        ".anthology-list-box",
-        ".anthology-list-play",
-        ".module-play-list"
-      ]
+      "roadsXPath": "//section",
+      "itemsXPath": ".//a[contains(@href, \"/play/\")]"
     }
   ],
   "play": [
     {
-      "op": "follow"
+      "op": "regex",
+      "pattern": "/play/(\\d+)",
+      "group": 1
+    },
+    {
+      "op": "setVar",
+      "name": "xifanEpisodeId",
+      "value": "{url:raw}"
     },
     {
       "op": "first",
-      "resolveMediaRedirects": true,
       "branches": [
         [
           {
-            "op": "playerAaaa",
-            "var": "player_aaaa",
-            "key": "url"
+            "op": "fetch",
+            "url": "https://rzmsnqblptbceicadbyd.supabase.co/functions/v1/issue-web-playback",
+            "method": "POST",
+            "contentType": "application/json",
+            "headers": {
+              "Accept": "application/json",
+              "apikey": "sb_publishable_aCb7uwyLN6H-sMjze4dRGA_2MDuROLF",
+              "Authorization": "Bearer sb_publishable_aCb7uwyLN6H-sMjze4dRGA_2MDuROLF",
+              "Origin": "https://next.xifanacg.com"
+            },
+            "body": "{\"action\":\"hls\",\"episode_id\":{xifanEpisodeId:raw}}"
+          },
+          {
+            "op": "json",
+            "path": "url"
           },
           {
             "op": "videoUrl"
@@ -71,56 +81,22 @@
         ],
         [
           {
-            "op": "playerAaaa",
-            "var": "player_aaaa",
-            "key": "url"
+            "op": "fetch",
+            "url": "https://rzmsnqblptbceicadbyd.supabase.co/functions/v1/issue-web-playback",
+            "method": "POST",
+            "contentType": "application/json",
+            "headers": {
+              "Accept": "application/json",
+              "apikey": "sb_publishable_aCb7uwyLN6H-sMjze4dRGA_2MDuROLF",
+              "Authorization": "Bearer sb_publishable_aCb7uwyLN6H-sMjze4dRGA_2MDuROLF",
+              "Origin": "https://next.xifanacg.com"
+            },
+            "body": "{\"action\":\"fallback\",\"episode_id\":{xifanEpisodeId:raw}}"
           },
           {
-            "op": "regex",
-            "pattern": "^(https?://\\S+)",
-            "group": 1
+            "op": "json",
+            "path": "url"
           },
-          {
-            "op": "follow"
-          },
-          {
-            "op": "videoUrl"
-          }
-        ],
-        [
-          {
-            "op": "select",
-            "css": "iframe[data-src]",
-            "attr": "data-src"
-          },
-          {
-            "op": "follow"
-          },
-          {
-            "op": "videoUrl"
-          }
-        ],
-        [
-          {
-            "op": "select",
-            "css": "iframe[src]",
-            "attr": "src"
-          },
-          {
-            "op": "follow"
-          },
-          {
-            "op": "videoUrl"
-          }
-        ],
-        [
-          {
-            "op": "regex",
-            "pattern": "\"url\"\\s*:\\s*\"(https?://[^\"]+)\"",
-            "group": 1
-          }
-        ],
-        [
           {
             "op": "videoUrl"
           }

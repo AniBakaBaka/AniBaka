@@ -4,7 +4,7 @@
   "name": "DM84",
   "baseUrl": "https://dmbus.cc",
   "iconUrl": "https://dmbus.cc/favicon.ico",
-  "description": "DM84 动漫视频源，源网站 dm84.net（当前入口 dmbus.cc）。",
+  "description": "DM84 动漫视频源。",
   "headers": {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
     "Accept": "*/*",
@@ -64,86 +64,73 @@
       "attr": "src"
     },
     {
-      "op": "hhPlayer",
-      "apiUrl": "https://hhjx.hhplayer.com/api.php",
-      "urlQueryParam": "url",
-      "timestampPattern": "var\\s+t\\s*=\\s*[\"'](\\d+)[\"']",
-      "timestampGroup": 1,
-      "encodedKeyPattern": "var\\s+key\\s*=\\s*OKOK\\([\"']([^\"']+)[\"']\\)",
-      "encodedKeyGroup": 1,
-      "caseSensitive": true,
-      "dotAll": false,
-      "urlField": "url",
-      "timestampField": "t",
-      "keyField": "key",
-      "fixedBody": {
-        "act": "0",
-        "play": "1"
-      },
-      "contentType": "form",
+      "op": "replace",
+      "pattern": "/index.php?",
+      "replacement": "/?"
+    },
+    {
+      "op": "follow"
+    },
+    {
+      "op": "regex",
+      "pattern": "window\\.__HHJX_BOOTSTRAP__\\s*=\\s*(\\{[^;]+\\})\\s*;",
+      "group": 1
+    },
+    {
+      "op": "setVar",
+      "name": "hhBootstrap",
+      "value": "{url:raw}"
+    },
+    {
+      "op": "regex",
+      "pattern": "\"t\"\\s*:\\s*(\\d+)",
+      "group": 1
+    },
+    {
+      "op": "setVar",
+      "name": "hhTimestamp",
+      "value": "{url:raw}"
+    },
+    {
+      "op": "template",
+      "value": "{hhBootstrap:raw}"
+    },
+    {
+      "op": "json",
+      "path": "url"
+    },
+    {
+      "op": "setVar",
+      "name": "hhUrl",
+      "value": "{url:raw}"
+    },
+    {
+      "op": "template",
+      "value": "{hhBootstrap:raw}"
+    },
+    {
+      "op": "json",
+      "path": "key"
+    },
+    {
+      "op": "setVar",
+      "name": "hhKey",
+      "value": "{url:raw}"
+    },
+    {
+      "op": "fetch",
+      "url": "https://hhjx.hhplayer.com/api/parse",
+      "method": "POST",
+      "contentType": "application/json",
+      "body": "{\"url\":\"{hhUrl:raw}\",\"t\":{hhTimestamp:raw},\"key\":\"{hhKey:raw}\",\"client_fallback\":false}",
       "headers": {
         "Accept": "application/json, text/plain, */*",
-        "Referer": "https://hhjx.hhplayer.com/",
-        "Origin": "https://hhjx.hhplayer.com",
-        "X-Requested-With": "XMLHttpRequest"
-      },
-      "codePath": "code",
-      "successCode": "200",
-      "urlPath": "url",
-      "charMap": {
-        "0Oo0o0Oo": "a",
-        "1O0bO001": "b",
-        "1OoCcO1": "c",
-        "3O0dO0O3": "d",
-        "4OoEeO4": "e",
-        "5O0fO0O5": "f",
-        "6OoGgO6": "g",
-        "7O0hO0O7": "h",
-        "8OoIiO8": "i",
-        "9O0jO0O9": "j",
-        "0OoKkO0": "k",
-        "1O0lO0O1": "l",
-        "2OoMmO2": "m",
-        "3O0nO0O3": "n",
-        "4OoOoO4": "o",
-        "5O0pO0O5": "p",
-        "6OoQqO6": "q",
-        "7O0rO0O7": "r",
-        "8OoSsO8": "s",
-        "9O0tOoO9": "t",
-        "0OoUuO0": "u",
-        "1O0vO0O1": "v",
-        "2OoWwO2": "w",
-        "3O0xO0O3": "x",
-        "4OoYyO4": "y",
-        "5O0zO0O5": "z",
-        "0OoAAO0": "A",
-        "1O0BBO1": "B",
-        "2OoCCO2": "C",
-        "3O0DDO3": "D",
-        "4OoEEO4": "E",
-        "5O0FFO5": "F",
-        "6OoGGO6": "G",
-        "7O0HHO7": "H",
-        "8OoIIO8": "I",
-        "9O0JJO9": "J",
-        "0OoKKO0": "K",
-        "1O0LLO1": "L",
-        "2OoMMO2": "M",
-        "3O0NNO3": "N",
-        "4OoOOO4": "O",
-        "5O0PPO5": "P",
-        "6OoQQO6": "Q",
-        "7O0RRO7": "R",
-        "8OoSSO8": "S",
-        "9O0TTO9": "T",
-        "0OoUO0": "U",
-        "1O0VVO1": "V",
-        "2OoWWO2": "W",
-        "3O0XXO3": "X",
-        "4OoYYO4": "Y",
-        "5O0ZZO5": "Z"
+        "Origin": "https://hhjx.hhplayer.com"
       }
+    },
+    {
+      "op": "json",
+      "path": "url"
     }
   ]
 }

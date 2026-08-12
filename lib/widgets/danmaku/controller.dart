@@ -1,3 +1,4 @@
+import 'package:baka/theme.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -133,6 +134,7 @@ abstract interface class DanmakuListener {
 
 class DanmakuOption {
   final double fontSize;
+  final String fontFamily;
   final double area;
   final double duration;
   final double opacity;
@@ -153,6 +155,7 @@ class DanmakuOption {
 
   const DanmakuOption({
     this.fontSize = 14,
+    this.fontFamily = AppFonts.defaultFont,
     this.area = 1.0,
     this.duration = 8,
     this.opacity = 1.0,
@@ -164,6 +167,7 @@ class DanmakuOption {
 
   DanmakuOption copyWith({
     double? fontSize,
+    String? fontFamily,
     double? area,
     double? duration,
     double? opacity,
@@ -175,6 +179,7 @@ class DanmakuOption {
     return DanmakuOption(
       area: area ?? this.area,
       fontSize: fontSize ?? this.fontSize,
+      fontFamily: fontFamily ?? this.fontFamily,
       duration: duration ?? this.duration,
       opacity: opacity ?? this.opacity,
       hideTop: hideTop ?? this.hideTop,

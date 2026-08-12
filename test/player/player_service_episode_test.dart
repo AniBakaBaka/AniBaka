@@ -62,6 +62,23 @@ void main() {
     expect(service.data['id'], 42);
   });
 
+  test('uses the localized logo image from player route data', () {
+    final service = PlayerService(
+      data: <String, Object>{
+        'source': 'internal',
+        'images': {
+          'logos': [
+            {'url': 'https://example.com/en-logo.png', 'lang': 'en'},
+            {'url': 'https://example.com/zh-logo.png', 'lang': 'zh'},
+          ],
+        },
+      },
+    );
+
+    expect(service.logoUrl, 'https://example.com/zh-logo.png');
+    expect(service.initialMediaInfo.logoUrl, service.logoUrl);
+  });
+
   test(
     'player service keeps typed episodes and clamps line selection',
     () async {

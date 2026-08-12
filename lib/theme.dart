@@ -13,7 +13,7 @@ class ThemeColors {
 
 class AppFonts {
   static const String systemFont = 'system';
-  static const String defaultFont = 'ZCOOL QingKe HuangYou';
+  static const String defaultFont = 'Noto Serif SC';
   static const String spKey = 'app_font_family';
 
   static const List<Map<String, String>> systemFonts = [
@@ -22,17 +22,14 @@ class AppFonts {
 
   static const List<Map<String, String>> sansFonts = [
     {'name': 'Noto Sans SC', 'label': '思源黑体', 'preview': '清晰阅读'},
+    {'name': 'M PLUS Rounded 1c', 'label': 'M PLUS 圆体', 'preview': '柔和圆润'},
+    {'name': 'Zen Maru Gothic', 'label': '禅丸圆体', 'preview': '清爽可爱'},
+    {'name': 'Sawarabi Gothic', 'label': '早蕨黑体', 'preview': '简洁现代'},
   ];
 
   static const List<Map<String, String>> serifFonts = [
     {'name': 'Noto Serif SC', 'label': '思源宋体', 'preview': '典雅风格'},
-  ];
-
-  static const List<Map<String, String>> handwritingFonts = [
-    {'name': 'Ma Shan Zheng', 'label': '马善政楷书', 'preview': '书法韵味'},
-    {'name': 'Long Cang', 'label': '龙藏体', 'preview': '洒脱自然'},
-    {'name': 'Liu Jian Mao Cao', 'label': '刘建毛草', 'preview': '草书飘逸'},
-    {'name': 'Zhi Mang Xing', 'label': '志莽行书', 'preview': '行云流水'},
+    {'name': 'Sawarabi Mincho', 'label': '早蕨明朝体', 'preview': '书卷气息'},
   ];
 
   static const List<Map<String, String>> displayFonts = [
@@ -45,19 +42,17 @@ class AppFonts {
     ...systemFonts,
     ...sansFonts,
     ...serifFonts,
-    ...handwritingFonts,
     ...displayFonts,
   ];
 
-  static final Map<String, String> _fontLabelMap = {
+  static final Map<String, String> fontOptions = Map.unmodifiable({
     for (final font in _allFonts) font['name']!: font['label']!,
-  };
+  });
 
   static const Map<String, String> categoryLabels = {
     'system': '系统',
     'sans': '黑体',
     'serif': '宋体',
-    'handwriting': '手写 / 书法',
     'display': '艺术 / 创意',
   };
 
@@ -92,7 +87,12 @@ class AppFonts {
 
   static bool isSystemFont(String fontName) => fontName == systemFont;
 
-  static String getSavedFont() => Instances.sp.getString(spKey) ?? defaultFont;
+  static String normalizeFont(String? fontName) =>
+      fontName != null && fontOptions.containsKey(fontName)
+      ? fontName
+      : defaultFont;
+
+  static String getSavedFont() => normalizeFont(Instances.sp.getString(spKey));
 
   static double getSavedFontScale() =>
       Instances.sp.getDouble(fontScaleKey) ?? defaultFontScale;
@@ -101,7 +101,7 @@ class AppFonts {
       Instances.sp.getInt(fontWeightKey) ?? defaultFontWeightIndex;
 
   static String getLabelForFont(String fontName) =>
-      _fontLabelMap[fontName] ?? fontName;
+      fontOptions[fontName] ?? fontName;
 }
 
 const _pageTransitionsTheme = PageTransitionsTheme(

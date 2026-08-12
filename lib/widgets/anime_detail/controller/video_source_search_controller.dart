@@ -413,24 +413,15 @@ class VideoSourceSearchController extends ChangeNotifier {
             ...automaticAliases.where(activeAutoAliases.contains).take(3),
           ];
 
-    // 自动匹配跳过站内源：站内需二次 play API，拖慢 first-ready。
     _progressing
       ..clear()
       ..addAll([
-        if (!autoMatchMode) 'internal',
+        'internal',
         ...quick.map((s) => s.key),
         ...custom.map((s) => AdapterRegistry.customSourceKey(s.id)),
       ]);
 
     final tasks = [
-      if (!autoMatchMode)
-        () => _searchSource(
-          runId: runId,
-          keywords: keywords,
-          sourceKey: 'internal',
-          load: _loadInternal,
-          errorMsg: '站内搜索失败',
-        ),
       for (final s in quick)
         () => _searchSource(
           runId: runId,
@@ -451,6 +442,14 @@ class VideoSourceSearchController extends ChangeNotifier {
           ),
           errorMsg: '${s.name} 搜索失败',
         ),
+      // 外部源保持 first-ready 优先；站内源并发搜索，但只作最终兜底。
+      () => _searchSource(
+        runId: runId,
+        keywords: keywords,
+        sourceKey: 'internal',
+        load: _loadInternal,
+        errorMsg: '站内搜索失败',
+      ),
     ];
 
     // 自动匹配更高搜索并发，尽快产出首条高置信结果。
@@ -957,6 +956,7 @@ class VideoSourceSearchController extends ChangeNotifier {
     ]..sort(SourceMatchEngine.compareScores);
 
     // final：每源最多 2 条兜底；中间路径已在 _appendResults 即时入队。
+    // 站内源需要再调 play API，留到外部直链竞速结束后再接管。
     final perSourceCap = finalPass ? 2 : 1;
     final maxCandidates = finalPass ? 8 : 4;
     final bySource = <String, List<SearchResultItem>>{};
@@ -995,8 +995,50 @@ class VideoSourceSearchController extends ChangeNotifier {
     while (!_autoMatchTimedOut) {
       if (!_alive(runId) || _autoMatched || _userSelected) return;
       final pump = _probePumpFuture;
-      if (pump == null) return;
+      if (pump == null) break;
       await pump;
+    }
+
+    if (finalPass &&
+        !_autoMatchTimedOut &&
+        _alive(runId) &&
+        !_autoMatched &&
+        !_userSelected) {
+      await _tryInternalFallback(runId, context);
+    }
+  }
+
+  Future<void> _tryInternalFallback(
+    int runId,
+    SourceMatchContext context,
+  ) async {
+    final ranked = [
+      for (final item in _results.values)
+        if (item.sourceType == 'internal')
+          _rankCache[item.key] ??= _engine.score(item.matchCandidate, context),
+    ]..sort(SourceMatchEngine.compareScores);
+
+    for (final score in ranked.take(2)) {
+      if (!score.shouldProbeOnFinalPass) continue;
+      final item = _results[score.candidate.key];
+      if (item == null) continue;
+      try {
+        final probe = await ensureCandidatePlayable(
+          item,
+          episodeIndex: _ep,
+          preferredLine: 1,
+          // 站内目录已经证明存在播放源；真实地址由播放器的 play API 解析。
+          resolveMedia: false,
+          raceMode: true,
+        ).timeout(_candidateBudget);
+        if (!_alive(runId) || _autoMatched || _userSelected) return;
+        if (probe.isReady && probe.data != null) {
+          _claimAutoMatch(runId, item, probe.data!);
+          return;
+        }
+      } catch (_) {
+        // One internal candidate failing must not hide the remaining result.
+      }
     }
   }
 
@@ -1647,6 +1689,10 @@ class VideoSourceSearchController extends ChangeNotifier {
     if (seed['bgmImageUrl']?.toString().trim() case final String img
         when img.isNotEmpty) {
       data['bgmImageUrl'] = img;
+    }
+    if (seed['logoUrl']?.toString().trim() case final String logo
+        when logo.isNotEmpty) {
+      data['logoUrl'] = logo;
     }
     return data;
   }

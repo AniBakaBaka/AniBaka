@@ -6,9 +6,11 @@ import 'package:flutter/foundation.dart';
 
 import 'package:baka/api/bgm.dart';
 import 'package:baka/api/post.dart';
+import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/source/adapter_base.dart';
 import 'package:baka/source/source_registry.dart';
 import 'package:baka/models/collection.dart';
+import 'package:baka/models/anime_detail_view_data.dart';
 import 'package:baka/services/collection_service.dart';
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/models/playback_state.dart';
@@ -170,17 +172,7 @@ class PlayerService {
     return data;
   }
 
-  String get logoUrl {
-    final explicitLogo =
-        data['logoUrl'] ?? data['logo'] ?? data['images']?['logo'];
-    if (explicitLogo != null && explicitLogo.toString().isNotEmpty) {
-      if (explicitLogo is List && explicitLogo.isNotEmpty) {
-        return explicitLogo.first.toString();
-      }
-      return explicitLogo.toString();
-    }
-    return '';
-  }
+  String get logoUrl => AnimeDetailViewData.resolveLogoUrl(data);
 
   PlaybackMediaInfo get initialMediaInfo => PlaybackMediaInfo(
     title: title,
@@ -526,7 +518,7 @@ class PlayerService {
 
   Future<Map<String, dynamic>?> ensureBgmDetail() {
     if (isLocalSource) return Future.value(null);
-    if (bgmDetailData != null && _bgmEpisodesLoaded) {
+    if (bgmDetailData != null && _bgmEpisodesLoaded && logoUrl.isNotEmpty) {
       return Future.value(bgmDetailData);
     }
     return _bgmDetailFuture ??= _loadBgmDetail();
@@ -543,11 +535,17 @@ class PlayerService {
       final episodesFuture = _bgmEpisodesLoaded
           ? Future.value(bgmEpisodes)
           : getBgmEpisodes(subjectId);
+      final animeDetailFuture = logoUrl.isEmpty
+          ? _loadAnimeDetailForLogo(subjectId)
+          : Future<Map<String, dynamic>?>.value(null);
       final detail = await detailFuture;
       bgmEpisodes = await episodesFuture;
+      final animeDetail = await animeDetailFuture;
       _bgmEpisodesLoaded = true;
 
       bgmDetailData = detail;
+      final resolvedLogo = AnimeDetailViewData.resolveLogoUrl(animeDetail);
+      if (resolvedLogo.isNotEmpty) data['logoUrl'] = resolvedLogo;
       final airDate = BgmUtils.formatPlainDate(detail['date']);
       if (airDate != null) data['airDate'] = airDate;
       return detail;
@@ -558,7 +556,16 @@ class PlayerService {
     }
   }
 
-  /// 获取弹幕数据列表（不涉及控制器绑定）。
+  Future<Map<String, dynamic>?> _loadAnimeDetailForLogo(int subjectId) async {
+    try {
+      return await AniBakaApi.getAnimeDetail(subjectId);
+    } catch (error) {
+      debugPrint('获取播放器 Logo 失败: $error');
+      return null;
+    }
+  }
+
+  /// 获取弹幕数据列表
   Future<List<DanmakuItem>> fetchDanmakuData(int episodeIndex) async {
     final title = data['title']?.toString() ?? '';
     final info = await ensureBgmInfo();

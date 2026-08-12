@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:baka/services/danmaku_service.dart';
 import 'package:baka/services/navigation_service.dart';
+import 'package:baka/theme.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/player/settings_panel.dart';
@@ -198,6 +199,16 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                       onChangeEnd: (_) => _saveSettings(),
                     ),
                     if (_isAppearanceExpanded) ...[
+                      const PanelDivider(),
+                      PanelSelectTile(
+                        title: '字体',
+                        value: option.fontFamily,
+                        options: AppFonts.fontOptions,
+                        onChanged: (fontFamily) => _updateOption(
+                          option.copyWith(fontFamily: fontFamily),
+                          persist: true,
+                        ),
+                      ),
                       const PanelDivider(),
                       PanelSliderTile(
                         title: '字体大小',

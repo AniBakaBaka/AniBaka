@@ -166,12 +166,20 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         _autoMatchController = null;
         controller?.cancelSearch();
         controller?.dispose();
-        // 匹配成功：直接用预取媒体开播（等同手动点选后的路径）。
-        _svc.adoptPlaybackData(resolvedData);
-        _bumpPageData();
-        initVideoController(_nextPlaybackGeneration());
-        // 元数据后台补齐，不与匹配抢网。
-        unawaited(_loadBgmMetaOnly());
+        final playerData = Map<String, dynamic>.from(resolvedData);
+        Navigator.of(context).pushReplacement(
+          platformPageRoute<void>(
+            builder: (_) => PlayerPage(
+              data: playerData,
+              posIndex: BgmUtils.toInt(playerData['currPlayIndex']),
+              autoMatch: false,
+            ),
+            transitionDuration: const Duration(milliseconds: 220),
+            transitionsBuilder:
+                (context, animation, secondaryAnimation, child) =>
+                    FadeTransition(opacity: animation, child: child),
+          ),
+        );
       },
       onMatchFailed: () {
         if (!mounted) return;
@@ -540,9 +548,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         final isPureBgmSubject =
             source == null || source.isEmpty || source == 'bgm';
 
-        if (isPureBgmSubject &&
-            !widget.autoMatch &&
-            _autoMatchController == null) {
+        if (isPureBgmSubject && _autoMatchController == null) {
           return Instances.isTV
               ? TvAnimeDetailPlaceholder(data: _svc.data)
               : AnimeDetailPlaceholder(data: _svc.data);

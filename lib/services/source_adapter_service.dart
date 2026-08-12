@@ -7,6 +7,7 @@ import 'package:baka/instance.dart';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/services/app_storage.dart';
 import 'package:baka/services/source/source_codec.dart';
+import 'package:baka/services/source/rule_version_store.dart';
 import 'package:baka/source/engine/rule_validator.dart';
 import 'package:baka/source/pipeline_source_adapter.dart';
 import 'package:baka/source/store/bundled_rule_store.dart';
@@ -306,6 +307,21 @@ class SourceCatalog extends ChangeNotifier {
   Future<void> init() => _initialization ??= _loadSources();
 
   Future<void> _loadSources() async {
+    var storageChanged = false;
+    final staleVersionKeys = <String>[];
+
+    void loadBuiltinOverride(CustomSourceConfig source) {
+      if (_bundledRuleReplacesKnownLegacyOverride(source)) {
+        storageChanged = true;
+        staleVersionKeys.add(ruleHubVersionKey(source.id));
+        return;
+      }
+      final current = _builtinOverrides[source.id];
+      if (current == null || source.updatedAt.isAfter(current.updatedAt)) {
+        _builtinOverrides[source.id] = source;
+      }
+    }
+
     final storedOverrides = AppStorage.customSourcesBox.get(
       _builtinOverridesKey,
     );
@@ -315,34 +331,43 @@ class SourceCatalog extends ChangeNotifier {
           Map<String, dynamic>.from(json),
         );
         if (AdapterRegistry.isBuiltinSource(source.id)) {
-          _builtinOverrides[source.id] = source;
+          loadBuiltinOverride(source);
         }
       }
     }
 
     final storedSources = AppStorage.customSourcesBox.get(_customSourcesKey);
     if (storedSources is List) {
-      var migratedBuiltin = false;
       for (final json in storedSources.whereType<Map>()) {
         final source = CustomSourceConfig.fromJson(
           Map<String, dynamic>.from(json),
         );
         if (AdapterRegistry.isBuiltinSource(source.id)) {
-          final current = _builtinOverrides[source.id];
-          if (current == null || source.updatedAt.isAfter(current.updatedAt)) {
-            _builtinOverrides[source.id] = source;
-          }
-          migratedBuiltin = true;
+          loadBuiltinOverride(source);
+          storageChanged = true;
         } else {
           _customSources.add(source);
         }
       }
-      if (migratedBuiltin) {
-        await _commit();
-        return;
-      }
+    }
+
+    if (staleVersionKeys.isNotEmpty) {
+      await Future.wait(staleVersionKeys.toSet().map(Instances.sp.remove));
+    }
+    if (storageChanged) {
+      await _commit();
+      return;
     }
     _rebuildCustomIndex();
+  }
+
+  bool _bundledRuleReplacesKnownLegacyOverride(CustomSourceConfig source) {
+    if (source.id != 'xifanacg') return false;
+    final legacyHost = Uri.tryParse(source.baseUrl)?.host.toLowerCase();
+    if (legacyHost != 'anime.xifanacg.com') return false;
+    final installedVersion = Instances.sp.getInt(ruleHubVersionKey(source.id));
+    return installedVersion == null ||
+        BundledRuleStore.versionFor(source.id) > installedVersion;
   }
 
   Future<void> _commit() async {
@@ -387,12 +412,18 @@ class SourceCatalog extends ChangeNotifier {
     return index == null ? null : _customSources[index];
   }
 
-  CustomSourceConfig? builtinOverrideById(String key) => _builtinOverrides[key];
+  CustomSourceConfig? builtinOverrideById(String key) {
+    final override = _builtinOverrides[key];
+    if (override == null || _bundledRuleReplacesKnownLegacyOverride(override)) {
+      return null;
+    }
+    return override;
+  }
 
   /// 内置源的只读配置视图。
   /// （override 命中优先于查表，更新/重置只写 _builtinOverrides）。
   CustomSourceConfig? builtinSourceById(String key) {
-    final override = _builtinOverrides[key];
+    final override = builtinOverrideById(key);
     if (override != null) return override;
 
     final cached = _bundledConfigCache[key];

@@ -107,4 +107,17 @@ void main() {
     expect(identical(detail.characters, characters), isTrue);
     expect(detail.posters, ['https://example.test/poster.jpg']);
   });
+
+  test('selects the localized logo used by the player', () {
+    final logo = AnimeDetailViewData.resolveLogoUrl(const <String, dynamic>{
+      'images': {
+        'logos': [
+          {'url': 'https://example.test/en-logo.png', 'lang': 'en'},
+          {'url': 'https://example.test/zh-logo.png', 'lang': 'zh'},
+        ],
+      },
+    });
+
+    expect(logo, 'https://example.test/zh-logo.png');
+  });
 }

@@ -1,4 +1,5 @@
 import 'package:baka/app_state.dart';
+import 'package:baka/services/danmaku_service.dart';
 import 'package:baka/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -43,16 +44,19 @@ class FontSettingsPage extends StatefulWidget {
 class _FontSettingsPageState extends State<FontSettingsPage> {
   final _theme = Get.find<AppState>();
   late final ValueNotifier<double> _fontScale;
+  late final ValueNotifier<String> _danmakuFontFamily;
 
   @override
   void initState() {
     super.initState();
     _fontScale = ValueNotifier(_theme.fontScale);
+    _danmakuFontFamily = ValueNotifier(DanmakuService.getSavedFontFamily());
   }
 
   @override
   void dispose() {
     _fontScale.dispose();
+    _danmakuFontFamily.dispose();
     super.dispose();
   }
 
@@ -66,6 +70,13 @@ class _FontSettingsPageState extends State<FontSettingsPage> {
     if (_theme.fontWeightIndex == index) return;
     HapticFeedback.selectionClick();
     _theme.setFontWeightIndex(index);
+  }
+
+  Future<void> _selectDanmakuFont(String fontFamily) async {
+    if (_danmakuFontFamily.value == fontFamily) return;
+    HapticFeedback.selectionClick();
+    _danmakuFontFamily.value = fontFamily;
+    await DanmakuService.setFontFamily(fontFamily);
   }
 
   @override
@@ -94,11 +105,56 @@ class _FontSettingsPageState extends State<FontSettingsPage> {
                 const SizedBox(height: 8),
                 _buildFontWeightSelector(isDark),
                 const SizedBox(height: 20),
+                const SettingsSectionHeader('弹幕字体', bottomPadding: 4),
+                const SizedBox(height: 8),
+                _buildDanmakuFontSelector(isDark),
+                const SizedBox(height: 20),
                 ..._buildFontCategories(isDark),
                 const SizedBox(height: 24),
                 _buildHintCard(isDark),
                 const SizedBox(height: 40),
               ]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDanmakuFontSelector(bool isDark) {
+    return ValueListenableBuilder<String>(
+      valueListenable: _danmakuFontFamily,
+      builder: (context, fontFamily, _) => SettingsGroup(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.subtitles_rounded),
+            title: const Text('播放器弹幕字体'),
+            subtitle: Text(
+              '默认 ${AppFonts.getLabelForFont(AppFonts.defaultFont)} · '
+              '当前 ${AppFonts.getLabelForFont(fontFamily)}',
+            ),
+            trailing: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: fontFamily,
+                borderRadius: BorderRadius.circular(12),
+                items: [
+                  for (final option in AppFonts.fontOptions.entries)
+                    DropdownMenuItem(
+                      value: option.key,
+                      child: Text(
+                        option.value,
+                        style: _fontStyle(
+                          option.key,
+                          fontSize: 14,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ),
+                ],
+                onChanged: (next) {
+                  if (next != null) _selectDanmakuFont(next);
+                },
+              ),
             ),
           ),
         ],
@@ -334,7 +390,6 @@ class _FontSettingsPageState extends State<FontSettingsPage> {
       'system': AppFonts.systemFonts,
       'sans': AppFonts.sansFonts,
       'serif': AppFonts.serifFonts,
-      'handwriting': AppFonts.handwritingFonts,
       'display': AppFonts.displayFonts,
     };
 

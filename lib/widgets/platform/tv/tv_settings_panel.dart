@@ -1,5 +1,6 @@
 import 'package:baka/widgets/platform/tv/tv_theme_util.dart';
 import 'package:baka/models/playback_state.dart';
+import 'package:baka/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -27,6 +28,10 @@ class TvSettingsPanel extends StatefulWidget {
 }
 
 class _TvSettingsPanelState extends State<TvSettingsPanel> {
+  static final _fontOptions = AppFonts.fontOptions.entries.toList(
+    growable: false,
+  );
+
   PlaybackController get _ctrl => widget.controller;
   DanmakuController get _danmaku => widget.danmakuController;
 
@@ -122,6 +127,17 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
                       onToggle: () {
                         _ctrl.setDanmakuVisible(!overlay.showDanmaku);
                       },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  _TvSelectItem(
+                    icon: Icons.font_download_outlined,
+                    title: '弹幕字体',
+                    value: option.fontFamily,
+                    options: _fontOptions,
+                    onChanged: (fontFamily) => _setDanmakuOption(
+                      option.copyWith(fontFamily: fontFamily),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -452,6 +468,105 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
             Icon(
               Icons.chevron_right_rounded,
               color: context.tvTextSecondaryColor,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TvSelectItem extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String value;
+  final List<MapEntry<String, String>> options;
+  final ValueChanged<String> onChanged;
+
+  const _TvSelectItem({
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final index = options.indexWhere((option) => option.key == value);
+    final selectedIndex = index < 0 ? 0 : index;
+
+    void select(int nextIndex) {
+      if (nextIndex >= 0 && nextIndex < options.length) {
+        onChanged(options[nextIndex].key);
+      }
+    }
+
+    return TvFocusable(
+      onPressed: () => select((selectedIndex + 1) % options.length),
+      borderRadius: BorderRadius.circular(12),
+      enableScale: false,
+      customKeyHandler: (event) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+        if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+          select(selectedIndex - 1);
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+          select(selectedIndex + 1);
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: context.tvHighlightColor(0.06),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: context.tvTextSecondaryColor, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: context.tvTextColor,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            Icon(
+              Icons.chevron_left,
+              color: selectedIndex > 0
+                  ? context.tvTextSecondaryColor
+                  : context.tvHighlightColor(0.15),
+              size: 20,
+            ),
+            const SizedBox(width: 4),
+            SizedBox(
+              width: 104,
+              child: Text(
+                options[selectedIndex].value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.chevron_right,
+              color: selectedIndex < options.length - 1
+                  ? context.tvTextSecondaryColor
+                  : context.tvHighlightColor(0.15),
+              size: 20,
             ),
           ],
         ),

@@ -290,7 +290,7 @@ class CommentListState extends State<CommentList> {
   static final Map<String, dynamic> _dummyComment = {
     'uname': '用户名称占位符',
     'time': '2026-08-06 12:00:00',
-    'content': '这是一条用于自动骨架遮罩的占位评论内容文本，展示真实的评论排版与风格。',
+    'content': '这是一条用于自动骨架遮罩的占位评论内容文本，展示真实的评论排版。',
     'uqq': '',
   };
 

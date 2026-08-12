@@ -107,6 +107,63 @@ class FakeHost implements PipelineHost {
   Future<String> sniffWithWebview(String url) async => '';
 }
 
+class HhPlayerBootstrapHost extends FakeHost {
+  HhPlayerBootstrapHost()
+    : super(const {
+        episodeUrl:
+            '<iframe src="https://hhjx.hhplayer.com/index.php?url=opaque-token"></iframe>',
+        playerUrl:
+            '<script>window.__HHJX_BOOTSTRAP__={"url":"opaque-token","t":123456,"key":"bootstrap-key"};</script>',
+        apiUrl: '{"code":200,"url":"https://media.example.com/video.m3u8"}',
+      });
+
+  static const episodeUrl = 'https://dmbus.cc/p/1-1-1.html';
+  static const playerUrl = 'https://hhjx.hhplayer.com/?url=opaque-token';
+  static const apiUrl = 'https://hhjx.hhplayer.com/api/parse';
+
+  String? apiMethod;
+  Map<String, String>? apiHeaders;
+  Object? apiBody;
+  String? apiContentType;
+  String? apiReferer;
+
+  @override
+  String? selectAttr(String html, String selector, String attr) {
+    if (selector == 'iframe[src*="hhjx.hhplayer.com"]' && attr == 'src') {
+      return 'https://hhjx.hhplayer.com/index.php?url=opaque-token';
+    }
+    return null;
+  }
+
+  @override
+  Future<String> fetch(
+    String url, {
+    String method = 'GET',
+    Map<String, String>? headers,
+    Object? body,
+    String? referer,
+    String? contentType,
+    RequestPriority priority = RequestPriority.search,
+  }) async {
+    if (url == apiUrl) {
+      apiMethod = method;
+      apiHeaders = headers;
+      apiBody = body;
+      apiContentType = contentType;
+      apiReferer = referer;
+    }
+    return super.fetch(
+      url,
+      method: method,
+      headers: headers,
+      body: body,
+      referer: referer,
+      contentType: contentType,
+      priority: priority,
+    );
+  }
+}
+
 class ReverseEpisodesHost extends FakeHost {
   ReverseEpisodesHost() : super(const {'https://example.com/detail': 'html'});
 
@@ -215,6 +272,41 @@ class AltchaWebviewHost extends FakeHost {
 
 void main() {
   const interp = PipelineInterpreter();
+
+  test('dm84 rule follows the current HHPlayer bootstrap API', () async {
+    final decoded = jsonDecode(
+      File('assets/rules/dm84.json').readAsStringSync(),
+    );
+    final rule = SourceRule.fromJson(Map<String, dynamic>.from(decoded as Map));
+    final host = HhPlayerBootstrapHost();
+
+    final url = await interp.runPlay(
+      rule,
+      host,
+      HhPlayerBootstrapHost.episodeUrl,
+    );
+
+    expect(url, 'https://media.example.com/video.m3u8');
+    expect(host.fetched, [
+      HhPlayerBootstrapHost.episodeUrl,
+      HhPlayerBootstrapHost.playerUrl,
+      HhPlayerBootstrapHost.apiUrl,
+    ]);
+    expect(host.apiMethod, 'POST');
+    expect(host.apiContentType, 'application/json');
+    expect(host.apiReferer, HhPlayerBootstrapHost.playerUrl);
+    expect(
+      host.apiHeaders,
+      containsPair('Origin', 'https://hhjx.hhplayer.com'),
+    );
+    expect(host.apiBody, isA<String>());
+    expect(jsonDecode(host.apiBody! as String), {
+      'url': 'opaque-token',
+      't': 123456,
+      'key': 'bootstrap-key',
+      'client_fallback': false,
+    });
+  });
 
   test(
     'timestamp template uses one millisecond value per pipeline run',

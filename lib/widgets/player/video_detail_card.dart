@@ -11,7 +11,7 @@ import 'package:baka/widgets/player/bgm_follow_pill.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:baka/widgets/danmaku/danmaku_list_sheet.dart';
 
-/// 播放页视频详情卡片 —— 标题、追番、meta 信息、标签。
+/// 播放页视频详情卡片
 class VideoDetailCard extends StatelessWidget {
   final Map detail;
   final BgmInfo bgmInfo;

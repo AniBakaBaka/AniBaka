@@ -91,12 +91,7 @@ class AnimeDetailViewData {
     final images = anibaka?['images'] as Map<String, dynamic>?;
     final posters = _imageUrls(images?['posters']);
     final backdrops = _imageUrls(images?['backdrops']);
-    final logos = _imageUrls(images?['logos'] ?? images?['logo']);
-    final logoUrl =
-        _first(logos) ??
-        BgmUtils.trimmed(anibaka?['logoUrl']) ??
-        BgmUtils.trimmed(anibaka?['logo']) ??
-        '';
+    final logoUrl = resolveLogoUrl(anibaka);
     final anibakaPoster = _first(posters);
     final cover =
         BgmUtils.resolveCoverImage(source, bgmInfo: bgmInfo) ??
@@ -211,15 +206,42 @@ class AnimeDetailViewData {
   static String? _first(List<String> images) =>
       images.isEmpty ? null : images.first;
 
+  static String resolveLogoUrl(Map<String, dynamic>? detail) {
+    final images = BgmUtils.asMap(detail?['images']);
+    final logos = _imageUrls(images?['logos'] ?? images?['logo']);
+    return _first(logos) ??
+        _directImageUrl(detail?['logoUrl']) ??
+        _directImageUrl(detail?['logo']) ??
+        '';
+  }
+
+  static String? _directImageUrl(dynamic value) {
+    if (value is List) {
+      for (final item in value) {
+        final url = _directImageUrl(item);
+        if (url != null) return url;
+      }
+      return null;
+    }
+    if (value is Map) {
+      return BgmUtils.trimmed(value['url']) ??
+          BgmUtils.trimmed(value['thumbnail']);
+    }
+    return value is String ? BgmUtils.trimmed(value) : null;
+  }
+
   static List<String> _imageUrls(dynamic value) {
     if (value is! List) return const [];
     final seen = <String>{};
     final ranked = <({String url, int score})>[];
-    for (final item in value.cast<Map<String, dynamic>>()) {
-      final url =
-          BgmUtils.trimmed(item['url']) ?? BgmUtils.trimmed(item['thumbnail']);
+    for (final rawItem in value) {
+      final item = BgmUtils.asMap(rawItem);
+      final url = item == null
+          ? _directImageUrl(rawItem)
+          : BgmUtils.trimmed(item['url']) ??
+                BgmUtils.trimmed(item['thumbnail']);
       if (url != null && seen.add(url)) {
-        final lang = (item['lang'] ?? item['language'] ?? '')
+        final lang = (item?['lang'] ?? item?['language'] ?? '')
             .toString()
             .toLowerCase();
         ranked.add((url: url, score: _imageLanguageScore(lang, url)));

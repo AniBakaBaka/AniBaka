@@ -8,6 +8,7 @@ import 'package:baka/instance.dart';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/models/rule_hub.dart';
 import 'package:baka/services/source/source_codec.dart';
+import 'package:baka/services/source/rule_version_store.dart';
 import 'package:baka/services/source_adapter_service.dart';
 import 'package:baka/source/source_registry.dart';
 import 'package:baka/source/store/bundled_rule_store.dart';
@@ -33,7 +34,6 @@ class RuleRepositoryService extends ChangeNotifier {
   static const String assetScheme = 'asset://';
   static const _subscriptionsKey = 'rule_hub_subscriptions';
   static const _cacheKeyPrefix = 'rule_hub_cache:';
-  static const _versionKeyPrefix = 'rule_hub_version:';
   static const _cacheTtl = Duration(minutes: 10);
 
   static const _legacyOfficialSubscriptions = {
@@ -203,7 +203,7 @@ class RuleRepositoryService extends ChangeNotifier {
           ? catalog.builtinSourceById(item.id)
           : catalog.customSourceById(item.id);
       final installedVersion =
-          Instances.sp.getInt('$_versionKeyPrefix${item.id}') ??
+          Instances.sp.getInt(ruleHubVersionKey(item.id)) ??
           (builtin ? BundledRuleStore.versionFor(item.id) : 0);
       result[item] = (
         source: source,
@@ -218,7 +218,7 @@ class RuleRepositoryService extends ChangeNotifier {
   }
 
   Future<void> _saveInstalledVersion(RuleHubItem item) =>
-      Instances.sp.setInt('$_versionKeyPrefix${item.id}', item.version);
+      Instances.sp.setInt(ruleHubVersionKey(item.id), item.version);
 
   RuleHubIndex _parseIndex(String body, String url) => RuleHubIndex.fromJson(
     jsonDecode(body) as Map<String, dynamic>,
