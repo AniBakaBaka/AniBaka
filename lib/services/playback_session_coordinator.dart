@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:baka/services/danmaku_service.dart';
 import 'package:baka/services/media_session_service.dart';
 import 'package:baka/services/player_service.dart';
+import 'package:baka/services/watch_party_service.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:flutter/foundation.dart';
@@ -17,6 +18,8 @@ class PlaybackSessionCoordinator {
     required this.onNextEpisode,
     required this.onPreviousEpisode,
     this._mediaSession,
+    this.watchParty,
+    this.onWatchPartyEpisodeRequested,
   });
 
   static const _progressThrottle = Duration(seconds: 30);
@@ -27,6 +30,8 @@ class PlaybackSessionCoordinator {
   final VoidCallback onNextEpisode;
   final VoidCallback onPreviousEpisode;
   final MediaSessionService? _mediaSession;
+  final WatchPartyService? watchParty;
+  final Future<void> Function(int episodeIndex)? onWatchPartyEpisodeRequested;
 
   StreamSubscription<void>? _completedSubscription;
   StreamSubscription<Duration>? _seekSubscription;
@@ -64,6 +69,15 @@ class PlaybackSessionCoordinator {
       onPreviousEpisode: onPreviousEpisode,
     );
     _attachedMediaSession = mediaSession;
+    final party = watchParty;
+    final onEpisodeRequested = onWatchPartyEpisodeRequested;
+    if (party != null && onEpisodeRequested != null) {
+      party.attachPlayer(
+        controller,
+        content,
+        onEpisodeRequested: onEpisodeRequested,
+      );
+    }
   }
 
   void _onTimelineChanged() {
@@ -112,6 +126,7 @@ class PlaybackSessionCoordinator {
     _saveHistory();
     _attachedMediaSession?.detach();
     _attachedMediaSession = null;
+    watchParty?.detachPlayer(controller);
     controller.detachDanmaku();
   }
 }

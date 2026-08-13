@@ -10,12 +10,14 @@ import 'package:baka/source/models/series.dart';
 import 'package:baka/source/models/source.dart';
 import 'package:baka/source/pipeline_source_adapter.dart';
 import 'package:baka/source/runtime/request_scheduler.dart';
+import 'package:baka/source/video_url_extractor.dart';
 
 const _searchEndpoint =
     'https://rzmsnqblptbceicadbyd.supabase.co/rest/v1/rpc/search_animes';
 const _playbackEndpoint =
     'https://rzmsnqblptbceicadbyd.supabase.co/functions/v1/'
     'issue-web-playback';
+const _live = bool.fromEnvironment('LIVE');
 
 SourceRule _loadRule() => SourceRule.fromJson(
   Map<String, dynamic>.from(
@@ -256,4 +258,26 @@ void main() {
       ['hls', 'fallback'],
     );
   });
+
+  test(
+    'live search, detail, and media resolution stay playable',
+    () async {
+      final adapter = PipelineSourceAdapter(_loadRule());
+      addTearDown(adapter.dispose);
+
+      final results = await adapter.search('命运石之门', enhanceWithBgm: false);
+      final series = results.firstWhere((item) => item.name == '命运石之门');
+      final catalog = await adapter.getPlaybackCatalog(series.seriesId);
+      expect(catalog.episodes, isNotEmpty);
+
+      final episodeId = catalog.episodes.first.lineAt(1);
+      expect(episodeId, isNotNull);
+      final media = await adapter.resolvePlaybackMedia(episodeId!);
+
+      expect(media.url, isNotEmpty);
+      expect(VideoUrlExtractor.isHlsUrl(media.url), isTrue);
+    },
+    skip: !_live,
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }

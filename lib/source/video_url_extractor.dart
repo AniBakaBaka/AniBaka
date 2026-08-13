@@ -72,11 +72,23 @@ class VideoUrlExtractor {
   static bool _isVideoUrlLower(String lower) {
     return _videoExtRegex.hasMatch(lower) ||
         lower.contains('type=m3u8') ||
+        lower.contains('mode=playlist') ||
         lower.contains('/hls/') ||
         lower.contains('/index/listres/') ||
         lower.contains('/video/tos/') ||
         lower.contains('mime_type=video') ||
         lower.contains('mime=video');
+  }
+
+  /// Whether [url] is an HLS playlist entry, including endpoints whose path
+  /// has no `.m3u8` suffix and identifies the playlist through its query.
+  static bool isHlsUrl(String url) {
+    final lower = url.toLowerCase();
+    return lower.contains('.m3u8') ||
+        lower.contains('type=m3u8') ||
+        lower.contains('mode=playlist') ||
+        lower.contains('/hls/') ||
+        lower.contains('/index/listres/');
   }
 
   static bool isSignedCdnUrl(String url) {
@@ -218,6 +230,15 @@ class VideoUrlExtractor {
             decoded = Uri.decodeComponent(decoded);
           } catch (_) {}
         }
+        // `path` commonly identifies a resource inside a signed media API
+        // endpoint. A relative value such as `episodes/1/master.m3u8` is not
+        // a nested player URL and must not replace the authenticated endpoint.
+        if (key == 'path' &&
+            !decoded.startsWith('http://') &&
+            !decoded.startsWith('https://') &&
+            !decoded.startsWith('//')) {
+          continue;
+        }
         if (isPlayable(decoded)) return decoded;
         final nested = decodeEncodedVideoUrl(decoded);
         if (nested != null && isPlayable(nested)) return nested;
@@ -257,7 +278,9 @@ class VideoUrlExtractor {
       text = text.substring(1, text.length - 1);
     }
 
-    if (!isSignedCdnUrl(text)) {
+    final isAbsoluteHttp =
+        text.startsWith('http://') || text.startsWith('https://');
+    if (!isAbsoluteHttp && !isSignedCdnUrl(text)) {
       for (var i = 0; i < 2; i++) {
         try {
           final decoded = Uri.decodeComponent(text);

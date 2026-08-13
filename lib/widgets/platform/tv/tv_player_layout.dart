@@ -26,6 +26,7 @@ class TvPlayerLayout extends StatefulWidget {
   final DanmakuController danmakuController;
   final void Function(int) onEpisodeChanged;
   final void Function(int) onUrlChanged;
+  final VoidCallback onWatchPartyPressed;
   final bool isSearching;
 
   const TvPlayerLayout({
@@ -38,6 +39,7 @@ class TvPlayerLayout extends StatefulWidget {
     required this.danmakuController,
     required this.onEpisodeChanged,
     required this.onUrlChanged,
+    required this.onWatchPartyPressed,
     this.isSearching = false,
     this.sourceNames,
     super.key,
@@ -478,6 +480,24 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
               ],
             ),
           ),
+          const SizedBox(width: 20),
+          TvFocusable(
+            onPressed: widget.onWatchPartyPressed,
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: context.tvHighlightColor(0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                Icons.group_rounded,
+                color: context.tvTextColor,
+                size: 24,
+              ),
+            ),
+          ),
+          const SizedBox(width: 20),
           ValueListenableBuilder<String>(
             valueListenable: _clock,
             builder: (_, v, _) => Text(

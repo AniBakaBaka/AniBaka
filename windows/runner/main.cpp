@@ -8,6 +8,7 @@ auto bdw = bitsdojo_window_configure(BDW_CUSTOM_FRAME);
 
 #include "flutter_window.h"
 #include "utils.h"
+#include "app_links/app_links_plugin_c_api.h"
 
 namespace {
 
@@ -89,6 +90,13 @@ static bool MigrateLegacyGpuPreference() {
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // app_links forwards protocol launches to the already-running Flutter
+  // window over WM_COPYDATA. Ordinary duplicate launches still use AniBaka's
+  // existing single-instance activation path below.
+  if (SendAppLinkToInstance()) {
+    return EXIT_SUCCESS;
+  }
+
   HANDLE instance_mutex =
       ::CreateMutexW(nullptr, FALSE, kAniBakaInstanceMutex);
   if (instance_mutex != nullptr &&

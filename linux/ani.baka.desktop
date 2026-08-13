@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=AniBaka
+Comment=Watch anime with AniBaka
+Exec=baka %u
+Icon=ani.baka
+Terminal=false
+Categories=AudioVideo;Video;
+MimeType=x-scheme-handler/anibaka;
+StartupNotify=true

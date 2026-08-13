@@ -36,6 +36,7 @@ class WindowsPlayerLayout extends StatelessWidget {
   final GlobalKey<CIslandCommentWidgetState> commentKey;
   final void Function(int) onEpisodeChanged;
   final VoidCallback onCastPressed;
+  final VoidCallback onWatchPartyPressed;
   final VoidCallback onPickEpisode;
   final ValueChanged<bool> onFullScreenChanged;
   final void Function(int) onUrlChanged;
@@ -61,6 +62,7 @@ class WindowsPlayerLayout extends StatelessWidget {
     required this.commentKey,
     required this.onEpisodeChanged,
     required this.onCastPressed,
+    required this.onWatchPartyPressed,
     required this.onPickEpisode,
     required this.onFullScreenChanged,
     required this.onUrlChanged,
@@ -96,6 +98,7 @@ class WindowsPlayerLayout extends StatelessWidget {
                           controller: controller,
                           danmakuController: danmakuController,
                           onCastPressed: onCastPressed,
+                          onWatchPartyPressed: onWatchPartyPressed,
                           videoList: videoList,
                           currentEpisodeIndex: currPlayIndex,
                           onEpisodeChanged: onEpisodeChanged,
@@ -169,6 +172,7 @@ class _PlayerArea extends StatelessWidget {
   final PlaybackController controller;
   final DanmakuController danmakuController;
   final VoidCallback onCastPressed;
+  final VoidCallback onWatchPartyPressed;
   final List<PlaybackEpisode> videoList;
   final int currentEpisodeIndex;
   final void Function(int) onEpisodeChanged;
@@ -182,6 +186,7 @@ class _PlayerArea extends StatelessWidget {
     required this.controller,
     required this.danmakuController,
     required this.onCastPressed,
+    required this.onWatchPartyPressed,
     required this.videoList,
     required this.currentEpisodeIndex,
     required this.onEpisodeChanged,
@@ -214,6 +219,14 @@ class _PlayerArea extends StatelessWidget {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
+                      IconButton(
+                        icon: const Icon(
+                          Icons.group_rounded,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                        onPressed: onWatchPartyPressed,
+                      ),
                       IconButton(
                         icon: const Icon(
                           Icons.cast_connected_rounded,

@@ -16,6 +16,8 @@ import 'package:baka/services/network_service.dart';
 import 'package:baka/services/playback_settings_service.dart';
 import 'package:baka/services/source_adapter_service.dart';
 import 'package:baka/services/system_proxy_service.dart';
+import 'package:baka/services/watch_party_service.dart';
+import 'package:baka/services/watch_party_link_service.dart';
 import 'package:baka/utils/app_logger.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/navigation/bottom_navigation.dart';
@@ -160,6 +162,8 @@ Future<void> _bootstrap() async {
   }
 
   Get.put(AppState(), permanent: true);
+  Get.put(WatchPartyService(), permanent: true);
+  WatchPartyLinkService.initialize();
 
   DauTracker.track();
 

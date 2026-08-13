@@ -77,6 +77,8 @@ android {
 
     buildTypes {
         release {
+            minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             // Keep CI buildable without secrets, but use the same release key
             // whenever android/key.properties has been restored.

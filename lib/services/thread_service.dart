@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:baka/api/post.dart';
+import 'package:baka/api/watch_party_api.dart';
+import 'package:baka/models/watch_party.dart';
 import 'package:baka/services/app_storage.dart';
 import 'package:baka/widgets/comment/comment_card.dart';
 
@@ -54,6 +56,37 @@ class ThreadService {
     channels.length,
     (i) => ThreadTab(channels[i]),
   );
+
+  List<WatchPartyInvite> watchRooms = const [];
+  bool watchRoomsRefreshing = false;
+  String watchRoomsError = '';
+  Future<List<WatchPartyInvite>>? _watchRoomsTask;
+
+  Future<List<WatchPartyInvite>> refreshWatchRooms() {
+    final running = _watchRoomsTask;
+    if (running != null) return running;
+    final task = _refreshWatchRooms();
+    _watchRoomsTask = task;
+    return task.whenComplete(() {
+      if (identical(_watchRoomsTask, task)) _watchRoomsTask = null;
+    });
+  }
+
+  Future<List<WatchPartyInvite>> _refreshWatchRooms() async {
+    watchRoomsRefreshing = true;
+    try {
+      final rooms = await WatchPartyApi.listRooms();
+      watchRooms = rooms;
+      watchRoomsError = '';
+      return rooms;
+    } catch (error) {
+      watchRoomsError = error.toString().replaceFirst('Bad state: ', '');
+      debugPrint('刷新一起看房间失败: $error');
+      rethrow;
+    } finally {
+      watchRoomsRefreshing = false;
+    }
+  }
 
   List? _readCache(int pid, {bool ignoreExpiry = true}) {
     final data = _commentsCache.read(

@@ -22,6 +22,17 @@
 		<string>????</string>
 		<key>CFBundleVersion</key>
 		<string>$(FLUTTER_BUILD_NUMBER)</string>
+		<key>FlutterDeepLinkingEnabled</key>
+		<false />
+		<key>CFBundleURLTypes</key>
+		<array>
+			<dict>
+				<key>CFBundleURLName</key>
+				<string>ani.baka.watch</string>
+				<key>CFBundleURLSchemes</key>
+				<array><string>anibaka</string></array>
+			</dict>
+		</array>
 		<key>LSRequiresIPhoneOS</key>
 		<true />
 		<key>NSAppTransportSecurity</key>
@@ -34,7 +45,7 @@
 			<true />
 		</dict>
 		<key>NSCameraUsageDescription</key>
-		<string>...</string>
+		<string>用于扫描 AniBaka 一起看和 TV 登录二维码。</string>
 		<key>NSMicrophoneUsageDescription</key>
 		<string>...</string>
 		<key>NSPhotoLibraryAddUsageDescription</key>

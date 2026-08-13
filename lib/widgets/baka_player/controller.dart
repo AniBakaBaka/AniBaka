@@ -77,6 +77,9 @@ class PlaybackController {
   int _lastTimelineBucket = -1;
   bool _listenersBound = false;
   bool _disposed = false;
+  bool _roomConnected = false;
+  bool _roomCanControl = true;
+  bool _roomRateLocked = false;
   bool _eofReached = false;
   String? _lastOpenUri;
   Map<String, String>? _lastOpenHeaders;
@@ -322,13 +325,13 @@ class PlaybackController {
     _syncDanmakuActivity();
   }
 
-  Future<void> play() async {
-    if (_disposed) return;
+  Future<void> play({bool remote = false}) async {
+    if (_disposed || (!_roomCanControl && _roomConnected && !remote)) return;
     await _backend.play();
   }
 
-  Future<void> pause() async {
-    if (_disposed) return;
+  Future<void> pause({bool remote = false}) async {
+    if (_disposed || (!_roomCanControl && _roomConnected && !remote)) return;
     await _backend.pause();
     _danmakuController?.pause();
   }
@@ -340,6 +343,7 @@ class PlaybackController {
   }
 
   void togglePlayback() {
+    if (_roomConnected && !_roomCanControl) return;
     if (core.value.playing) {
       unawaited(pause());
     } else {
@@ -347,8 +351,12 @@ class PlaybackController {
     }
   }
 
-  Future<void> seek(Duration target, {bool fromSlider = false}) async {
-    if (_disposed) return;
+  Future<void> seek(
+    Duration target, {
+    bool fromSlider = false,
+    bool remote = false,
+  }) async {
+    if (_disposed || (!_roomCanControl && _roomConnected && !remote)) return;
     if (overlay.value.skipState == SkipState.waiting) {
       _setSkipState(SkipState.idle);
     }
@@ -382,8 +390,8 @@ class PlaybackController {
     }
   }
 
-  Future<void> setRate(double rate) async {
-    if (_disposed) return;
+  Future<void> setRate(double rate, {bool roomCorrection = false}) async {
+    if (_disposed || (_roomRateLocked && !roomCorrection)) return;
     final normalized = rate > 0 ? rate : 1.0;
     core.value = core.value.copyWith(playbackRate: normalized);
     _danmakuController?.playbackRate = normalized;
@@ -392,6 +400,7 @@ class PlaybackController {
 
   void setDoubleSpeed(bool enabled) {
     if (_disposed ||
+        _roomRateLocked ||
         overlay.value.controlsLocked ||
         overlay.value.doubleSpeed == enabled) {
       return;
@@ -419,7 +428,7 @@ class PlaybackController {
   }
 
   void updateDoubleSpeedOffset(double horizontalOffset) {
-    if (_disposed || !overlay.value.doubleSpeed) return;
+    if (_disposed || _roomRateLocked || !overlay.value.doubleSpeed) return;
     final rate =
         (_longPressStartRate + horizontalOffset / _longPressPixelsPerRate)
             .clamp(-_maxLongPressRate, _maxLongPressRate)
@@ -429,6 +438,20 @@ class PlaybackController {
     overlay.value = overlay.value.copyWith(longPressRate: steppedRate);
     _notifyToastChanged();
     _scheduleLongPressState();
+  }
+
+  /// Applies room permissions at the player boundary so every platform layout
+  /// observes the same control and playback-rate policy.
+  Future<void> configureWatchParty({
+    required bool connected,
+    required bool canControl,
+  }) async {
+    _roomConnected = connected;
+    _roomCanControl = canControl;
+    _roomRateLocked = connected;
+    if (connected && core.value.playbackRate != 1.0) {
+      await setRate(1.0, roomCorrection: true);
+    }
   }
 
   void _scheduleLongPressState() {

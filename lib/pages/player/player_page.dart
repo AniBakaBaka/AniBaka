@@ -12,6 +12,7 @@ import 'package:baka/services/danmaku_service.dart';
 import 'package:baka/services/playback_session_coordinator.dart';
 import 'package:baka/services/player_service.dart';
 import 'package:baka/services/matching/match_memory_service.dart';
+import 'package:baka/services/watch_party_service.dart';
 
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
@@ -30,6 +31,7 @@ import 'package:baka/widgets/platform/windows/windows_player_layout.dart';
 import 'package:baka/widgets/player/download_indicators.dart';
 import 'package:baka/widgets/player/source_switch_sheet.dart';
 import 'package:baka/widgets/player/video_detail_card.dart';
+import 'package:baka/widgets/watch_party/watch_party_sheet.dart';
 import 'package:baka/widgets/anime_detail/controller/video_source_search_controller.dart';
 
 class PlayerPage extends StatefulWidget {
@@ -72,6 +74,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
 
   late final PlayerService _svc;
   late final PlaybackSessionCoordinator _session;
+  late final WatchPartyService _watchParty;
   late final TabController _tabController;
   List<String> _cachedTags = const [];
   late final String _fixedSummary;
@@ -119,12 +122,16 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     _sourceSearchController = VideoSourceSearchController.takeCachedFor(
       seedData: _svc.data,
     );
+    _watchParty = WatchPartyService.instance;
     _session = PlaybackSessionCoordinator(
       controller: ctr,
       danmakuController: danmakuController,
       content: _svc,
       onNextEpisode: _playNextEpisode,
       onPreviousEpisode: _playPreviousEpisode,
+      watchParty: _watchParty,
+      onWatchPartyEpisodeRequested: (episodeIndex) =>
+          _switchEpisode(episodeIndex),
     );
     _tabController = TabController(length: 2, vsync: this);
     final source = _svc.data['source']?.toString() ?? '';
@@ -206,6 +213,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       _updateCachedTagsFromBgm();
       ctr.setMediaInfo(_svc.currentMediaInfo);
       _bumpPageData();
+      _watchParty.publishCurrentMedia();
     } catch (e) {
       debugPrint('加载 BGM 元数据失败: $e');
     }
@@ -529,6 +537,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     await ctr.stop();
     _svc.stopAdapterPlaybackKeepAlive();
     await initVideoController(currentRequestId);
+    _watchParty.publishCurrentMedia();
     // 播放器与弹幕在 initVideoController 内完成局部更新，无需重建整页。
   }
 
@@ -577,6 +586,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
           danmakuController: danmakuController,
           onEpisodeChanged: changePlayIndex,
           onUrlChanged: changeUrl,
+          onWatchPartyPressed: () => WatchPartySheet.show(context, _watchParty),
           isSearching: _autoMatchController != null,
         );
       },
@@ -615,6 +625,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
             commentKey: commentKey,
             onEpisodeChanged: changePlayIndex,
             onCastPressed: () => showCast(context),
+            onWatchPartyPressed: () =>
+                WatchPartySheet.show(context, _watchParty),
             onPickEpisode: () => _showEpisodePicker(),
             onFullScreenChanged: (value) {
               _playerFullscreen.value = value;
@@ -953,6 +965,11 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          _buildGlassIconButton(
+            icon: Icons.group_rounded,
+            onPressed: () => WatchPartySheet.show(context, _watchParty),
+          ),
+          const SizedBox(width: 12),
           _buildGlassIconButton(
             icon: Icons.cast_connected_rounded,
             onPressed: () => showCast(context),

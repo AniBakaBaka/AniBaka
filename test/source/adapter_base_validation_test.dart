@@ -125,4 +125,32 @@ void main() {
 
     expect(await adapter.resolveDownloadUrl('episode'), isEmpty);
   });
+
+  test('query-marked HLS endpoint is validated as a playlist', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(server.close);
+
+    var requests = 0;
+    server.listen((request) async {
+      requests++;
+      expect(request.method, 'GET');
+      expect(request.headers.value(HttpHeaders.rangeHeader), 'bytes=0-2047');
+      request.response
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType = ContentType('application', 'vnd.apple.mpegurl')
+        ..write('#EXTM3U\n#EXT-X-VERSION:4\n');
+      await request.response.close();
+    });
+
+    final url =
+        'http://${server.address.address}:${server.port}/issue-hls-playback'
+        '?mode=playlist&resource=episode-1';
+    final adapter = _DirectUrlAdapter(
+      url,
+      'query-hls-${DateTime.now().microsecondsSinceEpoch}',
+    );
+
+    expect(await adapter.resolveDownloadUrl('episode'), url);
+    expect(requests, 1);
+  });
 }

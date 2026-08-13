@@ -2,15 +2,17 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'package:baka/instance.dart';
+import 'package:baka/services/watch_party_link_service.dart';
 import 'package:baka/utils/toast_utils.dart';
 
-/// 手机端扫码登录 TV 页面
+/// AniBaka 通用扫码页。
 ///
-/// 扫描 TV 端显示的二维码，将当前已登录的 token 和 userinfo
-/// 发送到 TV 端的本地服务器，完成 TV 端登录。
+/// TV 登录二维码会把当前登录信息发送到 TV；一起看邀请二维码会关闭
+/// 扫码页并直接加入房间。
 class QrScannerPage extends StatefulWidget {
   const QrScannerPage({super.key});
 
@@ -40,17 +42,28 @@ class _QrScannerPageState extends State<QrScannerPage> {
       // rawValue 为空时尝试 displayValue
       final displayValue = barcodes.first.displayValue;
       if (displayValue == null || displayValue.isEmpty) return;
-      _processScannedValue(displayValue);
+      await _processScannedValue(displayValue);
       return;
     }
 
-    _processScannedValue(rawValue);
+    await _processScannedValue(rawValue);
   }
 
-  void _processScannedValue(String value) {
-    // 验证是 TV 登录二维码
+  Future<void> _processScannedValue(String value) async {
+    final inviteCode = WatchPartyLinkService.inviteCodeFromValue(value);
+    if (inviteCode != null) {
+      _hasScanned = true;
+      if (mounted) setState(() => _isSending = true);
+      await _controller.stop();
+      await HapticFeedback.mediumImpact();
+      if (mounted) Navigator.of(context).pop();
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await WatchPartyLinkService.joinInvite(inviteCode);
+      return;
+    }
+
     if (!value.contains('/auth?session=')) {
-      showSnackBar('不是有效的 TV 登录二维码');
+      showSnackBar('不是有效的 TV 登录或一起看二维码');
       return;
     }
 
@@ -124,12 +137,11 @@ class _QrScannerPageState extends State<QrScannerPage> {
 
   @override
   Widget build(BuildContext context) {
-    // mobile_scanner 没有 Windows 实现，直接渲染会抛出 MissingPluginException；
-    // 该页面仅手机端可用（手机扫描 TV 端二维码）。
-    final scanner = Platform.isWindows
-        ? const Center(
-            child: Text('当前平台不支持扫码，请在手机端使用此功能'),
-          )
+    // mobile_scanner 没有 Windows/Linux 实现，直接渲染会抛出
+    // MissingPluginException。
+    final supported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
+    final scanner = !supported
+        ? const Center(child: Text('当前平台不支持扫码，请在手机端使用此功能'))
         : MobileScanner(
             controller: _controller,
             onDetect: _onDetect,
@@ -141,7 +153,7 @@ class _QrScannerPageState extends State<QrScannerPage> {
           );
     return Scaffold(
       appBar: AppBar(
-        title: const Text('扫码登录 TV'),
+        title: const Text('扫一扫'),
         iconTheme: IconThemeData(color: Theme.of(context).colorScheme.primary),
       ),
       body: Stack(
@@ -177,7 +189,7 @@ class _QrScannerPageState extends State<QrScannerPage> {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  _isSending ? '正在发送登录信息...' : '将二维码放入框内扫描',
+                  _isSending ? '正在处理...' : '扫描 TV 登录或 AniBaka 一起看二维码',
                   style: const TextStyle(color: Colors.white, fontSize: 14),
                 ),
               ),
@@ -187,9 +199,7 @@ class _QrScannerPageState extends State<QrScannerPage> {
           if (_isSending)
             Container(
               color: Colors.black54,
-              child: const Center(
-                child: CircularProgressIndicator(),
-              ),
+              child: const Center(child: CircularProgressIndicator()),
             ),
         ],
       ),
