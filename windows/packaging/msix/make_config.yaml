@@ -17,10 +17,11 @@ publisher_display_name: Baka动漫
 identity_name: ani.baka
 
 # 发布者 (需要与证书匹配)
-publisher: CN=Baka动漫
+publisher: "CN=SignPath Foundation, O=SignPath Foundation, C=US, S=DE, L=Lewes"
 
-# CI 使用测试证书签名，但不向临时构建机的证书库发起交互式安装。
+# CI 生成未签名 MSIX，再交给 SignPath release-signing 策略签名。
 install_certificate: "false"
+sign_msix: "false"
 
 # 应用 Logo 路径 (支持 PNG 格式)
 # 图标会自动生成不同尺寸用于开始菜单、任务栏等

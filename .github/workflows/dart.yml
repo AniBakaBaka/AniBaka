@@ -51,6 +51,7 @@ on:
         default: false
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -62,10 +63,42 @@ env:
   ANDROID_SIGNING_CERT_SHA256: FF6D2DCA832EA3D9B20C20F21B33D124D8C239B2EDFAC382DB77740D23935B11
 
 jobs:
+  prepare:
+    name: Prepare release metadata
+    if: >-
+      ${{
+        inputs.build_android ||
+        inputs.build_ios ||
+        inputs.build_macos ||
+        inputs.build_windows ||
+        inputs.build_linux
+      }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release_meta.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate release version
+        id: release_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^[[:space:]]*version:[[:space:]]*//p' pubspec.yaml | head -n 1 | tr -d '\r')
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?$ ]]; then
+            echo "::error::Invalid pubspec.yaml version: $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   build-android:
     name: Android packages
     if: ${{ inputs.build_android }}
+    needs: prepare
     runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -111,7 +144,7 @@ jobs:
       - name: Stage Android artifacts
         run: |
           set -euo pipefail
-          version=$(sed -n 's/^[[:space:]]*version:[[:space:]]*//p' pubspec.yaml | head -n 1 | tr -d '\r')
+          version=$RELEASE_VERSION
           mkdir -p release-stage
           cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "release-stage/baka-${version}-android-armv7.apk"
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "release-stage/baka-${version}-android-arm64-v8a.apk"
@@ -123,12 +156,16 @@ jobs:
         with:
           name: release-android
           path: release-stage/*
+          if-no-files-found: error
           retention-days: 1
 
   build-ios:
     name: iOS package
     if: ${{ inputs.build_ios }}
+    needs: prepare
     runs-on: macos-15
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -150,7 +187,7 @@ jobs:
       - name: Package unsigned IPA
         run: |
           set -euo pipefail
-          version=$(sed -n 's/^[[:space:]]*version:[[:space:]]*//p' pubspec.yaml | head -n 1 | tr -d '\r')
+          version=$RELEASE_VERSION
           mkdir -p build/ios/unsigned-ipa/Payload release-stage
           ditto build/ios/iphoneos/Runner.app build/ios/unsigned-ipa/Payload/Runner.app
           ditto -c -k --sequesterRsrc --keepParent build/ios/unsigned-ipa/Payload "release-stage/baka-${version}-ios-unsigned.ipa"
@@ -160,11 +197,13 @@ jobs:
         with:
           name: release-ios
           path: release-stage/*
+          if-no-files-found: error
           retention-days: 1
 
   build-macos:
     name: macOS ${{ matrix.asset_arch }} packages
     if: ${{ inputs.build_macos }}
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -176,6 +215,8 @@ jobs:
             xcode_arch: arm64
             asset_arch: arm64
     runs-on: ${{ matrix.runner }}
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -239,9 +280,8 @@ jobs:
           codesign --force --deep --verbose --options runtime ${timestamp_option:+"$timestamp_option"} --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$app_path"
           codesign --verify --deep --strict --verbose "$app_path"
 
-          version=$(sed -n 's/^[[:space:]]*version:[[:space:]]*//p' pubspec.yaml | head -n 1 | tr -d '\r')
+          version=$RELEASE_VERSION
           mkdir -p release-stage
-          ditto -c -k --sequesterRsrc --keepParent "$app_path" "release-stage/baka-${version}-macos-${ASSET_ARCH}.zip"
 
           dmg_root=$(mktemp -d "$RUNNER_TEMP/baka-dmg.XXXXXX")
           ditto "$app_path" "$dmg_root/${product_name}.app"
@@ -256,6 +296,7 @@ jobs:
         with:
           name: release-macos-${{ matrix.asset_arch }}
           path: release-stage/*
+          if-no-files-found: error
           retention-days: 1
 
       - name: Clean up signing keychain
@@ -270,7 +311,10 @@ jobs:
   build-windows:
     name: Windows x64 packages
     if: ${{ inputs.build_windows }}
+    needs: prepare
     runs-on: windows-latest
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -286,20 +330,11 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Configure Windows signing
-        id: windows_signing
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: pwsh .github/scripts/setup-windows-signing.ps1
-
       - name: Sync MSIX version
         shell: pwsh
         run: |
-          $versionLine = Select-String -Path pubspec.yaml -Pattern '^\s*version:\s*(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?\s*$' | Select-Object -First 1
-          if ($null -eq $versionLine) { throw 'pubspec.yaml version format error' }
-          $match = $versionLine.Matches[0]
+          $match = [regex]::Match($env:RELEASE_VERSION, '^(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?$')
+          if (-not $match.Success) { throw "Invalid release version: $env:RELEASE_VERSION" }
           $buildNumber = if ($match.Groups[4].Success) { [int]$match.Groups[4].Value } else { [int]$env:GITHUB_RUN_NUMBER }
           $parts = @(
             [int]$match.Groups[1].Value
@@ -320,49 +355,121 @@ jobs:
           dart pub global activate fastforge "$env:FASTFORGE_VERSION"
           dart pub global run fastforge:main package --platform=windows --targets=exe,msix --skip-clean --flutter-build-args=no-pub
 
-      - name: Sign and stage Windows artifacts
+      - name: Stage unsigned Windows artifacts
+        id: windows_release_meta
         shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
-          $certPath = '${{ steps.windows_signing.outputs.certificate_path }}'
-          $signtool = Get-ChildItem -Path 'C:\Program Files (x86)\Windows Kits\10\bin' -Filter signtool.exe -Recurse |
-            Where-Object { $_.FullName -match '\\x64\\' } |
-            Select-Object -First 1 -ExpandProperty FullName
-          if ([string]::IsNullOrWhiteSpace($signtool)) { throw 'signtool.exe was not found' }
-
-          $buildFiles = Get-ChildItem 'build/windows/x64/runner/Release' -Recurse -File |
-            Where-Object { $_.Extension -in '.exe', '.dll' }
           $packageFiles = Get-ChildItem dist -Recurse -File |
             Where-Object { $_.Extension -in '.exe', '.msix' }
-          foreach ($file in @($buildFiles) + @($packageFiles)) {
-            & $signtool sign /f $certPath /p $env:WINDOWS_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td sha256 /fd sha256 $file.FullName
-            if ($LASTEXITCODE -ne 0) { throw "Failed to sign $($file.FullName)" }
+          foreach ($extension in '.exe', '.msix') {
+            $matches = @($packageFiles | Where-Object { $_.Extension -eq $extension })
+            if ($matches.Count -ne 1) { throw "Expected exactly one Windows $extension package, found $($matches.Count)" }
           }
 
-          $version = (Select-String -Path pubspec.yaml -Pattern '^\s*version:\s*(\S+)\s*$').Matches.Groups[1].Value
-          New-Item -ItemType Directory -Path release-stage -Force | Out-Null
+          $version = $env:RELEASE_VERSION
+          "version=$version" >> $env:GITHUB_OUTPUT
+          New-Item -ItemType Directory -Path signpath-input -Force | Out-Null
           foreach ($file in $packageFiles) {
-            $target = "release-stage/baka-${version}-windows-x64$($file.Extension.ToLowerInvariant())"
+            $target = "signpath-input/baka-${version}-windows-x64$($file.Extension.ToLowerInvariant())"
             if (Test-Path -LiteralPath $target) { throw "Duplicate Windows package extension: $($file.Extension)" }
             Copy-Item -LiteralPath $file.FullName -Destination $target
           }
-          Compress-Archive -Path 'build/windows/x64/runner/Release/*' -DestinationPath "release-stage/baka-${version}-windows-x64.zip" -CompressionLevel Optimal
+          Compress-Archive -Path 'build/windows/x64/runner/Release/*' -DestinationPath "signpath-input/baka-${version}-windows-x64.zip" -CompressionLevel Optimal
 
-          Copy-Item '${{ steps.windows_signing.outputs.public_certificate_path }}' "release-stage/baka-${version}-windows-certificate.cer"
-          Copy-Item '.github/scripts/install-windows-msix.ps1' "release-stage/baka-${version}-windows-install.ps1"
+      - name: Upload unsigned Windows artifacts
+        id: upload_unsigned_windows
+        if: ${{ vars.SIGNPATH_RELEASE_SIGNING_ENABLED == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: signpath-unsigned-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: signpath-input/*
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Submit Windows artifacts to SignPath
+        id: signpath_windows
+        if: ${{ vars.SIGNPATH_RELEASE_SIGNING_ENABLED == 'true' }}
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ad88b2e9-2cf4-4984-b56b-4f4d2e575e15
+          project-slug: AniBaka
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: windows-release
+          github-artifact-id: ${{ steps.upload_unsigned_windows.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 21600
+          output-artifact-directory: ${{ github.workspace }}\signpath-output
+          parameters: |
+            version: ${{ toJSON(steps.windows_release_meta.outputs.version) }}
+
+      - name: Validate and stage signed Windows artifacts
+        if: ${{ vars.SIGNPATH_RELEASE_SIGNING_ENABLED == 'true' }}
+        shell: pwsh
+        run: |
+          $version = $env:RELEASE_VERSION
+          $expectedNames = @(
+            "baka-${version}-windows-x64.exe"
+            "baka-${version}-windows-x64.msix"
+            "baka-${version}-windows-x64.zip"
+          )
+          New-Item -ItemType Directory -Path release-stage -Force | Out-Null
+          foreach ($name in $expectedNames) {
+            $matches = @(Get-ChildItem signpath-output -Recurse -File | Where-Object { $_.Name -eq $name })
+            if ($matches.Count -ne 1) { throw "Expected exactly one signed output named $name, found $($matches.Count)" }
+            Copy-Item -LiteralPath $matches[0].FullName -Destination (Join-Path release-stage $name)
+          }
+
+          $expectedCommonName = 'SignPath Foundation'
+          $signedFiles = @(
+            "release-stage/baka-${version}-windows-x64.exe"
+            "release-stage/baka-${version}-windows-x64.msix"
+          )
+          $portableDirectory = Join-Path $env:RUNNER_TEMP "anibaka-portable-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          Expand-Archive -LiteralPath "release-stage/baka-${version}-windows-x64.zip" -DestinationPath $portableDirectory
+          $portableExecutables = @(Get-ChildItem $portableDirectory -Recurse -File -Filter baka.exe)
+          if ($portableExecutables.Count -ne 1) {
+            throw "Expected exactly one portable baka.exe, found $($portableExecutables.Count)"
+          }
+          $signedFiles += $portableExecutables[0].FullName
+
+          foreach ($file in $signedFiles) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $file
+            if ($null -eq $signature.SignerCertificate) { throw "SignPath did not sign $file" }
+            $commonName = $signature.SignerCertificate.GetNameInfo(
+              [Security.Cryptography.X509Certificates.X509NameType]::SimpleName,
+              $false
+            )
+            if ($commonName -ne $expectedCommonName) {
+              throw "Unexpected signing certificate for ${file}: $($signature.SignerCertificate.Subject)"
+            }
+          }
+
+      - name: Stage unsigned Windows artifacts while release signing is unavailable
+        if: ${{ vars.SIGNPATH_RELEASE_SIGNING_ENABLED != 'true' }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release-stage -Force | Out-Null
+          Copy-Item -Path 'signpath-input/*' -Destination release-stage
+          "::warning::Release certificate 2026 is not enabled; publishing unsigned Windows artifacts."
+          "### Windows code signing" >> $env:GITHUB_STEP_SUMMARY
+          "Release certificate 2026 is not enabled, so these Windows artifacts are unsigned." >> $env:GITHUB_STEP_SUMMARY
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-windows
           path: release-stage/*
+          if-no-files-found: error
           retention-days: 1
 
   build-linux:
     name: Linux x64 packages
     if: ${{ inputs.build_linux }}
+    needs: prepare
     runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -393,34 +500,28 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
           dart pub global activate fastforge "$FASTFORGE_VERSION"
-          dart pub global run fastforge:main package --platform=linux --targets=appimage,deb,zip --skip-clean --flutter-build-args=no-pub
+          dart pub global run fastforge:main package --platform=linux --targets=appimage,deb --skip-clean --flutter-build-args=no-pub
 
       - name: Stage Linux artifacts
         run: |
           set -euo pipefail
-          version=$(sed -n 's/^[[:space:]]*version:[[:space:]]*//p' pubspec.yaml | head -n 1 | tr -d '\r')
+          version=$RELEASE_VERSION
           mkdir -p release-stage
-          count=0
-          while IFS= read -r -d '' artifact; do
-            case "$artifact" in
-              *.AppImage) target="release-stage/baka-${version}-linux-x64.AppImage" ;;
-              *.deb) target="release-stage/baka-${version}-linux-amd64.deb" ;;
-              *.zip) target="release-stage/baka-${version}-linux-x64.zip" ;;
-              *) continue ;;
-            esac
-            cp "$artifact" "$target"
-            count=$((count + 1))
-          done < <(find dist -type f -print0)
-          if [ "$count" -ne 3 ]; then
-            echo "::error::Expected 3 Linux packages, staged $count."
+          mapfile -d '' appimages < <(find dist -type f -name '*.AppImage' -print0)
+          mapfile -d '' debs < <(find dist -type f -name '*.deb' -print0)
+          if [ "${#appimages[@]}" -ne 1 ] || [ "${#debs[@]}" -ne 1 ]; then
+            echo "::error::Expected one AppImage and one DEB; found ${#appimages[@]} AppImage(s) and ${#debs[@]} DEB(s)."
             exit 1
           fi
+          cp -- "${appimages[0]}" "release-stage/baka-${version}-linux-x64.AppImage"
+          cp -- "${debs[0]}" "release-stage/baka-${version}-linux-amd64.deb"
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-linux
           path: release-stage/*
+          if-no-files-found: error
           retention-days: 1
 
   release:
@@ -429,6 +530,7 @@ jobs:
     permissions:
       contents: write
     needs:
+      - prepare
       - build-android
       - build-ios
       - build-macos
@@ -437,6 +539,7 @@ jobs:
     if: >-
       ${{
         !cancelled() &&
+        needs.prepare.result == 'success' &&
         (inputs.build_android || inputs.build_ios || inputs.build_macos || inputs.build_windows || inputs.build_linux) &&
         (!inputs.build_android || needs.build-android.result == 'success') &&
         (!inputs.build_ios || needs.build-ios.result == 'success') &&
@@ -451,13 +554,8 @@ jobs:
       - name: Determine release metadata
         id: release_meta
         run: |
-          version=$(sed -n 's/^[[:space:]]*version:[[:space:]]*//p' pubspec.yaml | head -n 1 | tr -d '\r')
-          prerelease=false
-          if [ "${{ inputs.release_type }}" = "prerelease" ]; then
-            prerelease=true
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "version=${{ needs.prepare.outputs.version }}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${{ inputs.release_type == 'prerelease' }}" >> "$GITHUB_OUTPUT"
 
       - name: Download package artifacts
         uses: actions/download-artifact@v4

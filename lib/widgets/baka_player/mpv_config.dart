@@ -88,9 +88,19 @@ Map<String, String> buildPlayerProperties({
 /// 实际生效的 hwdec：硬解直通强制 mediacodec 解码，否则沿用用户选择。
 String effectiveHwdec(String hwdecMode, String videoRenderer, {bool? android}) {
   final isAndroid = android ?? Platform.isAndroid;
-  return isAndroid && videoRenderer == mediacodecEmbedRenderer
-      ? 'mediacodec'
-      : hwdecMode;
+  if (!isAndroid) return hwdecMode;
+  if (videoRenderer == mediacodecEmbedRenderer) return 'mediacodec';
+
+  // media_kit_video intentionally defaults Android to auto-safe. Plain auto
+  // may select an unsafe MediaCodec path which cannot fall back cleanly when
+  // a decoder is lost or a stream changes codec configuration.
+  return hwdecMode == 'auto' ? 'auto-safe' : hwdecMode;
+}
+
+bool isFatalPlaybackError(String error) {
+  final message = error.toLowerCase();
+  return message.contains('could not open codec') ||
+      message.contains('failed to open codec');
 }
 
 Map<String, String> buildRendererSwitchProperties({

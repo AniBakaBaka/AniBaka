@@ -29,11 +29,6 @@ releases:
           platform: macos
           target: dmg
 
-      - name: macos-zip
-        package:
-          platform: macos
-          target: zip
-
   - name: android
     jobs:
       - name: android-apk-arm64
@@ -68,8 +63,3 @@ releases:
         package:
           platform: linux
           target: deb
-
-      - name: linux-zip
-        package:
-          platform: linux
-          target: zip

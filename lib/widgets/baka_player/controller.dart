@@ -306,7 +306,10 @@ class PlaybackController {
     if (_disposed) return;
     final safeError = sanitizePlaybackError(error);
     AppLogger.instance.warning('Playback error: $safeError', tag: 'Playback');
-    if (_backend.isPlaying) {
+    // Audio may keep mpv's playing state true after the video decoder has
+    // failed. Treat codec initialization failures as fatal regardless, so the
+    // broken native decode pipeline is stopped instead of freezing the app.
+    if (_backend.isPlaying && !isFatalPlaybackError(safeError)) {
       debugPrint('播放中忽略非致命错误: $safeError');
       return;
     }

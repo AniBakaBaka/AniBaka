@@ -62,6 +62,25 @@ void main() {
     await Instances.sp.remove('rule_hub_subscriptions');
   });
 
+  test('rule hub subscriptions can be added and removed', () async {
+    await Instances.sp.remove('rule_hub_subscriptions');
+    const custom = 'https://example.test/rules/index.json';
+
+    expect(
+      await RuleRepositoryService.instance.addSubscription(custom),
+      isTrue,
+    );
+    expect(RuleRepositoryService.instance.subscriptions, contains(custom));
+    expect(
+      await RuleRepositoryService.instance.removeSubscription(custom),
+      isTrue,
+    );
+    expect(
+      RuleRepositoryService.instance.subscriptions,
+      isNot(contains(custom)),
+    );
+  });
+
   test('custom adapter cache follows the current rule revision', () async {
     final source = CustomSourceConfig(
       id: 'cache-test',

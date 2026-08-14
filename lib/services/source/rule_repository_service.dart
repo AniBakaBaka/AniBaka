@@ -61,7 +61,7 @@ class RuleRepositoryService extends ChangeNotifier {
         _legacyOfficialSubscriptions.contains(value.trim())
             ? defaultSubscription
             : value.trim(),
-    }.toList(growable: false);
+    }.toList();
   }
 
   Future<bool> addSubscription(String url) async {

@@ -248,6 +248,10 @@ class DownloadService {
   }
 
   Future<void> _downloadFile(DownloadTask task) async {
+    // Claim the queue slot before the first await. Otherwise repeated queue
+    // scans can start the same waiting task again while Android's permission
+    // dialog is open, resulting in concurrent Permission.request calls.
+    task.status = DownloadStatus.downloading;
     if (task.kind == DownloadTaskKind.file &&
         Platform.isAndroid &&
         !await _requestStoragePermission()) {
@@ -255,8 +259,6 @@ class DownloadService {
       _notifyAndSave();
       return;
     }
-
-    task.status = DownloadStatus.downloading;
 
     final cancelToken = CancelToken();
     _cancelTokens[task.id] = cancelToken;

@@ -342,6 +342,27 @@ void main() {
     },
   );
 
+  test(
+    'stops a fatal codec failure while audio still reports playing',
+    () async {
+      final backend = FakePlaybackBackend();
+      final controller = PlaybackController(backend: backend);
+      await controller.open('https://example.test/video.mp4');
+      backend.emitPosition(const Duration(seconds: 2));
+      backend.emitPlaying(true);
+
+      backend.emitError('Could not open codec.');
+
+      expect(controller.core.value.failed, isTrue);
+      expect(
+        controller.core.value.errorMessage,
+        contains('Could not open codec'),
+      );
+      expect(backend.pauseCount, 1);
+      await controller.dispose();
+    },
+  );
+
   test('opening replacement media clears the previous failure', () async {
     final backend = FakePlaybackBackend();
     final controller = PlaybackController(backend: backend);

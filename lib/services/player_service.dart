@@ -538,9 +538,17 @@ class PlayerService {
       final animeDetailFuture = logoUrl.isEmpty
           ? _loadAnimeDetailForLogo(subjectId)
           : Future<Map<String, dynamic>?>.value(null);
-      final detail = await detailFuture;
-      bgmEpisodes = await episodesFuture;
-      final animeDetail = await animeDetailFuture;
+      // Attach error handlers to all parallel requests immediately. Awaiting
+      // them one by one lets a fast 522 response from the episodes request be
+      // reported as an uncaught zone error while the detail request is pending.
+      final result = await (
+        detailFuture,
+        episodesFuture,
+        animeDetailFuture,
+      ).wait;
+      final detail = result.$1;
+      bgmEpisodes = result.$2;
+      final animeDetail = result.$3;
       _bgmEpisodesLoaded = true;
 
       bgmDetailData = detail;

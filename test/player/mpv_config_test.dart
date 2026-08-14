@@ -98,13 +98,20 @@ void main() {
       );
       expect(effectiveHwdec('no', 'mediacodec_embed', android: false), 'no');
       expect(effectiveHwdec('no', 'gpu-next', android: true), 'no');
-      expect(effectiveHwdec('auto', 'gpu', android: true), 'auto');
+      expect(effectiveHwdec('auto', 'gpu', android: true), 'auto-safe');
+      expect(effectiveHwdec('auto', 'gpu', android: false), 'auto');
       expect(
         effectiveHwdec('mediacodec-copy', 'gpu', android: true),
         'mediacodec-copy',
       );
     },
   );
+
+  test('codec open failures are fatal even when audio is still playing', () {
+    expect(isFatalPlaybackError('Could not open codec.'), isTrue);
+    expect(isFatalPlaybackError('Failed to open codec: h264'), isTrue);
+    expect(isFatalPlaybackError('temporary network read error'), isFalse);
+  });
 
   test('Android never hot-swaps vo or hwdec on the running player', () {
     for (final renderer in <String>['gpu', 'gpu-next', 'mediacodec_embed']) {
