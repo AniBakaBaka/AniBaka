@@ -5,17 +5,8 @@ import 'package:flutter/material.dart';
 
 typedef MpvPropertySetter = Future<void> Function(String name, String value);
 
-/// 硬解直通渲染器（仅 Android 可用）。
-///
-/// 对应 mpv 的 `vo=mediacodec_embed`：解码帧由 MediaCodec 直接写入 Surface，
-/// 完全绕过 GPU 合成。部分电视（尤其低端 Android TV）的 `vo=gpu` 会出现
-/// 有声黑屏，此模式是这类设备的可靠退路。
 const mediacodecEmbedRenderer = 'mediacodec_embed';
 
-/// A bounded packet cache shared by every platform.
-///
-/// media_kit already configures mpv's demuxer cache. Keep one explicit memory
-/// budget here instead of stacking several 32 MiB stream/network buffers.
 const playerProperties = <String, String>{
   'volume-max': '100',
   'hwdec': 'auto',
@@ -31,17 +22,10 @@ const playerProperties = <String, String>{
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
 };
 
-/// 本地文件的 lavf 参数：保持 media_kit 默认的协议白名单与宽松解析。
-///
-/// 刻意不使用 `igndts+ignidx`：本地 MP4/MKV 的精确 seek 依赖样本索引与
-/// DTS（B 帧流的包排序），忽略后 seek 会定位到错误关键帧，甚至直接落到
-/// 文件末尾导致视频立即播完。
 const localDemuxerLavfOptions =
     'seg_max_retry=5,strict=experimental,allowed_extensions=ALL,'
     'protocol_whitelist=[file,http,https,tcp,udp,tls,data,crypto,ftp,rtp,rtsp,rtmp,srt]';
 
-/// 网络流（http/https）专用的 lavf 参数：断线重连、HLS 容错，以及
-/// 忽略索引/DTS 以绕过部分在线源的坏时间戳。仅适用于网络媒体。
 const networkDemuxerLavfOptions =
     'reconnect=1,multiple_requests=1,retry_open=3,hls_wrap=0,hls_allow_cache=1,'
     'fflags=+igndts+ignidx,tls_verify=0';
@@ -53,17 +37,6 @@ const lowMemoryPlayerProperties = <String, String>{
   'demuxer-hysteresis-secs': '2',
 };
 
-/// Build player properties with configurable decode and render profiles.
-///
-/// [hwdecMode] accepts 'auto', 'auto-safe', 'mediacodec-copy', or 'no'.
-/// [videoRenderer] usually changes libmpv's scaling profile instead of `vo`:
-/// media_kit's external texture requires `vo=libmpv` on Windows. The Android
-/// 硬解直通 profile is the exception — it pins `hwdec=mediacodec` here and
-/// leaves `vo=mediacodec_embed` to the VideoController configuration.
-///
-/// 初始加载路径刻意不设置 `vo`：Flutter 视频 Surface 尚未就绪（wid=0）时
-/// 初始化 VO 可能导致崩溃，初始 vo 由 VideoController 的 configuration 在
-/// Surface 就绪后统一应用。
 Map<String, String> buildPlayerProperties({
   String hwdecMode = 'auto',
   String videoRenderer = 'gpu',
@@ -90,10 +63,6 @@ String effectiveHwdec(String hwdecMode, String videoRenderer, {bool? android}) {
   final isAndroid = android ?? Platform.isAndroid;
   if (!isAndroid) return hwdecMode;
   if (videoRenderer == mediacodecEmbedRenderer) return 'mediacodec';
-
-  // media_kit_video intentionally defaults Android to auto-safe. Plain auto
-  // may select an unsafe MediaCodec path which cannot fall back cleanly when
-  // a decoder is lost or a stream changes codec configuration.
   return hwdecMode == 'auto' ? 'auto-safe' : hwdecMode;
 }
 
@@ -152,8 +121,7 @@ Map<String, String> buildVideoRendererProperties(
     };
   }
 
-  // gpu 使用保守缩放。这些值也会在播放中切换渲染器时重置 gpu-next 的
-  // 高质量覆盖。
+
   return const <String, String>{
     'scale': 'bilinear',
     'cscale': 'bilinear',

@@ -22,6 +22,7 @@ import 'package:baka/services/navigation_service.dart';
 import 'widgets/danmaku_input_overlay.dart';
 import 'widgets/player_dialogs.dart';
 import 'widgets/player_indicators.dart';
+import 'widgets/player_info_hud.dart';
 import 'widgets/player_prompts.dart';
 
 const _longPressDelay = Duration(milliseconds: 400);
@@ -91,6 +92,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
   _VerticalControl _verticalControl = _VerticalControl.none;
   bool _verticalFrameScheduled = false;
   bool _autoFullscreenTriggered = false;
+  bool _showPlayerInfoHud = false;
 
   // 设备类型判断 - 在 dispose 时需要用到但无法访问 context
   bool _isTablet = false;
@@ -291,52 +293,91 @@ class _BakaPlayerState extends State<BakaPlayer> {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
-      builder: (context, constraints) => Stack(
-        fit: StackFit.passthrough,
-        children: <Widget>[
-          RepaintBoundary(child: _buildVideoPlayer()),
-          PlayerLoadingIndicator(controller: widget.controller),
-          PlayerToastIndicators(controller: widget.controller),
-          Positioned.fill(
-            child: ListenableBuilder(
-              listenable: _indicatorRevision,
-              builder: (context, _) => Stack(
-                fit: StackFit.expand,
-                children: [
-                  PlayerVolumeBrightnessIndicators(
-                    controller: widget.controller,
-                    volumeVisible:
-                        _visibleVerticalIndicator == _VerticalControl.volume,
-                    brightnessVisible:
-                        _visibleVerticalIndicator ==
-                        _VerticalControl.brightness,
-                  ),
-                  PlayerSeekIndicator(seconds: _pendingSeekSeconds),
-                ],
+      builder: (context, constraints) {
+        final isWide =
+            Instances.isDesktopPlatform ||
+            Instances.isTV ||
+            (_isTablet && constraints.maxWidth >= 720);
+
+        return Stack(
+          fit: StackFit.passthrough,
+          children: <Widget>[
+            RepaintBoundary(child: _buildVideoPlayer()),
+            PlayerLoadingIndicator(controller: widget.controller),
+            PlayerToastIndicators(controller: widget.controller),
+            Positioned.fill(
+              child: ListenableBuilder(
+                listenable: _indicatorRevision,
+                builder: (context, _) => Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    PlayerVolumeBrightnessIndicators(
+                      controller: widget.controller,
+                      volumeVisible:
+                          _visibleVerticalIndicator == _VerticalControl.volume,
+                      brightnessVisible:
+                          _visibleVerticalIndicator ==
+                          _VerticalControl.brightness,
+                    ),
+                    PlayerSeekIndicator(seconds: _pendingSeekSeconds),
+                  ],
+                ),
               ),
             ),
-          ),
-          _buildDanmaku(),
-          _buildGestureDetector(),
-          _buildControlsOverlay(
-            Instances.isDesktopPlatform ||
-                Instances.isTV ||
-                (_isTablet && constraints.maxWidth >= 720),
-          ),
-          _buildLockButton(),
-          PlayerErrorIndicator(
-            controller: widget.controller,
-            canSearchSource: widget.canSearchSource,
-            onSearch: _navigateToSearch,
-          ),
-          PlayerPrompts(
-            controller: widget.controller,
-            isFullScreen: widget.full,
-            hasNextEpisode: widget.hasNextEpisode,
-            onNextEpisode: widget.onNextEpisode,
-          ),
-          _buildDanmakuInputOverlay(),
-        ],
+            _buildDanmaku(),
+            _buildGestureDetector(),
+            _buildControlsOverlay(isWide),
+            _buildLockButton(),
+            _buildPlayerInfoHud(isWide),
+            PlayerErrorIndicator(
+              controller: widget.controller,
+              canSearchSource: widget.canSearchSource,
+              onSearch: _navigateToSearch,
+            ),
+            PlayerPrompts(
+              controller: widget.controller,
+              isFullScreen: widget.full,
+              hasNextEpisode: widget.hasNextEpisode,
+              onNextEpisode: widget.onNextEpisode,
+            ),
+            _buildDanmakuInputOverlay(),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildPlayerInfoHud(bool isWide) {
+    return Positioned(
+      left: isWide ? 28 : 12,
+      top: 0,
+      bottom: 0,
+      child: Center(
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 250),
+          reverseDuration: const Duration(milliseconds: 200),
+          transitionBuilder: (child, animation) {
+            final slide = Tween<Offset>(
+              begin: const Offset(-0.2, 0),
+              end: Offset.zero,
+            ).animate(
+              CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+            );
+            return FadeTransition(
+              opacity: animation,
+              child: SlideTransition(position: slide, child: child),
+            );
+          },
+          child: _showPlayerInfoHud
+              ? PlayerInfoHud(
+                  key: const ValueKey('player_info_hud'),
+                  controller: widget.controller,
+                  onClose: () => setState(() => _showPlayerInfoHud = false),
+                )
+              : const SizedBox.shrink(
+                  key: ValueKey('player_info_hud_empty'),
+                ),
+        ),
       ),
     );
   }
@@ -869,8 +910,12 @@ class _BakaPlayerState extends State<BakaPlayer> {
                 child: _buildHeaderButton(
                   icon: Icons.info_outline_rounded,
                   isWide: isWide,
-                  isActive: true,
-                  onTap: () => showPlaybackDetailsSheet(context, controller),
+                  isActive: _showPlayerInfoHud,
+                  onTap: () {
+                    setState(() {
+                      _showPlayerInfoHud = !_showPlayerInfoHud;
+                    });
+                  },
                 ),
               ),
             );

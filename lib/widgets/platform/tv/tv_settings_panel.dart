@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:baka/widgets/baka_player/controller.dart';
-import 'package:baka/widgets/baka_player/widgets/player_dialogs.dart';
+import 'package:baka/widgets/baka_player/widgets/player_info_hud.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:baka/services/danmaku_service.dart';
 import 'package:baka/services/playback_settings_service.dart';
@@ -335,7 +335,7 @@ class _TvSettingsPanelState extends State<TvSettingsPanel> {
                     icon: Icons.info_outline_rounded,
                     title: '播放器详情',
                     subtitle: '清晰度、解码与渲染信息',
-                    onPressed: () => showPlaybackDetailsSheet(context, _ctrl),
+                    onPressed: () => showPlayerInfoDialog(context, _ctrl),
                   ),
                   const SizedBox(height: 8),
 
