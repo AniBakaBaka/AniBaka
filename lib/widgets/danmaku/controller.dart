@@ -110,9 +110,6 @@ class DanmakuController extends ChangeNotifier {
       blockColor && color.toARGB32() != Colors.white.toARGB32();
 
   void attach(DanmakuListener listener) {
-    if (_listener != null && !identical(_listener, listener)) {
-      throw StateError('DanmakuController already has an attached view');
-    }
     _listener = listener;
   }
 

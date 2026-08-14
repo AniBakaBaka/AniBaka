@@ -1,23 +1,19 @@
-import 'dart:io';
-import 'package:baka/utils/format_utils.dart';
 import 'package:flutter/material.dart';
-import 'package:baka/models/playback_state.dart';
-import 'package:baka/models/playback_episode.dart';
-import 'package:baka/widgets/platform/windows/windows_episode_list.dart';
-import 'package:baka/widgets/baka_player/index.dart';
-import 'package:baka/widgets/danmaku/controller.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:url_launcher/url_launcher_string.dart';
-import 'package:baka/services/navigation_service.dart';
-import 'package:baka/widgets/comment/comment_widget.dart';
-import 'package:baka/services/torrent/torrent_service.dart';
-import 'package:baka/services/torrent/torrent_engine.dart';
-import 'package:baka/services/torrent/piece_manager.dart';
-import 'package:bitsdojo_window/bitsdojo_window.dart';
-import 'package:baka/utils/bgm_utils.dart';
-import 'package:baka/widgets/player/video_detail_card.dart';
 
-class WindowsPlayerLayout extends StatelessWidget {
+import 'package:baka/models/playback_episode.dart';
+import 'package:baka/models/playback_state.dart';
+import 'package:baka/services/navigation_service.dart';
+import 'package:baka/services/torrent/torrent_engine.dart';
+import 'package:baka/services/torrent/torrent_service.dart';
+import 'package:baka/utils/bgm_utils.dart';
+import 'package:baka/utils/format_utils.dart';
+import 'package:baka/widgets/baka_player/controller.dart';
+import 'package:baka/widgets/baka_player/view.dart';
+import 'package:baka/widgets/comment/comment_widget.dart';
+import 'package:baka/widgets/danmaku/controller.dart';
+import 'package:baka/widgets/platform/windows/windows_episode_list.dart';
+
+class WindowsPlayerLayout extends StatefulWidget {
   final Map data;
   final List<PlaybackEpisode> videoList;
   final int currPlayIndex;
@@ -76,677 +72,464 @@ class WindowsPlayerLayout extends StatelessWidget {
   });
 
   @override
+  State<WindowsPlayerLayout> createState() => _WindowsPlayerLayoutState();
+}
+
+class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
+  bool _showSidebar = true;
+  int _sidebarTabIndex = 0;
+  bool _isFullScreen = false;
+
+  String get _currentEpisodeTitle {
+    final episodes = widget.data['bgmDetailData']?['episodes'];
+    if (episodes is List &&
+        widget.currPlayIndex >= 0 &&
+        widget.currPlayIndex < episodes.length) {
+      final ep = episodes[widget.currPlayIndex];
+      final cn = ep['name_cn']?.toString().trim();
+      final name = ep['name']?.toString().trim();
+      if (cn != null && cn.isNotEmpty) return cn;
+      if (name != null && name.isNotEmpty) return name;
+    }
+    if (widget.currPlayIndex >= 0 &&
+        widget.currPlayIndex < widget.videoList.length) {
+      return widget.videoList[widget.currPlayIndex].title;
+    }
+    return '第${widget.currPlayIndex + 1}话';
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      body: Column(
+      backgroundColor: Colors.black,
+      body: Row(
         children: [
-          if (Platform.isWindows || Platform.isMacOS)
-            _DesktopPlayerTitleBar(title: data['title'] ?? ''),
           Expanded(
-            child: Row(
+            child: _buildPlayerArea(context),
+          ),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+            width: _showSidebar && !_isFullScreen ? 400 : 0,
+            child: ClipRect(
+              child: OverflowBox(
+                minWidth: 400,
+                maxWidth: 400,
+                alignment: Alignment.topLeft,
+                child: _buildSidebar(context),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPlayerArea(BuildContext context) {
+    return Container(
+      color: Colors.black,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (widget.inited)
+            BakaPlayer(
+              controller: widget.controller,
+              canSearchSource: true,
+              danmakuEnabled: true,
+              headerControl: _buildHeaderControls(context),
+              full: false,
+              onPickEpisode: widget.onPickEpisode,
+              hasNextEpisode: widget.currPlayIndex + 1 < widget.videoList.length,
+              onNextEpisode: widget.currPlayIndex + 1 < widget.videoList.length
+                  ? () => widget.onEpisodeChanged(widget.currPlayIndex + 1)
+                  : null,
+              onFullScreenChanged: (full) {
+                setState(() => _isFullScreen = full);
+                widget.onFullScreenChanged(full);
+              },
+            ),
+          if (!widget.inited)
+            _buildLoadingState(context),
+          ValueListenableBuilder<PlaybackCoreState>(
+            valueListenable: widget.controller.core,
+            builder: (context, core, _) {
+              if (core.failed) {
+                return _buildErrorState(context);
+              }
+              return const SizedBox.shrink();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopHeaderBar(BuildContext context) {
+    final title = widget.data['title']?.toString() ?? '';
+    final epTitle = _currentEpisodeTitle;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.black.withValues(alpha: 0.8),
+            Colors.black.withValues(alpha: 0.0),
+          ],
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          IconButton(
+            icon: const Icon(
+              Icons.arrow_back_ios_new_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+            onPressed: () => Navigator.of(context).pop(),
+            tooltip: '返回',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: CustomScrollView(
-                    slivers: [
-                      SliverToBoxAdapter(
-                        child: _PlayerArea(
-                          data: data,
-                          inited: inited,
-                          controller: controller,
-                          danmakuController: danmakuController,
-                          onCastPressed: onCastPressed,
-                          onWatchPartyPressed: onWatchPartyPressed,
-                          videoList: videoList,
-                          currentEpisodeIndex: currPlayIndex,
-                          onEpisodeChanged: onEpisodeChanged,
-                          onPickEpisode: onPickEpisode,
-                          onFullScreenChanged: onFullScreenChanged,
-                          isSearching: isSearching,
-                        ),
-                      ),
-                      SliverToBoxAdapter(
-                        child: VideoDetailCard(
-                          detail: data,
-                          bgmInfo: bgmInfo,
-                          followNotifier: followNotifier,
-                          cachedTags: cachedTags,
-                          danmakuController: danmakuController,
-                          sourceName: sourceName,
-                          lineName: lineName,
-                          onSourceTap: onSourceTap,
-                          onFollowPressed: onFollowPressed,
-                          onShowDetail: onShowDetail,
-                          isSearching: isSearching,
-                        ),
-                      ),
-                      const SliverToBoxAdapter(
-                        child: _DesktopBtProgressIndicator(),
-                      ),
-                      SliverToBoxAdapter(
-                        child: _DescriptionSection(
-                          content: data['content'] ?? '',
-                        ),
-                      ),
-                    ],
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    letterSpacing: 0.3,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  'S1E${widget.currPlayIndex + 1}: $epTitle',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.white.withValues(alpha: 0.65),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          _buildNetworkSpeedBadge(),
+          _buildHeaderIconButton(
+            icon: _showSidebar
+                ? Icons.splitscreen_rounded
+                : Icons.view_sidebar_outlined,
+            tooltip: _showSidebar ? '隐藏侧边栏' : '显示侧边栏',
+            isActive: _showSidebar,
+            onTap: () => setState(() => _showSidebar = !_showSidebar),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeaderControls(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildNetworkSpeedBadge(),
+        _buildHeaderIconButton(
+          icon: Icons.group_rounded,
+          tooltip: '一起看',
+          onTap: widget.onWatchPartyPressed,
+        ),
+        _buildHeaderIconButton(
+          icon: Icons.cast_connected_rounded,
+          tooltip: '投屏',
+          onTap: widget.onCastPressed,
+        ),
+        _buildHeaderIconButton(
+          icon: _showSidebar
+              ? Icons.splitscreen_rounded
+              : Icons.view_sidebar_outlined,
+          tooltip: _showSidebar ? '隐藏侧边栏' : '显示侧边栏',
+          isActive: _showSidebar,
+          onTap: () => setState(() => _showSidebar = !_showSidebar),
+        ),
+        _buildHeaderIconButton(
+          icon: Icons.settings_outlined,
+          tooltip: '播放设置',
+          onTap: () => NavigationService.showPlayerSettings(
+            context,
+            widget.controller,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNetworkSpeedBadge() {
+    final torrent = TorrentService.instance;
+    final primaryColor = Theme.of(context).colorScheme.primary;
+
+    return ValueListenableBuilder<TorrentStats?>(
+      valueListenable: torrent.statsNotifier,
+      builder: (context, stats, _) {
+        final speed = stats?.downloadSpeed ?? 0.0;
+        if (speed <= 0) return const SizedBox.shrink();
+        final speedText = formatBytesPerSecond(speed);
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.arrow_upward_rounded,
+                size: 14,
+                color: primaryColor,
+              ),
+              const SizedBox(width: 2),
+              Text(
+                speedText,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: primaryColor,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildHeaderIconButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+    bool isActive = false,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 300),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          child: Icon(
+            icon,
+            size: 20,
+            color: isActive
+                ? Colors.white
+                : Colors.white.withValues(alpha: 0.6),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingState(BuildContext context) {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+
+    return Container(
+      color: Colors.black,
+      child: Stack(
+        children: [
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _buildTopHeaderBar(context),
+          ),
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: CircularProgressIndicator(
+                    color: primaryColor,
+                    strokeWidth: 2.5,
                   ),
                 ),
-                _PlayerSidebar(
-                  data: data,
-                  videoList: videoList,
-                  currPlayIndex: currPlayIndex,
-                  currUrl: currUrl,
-                  sourceNames: sourceNames,
-                  bgmInfo: bgmInfo,
-                  commentKey: commentKey,
-                  onEpisodeChanged: onEpisodeChanged,
-                  onDownloadPressed: onDownloadPressed,
-                  onUrlChanged: onUrlChanged,
-                  onCommentLinkTap: onCommentLinkTap,
+                const SizedBox(height: 16),
+                Text(
+                  widget.isSearching ? '正在自动匹配源中...' : '正在加载视频...',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                  ),
                 ),
               ],
             ),
           ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'comment_fab',
-        onPressed: () => CommentInputWidget.show(context).then((result) {
-          if (result is String && result.isNotEmpty) {
-            commentKey.currentState?.sendComment(result);
-          }
-        }),
-        backgroundColor: theme.colorScheme.secondary,
-        tooltip: '发表评论',
-        child: const Icon(Icons.comment, color: Colors.white),
-      ),
-    );
-  }
-}
-
-class _PlayerArea extends StatelessWidget {
-  final Map data;
-  final bool inited;
-  final PlaybackController controller;
-  final DanmakuController danmakuController;
-  final VoidCallback onCastPressed;
-  final VoidCallback onWatchPartyPressed;
-  final List<PlaybackEpisode> videoList;
-  final int currentEpisodeIndex;
-  final void Function(int) onEpisodeChanged;
-  final VoidCallback onPickEpisode;
-  final ValueChanged<bool> onFullScreenChanged;
-  final bool isSearching;
-
-  const _PlayerArea({
-    required this.data,
-    required this.inited,
-    required this.controller,
-    required this.danmakuController,
-    required this.onCastPressed,
-    required this.onWatchPartyPressed,
-    required this.videoList,
-    required this.currentEpisodeIndex,
-    required this.onEpisodeChanged,
-    required this.onPickEpisode,
-    required this.onFullScreenChanged,
-    this.isSearching = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.sizeOf(context).height;
-    return Container(
-      constraints: BoxConstraints(maxHeight: screenHeight * 0.75),
-      color: Colors.black,
-      child: Center(
-        child: AspectRatio(
-          aspectRatio: 16 / 9,
-          child: ValueListenableBuilder<PlaybackCoreState>(
-            valueListenable: controller.core,
-            builder: (context, core, _) {
-              if (core.failed) {
-                return _buildErrorState(context);
-              }
-              if (!inited) return _buildLoadingState();
-              return BakaPlayer(
-                canSearchSource: true,
-                danmakuEnabled: true,
-                headerControl: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      IconButton(
-                        icon: const Icon(
-                          Icons.group_rounded,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                        onPressed: onWatchPartyPressed,
-                      ),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.cast_connected_rounded,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                        onPressed: onCastPressed,
-                      ),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.more_vert,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                        onPressed: () => NavigationService.showPlayerSettings(
-                          context,
-                          controller,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                controller: controller,
-                full: false,
-                onPickEpisode: onPickEpisode,
-                hasNextEpisode: currentEpisodeIndex + 1 < videoList.length,
-                onNextEpisode: currentEpisodeIndex + 1 < videoList.length
-                    ? () => onEpisodeChanged(currentEpisodeIndex + 1)
-                    : null,
-                onFullScreenChanged: onFullScreenChanged,
-              );
-            },
-          ),
-        ),
       ),
     );
   }
 
   Widget _buildErrorState(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Text('播放失败，请换源或到BAKA报错', style: TextStyle(color: Colors.white)),
-          const SizedBox(height: 10),
-          if (data['title'] != null)
-            ElevatedButton.icon(
-              onPressed: () => NavigationService.toSearch(
-                context,
-                keyword: data['title'],
-                initialSource: 2,
-              ),
-              icon: const Icon(Icons.search, color: Colors.white),
-              label: const Text('搜索番剧源', style: TextStyle(color: Colors.white)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue.withValues(alpha: 0.7),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
+    final primaryColor = Theme.of(context).colorScheme.primary;
 
-  Widget _buildLoadingState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const SizedBox(
-            height: 20,
-            width: 20,
-            child: CircularProgressIndicator(color: Colors.white),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            isSearching ? '正在自动匹配源中...' : '正在加载播放器...',
-            style: const TextStyle(color: Colors.white, fontSize: 14),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PlayerSidebar extends StatelessWidget {
-  final Map data;
-  final List<PlaybackEpisode> videoList;
-  final int currPlayIndex;
-  final int currUrl;
-  final List<String>? sourceNames;
-  final BgmInfo bgmInfo;
-  final GlobalKey<CIslandCommentWidgetState> commentKey;
-  final void Function(int) onEpisodeChanged;
-  final VoidCallback onDownloadPressed;
-  final void Function(int) onUrlChanged;
-  final void Function(String, String?, String) onCommentLinkTap;
-
-  const _PlayerSidebar({
-    required this.data,
-    required this.videoList,
-    required this.currPlayIndex,
-    required this.currUrl,
-    required this.bgmInfo,
-    required this.commentKey,
-    required this.onEpisodeChanged,
-    required this.onDownloadPressed,
-    required this.onUrlChanged,
-    required this.onCommentLinkTap,
-    this.sourceNames,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Container(
-      constraints: const BoxConstraints(minWidth: 320, maxWidth: 360),
+      color: Colors.black,
+      child: Stack(
+        children: [
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _buildTopHeaderBar(context),
+          ),
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.error_outline_rounded,
+                  color: Colors.redAccent,
+                  size: 48,
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  '播放失败，请换源或重试',
+                  style: TextStyle(color: Colors.white, fontSize: 14),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: widget.onSourceTap,
+                  icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+                  label: const Text('切换播放源'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primaryColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSidebar(BuildContext context) {
+    return Container(
+      width: 400,
       decoration: BoxDecoration(
+        color: const Color(0xFF141416),
         border: Border(
           left: BorderSide(
-            color: theme.dividerColor.withValues(alpha: 0.2),
+            color: Colors.white.withValues(alpha: 0.08),
             width: 1,
           ),
         ),
       ),
-      child: DefaultTabController(
-        length: 2,
-        child: Column(
-          children: [
-            _buildTabBar(theme),
-            Expanded(
-              child: TabBarView(
-                children: [_buildEpisodeTab(), _buildCommentTab()],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTabBar(ThemeData theme) => Container(
-    decoration: BoxDecoration(
-      border: Border(
-        bottom: BorderSide(
-          color: theme.dividerColor.withValues(alpha: 0.1),
-          width: 1,
-        ),
-      ),
-    ),
-    child: TabBar(
-      tabs: const [
-        Tab(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.playlist_play_rounded, size: 18),
-              SizedBox(width: 8),
-              Text('播放列表'),
-            ],
-          ),
-        ),
-        Tab(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.chat_bubble_outline_rounded, size: 18),
-              SizedBox(width: 8),
-              Text('互动评论'),
-            ],
-          ),
-        ),
-      ],
-      labelColor: theme.colorScheme.primary,
-      unselectedLabelColor: theme.textTheme.bodyMedium?.color?.withValues(
-        alpha: 0.6,
-      ),
-      labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-      unselectedLabelStyle: const TextStyle(
-        fontSize: 14,
-        fontWeight: FontWeight.w500,
-      ),
-      indicatorSize: TabBarIndicatorSize.label,
-      indicatorWeight: 3,
-      dividerColor: Colors.transparent,
-      splashFactory: NoSplash.splashFactory,
-    ),
-  );
-
-  Widget _buildEpisodeTab() => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-    child: WindowsEpisodeList(
-      videoList: videoList,
-      currentIndex: currPlayIndex,
-      onEpisodeSelected: onEpisodeChanged,
-      onDownloadPressed: onDownloadPressed,
-      onUrlSelected: (_, urlIndex) => onUrlChanged(urlIndex),
-      currUrl: currUrl,
-      sourceNames: sourceNames,
-    ),
-  );
-
-  Widget _buildCommentTab() {
-    final isAdapter = data['sourceUrl'] != null;
-    final pid = (isAdapter && bgmInfo.subjectId != null)
-        ? bgmInfo.subjectId!
-        : (int.tryParse(data['id']?.toString() ?? '') ?? 11);
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: CIslandCommentWidget(
-        key: commentKey,
-        postId: pid,
-        bgmSubjectId: bgmInfo.subjectId,
-        episodeIndex: currPlayIndex,
-        onCommentLinkTap: onCommentLinkTap,
-      ),
-    );
-  }
-}
-
-class _DescriptionSection extends StatelessWidget {
-  final String content;
-
-  const _DescriptionSection({required this.content});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(16),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '简介',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 12),
-          MarkdownBody(
-            selectable: true,
-            data: content,
-            onTapLink: (_, url, _) =>
-                launchUrlString(url!, mode: LaunchMode.externalApplication),
-            styleSheet: MarkdownStyleSheet(
-              blockquotePadding: const EdgeInsets.only(left: 6),
-              blockquoteDecoration: BoxDecoration(
-                border: Border(
-                  left: BorderSide(width: 1, color: theme.colorScheme.primary),
-                ),
-              ),
-              blockquote: const TextStyle(fontSize: 14),
-              code: const TextStyle(fontFamily: 'Source Code Pro'),
-              a: TextStyle(color: theme.colorScheme.primary),
-              p: TextStyle(
-                fontSize: 14,
-                color: theme.textTheme.bodySmall?.color,
-              ),
+          _buildSidebarTabs(),
+          Expanded(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: _sidebarTabIndex == 0
+                  ? _buildPlaylistTab()
+                  : _buildCommentTab(),
             ),
           ),
         ],
       ),
     );
   }
-}
 
-class _DesktopPlayerTitleBar extends StatelessWidget {
-  final String title;
-
-  const _DesktopPlayerTitleBar({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = theme.textTheme.bodyMedium?.color;
-    final isMac = Platform.isMacOS;
-
-    IconButton btn(
-      IconData icon,
-      VoidCallback onPressed,
-      String tooltip, {
-      double size = 16,
-      Color? iconColor,
-    }) => IconButton(
-      icon: Icon(icon, size: size, color: iconColor ?? color),
-      onPressed: onPressed,
-      tooltip: tooltip,
+  Widget _buildSidebarTabs() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 10),
       padding: const EdgeInsets.all(4),
-      constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF202024),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.06),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildTabButton(
+              index: 0,
+              icon: Icons.info_outline_rounded,
+              title: '简介',
+            ),
+          ),
+          Expanded(
+            child: _buildTabButton(
+              index: 1,
+              icon: Icons.chat_bubble_outline_rounded,
+              title: '互动评论',
+            ),
+          ),
+        ],
+      ),
     );
+  }
 
-    return GestureDetector(
-      onPanStart: (_) => appWindow.startDragging(),
-      child: Container(
-        width: double.infinity,
-        height: isMac ? 40.0 : 30.0,
+  Widget _buildTabButton({
+    required int index,
+    required IconData icon,
+    required String title,
+  }) {
+    final isSelected = _sidebarTabIndex == index;
+    return InkWell(
+      onTap: () => setState(() => _sidebarTabIndex = index),
+      borderRadius: BorderRadius.circular(7),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(vertical: 7),
         decoration: BoxDecoration(
-          color: theme.scaffoldBackgroundColor,
-          border: isMac
-              ? Border(
-                  bottom: BorderSide(
-                    color: theme.dividerColor.withValues(alpha: 0.3),
-                    width: 0.5,
+          color: isSelected ? const Color(0xFF2D2D32) : Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.25),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
                   ),
-                )
+                ]
               : null,
         ),
         child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (isMac) const SizedBox(width: 80),
-            btn(
-              Icons.arrow_back,
-              () => Navigator.of(context).pop(),
-              '返回',
-              size: isMac ? 20.0 : 16.0,
+            Icon(
+              icon,
+              size: 16,
+              color: isSelected ? Colors.white : Colors.white54,
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                title,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: color,
-                  fontWeight: FontWeight.w500,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            if (!isMac) ...[
-              btn(Icons.minimize, () => appWindow.minimize(), '最小化'),
-              btn(
-                Icons.crop_square,
-                () => appWindow.maximizeOrRestore(),
-                '最大化/还原',
-              ),
-              btn(
-                Icons.close,
-                () => appWindow.close(),
-                '关闭',
-                iconColor: Colors.red,
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DesktopBtProgressIndicator extends StatelessWidget {
-  const _DesktopBtProgressIndicator();
-
-  @override
-  Widget build(BuildContext context) {
-    final torrent = TorrentService.instance;
-    return ValueListenableBuilder<TorrentStats?>(
-      valueListenable: torrent.statsNotifier,
-      builder: (context, stats, _) {
-        if (stats == null || stats.state == TorrentState.idle) {
-          return const SizedBox.shrink();
-        }
-        return _buildIndicator(context, stats);
-      },
-    );
-  }
-
-  Widget _buildIndicator(BuildContext context, TorrentStats stats) {
-    final theme = Theme.of(context);
-    final primary = theme.colorScheme.primary;
-    final bodyColor = theme.textTheme.bodyMedium?.color;
-    const readyColor = Color(0xFF34C759);
-
-    final (stateText, stateIcon, stateColor) = switch (stats.state) {
-      TorrentState.resolving => (
-        '解析中',
-        Icons.manage_search_rounded,
-        theme.colorScheme.secondary,
-      ),
-      TorrentState.connecting => (
-        '连接 Peers',
-        Icons.sync_rounded,
-        theme.colorScheme.secondary,
-      ),
-      TorrentState.downloading => (
-        '${(stats.progress * 100).toStringAsFixed(1)}%',
-        Icons.downloading_rounded,
-        primary,
-      ),
-      TorrentState.seeding => (
-        '做种中',
-        Icons.check_circle_outline_rounded,
-        readyColor,
-      ),
-      TorrentState.error => (
-        stats.errorMessage ?? '错误',
-        Icons.error_outline_rounded,
-        theme.colorScheme.error,
-      ),
-      _ => ('', Icons.help, theme.colorScheme.error),
-    };
-    if (stats.state == TorrentState.idle) return const SizedBox.shrink();
-
-    final readyToPlay = stats.readyToPlay;
-    final speed = stats.downloadSpeed;
-    final uploadSpeed = stats.uploadSpeed;
-    final peers = stats.peers;
-    final total = stats.totalBytes;
-    final uploadedBytes = stats.uploadedBytes;
-    final contiguous = stats.contiguousBytes;
-    final required = stats.bufferRequiredBytes;
-    final remaining = (required - contiguous).clamp(0, required);
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(stateIcon, size: 15, color: stateColor),
-                const SizedBox(width: 6),
-                Text(
-                  'BT $stateText',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: stateColor,
-                  ),
-                ),
-                if (speed > 0 || uploadSpeed > 0) ...[
-                  const SizedBox(width: 10),
-                  Icon(
-                    Icons.arrow_downward_rounded,
-                    size: 12,
-                    color: primary.withValues(alpha: 0.7),
-                  ),
-                  const SizedBox(width: 2),
-                  Text(
-                    formatBytesPerSecond(speed),
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: primary,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(
-                    Icons.arrow_upward_rounded,
-                    size: 12,
-                    color: Colors.orange.withValues(alpha: 0.7),
-                  ),
-                  const SizedBox(width: 2),
-                  Text(
-                    formatBytesPerSecond(uploadSpeed),
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.orange,
-                    ),
-                  ),
-                ],
-                const Spacer(),
-                Text(
-                  readyToPlay ? '可播放' : '待缓冲',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: readyToPlay
-                        ? readyColor
-                        : bodyColor?.withValues(alpha: 0.45),
-                  ),
-                ),
-                if (peers > 0) ...[
-                  const SizedBox(width: 10),
-                  Text(
-                    '$peers peers',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: bodyColor?.withValues(alpha: 0.4),
-                    ),
-                  ),
-                ],
-                if (total > 0) ...[
-                  const SizedBox(width: 10),
-                  Text(
-                    '${formatBytes(stats.downloadedBytes)} / ${formatBytes(total)}',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: bodyColor?.withValues(alpha: 0.5),
-                    ),
-                  ),
-                ],
-                if (uploadedBytes > 0) ...[
-                  const SizedBox(width: 10),
-                  Text(
-                    '↑${formatBytes(uploadedBytes)}',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.orange.withValues(alpha: 0.6),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            _buildPieceGrid(theme, stateColor, stats),
-            const SizedBox(height: 6),
+            const SizedBox(width: 6),
             Text(
-              readyToPlay
-                  ? '连续缓冲 ${formatBytes(contiguous)} / ${formatBytes(required)}，已达标'
-                  : '连续缓冲 ${formatBytes(contiguous)} / ${formatBytes(required)}，还差 ${formatBytes(remaining)}',
+              title,
               style: TextStyle(
-                fontSize: 11,
-                color: bodyColor?.withValues(alpha: 0.45),
+                fontSize: 12.5,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                color: isSelected ? Colors.white : Colors.white54,
               ),
             ),
           ],
@@ -755,41 +538,74 @@ class _DesktopBtProgressIndicator extends StatelessWidget {
     );
   }
 
-  Widget _buildPieceGrid(
-    ThemeData theme,
-    Color stateColor,
-    TorrentStats stats,
-  ) {
-    final firstPiece = stats.firstPiece;
-    final lastPiece = stats.lastPiece;
-    final totalTargetPieces = lastPiece - firstPiece + 1;
-    if (totalTargetPieces <= 0) return const SizedBox.shrink();
+  Widget _buildPlaylistTab() {
+    final rawEpisodes = widget.data['bgmDetailData']?['episodes'];
+    final bgmEpisodes = (rawEpisodes is List)
+        ? rawEpisodes.cast<Map<String, dynamic>>()
+        : null;
 
-    final states = stats.pieceStates;
+    final summary = widget.data['summary']?.toString() ??
+        widget.data['content']?.toString() ??
+        '';
 
     return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Wrap(
-        spacing: 1,
-        runSpacing: 1,
-        children: List.generate(totalTargetPieces, (i) {
-          final state = i < states.length ? states[i] : PieceState.pending;
-          final color = switch (state) {
-            PieceState.completed => const Color(0xFF34C759),
-            PieceState.downloading => stateColor.withValues(alpha: 0.6),
-            PieceState.pending => theme.dividerColor.withValues(alpha: 0.15),
-          };
-          return SizedBox(
-            width: 5,
-            height: 5,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(1),
-              ),
-            ),
-          );
-        }),
+      key: const ValueKey('intro_tab'),
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      child: WindowsEpisodeList(
+        videoList: widget.videoList,
+        currentIndex: widget.currPlayIndex,
+        onEpisodeSelected: widget.onEpisodeChanged,
+        onDownloadPressed: widget.onDownloadPressed,
+        onUrlSelected: (_, urlIndex) => widget.onUrlChanged(urlIndex),
+        currUrl: widget.currUrl,
+        sourceNames: widget.sourceNames,
+        bgmId: widget.bgmInfo.subjectId,
+        bgmEpisodes: bgmEpisodes,
+        fallbackCoverUrl: BgmUtils.resolveCoverImage(
+          widget.data,
+          bgmInfo: widget.bgmInfo,
+        ),
+        title: widget.data['title']?.toString() ?? '',
+        summary: summary,
+        bgmInfo: widget.bgmInfo,
+        followNotifier: widget.followNotifier,
+        onFollowPressed: widget.onFollowPressed,
+        sourceName: widget.sourceName,
+        lineName: widget.lineName,
+        onSourceTap: widget.onSourceTap,
+        isSearching: widget.isSearching,
+        danmakuController: widget.danmakuController,
+        onShowDetail: widget.onShowDetail,
+        cachedTags: widget.cachedTags,
+      ),
+    );
+  }
+
+  Widget _buildCommentTab() {
+    final isAdapter = widget.data['sourceUrl'] != null;
+    final pid = (isAdapter && widget.bgmInfo.subjectId != null)
+        ? widget.bgmInfo.subjectId!
+        : (int.tryParse(widget.data['id']?.toString() ?? '') ?? 11);
+    final primaryColor = Theme.of(context).colorScheme.primary;
+
+    return Theme(
+      key: const ValueKey('comment_tab'),
+      data: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF141416),
+        colorScheme: ColorScheme.dark(
+          primary: primaryColor,
+          surface: const Color(0xFF1E1E22),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+        child: CIslandCommentWidget(
+          key: widget.commentKey,
+          postId: pid,
+          bgmSubjectId: widget.bgmInfo.subjectId,
+          episodeIndex: widget.currPlayIndex,
+          onCommentLinkTap: widget.onCommentLinkTap,
+        ),
       ),
     );
   }

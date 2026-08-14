@@ -438,7 +438,8 @@ class _BakaPlayerState extends State<BakaPlayer> {
   }
 
   Widget _buildDanmaku() {
-    if (!widget.danmakuEnabled || !widget.full) {
+    if (!widget.danmakuEnabled ||
+        (!widget.full && !Instances.isDesktopPlatform)) {
       return const SizedBox.shrink();
     }
     return ValueListenableBuilder<PlayerOverlayState>(
@@ -768,7 +769,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
         ),
         SizedBox(width: isWide ? 16 : 12),
         Expanded(
-          child: widget.full
+          child: (widget.full || Instances.isDesktopPlatform)
               ? ValueListenableBuilder<PlaybackMediaInfo>(
                   valueListenable: controller.mediaInfo,
                   builder: (context, mediaInfo, _) => Column(
@@ -780,6 +781,19 @@ class _BakaPlayerState extends State<BakaPlayer> {
                         mediaInfo.logoUrl.isNotEmpty ? mediaInfo.logoUrl : '',
                         isWide,
                       ),
+                      if (mediaInfo.episode.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          mediaInfo.episode,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.75),
+                            fontSize: isWide ? 12.5 : 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                     ],
                   ),
                 )
