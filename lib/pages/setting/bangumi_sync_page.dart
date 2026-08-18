@@ -1,13 +1,11 @@
 import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
-import 'package:baka/pages/login/login_page.dart';
 import 'package:baka/services/bangumi_sync_service.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
 import 'package:baka/widgets/settings/settings_widgets.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
@@ -15,6 +13,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 
 const _bangumiIconAsset = 'assets/bangumi.svg';
 const _bangumiPink = Color(0xFFF09199);
+const _tokenHelperUrl = 'https://next.bgm.tv/demo/access-token';
 
 class BangumiSyncPage extends StatefulWidget {
   const BangumiSyncPage({super.key});
@@ -27,23 +26,9 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
   static const _apiDocsUrl = 'https://bangumi.github.io/api/';
 
   final _service = BangumiSyncService.instance;
-  BangumiAccount? _account;
   bool _busy = false;
   String? _progress;
   BangumiSyncReport? _report;
-  late bool _autoMarkEpisode;
-  late bool _quickMarkGrid;
-
-  bool get _connected => _service.isConnected;
-  bool get _aniBakaLoggedIn => Instances.userToken.isNotEmpty;
-
-  @override
-  void initState() {
-    super.initState();
-    _account = _service.account;
-    _autoMarkEpisode = _service.autoMarkEpisode;
-    _quickMarkGrid = _service.quickMarkGrid;
-  }
 
   Future<void> _openUrl(String url) async {
     if (!await launchUrlString(url, mode: LaunchMode.externalApplication) &&
@@ -71,14 +56,10 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
     try {
       final account = await _service.connect(result);
       if (!mounted) return;
-      setState(() {
-        _account = account;
-        _progress = null;
-      });
+      setState(() => _progress = null);
       if (Get.isRegistered<AppState>()) {
         Get.find<AppState>().triggerLoginRefresh();
       }
-      HapticFeedback.mediumImpact();
       showSnackBar('已连接 Bangumi：${account.nickname}');
     } catch (error) {
       if (!mounted) return;
@@ -89,19 +70,6 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
     }
   }
 
-  Future<void> _navigateToLogin() async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const Login()),
-    );
-    if (!mounted) return;
-    setState(() {
-      _account = _service.account;
-    });
-    if (Get.isRegistered<AppState>()) {
-      Get.find<AppState>().triggerLoginRefresh();
-    }
-  }
 
   Future<void> _disconnect() async {
     if (_busy) return;
@@ -116,7 +84,6 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
     await _service.disconnect();
     if (!mounted) return;
     setState(() {
-      _account = null;
       _progress = null;
       _report = null;
     });
@@ -143,9 +110,7 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
       setState(() {
         _report = report;
         _progress = null;
-        _account = _service.account;
       });
-      HapticFeedback.mediumImpact();
       showSnackBar(report.summary, isError: report.failed > 0);
     } catch (error) {
       if (!mounted) return;
@@ -158,7 +123,10 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
 
   @override
   Widget build(BuildContext context) {
+    final connected = _service.isConnected;
+    final account = _service.account;
     final lastSyncAt = _service.lastSyncAt?.toLocal();
+    final aniBakaLoggedIn = Instances.userToken.isNotEmpty;
     final theme = Theme.of(context);
 
     return Scaffold(
@@ -172,25 +140,24 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
             padding: const EdgeInsets.fromLTRB(18, 16, 18, 40),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                const _NoticeCard(
-                  icon: Icons.wifi_protected_setup_rounded,
-                  title: '网络连接提示',
-                  content:
-                      'Bangumi API 在部分网络环境下可能无法直连。如遇到连接失败或超时，请开启网络代理后重试。',
-                ),
+                const _NoticeCard(),
                 const SizedBox(height: 20),
                 const SettingsSectionHeader('Bangumi 账号'),
-                if (_connected)
-                  _AccountCard(
-                    account: _account,
-                    onReplace: _connectWithAccessToken,
-                    onDisconnect: _disconnect,
-                  )
-                else
-                  _UnconnectedCard(
-                    onGoToLogin: _navigateToLogin,
-                    onConnectToken: _connectWithAccessToken,
-                  ),
+                SettingsGroup(
+                  children: [
+                    if (connected)
+                      _AccountView(
+                        account: account,
+                        onReplace: _connectWithAccessToken,
+                        onDisconnect: _disconnect,
+                      )
+                    else
+                      _UnconnectedView(
+                        onConnectToken: _connectWithAccessToken,
+                        onGetToken: () => _openUrl(_tokenHelperUrl),
+                      ),
+                  ],
+                ),
                 const SizedBox(height: 24),
                 const SettingsSectionHeader('快捷偏好'),
                 SettingsGroup(
@@ -199,21 +166,21 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
                       icon: Icons.auto_awesome_rounded,
                       title: '播放完成自动点格子',
                       subtitle: '播放进度达到 95% 时自动标记为已看',
-                      value: _autoMarkEpisode,
+                      value: _service.autoMarkEpisode,
                       onChanged: (val) async {
                         await _service.setAutoMarkEpisode(val);
-                        if (mounted) setState(() => _autoMarkEpisode = val);
+                        if (mounted) setState(() {});
                       },
                     ),
                     SettingsSwitchTile(
                       icon: Icons.grid_view_rounded,
                       title: '剧集快捷点格子',
                       subtitle: '在剧集列表中点击集数可快速标记',
-                      value: _quickMarkGrid,
+                      value: _service.quickMarkGrid,
                       showDivider: false,
                       onChanged: (val) async {
                         await _service.setQuickMarkGrid(val);
-                        if (mounted) setState(() => _quickMarkGrid = val);
+                        if (mounted) setState(() {});
                       },
                     ),
                   ],
@@ -221,9 +188,9 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
                 const SizedBox(height: 24),
                 const SettingsSectionHeader('数据同步'),
                 _SyncCard(
-                  enabled: _connected && !_busy,
-                  connected: _connected,
-                  localMode: !_aniBakaLoggedIn,
+                  enabled: connected && !_busy,
+                  connected: connected,
+                  localMode: !aniBakaLoggedIn,
                   progress: _progress,
                   report: _report,
                   lastSyncText: lastSyncAt == null
@@ -254,15 +221,7 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
 }
 
 class _NoticeCard extends StatelessWidget {
-  const _NoticeCard({
-    required this.icon,
-    required this.title,
-    required this.content,
-  });
-
-  final IconData icon;
-  final String title;
-  final String content;
+  const _NoticeCard();
 
   @override
   Widget build(BuildContext context) {
@@ -284,14 +243,18 @@ class _NoticeCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 20, color: colors.primary),
+          Icon(
+            Icons.wifi_protected_setup_rounded,
+            size: 20,
+            color: colors.primary,
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  title,
+                  '网络连接提示',
                   style: TextStyle(
                     color: colors.onSurface,
                     fontSize: 13,
@@ -300,7 +263,7 @@ class _NoticeCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  content,
+                  'Bangumi API 在部分网络环境下可能无法直连。如遇到连接失败或超时，请开启网络代理后重试。',
                   style: TextStyle(
                     color: colors.onSurfaceVariant,
                     fontSize: 12,
@@ -316,54 +279,35 @@ class _NoticeCard extends StatelessWidget {
   }
 }
 
-class _UnconnectedCard extends StatelessWidget {
-  const _UnconnectedCard({
-    required this.onGoToLogin,
+class _UnconnectedView extends StatelessWidget {
+  const _UnconnectedView({
     required this.onConnectToken,
+    required this.onGetToken,
   });
 
-  final VoidCallback onGoToLogin;
   final VoidCallback onConnectToken;
+  final VoidCallback onGetToken;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    final isDark = theme.brightness == Brightness.dark;
+    final colors = Theme.of(context).colorScheme;
 
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: _bangumiPink.withValues(alpha: 0.2),
-          width: 1,
-        ),
-        boxShadow: context.reduceMotion
-            ? null
-            : [
-                BoxShadow(
-                  color: _bangumiPink.withValues(alpha: 0.06),
-                  blurRadius: 16,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-      ),
+    return Padding(
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: _bangumiPink.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SvgPicture.asset(
+                  _bangumiIconAsset,
+                  width: 36,
+                  height: 36,
                 ),
-                child: const _BangumiIcon(size: 28),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -371,9 +315,8 @@ class _UnconnectedCard extends StatelessWidget {
                     const Text(
                       '关联 Bangumi 账号',
                       style: TextStyle(
-                        fontSize: 16,
+                        fontSize: 15,
                         fontWeight: FontWeight.w700,
-                        letterSpacing: -0.2,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -389,50 +332,44 @@ class _UnconnectedCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           Row(
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: () {
-                    HapticFeedback.lightImpact();
-                    onGoToLogin();
-                  },
+                  onPressed: onConnectToken,
                   style: FilledButton.styleFrom(
                     backgroundColor: _bangumiPink,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  icon: const Icon(Icons.login_rounded, size: 18),
+                  icon: const Icon(Icons.key_rounded, size: 16),
                   label: const Text(
-                    '前往 Bangumi 登录',
-                    style: TextStyle(fontWeight: FontWeight.w600),
+                    '粘贴 Token 连接',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               OutlinedButton.icon(
-                onPressed: () {
-                  HapticFeedback.lightImpact();
-                  onConnectToken();
-                },
+                onPressed: onGetToken,
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
+                    horizontal: 12,
+                    vertical: 10,
                   ),
                   side: BorderSide(
                     color: colors.outline.withValues(alpha: 0.3),
                   ),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                 ),
-                icon: const Icon(Icons.key_rounded, size: 18),
-                label: const Text('粘贴 Token'),
+                icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                label: const Text('获取 Token', style: TextStyle(fontSize: 13)),
               ),
             ],
           ),
@@ -442,8 +379,8 @@ class _UnconnectedCard extends StatelessWidget {
   }
 }
 
-class _AccountCard extends StatelessWidget {
-  const _AccountCard({
+class _AccountView extends StatelessWidget {
+  const _AccountView({
     required this.account,
     required this.onReplace,
     required this.onDisconnect,
@@ -465,60 +402,33 @@ class _AccountCard extends StatelessWidget {
     final username = account?.username;
     final avatarUrl = account?.avatarUrl;
 
-    return Container(
+    return Padding(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: context.reduceMotion
-            ? null
-            : [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.03),
-                  blurRadius: 12,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-      ),
       child: Column(
         children: [
           Row(
             children: [
-              Stack(
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _bangumiPink.withValues(alpha: 0.15),
-                    ),
-                    child: ClipOval(
-                      child: avatarUrl != null && avatarUrl.isNotEmpty
-                          ? CachedNetworkImage(
-                              imageUrl: avatarUrl,
-                              fit: BoxFit.cover,
-                              errorWidget: (_, _, _) =>
-                                  const _BangumiIcon(size: 32, circular: true),
-                            )
-                          : const _BangumiIcon(size: 32, circular: true),
-                    ),
-                  ),
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(2),
-                      decoration: BoxDecoration(
-                        color: theme.scaffoldBackgroundColor,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const _BangumiIcon(size: 14, circular: true),
-                    ),
-                  ),
-                ],
+              ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: avatarUrl != null && avatarUrl.isNotEmpty
+                      ? CachedNetworkImage(
+                          imageUrl: avatarUrl,
+                          fit: BoxFit.cover,
+                          errorWidget: (_, _, _) => SvgPicture.asset(
+                            _bangumiIconAsset,
+                            fit: BoxFit.cover,
+                          ),
+                        )
+                      : SvgPicture.asset(
+                          _bangumiIconAsset,
+                          fit: BoxFit.cover,
+                        ),
+                ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -529,9 +439,8 @@ class _AccountCard extends StatelessWidget {
                           child: Text(
                             name,
                             style: const TextStyle(
-                              fontSize: 16,
+                              fontSize: 15,
                               fontWeight: FontWeight.w700,
-                              letterSpacing: -0.2,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -540,12 +449,12 @@ class _AccountCard extends StatelessWidget {
                         const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
+                            horizontal: 5,
+                            vertical: 1.5,
                           ),
                           decoration: BoxDecoration(
                             color: Colors.green.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(4),
                           ),
                           child: const Text(
                             '已关联',
@@ -573,68 +482,39 @@ class _AccountCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           Divider(
             height: 1,
             thickness: 0.5,
-            color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+            color: isDark ? Colors.white10 : Colors.black12,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               TextButton.icon(
-                onPressed: () {
-                  HapticFeedback.lightImpact();
-                  onReplace();
-                },
+                onPressed: onReplace,
                 style: TextButton.styleFrom(
                   visualDensity: VisualDensity.compact,
                   foregroundColor: colors.primary,
                 ),
                 icon: const Icon(Icons.swap_horiz_rounded, size: 16),
-                label: const Text('更换 Token', style: TextStyle(fontSize: 13)),
+                label: const Text('更换 Token', style: TextStyle(fontSize: 12)),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 4),
               TextButton.icon(
-                onPressed: () {
-                  HapticFeedback.lightImpact();
-                  onDisconnect();
-                },
+                onPressed: onDisconnect,
                 style: TextButton.styleFrom(
                   visualDensity: VisualDensity.compact,
                   foregroundColor: colors.error,
                 ),
                 icon: const Icon(Icons.link_off_rounded, size: 16),
-                label: const Text('断开关联', style: TextStyle(fontSize: 13)),
+                label: const Text('断开关联', style: TextStyle(fontSize: 12)),
               ),
             ],
           ),
         ],
       ),
-    );
-  }
-}
-
-class _BangumiIcon extends StatelessWidget {
-  const _BangumiIcon({required this.size, this.circular = false});
-
-  final double size;
-  final bool circular;
-
-  @override
-  Widget build(BuildContext context) {
-    final image = SvgPicture.asset(
-      _bangumiIconAsset,
-      width: size,
-      height: size,
-      fit: BoxFit.cover,
-      semanticsLabel: 'Bangumi',
-    );
-    if (circular) return ClipOval(child: image);
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(size * 0.22),
-      child: image,
     );
   }
 }
@@ -660,53 +540,45 @@ class _SyncCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
+    final colors = Theme.of(context).colorScheme;
 
     return SettingsGroup(
       children: [
         Padding(
-          padding: const EdgeInsets.all(18),
+          padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: colors.primary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(
-                      Icons.sync_rounded,
-                      size: 20,
-                      color: colors.primary,
-                    ),
+                  Icon(
+                    Icons.sync_rounded,
+                    size: 20,
+                    color: colors.primary,
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
                       '双向同步',
                       style: TextStyle(
-                        fontSize: 16,
+                        fontSize: 15,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
+                      horizontal: 7,
+                      vertical: 2.5,
                     ),
                     decoration: BoxDecoration(
                       color: localMode
                           ? colors.surfaceContainerHighest
                           : colors.primaryContainer.withValues(alpha: 0.5),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
-                      localMode ? '本地同步模式' : '云端同步模式',
+                      localMode ? '本地模式' : '云端模式',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
@@ -718,7 +590,7 @@ class _SyncCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Icon(
@@ -736,7 +608,7 @@ class _SyncCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Text(
                 !connected
                     ? '请先关联 Bangumi 账号以使用同步功能'
@@ -744,22 +616,19 @@ class _SyncCard extends StatelessWidget {
                         '支持同步想看、在看、看过的进度与评分。首次同步冲突以 Bangumi 为准。'),
                 style: TextStyle(
                   fontSize: 12,
-                  height: 1.45,
+                  height: 1.4,
                   color: (report?.failed ?? 0) > 0
                       ? colors.error
                       : colors.onSurfaceVariant,
                 ),
               ),
               if (progress != null) ...[
-                const SizedBox(height: 14),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    minHeight: 4,
-                    backgroundColor: colors.primary.withValues(alpha: 0.12),
-                  ),
+                const SizedBox(height: 12),
+                LinearProgressIndicator(
+                  minHeight: 3,
+                  backgroundColor: colors.primary.withValues(alpha: 0.12),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(
                   progress!,
                   style: TextStyle(
@@ -769,33 +638,31 @@ class _SyncCard extends StatelessWidget {
                   ),
                 ),
               ],
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: enabled
-                      ? () {
-                          HapticFeedback.mediumImpact();
-                          onSync();
-                        }
-                      : null,
+                  onPressed: enabled ? onSync : null,
                   style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
                   icon: progress != null
                       ? SizedBox(
-                          width: 16,
-                          height: 16,
+                          width: 14,
+                          height: 14,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
                             color: colors.onPrimary,
                           ),
                         )
-                      : const Icon(Icons.cloud_sync_rounded, size: 18),
-                  label: Text(progress == null ? '开始同步' : '正在同步…'),
+                      : const Icon(Icons.cloud_sync_rounded, size: 16),
+                  label: Text(
+                    progress == null ? '开始同步' : '正在同步…',
+                    style: const TextStyle(fontSize: 13),
+                  ),
                 ),
               ),
             ],

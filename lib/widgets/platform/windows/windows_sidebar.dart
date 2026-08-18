@@ -1,5 +1,4 @@
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:baka/instance.dart';
 import 'package:baka/services/mine_service.dart';
 import 'package:baka/services/navigation_service.dart';
 import 'package:baka/services/settings_service.dart';
@@ -7,7 +6,7 @@ import 'package:flutter/material.dart';
 
 class WindowsSidebar extends StatefulWidget {
   final int currentPageIndex;
-  final Function(int) onPageChange;
+  final ValueChanged<int> onPageChange;
 
   const WindowsSidebar({
     required this.currentPageIndex,
@@ -22,73 +21,49 @@ class WindowsSidebar extends StatefulWidget {
 class _WindowsSidebarState extends State<WindowsSidebar> {
   late final MineService _mine = MineService();
   late bool _isSidebarCollapsed = ThemeService.getSidebarCollapsed();
-  int? _hoveredIndex;
-
-  void _setHoveredIndex(int? index) {
-    if (_hoveredIndex != index) {
-      setState(() => _hoveredIndex = index);
-    }
-  }
 
   void _toggleSidebar() {
     setState(() => _isSidebarCollapsed = !_isSidebarCollapsed);
     ThemeService.setSidebarCollapsed(_isSidebarCollapsed);
   }
 
+  void _openLoginPage() {
+    Navigator.pushNamed(context, 'Baka://login');
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final reduceVisualEffects = context.reduceMotion;
-
-    final width = _isSidebarCollapsed ? 72.0 : 240.0;
-
-    final backgroundColor = theme.scaffoldBackgroundColor;
+    final width = _isSidebarCollapsed ? 68.0 : 220.0;
+    final dividerColor = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.black.withValues(alpha: 0.06);
 
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.fastOutSlowIn, // 更优雅的动画曲线
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
       width: width,
       decoration: BoxDecoration(
-        color: backgroundColor,
-        border: Border(
-          right: BorderSide(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.08)
-                : Colors.black.withValues(alpha: 0.05),
-            width: 1,
-          ),
-        ),
-        boxShadow: [
-          if (!_isSidebarCollapsed && !reduceVisualEffects)
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
-              blurRadius: 20,
-              offset: const Offset(4, 0),
-            ),
-        ],
+        color: theme.scaffoldBackgroundColor,
+        border: Border(right: BorderSide(color: dividerColor, width: 1)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 32),
-
+          const SizedBox(height: 24),
           _buildUserInfo(theme),
-
-          const SizedBox(height: 32),
-
+          const SizedBox(height: 20),
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Column(children: _buildNavItems(theme)),
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              children: _buildNavItems(theme),
             ),
           ),
-
           Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
             child: _buildCollapseButton(theme),
           ),
-          const SizedBox(height: 16),
         ],
       ),
     );
@@ -96,19 +71,19 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
 
   Widget _buildAvatar(double size) {
     final avatarUrl = _mine.avatarUrl;
-    return Hero(
-      tag: 'sidebar_avatar',
-      child: ClipOval(
-        child: avatarUrl.isEmpty
-            ? _buildAvatarFallback(size)
-            : CachedNetworkImage(
-                memCacheWidth: (size * 2).toInt(),
-                imageUrl: avatarUrl,
-                width: size,
-                height: size,
-                fit: BoxFit.cover,
-                errorWidget: (_, _, _) => _buildAvatarFallback(size),
-              ),
+    if (avatarUrl.isEmpty) {
+      return _buildAvatarFallback(size);
+    }
+    return ClipOval(
+      child: CachedNetworkImage(
+        memCacheWidth: (size * 2).toInt(),
+        imageUrl: avatarUrl,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        fadeInDuration: const Duration(milliseconds: 150),
+        fadeOutDuration: const Duration(milliseconds: 150),
+        errorWidget: (_, _, _) => _buildAvatarFallback(size),
       ),
     );
   }
@@ -118,50 +93,42 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
     return Container(
       width: size,
       height: size,
-      color: colors.surfaceContainerHighest,
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest,
+        shape: BoxShape.circle,
+      ),
       alignment: Alignment.center,
       child: Icon(
         Icons.person_outline_rounded,
-        size: size * 0.56,
+        size: size * 0.55,
         color: colors.onSurfaceVariant,
-      ),
-    );
-  }
-
-  void _openLoginPage() {
-    Navigator.pushNamed(context, 'Baka://login');
-  }
-
-  Widget _buildUserButton(Widget child) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: _openLoginPage,
-        child: child,
       ),
     );
   }
 
   Widget _buildUserInfo(ThemeData theme) {
     if (_isSidebarCollapsed) {
-      return _buildUserButton(
-        Center(
-          child: Tooltip(
-            message: _mine.isLogin ? '账号与 Bangumi' : '登录',
-            child: SizedBox(width: 40, height: 40, child: _buildAvatar(40)),
+      return Center(
+        child: Tooltip(
+          message: _mine.isLogin ? '账号与 Bangumi' : '登录',
+          child: InkResponse(
+            onTap: _openLoginPage,
+            radius: 24,
+            child: SizedBox(width: 38, height: 38, child: _buildAvatar(38)),
           ),
         ),
       );
     }
 
-    return _buildUserButton(
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
+    return InkWell(
+      onTap: _openLoginPage,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         child: Row(
           children: [
-            SizedBox(width: 48, height: 48, child: _buildAvatar(48)),
-            const SizedBox(width: 16),
+            SizedBox(width: 40, height: 40, child: _buildAvatar(40)),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -170,26 +137,25 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
                   Text(
                     _mine.hasIdentity ? _mine.displayName : '点击登录',
                     style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.2,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 2),
                   Text(
                     _mine.isBangumiLogin && !_mine.isLogin
-                        ? 'Bangumi 登录 · 历史仅本机'
+                        ? 'Bangumi 登录'
                         : _mine.isLogin
-                        ? '欢迎回来'
-                        : '打开登录页面',
+                            ? '已登录'
+                            : '打开登录',
                     style: TextStyle(
                       fontSize: 11,
-                      color: theme.textTheme.bodyMedium?.color?.withValues(
-                        alpha: 0.5,
+                      color: theme.textTheme.bodySmall?.color?.withValues(
+                        alpha: 0.6,
                       ),
-                      fontWeight: FontWeight.w500,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
@@ -202,41 +168,47 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
 
   List<Widget> _buildNavItems(ThemeData theme) {
     final currentIndex = widget.currentPageIndex;
-    final entries = <_NavEntry>[
-      _NavEntry(
-        index: 0,
+    return [
+      _NavItem(
         icon: Icons.explore_rounded,
         label: '番组',
         isSelected: currentIndex == 0,
+        isCollapsed: _isSidebarCollapsed,
         onTap: () => widget.onPageChange(0),
       ),
-      _NavEntry(
-        index: 1,
+      const SizedBox(height: 4),
+      _NavItem(
         icon: Icons.forum_rounded,
         label: 'C 岛',
         isSelected: currentIndex == 1,
+        isCollapsed: _isSidebarCollapsed,
         onTap: () => widget.onPageChange(1),
       ),
-      _NavEntry(
-        index: 2,
+      const SizedBox(height: 4),
+      _NavItem(
         icon: Icons.person_rounded,
         label: '我的',
         isSelected: currentIndex == 2,
+        isCollapsed: _isSidebarCollapsed,
         onTap: () => widget.onPageChange(2),
       ),
-      const _NavEntry.divider(),
-      _NavEntry(
-        index: 10,
+      const Padding(
+        padding: EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+        child: Divider(height: 1, thickness: 0.8),
+      ),
+      _NavItem(
         icon: Icons.search_rounded,
         label: '搜索',
         isSelected: false,
+        isCollapsed: _isSidebarCollapsed,
         onTap: () => NavigationService.toSearch(context),
       ),
-      _NavEntry(
-        index: 11,
+      const SizedBox(height: 4),
+      _NavItem(
         icon: Icons.public_rounded,
         label: '里世界',
         isSelected: false,
+        isCollapsed: _isSidebarCollapsed,
         onTap: () => NavigationService.toWebView(
           context,
           url: 'https://www.acgzone.cc',
@@ -244,113 +216,22 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
         ),
       ),
     ];
-
-    final widgets = <Widget>[];
-    for (var i = 0; i < entries.length; i++) {
-      final entry = entries[i];
-      if (entry.isDivider) {
-        widgets.add(
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 16),
-            child: Divider(height: 1, indent: 8, endIndent: 8),
-          ),
-        );
-        continue;
-      }
-      if (i > 0 && !entries[i - 1].isDivider) {
-        widgets.add(const SizedBox(height: 8));
-      }
-      widgets.add(_buildNavItem(theme, entry));
-    }
-    return widgets;
-  }
-
-  Widget _buildNavItem(ThemeData theme, _NavEntry entry) {
-    final isSelected = entry.isSelected;
-    final isHovered = _hoveredIndex == entry.index;
-    final primaryColor = theme.colorScheme.primary;
-    final baseTextColor = theme.textTheme.bodyMedium?.color;
-
-    final Color? foreground;
-    if (isSelected) {
-      foreground = primaryColor;
-    } else if (isHovered) {
-      foreground = baseTextColor;
-    } else {
-      foreground = null;
-    }
-    final iconColor = foreground ?? baseTextColor?.withValues(alpha: 0.5);
-    final textColor = foreground ?? baseTextColor?.withValues(alpha: 0.7);
-    final backgroundColor = isSelected
-        ? primaryColor.withValues(alpha: 0.1)
-        : (isHovered ? theme.hoverColor : Colors.transparent);
-
-    return MouseRegion(
-      onEnter: (_) => _setHoveredIndex(entry.index),
-      onExit: (_) => _setHoveredIndex(null),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: entry.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
-          height: 48,
-          margin: const EdgeInsets.symmetric(vertical: 2),
-          padding: EdgeInsets.symmetric(
-            horizontal: _isSidebarCollapsed ? 0 : 16,
-          ),
-          decoration: BoxDecoration(
-            color: backgroundColor,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: _isSidebarCollapsed
-              ? Center(child: Icon(entry.icon, color: iconColor, size: 24))
-              : Row(
-                  children: [
-                    Icon(entry.icon, color: iconColor, size: 22),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Text(
-                        entry.label,
-                        style: TextStyle(
-                          color: textColor,
-                          fontWeight: isSelected
-                              ? FontWeight.w700
-                              : FontWeight.w500,
-                          fontSize: 14,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    if (isSelected)
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: primaryColor,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                  ],
-                ),
-        ),
-      ),
-    );
   }
 
   Widget _buildCollapseButton(ThemeData theme) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
+    final isDark = theme.brightness == Brightness.dark;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         onTap: _toggleSidebar,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.all(10),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
           decoration: BoxDecoration(
-            color: theme.scaffoldBackgroundColor,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: theme.dividerColor.withValues(alpha: 0.5),
+              color: isDark ? Colors.white12 : Colors.black12,
+              width: 0.8,
             ),
           ),
           child: Row(
@@ -360,8 +241,8 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
                 _isSidebarCollapsed
                     ? Icons.keyboard_double_arrow_right_rounded
                     : Icons.keyboard_double_arrow_left_rounded,
-                size: 20,
-                color: theme.disabledColor,
+                size: 18,
+                color: theme.hintColor,
               ),
               if (!_isSidebarCollapsed) ...[
                 const SizedBox(width: 8),
@@ -369,8 +250,8 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
                   '收起侧边栏',
                   style: TextStyle(
                     fontSize: 12,
-                    color: theme.disabledColor,
-                    fontWeight: FontWeight.bold,
+                    color: theme.hintColor,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ],
@@ -382,29 +263,77 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
   }
 }
 
-class _NavEntry {
-  const _NavEntry({
-    required this.index,
-    required this.icon,
-    required this.label,
-    required this.isSelected,
-    required this.onTap,
-  }) : isDivider = false;
-
-  const _NavEntry.divider()
-    : index = -1,
-      icon = Icons.remove,
-      label = '',
-      isSelected = false,
-      onTap = _noop,
-      isDivider = true;
-
-  final int index;
+class _NavItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool isSelected;
+  final bool isCollapsed;
   final VoidCallback onTap;
-  final bool isDivider;
 
-  static void _noop() {}
+  const _NavItem({
+    required this.icon,
+    required this.label,
+    required this.isSelected,
+    required this.isCollapsed,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+    final baseTextColor = theme.textTheme.bodyMedium?.color;
+
+    final fgColor = isSelected ? primary : baseTextColor?.withValues(alpha: 0.75);
+    final bgColor = isSelected ? primary.withValues(alpha: 0.12) : Colors.transparent;
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        hoverColor: isSelected ? null : theme.hoverColor,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          height: 42,
+          padding: EdgeInsets.symmetric(horizontal: isCollapsed ? 0 : 12),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          alignment: Alignment.center,
+          child: isCollapsed
+              ? Icon(icon, color: fgColor, size: 22)
+              : Row(
+                  children: [
+                    Icon(icon, color: fgColor, size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          color: fgColor,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                          fontSize: 13.5,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (isSelected)
+                      Container(
+                        width: 5,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: primary,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
 }

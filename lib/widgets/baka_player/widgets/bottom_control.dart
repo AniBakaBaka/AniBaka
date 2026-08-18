@@ -51,10 +51,11 @@ class BottomControl extends StatelessWidget {
             Padding(
               padding: EdgeInsets.only(
                 bottom: isWideScreen ? 12 : 8,
-                left: 4,
-                right: 4,
+                left: (isWideScreen ? 16 : 10) - (isWideScreen ? 4 : 2),
+                right: isWideScreen ? 16 : 10,
               ),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   ?episodeTitle,
                   const Spacer(),

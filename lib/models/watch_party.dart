@@ -132,8 +132,11 @@ class WatchPartySnapshot {
   });
 
   factory WatchPartySnapshot.fromJson(Map<String, dynamic> json) {
-    Map<String, dynamic> mapOf(Object? value) =>
-        value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{};
+    final rawPlayback = json['playback'];
+    final rawMedia = json['media'];
+    final rawMembers = json['members'] as List?;
+    final rawChat = json['chat'] as List?;
+
     return WatchPartySnapshot(
       roomId: json['roomId']?.toString() ?? '',
       inviteCode: json['inviteCode']?.toString() ?? '',
@@ -142,22 +145,38 @@ class WatchPartySnapshot {
       selfId: json['selfId']?.toString() ?? '',
       revision: (json['revision'] as num?)?.toInt() ?? 0,
       serverTime: (json['serverTime'] as num?)?.toInt() ?? 0,
-      playback: WatchPartyPlayback.fromJson(mapOf(json['playback'])),
-      media: WatchPartyMedia.fromJson(mapOf(json['media'])),
-      members: (json['members'] as List? ?? const [])
-          .whereType<Map>()
-          .map(
-            (item) =>
-                WatchPartyMember.fromJson(Map<String, dynamic>.from(item)),
-          )
-          .toList(growable: false),
-      chat: (json['chat'] as List? ?? const [])
-          .whereType<Map>()
-          .map(
-            (item) =>
-                WatchPartyChatMessage.fromJson(Map<String, dynamic>.from(item)),
-          )
-          .toList(growable: false),
+      playback: rawPlayback is Map<String, dynamic>
+          ? WatchPartyPlayback.fromJson(rawPlayback)
+          : (rawPlayback is Map
+              ? WatchPartyPlayback.fromJson(rawPlayback.cast<String, dynamic>())
+              : const WatchPartyPlayback()),
+      media: rawMedia is Map<String, dynamic>
+          ? WatchPartyMedia.fromJson(rawMedia)
+          : (rawMedia is Map
+              ? WatchPartyMedia.fromJson(rawMedia.cast<String, dynamic>())
+              : const WatchPartyMedia(episodeIndex: 0, title: '')),
+      members: rawMembers == null
+          ? const []
+          : [
+              for (final item in rawMembers)
+                if (item is Map)
+                  WatchPartyMember.fromJson(
+                    item is Map<String, dynamic>
+                        ? item
+                        : item.cast<String, dynamic>(),
+                  ),
+            ],
+      chat: rawChat == null
+          ? const []
+          : [
+              for (final item in rawChat)
+                if (item is Map)
+                  WatchPartyChatMessage.fromJson(
+                    item is Map<String, dynamic>
+                        ? item
+                        : item.cast<String, dynamic>(),
+                  ),
+            ],
     );
   }
 

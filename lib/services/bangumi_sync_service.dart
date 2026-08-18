@@ -35,11 +35,17 @@ class BangumiAccount {
   final String? avatarUrl;
 
   factory BangumiAccount.fromJson(Map<String, dynamic> json) {
-    final avatar = BgmUtils.asMap(json['avatar']);
+    final avatar = json['avatar'];
+    String? avatarUrl;
+    if (avatar is Map) {
+      avatarUrl = avatar['large']?.toString();
+    } else {
+      avatarUrl = json['avatar_url']?.toString();
+    }
     return BangumiAccount(
       username: json['username']?.toString() ?? '',
       nickname: json['nickname']?.toString() ?? '',
-      avatarUrl: avatar?['large']?.toString(),
+      avatarUrl: avatarUrl,
     );
   }
 
@@ -48,14 +54,6 @@ class BangumiAccount {
     'nickname': nickname,
     if (avatarUrl != null) 'avatar_url': avatarUrl,
   };
-
-  factory BangumiAccount.fromCachedJson(Map<String, dynamic> json) {
-    return BangumiAccount(
-      username: json['username']?.toString() ?? '',
-      nickname: json['nickname']?.toString() ?? '',
-      avatarUrl: json['avatar_url']?.toString(),
-    );
-  }
 }
 
 class BangumiOAuthStart {
@@ -134,7 +132,11 @@ class _BangumiOAuthBroker {
     final root = BgmUtils.parseJsonMap(response);
     if (root == null) return null;
     if (BgmUtils.toInt(root['code']) != 0) {
-      throw BangumiSyncException(root['message']?.toString() ?? 'Bangumi 登录失败');
+      final msg = root['message']?.toString() ?? 'Bangumi 登录失败';
+      if (msg.contains('未配置')) {
+        throw const BangumiSyncException('服务端未配置 Bangumi 授权应用，请使用 Access Token 方式连接');
+      }
+      throw BangumiSyncException(msg);
     }
     return BgmUtils.asMap(root['data']);
   }
@@ -181,15 +183,21 @@ class _BangumiCollectionRecord {
     final subject = BgmUtils.asMap(json['subject']);
     final nameCn = subject?['name_cn']?.toString().trim() ?? '';
     final name = subject?['name']?.toString().trim() ?? '';
+    final rawTags = json['tags'];
+    final tags = rawTags is List
+        ? rawTags.map((e) => e.toString()).toList()
+        : const <String>[];
     return _BangumiCollectionRecord(
       subjectId: BgmUtils.toInt(json['subject_id']) ?? 0,
       status: BgmUtils.toInt(json['type']) ?? CollectionStatus.wish.value,
       rating: BgmUtils.toInt(json['rate']) ?? 0,
       episodeWatched: BgmUtils.toInt(json['ep_status']) ?? 0,
-      tags: (json['tags'] as List<dynamic>).cast<String>(),
-      isPrivate: json['private'] as bool,
+      tags: tags,
+      isPrivate: json['private'] == true,
       title: nameCn.isNotEmpty ? nameCn : name,
-      comment: _nonEmpty(json['comment']),
+      comment: json['comment']?.toString().trim().isNotEmpty == true
+          ? json['comment'].toString().trim()
+          : null,
       episodeTotal: BgmUtils.toInt(subject?['eps']),
       subjectScore: BgmUtils.toDouble(subject?['score']),
     );
@@ -507,7 +515,7 @@ class BangumiSyncService {
     final value = Instances.sp.getString(_accountKey);
     if (value == null || value.isEmpty) return null;
     try {
-      return BangumiAccount.fromCachedJson(
+      return BangumiAccount.fromJson(
         BgmUtils.parseJsonMap(jsonDecode(value)) ?? const {},
       );
     } catch (_) {
@@ -685,9 +693,6 @@ class BangumiSyncService {
           : _localFingerprint(localItem);
       final previous = snapshots['$id'];
 
-      // v0 API 没有删除条目收藏的接口。已同步条目只在一端消失时，
-      // 保留该端的删除结果，不立即从另一端把记录重新创建回来。
-      // 如果仍存在的一端后来又被修改，下面的普通变更判断会重新同步它。
       if (previous != null &&
           ((remoteItem == null && localFingerprint == previous) ||
               (localItem == null && remoteFingerprint == previous))) {
@@ -872,39 +877,18 @@ String _fingerprint({
   required List<String> tags,
   required bool isPrivate,
 }) {
-  final normalizedTags = tags.length < 2 ? tags : ([...tags]..sort());
-  return jsonEncode({
-    'status': status,
-    'rating': rating,
-    'comment': comment?.trim() ?? '',
-    'episode_watched': episodeWatched,
-    'tags': normalizedTags,
-    'private': isPrivate,
-  });
+  final tagStr = tags.isEmpty
+      ? ''
+      : (tags.length == 1 ? tags.first : (List<String>.from(tags)..sort()).join(','));
+  return '$status|$rating|${comment?.trim() ?? ''}|$episodeWatched|$tagStr|${isPrivate ? 1 : 0}';
 }
 
 List<String> _parseTags(String? value) {
   if (value == null || value.trim().isEmpty) return const [];
-  final tags = <String>[];
-  final seen = <String>{};
-  var start = 0;
-  for (var i = 0; i <= value.length; i++) {
-    final separator =
-        i == value.length ||
-        value.codeUnitAt(i) == 0x2C ||
-        value.codeUnitAt(i) == 0xFF0C ||
-        value.codeUnitAt(i) <= 0x20;
-    if (!separator) continue;
-    if (i > start) {
-      final tag = value.substring(start, i).trim();
-      if (tag.isNotEmpty && seen.add(tag)) tags.add(tag);
-    }
-    start = i + 1;
-  }
-  return tags;
-}
-
-String? _nonEmpty(Object? value) {
-  final text = value?.toString().trim();
-  return text == null || text.isEmpty ? null : text;
+  return value
+      .split(RegExp(r'[,，\s]+'))
+      .map((t) => t.trim())
+      .where((t) => t.isNotEmpty)
+      .toSet()
+      .toList();
 }

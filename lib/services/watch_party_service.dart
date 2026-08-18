@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:baka/api/watch_party_api.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/watch_party.dart';
+import 'package:baka/services/network_service.dart';
 import 'package:baka/services/player_service.dart';
 import 'package:baka/utils/app_logger.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
@@ -154,7 +155,7 @@ class WatchPartyService extends GetxService {
       cancelOnError: true,
     );
     _heartbeat?.cancel();
-    _heartbeat = Timer.periodic(const Duration(seconds: 1), (_) {
+    _heartbeat = Timer.periodic(const Duration(seconds: 15), (_) {
       final requestId = _send('ping', const <String, Object>{});
       if (requestId.isNotEmpty) {
         _pendingPings[requestId] = DateTime.now();
@@ -482,13 +483,12 @@ class WatchPartyService extends GetxService {
     duration: (_controller?.timeline.value.duration.inMilliseconds ?? 0) / 1000,
   );
 
-  String _currentNickname() {
-    try {
-      final user = jsonDecode(Instances.sp.getString('userinfo') ?? '{}');
-      if (user is Map && user['name'] != null) return user['name'].toString();
-    } catch (_) {}
-    return 'AniBaka';
+  static String currentNickname() {
+    final name = getUserInfo()['name']?.toString();
+    return (name != null && name.isNotEmpty) ? name : 'AniBaka';
   }
+
+  String _currentNickname() => currentNickname();
 
   @override
   void onClose() {

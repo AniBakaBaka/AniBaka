@@ -808,34 +808,17 @@ class _BakaPlayerState extends State<BakaPlayer> {
             ),
           ),
         ),
-        SizedBox(width: isWide ? 16 : 12),
         Expanded(
           child: (widget.full || Instances.isDesktopPlatform)
               ? ValueListenableBuilder<PlaybackMediaInfo>(
                   valueListenable: controller.mediaInfo,
-                  builder: (context, mediaInfo, _) => Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildPlayerTitleOrLogo(
-                        mediaInfo.title.isNotEmpty ? mediaInfo.title : '',
-                        mediaInfo.logoUrl.isNotEmpty ? mediaInfo.logoUrl : '',
-                        isWide,
-                      ),
-                      if (mediaInfo.episode.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          mediaInfo.episode,
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.75),
-                            fontSize: isWide ? 12.5 : 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ],
+                  builder: (context, mediaInfo, _) => Align(
+                    alignment: Alignment.centerLeft,
+                    child: _buildPlayerTitleOrLogo(
+                      mediaInfo.title.isNotEmpty ? mediaInfo.title : '',
+                      mediaInfo.logoUrl.isNotEmpty ? mediaInfo.logoUrl : '',
+                      isWide,
+                    ),
                   ),
                 )
               : const SizedBox.shrink(),
@@ -898,27 +881,26 @@ class _BakaPlayerState extends State<BakaPlayer> {
                   onTap: () => showSpeedDialog(context, controller),
                 ),
               );
+              actions.add(
+                Tooltip(
+                  message: '播放器详情',
+                  child: _buildHeaderButton(
+                    icon: Icons.info_outline_rounded,
+                    isWide: isWide,
+                    isActive: _showPlayerInfoHud,
+                    onTap: () {
+                      setState(() {
+                        _showPlayerInfoHud = !_showPlayerInfoHud;
+                      });
+                    },
+                  ),
+                ),
+              );
             }
 
             if (widget.headerControl != null) {
               actions.add(widget.headerControl!);
             }
-
-            actions.add(
-              Tooltip(
-                message: '播放器详情',
-                child: _buildHeaderButton(
-                  icon: Icons.info_outline_rounded,
-                  isWide: isWide,
-                  isActive: _showPlayerInfoHud,
-                  onTap: () {
-                    setState(() {
-                      _showPlayerInfoHud = !_showPlayerInfoHud;
-                    });
-                  },
-                ),
-              ),
-            );
 
             if (actions.isEmpty) return const SizedBox.shrink();
 
@@ -1022,44 +1004,74 @@ class _BakaPlayerState extends State<BakaPlayer> {
         final epIndex = mediaInfo.episodeIndex;
         final display = 'E${epIndex + 1}: $title';
 
-        return Tooltip(
-          message: '选择剧集',
-          child: InkWell(
-            onTap: widget.onPickEpisode,
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: isWide ? 10 : 6,
-                vertical: isWide ? 8 : 5,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: isWide ? 320 : 220),
-                    child: Text(
-                      display,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.9),
-                        fontSize: isWide ? 16 : 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+        final hasNext = widget.hasNextEpisode;
+        final onNext = widget.onNextEpisode;
+
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            if (hasNext && onNext != null) ...[
+              Tooltip(
+                message: '下一集',
+                child: InkResponse(
+                  onTap: onNext,
+                  radius: isWide ? 20 : 16,
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      vertical: 4,
+                      horizontal: isWide ? 4 : 2,
+                    ),
+                    child: Icon(
+                      Icons.skip_next_rounded,
+                      color: Colors.white,
+                      size: isWide ? 22 : 18,
                     ),
                   ),
-                  if (widget.onPickEpisode != null) ...[
-                    SizedBox(width: isWide ? 6 : 4),
-                    Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      color: Colors.white.withValues(alpha: 0.75),
-                      size: isWide ? 20 : 16,
-                    ),
-                  ],
-                ],
+                ),
+              ),
+              SizedBox(width: isWide ? 8 : 6),
+            ],
+            Tooltip(
+              message: '选择剧集',
+              child: InkWell(
+                onTap: widget.onPickEpisode,
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isWide ? 6 : 4,
+                    vertical: 4,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: isWide ? 300 : 200),
+                        child: Text(
+                          display,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.9),
+                            fontSize: isWide ? 14 : 12.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (widget.onPickEpisode != null) ...[
+                        SizedBox(width: isWide ? 4 : 2),
+                        Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          color: Colors.white.withValues(alpha: 0.75),
+                          size: isWide ? 18 : 15,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ),
             ),
-          ),
+          ],
         );
       },
     );

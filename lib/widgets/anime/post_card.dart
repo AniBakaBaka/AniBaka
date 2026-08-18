@@ -249,33 +249,26 @@ class _MobileCard extends StatelessWidget {
       ),
     );
 
-    // 瀑布流（SliverMasonryGrid）给的是无界高度，Expanded 会直接抛
-    // RenderFlex 断言；只有在高度有界的网格里才用 Expanded 收缩封面。
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final bounded = constraints.hasBoundedHeight;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: bounded ? MainAxisSize.max : MainAxisSize.min,
-          children: [
-            if (bounded) Expanded(child: cover) else cover,
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: Text(
-                data['title']?.toString() ?? '未知标题',
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-                style: TextStyle(
-                  fontSize: 13,
-                  height: 1.2,
-                  color: Theme.of(context).textTheme.bodyMedium?.color,
-                ),
-              ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(fit: FlexFit.loose, child: cover),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          child: Text(
+            data['title']?.toString() ?? '未知标题',
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.2,
+              color: Theme.of(context).textTheme.bodyMedium?.color,
             ),
-          ],
-        );
-      },
+          ),
+        ),
+      ],
     );
   }
 }

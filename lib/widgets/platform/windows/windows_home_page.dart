@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 
 const _kWeekLabels = <String>['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
-/// Windows 桌面版主页。各板块独立订阅自己的数据源，避免整页重建。
+/// Windows 桌面版主页。各板块独立订阅数据源，避免整页重建。
 class WindowsHomePage extends StatelessWidget {
   const WindowsHomePage({
     required this.svc,
@@ -29,15 +29,16 @@ class WindowsHomePage extends StatelessWidget {
         loadMoreResetListenable: svc.tag,
         showInitialIndicator: false,
         child: CustomScrollView(
+          cacheExtent: 600,
           slivers: [
-            const SliverToBoxAdapter(child: SizedBox(height: 24)),
+            const SliverToBoxAdapter(child: SizedBox(height: 20)),
             _buildBanner(),
             _buildSchedule(),
             _buildRanks(),
-            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            const SliverToBoxAdapter(child: SizedBox(height: 12)),
             _buildTagBar(),
             _buildFeedGrid(),
-            const SliverToBoxAdapter(child: SizedBox(height: 48)),
+            const SliverToBoxAdapter(child: SizedBox(height: 36)),
           ],
         ),
       ),
@@ -53,9 +54,9 @@ class WindowsHomePage extends StatelessWidget {
         }
         return SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
+            padding: const EdgeInsets.symmetric(horizontal: 24),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(12),
               child: AspectRatio(
                 aspectRatio: 32 / 9,
                 child: SwiperBanner(swiperData: swipers),
@@ -93,7 +94,7 @@ class WindowsHomePage extends StatelessWidget {
   Widget _buildRanks() {
     return SliverToBoxAdapter(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(32, 32, 32, 0),
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
         child: ValueListenableBuilder<int>(
           valueListenable: svc.rankIndex,
           builder: (context, index, _) =>
@@ -113,13 +114,13 @@ class WindowsHomePage extends StatelessWidget {
   Widget _buildTagBar() {
     return SliverToBoxAdapter(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(32, 24, 32, 16),
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 12),
         child: ValueListenableBuilder<String>(
           valueListenable: svc.tag,
           builder: (context, selected, _) => Row(
             children: [
               Expanded(child: _buildTagSelector(context, selected)),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
               _buildMoreTagsButton(context, selected),
             ],
           ),
@@ -135,13 +136,13 @@ class WindowsHomePage extends StatelessWidget {
         builder: (context, constraints) {
           final columns = _columnsFor(constraints.crossAxisExtent);
           return SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
+            padding: const EdgeInsets.symmetric(horizontal: 24),
             sliver: SliverGrid(
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: columns,
-                childAspectRatio: 0.7,
-                crossAxisSpacing: 20,
-                mainAxisSpacing: 24,
+                childAspectRatio: 0.68,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 18,
               ),
               delegate: SliverChildBuilderDelegate(
                 (context, index) {
@@ -171,7 +172,6 @@ class WindowsHomePage extends StatelessWidget {
     return 2;
   }
 
-  /// 横向滚动板块（更新表）：标题 + 选择器 + 卡片列表。
   Widget _buildSection(
     BuildContext context, {
     required String title,
@@ -182,16 +182,15 @@ class WindowsHomePage extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(32, 32, 32, 16),
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
                 title,
                 style: TextStyle(
-                  fontSize: 22,
+                  fontSize: 20,
                   fontWeight: FontWeight.w700,
-                  letterSpacing: -0.5,
                   color: Theme.of(context).textTheme.titleLarge?.color,
                 ),
               ),
@@ -200,14 +199,14 @@ class WindowsHomePage extends StatelessWidget {
           ),
         ),
         SizedBox(
-          height: 260,
+          height: 240,
           child: ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
+            padding: const EdgeInsets.symmetric(horizontal: 24),
             scrollDirection: Axis.horizontal,
             itemCount: items.length,
             addAutomaticKeepAlives: false,
             itemBuilder: (context, index) => Padding(
-              padding: const EdgeInsets.only(right: 16),
+              padding: const EdgeInsets.only(right: 12),
               child: _buildScrollCard(context, items[index] as Map),
             ),
           ),
@@ -218,6 +217,9 @@ class WindowsHomePage extends StatelessWidget {
 
   Widget _buildScrollCard(BuildContext context, Map data) {
     final heroTag = 'home_${coverHeroTag(data)}';
+    final title = data['title']?.toString() ?? '';
+    final subtitle = data['subtitle']?.toString() ?? '';
+
     return InkWell(
       onTap: () => navigateToDetail(
         context,
@@ -225,83 +227,64 @@ class WindowsHomePage extends StatelessWidget {
         posIndex: data['index'] ?? 0,
         heroTag: heroTag,
       ),
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        width: 180.0,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 16,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Hero(
-          tag: heroTag,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                buildCachedImage(data, double.infinity, double.infinity),
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.1),
-                          Colors.black.withValues(alpha: 0.6),
-                          Colors.black.withValues(alpha: 0.9),
-                        ],
-                        stops: const [0.3, 0.6, 0.85, 1.0],
-                      ),
+      borderRadius: BorderRadius.circular(10),
+      child: SizedBox(
+        width: 160.0,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Hero(
+                tag: heroTag,
+                child: buildCachedImage(data, double.infinity, double.infinity),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(10, 24, 10, 10),
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.transparent, Colors.black87],
                     ),
                   ),
-                ),
-                Positioned(
-                  left: 14,
-                  right: 14,
-                  bottom: 14,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        data['title'] ?? '',
+                        title,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                          height: 1.3,
-                          letterSpacing: 0.2,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          height: 1.2,
                         ),
                       ),
-                      if ((data['subtitle'] as String?)?.isNotEmpty ?? false)
+                      if (subtitle.isNotEmpty)
                         Padding(
-                          padding: const EdgeInsets.only(top: 6),
+                          padding: const EdgeInsets.only(top: 4),
                           child: Text(
-                            data['subtitle'],
+                            subtitle,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.7),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 11,
                             ),
                           ),
                         ),
                     ],
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -312,59 +295,47 @@ class WindowsHomePage extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final primary = theme.colorScheme.primary;
-    final unselectedColor = isDark ? Colors.white54 : Colors.black54;
+    final unselectedColor = isDark ? Colors.white60 : Colors.black54;
 
     return Container(
-      height: 38,
+      height: 34,
       decoration: BoxDecoration(
         color: isDark
-            ? Colors.white.withValues(alpha: 0.05)
+            ? Colors.white.withValues(alpha: 0.06)
             : Colors.black.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
       ),
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        shrinkWrap: true,
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        itemCount: _kWeekLabels.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 4),
-        itemBuilder: (_, index) {
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(_kWeekLabels.length, (index) {
           final isSelected = selected == index;
-          return Center(
+          return Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
             child: InkWell(
               onTap: () => svc.week.value = index,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(7),
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 6,
-                ),
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOutCubic,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: isSelected ? primary : Colors.transparent,
-                  borderRadius: BorderRadius.circular(8),
-                  boxShadow: isSelected
-                      ? [
-                          BoxShadow(
-                            color: primary.withValues(alpha: 0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ]
-                      : null,
+                  borderRadius: BorderRadius.circular(7),
                 ),
+                alignment: Alignment.center,
                 child: Text(
                   _kWeekLabels[index],
                   style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                    fontSize: 12,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                     color: isSelected ? Colors.white : unselectedColor,
                   ),
                 ),
               ),
             ),
           );
-        },
+        }),
       ),
     );
   }
@@ -379,55 +350,45 @@ class WindowsHomePage extends StatelessWidget {
         children: [
           for (final tag in svc.displayTags)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.only(right: 6),
               child: Material(
                 color: Colors.transparent,
+                borderRadius: BorderRadius.circular(16),
                 child: InkWell(
                   onTap: () => svc.selectTag(tag),
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(16),
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
+                    duration: const Duration(milliseconds: 160),
+                    curve: Curves.easeOutCubic,
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 6,
+                      horizontal: 12,
+                      vertical: 5,
                     ),
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(20),
                       color: tag == selected
                           ? primaryColor.withValues(alpha: 0.15)
-                          : theme.scaffoldBackgroundColor.withValues(
-                              alpha: 0.8,
-                            ),
+                          : (theme.brightness == Brightness.dark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.black.withValues(alpha: 0.04)),
+                      borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: tag == selected
                             ? primaryColor.withValues(alpha: 0.5)
-                            : theme.dividerColor.withValues(alpha: 0.1),
+                            : Colors.transparent,
+                        width: 0.8,
                       ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (tag == selected) ...[
-                          Icon(
-                            Icons.check_circle_rounded,
-                            color: primaryColor,
-                            size: 14,
-                          ),
-                          const SizedBox(width: 6),
-                        ],
-                        Text(
-                          tag,
-                          style: TextStyle(
-                            color: tag == selected
-                                ? primaryColor
-                                : theme.textTheme.bodyMedium?.color,
-                            fontSize: 13.0,
-                            fontWeight: tag == selected
-                                ? FontWeight.w600
-                                : FontWeight.normal,
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      tag,
+                      style: TextStyle(
+                        color: tag == selected
+                            ? primaryColor
+                            : theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.8),
+                        fontSize: 12.0,
+                        fontWeight: tag == selected
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                      ),
                     ),
                   ),
                 ),
@@ -441,43 +402,42 @@ class WindowsHomePage extends StatelessWidget {
   Widget _buildMoreTagsButton(BuildContext context, String selected) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final secondaryColor = theme.textTheme.bodyMedium?.color?.withValues(
-      alpha: 0.6,
-    );
+    final secondaryColor = theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.6);
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         onTap: () async {
           final tag = await TagFilterSheet.show(context, selected);
           if (tag != null && tag.isNotEmpty) await svc.selectTag(tag);
         },
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
             color: isDark
                 ? Colors.white.withValues(alpha: 0.05)
                 : Colors.black.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: isDark
-                  ? Colors.white.withValues(alpha: 0.1)
-                  : Colors.black.withValues(alpha: 0.1),
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.black.withValues(alpha: 0.08),
             ),
           ),
           child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 '更多',
                 style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
                   color: secondaryColor,
                 ),
               ),
-              const SizedBox(width: 4),
-              Icon(Icons.keyboard_arrow_down, size: 16, color: secondaryColor),
+              const SizedBox(width: 2),
+              Icon(Icons.keyboard_arrow_down, size: 15, color: secondaryColor),
             ],
           ),
         ),

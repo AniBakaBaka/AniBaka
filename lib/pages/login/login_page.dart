@@ -172,7 +172,12 @@ class LoginState extends State<Login> {
       setState(() {});
       showSnackBar('已成功连接 Bangumi：${account.nickname}');
     } catch (error) {
-      if (mounted) showSnackBar(error.toString(), isError: true);
+      if (mounted) {
+        showSnackBar(error.toString(), isError: true);
+        if (error.toString().contains('未配置')) {
+          _connectBangumi();
+        }
+      }
     } finally {
       if (mounted) setState(() => _bangumiBusy = false);
     }

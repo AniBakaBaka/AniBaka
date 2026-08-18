@@ -20,11 +20,11 @@ class WindowsTitleBar extends StatelessWidget {
     final bgColor =
         backgroundColor ??
         theme.appBarTheme.backgroundColor ??
-        (isDark ? const Color(0xFF2D2D2D) : const Color(0xFFF3F3F3));
+        (isDark ? const Color(0xFF202020) : const Color(0xFFF5F5F5));
     final fgColor =
         foregroundColor ??
         theme.appBarTheme.foregroundColor ??
-        (isDark ? Colors.white : Colors.black);
+        (isDark ? Colors.white70 : Colors.black87);
 
     return Container(
       height: 32,
@@ -33,32 +33,28 @@ class WindowsTitleBar extends StatelessWidget {
         child: Row(
           children: [
             Expanded(child: MoveWindow()),
-            Row(
-              children: [
-                _WindowButton(
-                  icon: Icons.remove,
-                  onPressed: () => appWindow.minimize(),
-                  color: fgColor,
-                ),
-                _WindowButton(
-                  icon: appWindow.isMaximized
-                      ? Icons.filter_none
-                      : Icons.crop_square,
-                  onPressed: () => appWindow.maximizeOrRestore(),
-                  color: fgColor,
-                ),
-                _WindowButton(
-                  icon: Icons.close,
-                  onPressed: () async {
-                    if (PlaybackSettingsService.getClearCacheOnExit()) {
-                      await AppStorage.clearAllCache();
-                    }
-                    appWindow.close();
-                  },
-                  color: fgColor,
-                  isCloseButton: true,
-                ),
-              ],
+            _WindowButton(
+              icon: Icons.remove,
+              onPressed: () => appWindow.minimize(),
+              color: fgColor,
+            ),
+            _WindowButton(
+              icon: appWindow.isMaximized
+                  ? Icons.filter_none
+                  : Icons.crop_square,
+              onPressed: () => appWindow.maximizeOrRestore(),
+              color: fgColor,
+            ),
+            _WindowButton(
+              icon: Icons.close,
+              onPressed: () async {
+                if (PlaybackSettingsService.getClearCacheOnExit()) {
+                  await AppStorage.clearAllCache();
+                }
+                appWindow.close();
+              },
+              color: fgColor,
+              isCloseButton: true,
             ),
           ],
         ),
@@ -67,7 +63,7 @@ class WindowsTitleBar extends StatelessWidget {
   }
 }
 
-class _WindowButton extends StatefulWidget {
+class _WindowButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onPressed;
   final Color color;
@@ -81,41 +77,23 @@ class _WindowButton extends StatefulWidget {
   });
 
   @override
-  State<_WindowButton> createState() => _WindowButtonState();
-}
-
-class _WindowButtonState extends State<_WindowButton> {
-  bool _isHovered = false;
-
-  @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    Color hoverColor;
-    if (widget.isCloseButton) {
-      hoverColor = Colors.red;
-    } else {
-      hoverColor = isDark
-          ? Colors.white.withValues(alpha: 0.1)
-          : Colors.black.withValues(alpha: 0.1);
-    }
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: GestureDetector(
-        onTap: widget.onPressed,
-        child: Container(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        hoverColor: isCloseButton
+            ? Colors.redAccent
+            : (Theme.of(context).brightness == Brightness.dark
+                ? Colors.white10
+                : Colors.black12),
+        onTap: onPressed,
+        child: SizedBox(
           width: 46,
           height: 32,
-          color: _isHovered ? hoverColor : Colors.transparent,
           child: Icon(
-            widget.icon,
-            size: 16,
-            color: _isHovered && widget.isCloseButton
-                ? Colors.white
-                : widget.color,
+            icon,
+            size: 15,
+            color: color,
           ),
         ),
       ),

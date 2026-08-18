@@ -25,18 +25,19 @@ class WindowsLineSelector extends StatelessWidget {
     if (lineCount <= 1) {
       if (isInline) return const SizedBox.shrink();
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          color: theme.cardColor.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(8),
+          color: theme.cardColor.withValues(alpha: 0.4),
         ),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.info_outline, color: theme.hintColor, size: 18),
-            const SizedBox(width: 8),
+            Icon(Icons.info_outline, color: theme.hintColor, size: 16),
+            const SizedBox(width: 6),
             Text(
               '此剧集暂无其他线路',
-              style: TextStyle(color: theme.hintColor, fontSize: 13),
+              style: TextStyle(color: theme.hintColor, fontSize: 12),
             ),
           ],
         ),
@@ -45,15 +46,16 @@ class WindowsLineSelector extends StatelessWidget {
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
         if (title != null && !isInline) ...[
           Text(
             title!,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
         ],
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -92,50 +94,52 @@ class _WindowsLineSelectorItem extends StatelessWidget {
     final isSelected = lineIndex == currUrl;
     final theme = Theme.of(context);
     final primaryColor = theme.colorScheme.primary;
+    final isDark = theme.brightness == Brightness.dark;
     final names = sourceNames;
     final lineName =
         (names != null && lineIndex > 0 && lineIndex <= names.length)
-        ? names[lineIndex - 1]
-        : '线路 $lineIndex';
+            ? names[lineIndex - 1]
+            : '线路 $lineIndex';
+
+    final bgColor = isSelected
+        ? primaryColor
+        : (isDark ? const Color(0xFF2C2C33) : Colors.black.withValues(alpha: 0.08));
+
+    final borderColor = isSelected
+        ? primaryColor
+        : (isDark ? Colors.white.withValues(alpha: 0.2) : Colors.black.withValues(alpha: 0.15));
 
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: Material(
         color: Colors.transparent,
+        borderRadius: BorderRadius.circular(6),
         child: InkWell(
           onTap: () => onTap(lineIndex),
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(6),
+          hoverColor: isSelected ? null : Colors.white.withValues(alpha: 0.08),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              color: isSelected
-                  ? primaryColor.withValues(alpha: 0.15)
-                  : theme.scaffoldBackgroundColor.withValues(alpha: 0.8),
-              border: Border.all(
-                color: isSelected
-                    ? primaryColor.withValues(alpha: 0.5)
-                    : theme.dividerColor.withValues(alpha: 0.1),
-              ),
+              color: bgColor,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: borderColor, width: 1.0),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (isSelected) ...[
-                  Icon(Icons.stream, color: primaryColor, size: 12),
-                  const SizedBox(width: 4),
+                  const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 14),
+                  const SizedBox(width: 3),
                 ],
                 Text(
                   lineName,
                   style: TextStyle(
-                    color: isSelected
-                        ? primaryColor
-                        : theme.textTheme.bodyMedium?.color,
+                    color: Colors.white,
                     fontSize: 12.0,
-                    fontWeight: isSelected
-                        ? FontWeight.w600
-                        : FontWeight.normal,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                   ),
                 ),
               ],

@@ -352,7 +352,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           children: [
             Column(
               children: [
-                if (Platform.isWindows) const WindowsTitleBar(),
+                if (Platform.isWindows && Instances.isDesktopPlatform) const WindowsTitleBar(),
                 if (Platform.isMacOS) const MacOSTitleBar(title: 'Baka'),
                 Expanded(
                   child: Row(

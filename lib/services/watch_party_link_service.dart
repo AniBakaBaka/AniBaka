@@ -57,7 +57,7 @@ final class WatchPartyLinkService {
     try {
       await WatchPartyService.instance.joinInvite(normalized);
       await _openMatchingPlayerWhenNeeded();
-      await _showRoomWhenReady();
+      _showRoomWhenReady();
     } catch (error, stackTrace) {
       AppLogger.instance.warning(
         'Unable to join watch party',
@@ -65,7 +65,7 @@ final class WatchPartyLinkService {
         error: error,
         stackTrace: stackTrace,
       );
-      await _showErrorWhenReady(
+      _showErrorWhenReady(
         error.toString().replaceFirst('Bad state: ', ''),
       );
     } finally {
@@ -100,7 +100,7 @@ final class WatchPartyLinkService {
         service.matchesAttachedMedia(media)) {
       return;
     }
-    final context = await _contextWhenReady();
+    final context = Instances.navigatorKey.currentContext;
     if (context == null || !context.mounted) return;
     NavigationService.toPlayer(
       context,
@@ -114,27 +114,17 @@ final class WatchPartyLinkService {
       posIndex: media.episodeIndex,
       autoMatch: true,
     );
-    await Future<void>.delayed(const Duration(milliseconds: 300));
   }
 
-  static Future<BuildContext?> _contextWhenReady() async {
-    for (var attempt = 0; attempt < 50; attempt++) {
-      final context = Instances.navigatorKey.currentContext;
-      if (context != null && context.mounted) return context;
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    }
-    return null;
-  }
-
-  static Future<void> _showRoomWhenReady() async {
-    final context = await _contextWhenReady();
+  static void _showRoomWhenReady() {
+    final context = Instances.navigatorKey.currentContext;
     if (context != null && context.mounted) {
-      await WatchPartySheet.show(context, WatchPartyService.instance);
+      WatchPartySheet.show(context, WatchPartyService.instance);
     }
   }
 
-  static Future<void> _showErrorWhenReady(String message) async {
-    final context = await _contextWhenReady();
+  static void _showErrorWhenReady(String message) {
+    final context = Instances.navigatorKey.currentContext;
     if (context != null && context.mounted) {
       ScaffoldMessenger.of(
         context,

@@ -37,8 +37,8 @@ class WindowsEpisodeList extends StatefulWidget {
 
   final List<PlaybackEpisode> videoList;
   final int currentIndex;
-  final Function(int) onEpisodeSelected;
-  final Function(int, int)? onUrlSelected;
+  final ValueChanged<int> onEpisodeSelected;
+  final void Function(int, int)? onUrlSelected;
   final VoidCallback? onDownloadPressed;
   final int? currUrl;
   final List<String>? sourceNames;
@@ -71,14 +71,10 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
   bool _isEpisodesExpanded = true;
   late List<int> _filteredList = _buildFilteredList();
 
-  final Map<int, Map<String, dynamic>> _stillsCache = {};
-  final Set<int> _loadingEpisodes = {};
-
   @override
   void initState() {
     super.initState();
-    _searchController.addListener(_rebuildFiltered);
-    _preloadVisibleStills();
+    _searchController.addListener(_onSearchChanged);
   }
 
   @override
@@ -93,12 +89,15 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.videoList, widget.videoList)) {
       _filteredList = _buildFilteredList();
-      _preloadVisibleStills();
     }
   }
 
-  void _rebuildFiltered() {
-    setState(() => _filteredList = _buildFilteredList());
+  void _onSearchChanged() {
+    final newList = _buildFilteredList();
+    if (newList.length != _filteredList.length ||
+        !newList.every((idx) => _filteredList.contains(idx))) {
+      setState(() => _filteredList = newList);
+    }
   }
 
   List<int> _buildFilteredList() {
@@ -109,133 +108,6 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
     );
   }
 
-  void _preloadVisibleStills() {
-    final targetIndices = [
-      widget.currentIndex,
-      widget.currentIndex + 1,
-      widget.currentIndex + 2,
-      widget.currentIndex + 3,
-      widget.currentIndex + 4,
-    ];
-    for (final index in targetIndices) {
-      if (index >= 0 && index < widget.videoList.length) {
-        _fetchStill(index);
-      }
-    }
-  }
-
-  Future<void> _fetchStill(int episodeIndex) async {
-    if (widget.bgmId == null || widget.bgmId! <= 0) return;
-    if (_stillsCache.containsKey(episodeIndex) ||
-        !_loadingEpisodes.add(episodeIndex)) {
-      return;
-    }
-
-    try {
-      final data = await AniBakaApi.getEpisodeStills(
-        bgmId: widget.bgmId,
-        season: 1,
-        episode: episodeIndex + 1,
-      );
-      if (mounted && data != null) {
-        setState(() {
-          _stillsCache[episodeIndex] = data;
-        });
-      }
-    } catch (_) {
-    } finally {
-      if (mounted) {
-        _loadingEpisodes.remove(episodeIndex);
-      }
-    }
-  }
-
-  String _formatEpisodeTitle(int index, String rawTitle) {
-    if (widget.bgmEpisodes != null &&
-        index >= 0 &&
-        index < widget.bgmEpisodes!.length) {
-      final ep = widget.bgmEpisodes![index];
-      final cn = ep['name_cn']?.toString().trim();
-      final jp = ep['name']?.toString().trim();
-      final sort = ep['sort']?.toString().trim() ?? '${index + 1}';
-      final name = (cn != null && cn.isNotEmpty)
-          ? cn
-          : (jp != null && jp.isNotEmpty ? jp : rawTitle);
-      if (name.startsWith('S') || name.startsWith('第')) {
-        return name;
-      }
-      return 'S1E$sort: $name';
-    }
-
-    final still = _stillsCache[index];
-    if (still != null) {
-      final name = BgmUtils.trimmed(still['name']);
-      if (name != null && name.isNotEmpty) {
-        if (name.startsWith('S') || name.startsWith('第')) return name;
-        return 'S1E${index + 1}: $name';
-      }
-    }
-
-    final trimmed = rawTitle.trim();
-    if (trimmed.startsWith('S') ||
-        trimmed.startsWith('第') ||
-        trimmed.contains('话') ||
-        trimmed.contains('集')) {
-      return trimmed;
-    }
-    return 'S1E${index + 1}: $trimmed';
-  }
-
-  String _getAirDate(int index) {
-    if (widget.bgmEpisodes != null &&
-        index >= 0 &&
-        index < widget.bgmEpisodes!.length) {
-      final ep = widget.bgmEpisodes![index];
-      final airdate = ep['airdate']?.toString().trim();
-      if (airdate != null && airdate.isNotEmpty) {
-        return '$airdate 23:59';
-      }
-    }
-
-    final still = _stillsCache[index];
-    if (still != null) {
-      final airDate = BgmUtils.trimmed(still['air_date']);
-      if (airDate != null && airDate.isNotEmpty) {
-        return airDate.contains(':') ? airDate : '$airDate 23:59';
-      }
-    }
-
-    return '';
-  }
-
-  String _getOverview(int index) {
-    final still = _stillsCache[index];
-    if (still != null) {
-      final overview = BgmUtils.trimmed(still['overview']);
-      if (overview != null && overview.isNotEmpty) return overview;
-    }
-
-    if (widget.bgmEpisodes != null &&
-        index >= 0 &&
-        index < widget.bgmEpisodes!.length) {
-      final ep = widget.bgmEpisodes![index];
-      final desc = ep['desc']?.toString().trim();
-      if (desc != null && desc.isNotEmpty) return desc;
-    }
-
-    return '暂无本集剧情简介';
-  }
-
-  String _getStillUrl(int index) {
-    final still = _stillsCache[index];
-    if (still != null) {
-      final url = BgmUtils.trimmed(still['still_url']) ??
-          BgmUtils.trimmed(still['still_thumb']);
-      if (url != null && url.isNotEmpty) return url;
-    }
-    return widget.fallbackCoverUrl ?? '';
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -243,67 +115,92 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
 
     return CustomScrollView(
       controller: _scrollController,
-      physics: const BouncingScrollPhysics(),
+      physics: const ClampingScrollPhysics(),
       slivers: [
         SliverToBoxAdapter(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildAnimeHeader(theme, primaryColor),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               _buildSourceRow(theme, primaryColor),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               _buildDanmakuRow(theme, primaryColor),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               _buildEpisodeHeaderSection(theme, primaryColor),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
             ],
           ),
         ),
         if (_isEpisodesExpanded) ...[
           if (_filteredList.isEmpty)
-            SliverToBoxAdapter(
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 36),
-                child: const Center(
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Center(
                   child: Text(
                     '没有找到匹配的剧集',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.white38,
-                    ),
+                    style: TextStyle(fontSize: 13, color: Colors.white38),
                   ),
                 ),
               ),
             )
           else if (_isGridView)
             SliverPadding(
-              padding: const EdgeInsets.only(bottom: 24),
+              padding: const EdgeInsets.only(bottom: 20),
               sliver: SliverGrid(
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 3,
-                  childAspectRatio: 2.3,
+                  childAspectRatio: 2.0,
                   crossAxisSpacing: 8,
                   mainAxisSpacing: 8,
                 ),
                 delegate: SliverChildBuilderDelegate(
-                  (context, index) => _buildGridItem(context, index, primaryColor),
+                  (context, index) {
+                    final i = _filteredList[index];
+                    return _WindowsEpisodeGridItem(
+                      index: i,
+                      isPlaying: i == widget.currentIndex,
+                      title: widget.videoList[i].title,
+                      primaryColor: primaryColor,
+                      onTap: () => widget.onEpisodeSelected(i),
+                    );
+                  },
                   childCount: _filteredList.length,
+                  addAutomaticKeepAlives: false,
                 ),
               ),
             )
           else
             SliverPadding(
-              padding: const EdgeInsets.only(bottom: 24),
+              padding: const EdgeInsets.only(bottom: 20),
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
-                  (context, index) => _buildListItem(context, index, theme, primaryColor),
+                  (context, index) {
+                    final i = _filteredList[index];
+                    final item = widget.videoList[i];
+                    return _WindowsEpisodeListItem(
+                      key: ValueKey(i),
+                      index: i,
+                      item: item,
+                      isPlaying: i == widget.currentIndex,
+                      bgmId: widget.bgmId,
+                      bgmEpisodes: widget.bgmEpisodes,
+                      fallbackCoverUrl: widget.fallbackCoverUrl,
+                      currUrl: widget.currUrl,
+                      sourceNames: widget.sourceNames,
+                      primaryColor: primaryColor,
+                      onEpisodeSelected: widget.onEpisodeSelected,
+                      onUrlSelected: widget.onUrlSelected,
+                    );
+                  },
                   childCount: _filteredList.length,
+                  addAutomaticKeepAlives: false,
                 ),
               ),
             ),
         ] else
-          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+          const SliverToBoxAdapter(child: SizedBox(height: 12)),
       ],
     );
   }
@@ -312,26 +209,25 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
     final title = widget.title?.trim() ?? '';
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(2, 6, 2, 2),
+      padding: const EdgeInsets.fromLTRB(2, 4, 2, 0),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(
             child: Text(
               title.isNotEmpty ? title : '番剧详情',
               style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
+                fontSize: 19,
+                fontWeight: FontWeight.w700,
                 color: Colors.white,
-                height: 1.25,
-                letterSpacing: -0.3,
+                letterSpacing: -0.2,
               ),
-              maxLines: 2,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),
           if (widget.followNotifier != null && widget.onFollowPressed != null) ...[
-            const SizedBox(width: 10),
+            const SizedBox(width: 6),
             ValueListenableBuilder<bool>(
               valueListenable: widget.followNotifier!,
               builder: (context, isFollowed, _) => BgmFollowPill(
@@ -353,36 +249,33 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
     final label = (line != null && line.isNotEmpty) ? '$source · $line' : source;
 
     return Material(
-      color: Colors.transparent,
+      color: const Color(0xFF1B1B1F),
+      borderRadius: BorderRadius.circular(6),
       child: InkWell(
         onTap: widget.onSourceTap,
-        borderRadius: BorderRadius.circular(8),
-        hoverColor: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(6),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
-            color: const Color(0xFF1B1B1F),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.07),
-            ),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: Colors.white10, width: 0.8),
           ),
           child: Row(
             children: [
-              Text(
+              const Text(
                 '播放源',
                 style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.white.withValues(alpha: 0.5),
+                  fontSize: 12.0,
+                  color: Colors.white54,
                   fontWeight: FontWeight.w500,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   widget.isSearching ? '正在自动匹配源中...' : label,
                   style: const TextStyle(
-                    fontSize: 13,
+                    fontSize: 13.0,
                     fontWeight: FontWeight.w600,
                     color: Colors.white,
                   ),
@@ -391,15 +284,15 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: primaryColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(5),
+                  borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
                   '切换源',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 11.0,
                     color: primaryColor,
                     fontWeight: FontWeight.w600,
                   ),
@@ -414,7 +307,8 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
 
   Widget _buildDanmakuRow(ThemeData theme, Color primaryColor) {
     return Material(
-      color: Colors.transparent,
+      color: const Color(0xFF1B1B1F),
+      borderRadius: BorderRadius.circular(6),
       child: InkWell(
         onTap: () {
           if (widget.danmakuController != null) {
@@ -426,28 +320,24 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
             );
           }
         },
-        borderRadius: BorderRadius.circular(8),
-        hoverColor: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(6),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
-            color: const Color(0xFF1B1B1F),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.07),
-            ),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: Colors.white10, width: 0.8),
           ),
           child: Row(
             children: [
-              Text(
+              const Text(
                 '弹幕库',
                 style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.white.withValues(alpha: 0.5),
+                  fontSize: 12.0,
+                  color: Colors.white54,
                   fontWeight: FontWeight.w500,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: widget.danmakuController != null
                     ? ListenableBuilder(
@@ -457,7 +347,7 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                           return Text(
                             count > 0 ? '$count 条弹幕' : '暂无关联弹幕',
                             style: const TextStyle(
-                              fontSize: 13,
+                              fontSize: 13.0,
                               fontWeight: FontWeight.w600,
                               color: Colors.white,
                             ),
@@ -469,23 +359,23 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                     : const Text(
                         '未开启',
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: 13.0,
                           fontWeight: FontWeight.w600,
-                          color: Colors.white70,
+                          color: Colors.white54,
                         ),
                       ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(5),
+                  color: Colors.white10,
+                  borderRadius: BorderRadius.circular(4),
                 ),
-                child: Text(
+                child: const Text(
                   '匹配管理',
                   style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.white.withValues(alpha: 0.8),
+                    fontSize: 11.0,
+                    color: Colors.white70,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -504,41 +394,33 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
       children: [
         InkWell(
           onTap: () => setState(() => _isEpisodesExpanded = !_isEpisodesExpanded),
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(4),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+            padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(
               children: [
                 const Text(
                   '剧集列表',
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: 14.5,
                     fontWeight: FontWeight.w700,
                     color: Colors.white,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    '共 ${widget.videoList.length} 话',
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      color: Colors.white.withValues(alpha: 0.6),
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
+                const SizedBox(width: 6),
+                Text(
+                  '(${widget.videoList.length}话)',
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    color: Colors.white54,
                   ),
                 ),
                 const Spacer(),
                 Text(
                   _isEpisodesExpanded ? '收起' : '展开',
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 11.5,
-                    color: Colors.white.withValues(alpha: 0.4),
+                    color: Colors.white38,
                   ),
                 ),
               ],
@@ -546,87 +428,61 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
           ),
         ),
         if (_isEpisodesExpanded) ...[
-          const SizedBox(height: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.04),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.06),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  height: 32,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(6),
+                    color: Colors.white.withValues(alpha: 0.06),
+                  ),
+                  child: TextField(
+                    controller: _searchController,
+                    textAlignVertical: TextAlignVertical.center,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: '搜索剧集...',
+                      hintStyle: const TextStyle(color: Colors.white30, fontSize: 12.0),
+                      prefixIcon: const Icon(Icons.search, color: Colors.white38, size: 16),
+                      prefixIconConstraints: const BoxConstraints(minWidth: 30, minHeight: 32),
+                      suffixIcon: hasQuery
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, color: Colors.white54, size: 14),
+                              onPressed: _searchController.clear,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 28, minHeight: 32),
+                            )
+                          : null,
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    style: const TextStyle(fontSize: 12.0, color: Colors.white),
+                  ),
+                ),
               ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    height: 32,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(6),
-                      color: Colors.black.withValues(alpha: 0.3),
-                    ),
-                    child: TextField(
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        hintText: '搜索剧集...',
-                        hintStyle: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.35),
-                          fontSize: 12,
-                        ),
-                        prefixIcon: Icon(
-                          Icons.search,
-                          color: Colors.white.withValues(alpha: 0.4),
-                          size: 16,
-                        ),
-                        suffixIcon: hasQuery
-                            ? IconButton(
-                                icon: const Icon(
-                                  Icons.clear,
-                                  color: Colors.grey,
-                                  size: 14,
-                                ),
-                                onPressed: _searchController.clear,
-                              )
-                            : null,
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          vertical: 8,
-                          horizontal: 6,
-                        ),
-                      ),
-                      style: const TextStyle(fontSize: 12, color: Colors.white),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 6),
+              const SizedBox(width: 4),
+              _buildIconButton(
+                icon: _isGridView ? Icons.view_list_rounded : Icons.grid_view_rounded,
+                onPressed: () => setState(() => _isGridView = !_isGridView),
+                tooltip: _isGridView ? '列表视图' : '网格视图',
+              ),
+              _buildIconButton(
+                icon: _ascending ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
+                onPressed: () => setState(() {
+                  _ascending = !_ascending;
+                  _filteredList = _buildFilteredList();
+                }),
+                tooltip: _ascending ? '升序' : '降序',
+              ),
+              if (widget.onDownloadPressed != null)
                 _buildIconButton(
-                  color: Colors.white.withValues(alpha: 0.8),
-                  icon: _isGridView
-                      ? Icons.view_list_rounded
-                      : Icons.grid_view_rounded,
-                  onPressed: () => setState(() => _isGridView = !_isGridView),
-                  tooltip: _isGridView ? '列表视图' : '网格视图',
+                  icon: Icons.download_rounded,
+                  onPressed: widget.onDownloadPressed,
+                  tooltip: '下载全部',
                 ),
-                _buildIconButton(
-                  color: Colors.white.withValues(alpha: 0.8),
-                  icon: _ascending
-                      ? Icons.arrow_upward_rounded
-                      : Icons.arrow_downward_rounded,
-                  onPressed: () => setState(() {
-                    _ascending = !_ascending;
-                    _filteredList = _buildFilteredList();
-                  }),
-                  tooltip: _ascending ? '升序' : '降序',
-                ),
-                if (widget.onDownloadPressed != null)
-                  _buildIconButton(
-                    color: Colors.white.withValues(alpha: 0.8),
-                    icon: Icons.download_rounded,
-                    onPressed: widget.onDownloadPressed,
-                    tooltip: '下载全部',
-                  ),
-              ],
-            ),
+            ],
           ),
         ],
       ],
@@ -636,191 +492,212 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
   Widget _buildIconButton({
     required IconData icon,
     required String tooltip,
-    required Color color,
     VoidCallback? onPressed,
   }) {
     return Tooltip(
       message: tooltip,
-      child: InkWell(
+      child: InkResponse(
         onTap: onPressed,
-        borderRadius: BorderRadius.circular(6),
+        radius: 16,
         child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: Icon(icon, size: 17, color: color),
+          padding: const EdgeInsets.all(5),
+          child: Icon(icon, size: 17, color: Colors.white70),
         ),
       ),
     );
   }
+}
 
-  Widget _buildListItem(BuildContext context, int index, ThemeData theme, Color primaryColor) {
-    final i = _filteredList[index];
-    final item = widget.videoList[i];
-    final isPlaying = i == widget.currentIndex;
-    final title = _formatEpisodeTitle(i, item.title);
-    final airDate = _getAirDate(i);
-    final overview = _getOverview(i);
-    final stillUrl = _getStillUrl(i);
+class _WindowsEpisodeListItem extends StatelessWidget {
+  final int index;
+  final PlaybackEpisode item;
+  final bool isPlaying;
+  final int? bgmId;
+  final List<Map<String, dynamic>>? bgmEpisodes;
+  final String? fallbackCoverUrl;
+  final int? currUrl;
+  final List<String>? sourceNames;
+  final Color primaryColor;
+  final ValueChanged<int> onEpisodeSelected;
+  final void Function(int, int)? onUrlSelected;
+
+  const _WindowsEpisodeListItem({
+    required this.index,
+    required this.item,
+    required this.isPlaying,
+    required this.bgmId,
+    required this.bgmEpisodes,
+    required this.fallbackCoverUrl,
+    required this.currUrl,
+    required this.sourceNames,
+    required this.primaryColor,
+    required this.onEpisodeSelected,
+    required this.onUrlSelected,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (bgmId != null && bgmId! > 0) {
+      return FutureBuilder<Map<String, dynamic>?>(
+        future: AniBakaApi.getEpisodeStills(
+          bgmId: bgmId,
+          season: 1,
+          episode: index + 1,
+        ),
+        builder: (context, snapshot) {
+          return _buildItemContent(context, snapshot.data);
+        },
+      );
+    }
+    return _buildItemContent(context, null);
+  }
+
+  String _resolveTitle(Map<String, dynamic>? still) {
+    if (bgmEpisodes != null && index >= 0 && index < bgmEpisodes!.length) {
+      final ep = bgmEpisodes![index];
+      final cn = ep['name_cn']?.toString().trim();
+      final jp = ep['name']?.toString().trim();
+      final name = (cn != null && cn.isNotEmpty)
+          ? cn
+          : (jp != null && jp.isNotEmpty ? jp : item.title);
+      if (name.startsWith('S') || name.startsWith('第')) return name;
+      return 'S1E${index + 1}: $name';
+    }
+    final stillName = BgmUtils.trimmed(still?['name']);
+    if (stillName != null && stillName.isNotEmpty) {
+      if (stillName.startsWith('S') || stillName.startsWith('第')) return stillName;
+      return 'S1E${index + 1}: $stillName';
+    }
+    final raw = item.title.trim();
+    if (raw.startsWith('S') || raw.startsWith('第') || raw.contains('话') || raw.contains('集')) {
+      return raw;
+    }
+    return 'S1E${index + 1}: $raw';
+  }
+
+  String _resolveAirDate(Map<String, dynamic>? still) {
+    if (bgmEpisodes != null && index >= 0 && index < bgmEpisodes!.length) {
+      final ep = bgmEpisodes![index];
+      final airdate = ep['airdate']?.toString().trim();
+      if (airdate != null && airdate.isNotEmpty) return airdate;
+    }
+    final stillDate = BgmUtils.trimmed(still?['air_date']);
+    if (stillDate != null && stillDate.isNotEmpty) return stillDate;
+    return '';
+  }
+
+  String _resolveOverview(Map<String, dynamic>? still) {
+    final stillOverview = BgmUtils.trimmed(still?['overview']);
+    if (stillOverview != null && stillOverview.isNotEmpty) return stillOverview;
+
+    if (bgmEpisodes != null && index >= 0 && index < bgmEpisodes!.length) {
+      final ep = bgmEpisodes![index];
+      final desc = ep['desc']?.toString().trim();
+      if (desc != null && desc.isNotEmpty) return desc;
+    }
+    return '暂无本集剧情简介';
+  }
+
+  String _resolveStillUrl(Map<String, dynamic>? still) {
+    if (still != null) {
+      final url = BgmUtils.trimmed(still['still_url']) ?? BgmUtils.trimmed(still['still_thumb']);
+      if (url != null && url.isNotEmpty) return url;
+    }
+    return fallbackCoverUrl ?? '';
+  }
+
+  Widget _buildItemContent(BuildContext context, Map<String, dynamic>? still) {
+    final title = _resolveTitle(still);
+    final airDate = _resolveAirDate(still);
+    final overview = _resolveOverview(still);
+    final stillUrl = _resolveStillUrl(still);
     final lineCount = item.lineCount;
 
-    if (!_stillsCache.containsKey(i)) {
-      _fetchStill(i);
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOutCubic,
+      margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        color: isPlaying
-            ? const Color(0xFF222226)
-            : Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(8),
+        color: isPlaying ? const Color(0xFF222226) : const Color(0xFF18181B),
         border: Border.all(
-          color: isPlaying
-              ? primaryColor.withValues(alpha: 0.6)
-              : Colors.white.withValues(alpha: 0.06),
-          width: isPlaying ? 1.2 : 0.8,
+          color: isPlaying ? primaryColor.withValues(alpha: 0.6) : Colors.white10,
+          width: 0.8,
         ),
       ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: () => widget.onEpisodeSelected(i),
-          borderRadius: BorderRadius.circular(10),
-          hoverColor: Colors.white.withValues(alpha: 0.04),
+          onTap: () => onEpisodeSelected(index),
+          borderRadius: BorderRadius.circular(8),
           child: Padding(
             padding: const EdgeInsets.all(10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Container(
-                        width: 130,
-                        height: 73,
-                        color: const Color(0xFF1E1E22),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            if (stillUrl.isNotEmpty)
-                              CachedNetworkImage(
-                                imageUrl: stillUrl,
-                                fit: BoxFit.cover,
-                                placeholder: (ctx, url) => Container(
-                                  color: const Color(0xFF1A1A1E),
-                                  child: const Center(
-                                    child: SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.white38,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                errorWidget: (ctx, url, err) => const Center(
-                                  child: Icon(
-                                    Icons.movie_outlined,
-                                    size: 24,
-                                    color: Colors.white24,
-                                  ),
-                                ),
-                              )
-                            else
-                              const Center(
-                                child: Icon(
-                                  Icons.movie_outlined,
-                                  size: 24,
-                                  color: Colors.white24,
-                                ),
-                              ),
-                            if (isPlaying)
-                              Container(
-                                color: Colors.black.withValues(alpha: 0.4),
-                                child: Center(
-                                  child: Container(
-                                    padding: const EdgeInsets.all(6),
-                                    decoration: BoxDecoration(
-                                      color: primaryColor,
-                                      shape: BoxShape.circle,
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: primaryColor.withValues(alpha: 0.5),
-                                          blurRadius: 8,
-                                        ),
-                                      ],
-                                    ),
-                                    child: const Icon(
-                                      Icons.play_arrow_rounded,
-                                      color: Colors.white,
-                                      size: 16,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
+                    _buildCoverThumbnail(stillUrl),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Expanded(
                                 child: Text(
                                   title,
                                   style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: isPlaying
-                                        ? FontWeight.bold
-                                        : FontWeight.w600,
-                                    color: isPlaying
-                                        ? primaryColor
-                                        : Colors.white.withValues(alpha: 0.95),
-                                    letterSpacing: 0.2,
+                                    fontSize: 13.5,
+                                    fontWeight: isPlaying ? FontWeight.bold : FontWeight.w600,
+                                    color: isPlaying ? primaryColor : Colors.white,
+                                    height: 1.25,
                                   ),
-                                  maxLines: 2,
+                                  maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               if (lineCount > 1)
                                 Container(
                                   margin: const EdgeInsets.only(left: 6),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 5,
-                                    vertical: 2,
-                                  ),
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.08),
+                                    color: primaryColor.withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                      color: primaryColor.withValues(alpha: 0.4),
+                                      width: 0.8,
+                                    ),
                                   ),
                                   child: Text(
                                     '$lineCount 线路',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.white.withValues(alpha: 0.65),
+                                    style: const TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white,
                                     ),
                                   ),
                                 ),
                             ],
                           ),
                           if (airDate.isNotEmpty) ...[
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 3),
                             Text(
                               airDate,
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                color: Colors.white.withValues(alpha: 0.45),
-                                fontFeatures: const [
-                                  FontFeature.tabularFigures(),
-                                ],
-                              ),
+                              style: const TextStyle(fontSize: 11.0, color: Colors.white38),
+                            ),
+                          ],
+                          if (overview.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              overview,
+                              style: const TextStyle(fontSize: 11.5, color: Colors.white60, height: 1.35),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ],
@@ -828,31 +705,16 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  overview,
-                  style: TextStyle(
-                    fontSize: 11,
-                    height: 1.4,
-                    color: Colors.white.withValues(alpha: 0.55),
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
                 if (isPlaying && lineCount > 1) ...[
-                  const SizedBox(height: 10),
-                  Divider(
-                    height: 1,
-                    thickness: 0.5,
-                    color: Colors.white.withValues(alpha: 0.08),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Divider(height: 1, thickness: 0.6, color: Colors.white12),
                   ),
-                  const SizedBox(height: 10),
                   WindowsLineSelector(
                     lineCount: lineCount,
-                    currUrl: widget.currUrl ?? 1,
-                    onUrlChanged: (urlIndex) =>
-                        widget.onUrlSelected?.call(i, urlIndex),
-                    sourceNames: widget.sourceNames,
+                    currUrl: currUrl ?? 1,
+                    onUrlChanged: (urlIndex) => onUrlSelected?.call(index, urlIndex),
+                    sourceNames: sourceNames,
                     isInline: true,
                   ),
                 ],
@@ -864,30 +726,88 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
     );
   }
 
-  Widget _buildGridItem(BuildContext context, int index, Color primaryColor) {
-    final i = _filteredList[index];
-    final isPlaying = i == widget.currentIndex;
-    final title = widget.videoList[i].title;
-
-    return InkWell(
-      onTap: () => widget.onEpisodeSelected(i),
-      borderRadius: BorderRadius.circular(8),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          color: isPlaying
-              ? primaryColor.withValues(alpha: 0.18)
-              : Colors.white.withValues(alpha: 0.04),
-          border: Border.all(
-            color: isPlaying
-                ? primaryColor.withValues(alpha: 0.7)
-                : Colors.white.withValues(alpha: 0.08),
-            width: 1,
-          ),
+  Widget _buildCoverThumbnail(String stillUrl) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        width: 126,
+        height: 71,
+        color: const Color(0xFF1E1E22),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (stillUrl.isNotEmpty)
+              CachedNetworkImage(
+                memCacheWidth: 260,
+                imageUrl: stillUrl,
+                fit: BoxFit.cover,
+                fadeInDuration: const Duration(milliseconds: 150),
+                fadeOutDuration: const Duration(milliseconds: 150),
+                placeholder: (_, _) => _placeholderIcon(),
+                errorWidget: (_, _, _) => _placeholderIcon(),
+              )
+            else
+              _placeholderIcon(),
+            if (isPlaying)
+              Container(
+                color: Colors.black45,
+                child: Center(
+                  child: Icon(
+                    Icons.play_circle_fill_rounded,
+                    color: primaryColor,
+                    size: 24,
+                  ),
+                ),
+              ),
+          ],
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Center(
+      ),
+    );
+  }
+
+  Widget _placeholderIcon() {
+    return const Center(
+      child: Icon(Icons.movie_outlined, size: 22, color: Colors.white24),
+    );
+  }
+}
+
+class _WindowsEpisodeGridItem extends StatelessWidget {
+  final int index;
+  final bool isPlaying;
+  final String title;
+  final Color primaryColor;
+  final VoidCallback onTap;
+
+  const _WindowsEpisodeGridItem({
+    required this.index,
+    required this.isPlaying,
+    required this.title,
+    required this.primaryColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOutCubic,
+          decoration: BoxDecoration(
+            color: isPlaying ? primaryColor.withValues(alpha: 0.18) : const Color(0xFF1B1B1F),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: isPlaying ? primaryColor.withValues(alpha: 0.6) : Colors.white10,
+              width: 0.8,
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          alignment: Alignment.center,
           child: Text(
             title,
             textAlign: TextAlign.center,
@@ -896,7 +816,7 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
               fontSize: 12.5,
               color: isPlaying ? primaryColor : Colors.white70,
             ),
-            maxLines: 2,
+            maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
         ),

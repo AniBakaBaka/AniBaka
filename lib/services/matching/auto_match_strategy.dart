@@ -9,5 +9,6 @@ abstract final class AutoMatchStrategy {
   static const int keywordsPerSourceManual = 2;
 
   static const Duration candidateBudget = Duration(milliseconds: 5500);
+  static const Duration sourceSearchBudget = Duration(seconds: 30);
   static const Duration wallClock = Duration(seconds: 12);
 }

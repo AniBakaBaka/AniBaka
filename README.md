@@ -1,13 +1,25 @@
 <div align="center">
+  <img src="assets/ic_launcher.png" width="128" alt="Baka" />
 
 # Baka
 
 跨平台番剧聚合、媒体播放与弹幕客户端
 
-[![Flutter](https://img.shields.io/badge/Flutter-3.44.9-02569B?logo=flutter)](https://flutter.dev/)
-[![Dart](https://img.shields.io/badge/Dart-%3E%3D3.8%20%3C%3D4.0-0175C2?logo=dart)](https://dart.dev/)
+[![Flutter](https://img.shields.io/badge/Flutter-3.44.9-02569B?logo=flutter&logoColor=white)](https://flutter.dev/)
+[![Dart](https://img.shields.io/badge/Dart-%3E%3D3.8%20%3C%3D4.0-0175C2?logo=dart&logoColor=white)](https://dart.dev/)
+[![Release](https://img.shields.io/github/v/release/AniBakaBaka/AniBaka?logo=github)](https://github.com/AniBakaBaka/AniBaka/releases)
 [![CI](https://github.com/AniBakaBaka/AniBaka/actions/workflows/dart.yml/badge.svg)](https://github.com/AniBakaBaka/AniBaka/actions/workflows/dart.yml)
-[![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/AniBakaBaka/AniBaka/total?logo=github)](https://github.com/AniBakaBaka/AniBaka/releases)
+[![Stars](https://img.shields.io/github/stars/AniBakaBaka/AniBaka?style=flat&logo=github)](https://github.com/AniBakaBaka/AniBaka/stargazers)
+[![License](https://img.shields.io/badge/License-GPLv3-blue.svg?logo=gnu&logoColor=white)](LICENSE)
+
+<br/>
+
+<img src="https://img.shields.io/badge/Windows-0078D4?logo=windows&logoColor=white" alt="Windows" />
+<img src="https://img.shields.io/badge/Android-3DDC84?logo=android&logoColor=white" alt="Android" />
+<img src="https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white" alt="macOS" />
+<img src="https://img.shields.io/badge/iOS-000000?logo=apple&logoColor=white" alt="iOS" />
+<img src="https://img.shields.io/badge/Android_TV-3DDC84?logo=androidtv&logoColor=white" alt="Android TV" />
 
 </div>
 

@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/pages/home/miniapp_page.dart';
@@ -64,7 +63,7 @@ class _HomePageState extends State<HomePage>
 
   void _onScroll() {
     final offset = _scrollController.offset;
-    if ((offset - _lastScrollOffset).abs() > 50) {
+    if ((offset - _lastScrollOffset).abs() > 100) {
       _appState.updateScrollDirection(offset > _lastScrollOffset);
       _lastScrollOffset = offset;
     }
@@ -104,6 +103,7 @@ class _HomePageState extends State<HomePage>
         showInitialIndicator: false,
         child: CustomScrollView(
           controller: _scrollController,
+          cacheExtent: 500,
           physics: const BouncingScrollPhysics(),
           slivers: [
             _buildAppBar(),
@@ -121,54 +121,48 @@ class _HomePageState extends State<HomePage>
   Widget _buildAppBar() {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final reduceVisualEffects = context.reduceMotion;
-    final content = ClipRRect(
-      borderRadius: BorderRadius.circular(100),
-      child: BackdropFilter(
-        filter: reduceVisualEffects
-            ? ImageFilter.blur(sigmaX: 0, sigmaY: 0)
-            : ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          height: 52,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          decoration: BoxDecoration(
-            color: isDark
-                ? const Color(
-                    0xFF1B1B1F,
-                  ).withValues(alpha: reduceVisualEffects ? 0.96 : 0.84)
-                : Colors.white.withValues(
-                    alpha: reduceVisualEffects ? 0.98 : 0.88,
-                  ),
-            borderRadius: BorderRadius.circular(100),
-            border: Border.all(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.18)
-                  : Colors.black.withValues(alpha: 0.08),
-              width: 1.2,
+    final content = Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark
+            ? const Color(0xF21B1B1F)
+            : Colors.white.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(100),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.18)
+              : Colors.black.withValues(alpha: 0.08),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildNavTabBar(),
+          const SizedBox(width: 12),
+          _buildIconButton(
+            'assets/li-font.svg',
+            () => _push(
+              const WebViewPage(url: 'https://www.bgm.tv', title: '里世界'),
             ),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildNavTabBar(),
-              const SizedBox(width: 12),
-              _buildIconButton(
-                'assets/li-font.svg',
-                () => _push(
-                  const WebViewPage(url: 'https://www.bgm.tv', title: '里世界'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              _buildIconButton(
-                'assets/Search.svg',
-                () => _push(const SearchPage()),
-                iconSize: 22,
-              ),
-              const SizedBox(width: 12),
-              _buildUserAvatar(),
-            ],
+          const SizedBox(width: 8),
+          _buildIconButton(
+            'assets/Search.svg',
+            () => _push(const SearchPage()),
+            iconSize: 22,
           ),
-        ),
+          const SizedBox(width: 12),
+          _buildUserAvatar(),
+        ],
       ),
     );
 
@@ -495,7 +489,9 @@ class _HomePageState extends State<HomePage>
             ? 5
             : 3;
         final itemWidth = (width - 40 - (columns - 1) * 12) / columns;
-        final titleHeight = MediaQuery.textScalerOf(context).scale(13) * 1.2;
+        final titleHeight =
+            (MediaQuery.textScalerOf(context).scale(13) * 1.3).ceilToDouble() +
+            4.0;
 
         return SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),

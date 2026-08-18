@@ -229,6 +229,7 @@ class VideoSourceSearchController extends ChangeNotifier {
   final _probeQueue = <_ProbeJob>[];
   Future<void>? _probePumpFuture;
   DateTime? _autoMatchStartedAt;
+  DateTime? _autoMatchDeadlineAt;
   Completer<bool>? _autoMatchGate;
 
   /// 最近一次自动匹配耗时（认领或失败），供调试/对比。
@@ -249,8 +250,12 @@ class VideoSourceSearchController extends ChangeNotifier {
   /// 记忆命中总超时。
   static const Duration _memoryTimeout = Duration(milliseconds: 4500);
 
-  /// 自动匹配整轮墙钟上限。
+  /// 自动匹配快速竞速阶段的墙钟上限；到时后仍会等待在途源完成。
   static const Duration _autoMatchWallClock = AutoMatchStrategy.wallClock;
+
+  /// 单个源搜索上限，避免某个无响应源让完整搜索永远无法收尾。
+  static const Duration _autoSourceSearchBudget =
+      AutoMatchStrategy.sourceSearchBudget;
 
   /// 自动匹配并发：同时按「手动点选」路径处理的候选数。
   static const int _autoProbeConcurrency = AutoMatchStrategy.raceConcurrency;
@@ -391,7 +396,9 @@ class VideoSourceSearchController extends ChangeNotifier {
     final runId = ++_runId;
     _autoMatched = false;
     lastAutoMatchDuration = null;
-    _autoMatchStartedAt = autoMatchMode ? DateTime.now() : null;
+    final autoMatchStartedAt = autoMatchMode ? DateTime.now() : null;
+    _autoMatchStartedAt = autoMatchStartedAt;
+    _autoMatchDeadlineAt = autoMatchStartedAt?.add(_autoMatchWallClock);
     _autoMatchGate = autoMatchMode ? Completer<bool>() : null;
     _resetState();
     isSearching = true;
@@ -480,19 +487,23 @@ class VideoSourceSearchController extends ChangeNotifier {
       try {
         await _autoMatchGate!.future.timeout(_autoMatchWallClock);
       } on TimeoutException {
-        // 墙钟到仍未认领：作废本轮，避免迟到的 onMatchFound 与 failed 双回调。
+        // 墙钟只约束首轮快速竞速。仍有源在搜索时继续等待完整搜索和
+        // final pass，不能把「暂时没数据」误判成搜索失败并提前回详情页。
         if (!_autoMatched) {
-          _runId++;
-          _probeQueue.clear();
+          _autoMatchDeadlineAt = null;
+          await _autoMatchGate!.future;
         }
       }
-      if (!_autoMatched && !_userSelected) {
+      final failed = !_autoMatched && !_userSelected;
+      if (failed) {
         _recordAutoMatchDuration();
-        onMatchFailed?.call();
       }
       if (!_disposed) {
         isSearching = false;
         _emitProgress();
+      }
+      if (failed && !_disposed) {
+        onMatchFailed?.call();
       }
       return;
     }
@@ -655,7 +666,10 @@ class VideoSourceSearchController extends ChangeNotifier {
 
     Future<List<Map<String, dynamic>>?> tryKeyword(String kw) async {
       try {
-        return await load(kw);
+        final pending = load(kw);
+        return autoMatchMode
+            ? await pending.timeout(_autoSourceSearchBudget)
+            : await pending;
       } catch (_) {
         return null;
       }
@@ -890,9 +904,8 @@ class VideoSourceSearchController extends ChangeNotifier {
   }
 
   bool get _autoMatchTimedOut {
-    final started = _autoMatchStartedAt;
-    if (started == null) return false;
-    return DateTime.now().difference(started) >= _autoMatchWallClock;
+    final deadline = _autoMatchDeadlineAt;
+    return deadline != null && !DateTime.now().isBefore(deadline);
   }
 
   void _ensureProbePump() {

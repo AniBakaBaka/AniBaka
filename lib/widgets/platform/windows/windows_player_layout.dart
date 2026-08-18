@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 
+import 'package:baka/instance.dart';
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/services/navigation_service.dart';
@@ -12,6 +14,7 @@ import 'package:baka/widgets/baka_player/view.dart';
 import 'package:baka/widgets/comment/comment_widget.dart';
 import 'package:baka/widgets/danmaku/controller.dart';
 import 'package:baka/widgets/platform/windows/windows_episode_list.dart';
+import 'package:baka/widgets/platform/windows/windows_title_bar.dart';
 
 class WindowsPlayerLayout extends StatefulWidget {
   final Map data;
@@ -80,46 +83,47 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
   int _sidebarTabIndex = 0;
   bool _isFullScreen = false;
 
-  String get _currentEpisodeTitle {
-    final episodes = widget.data['bgmDetailData']?['episodes'];
-    if (episodes is List &&
-        widget.currPlayIndex >= 0 &&
-        widget.currPlayIndex < episodes.length) {
-      final ep = episodes[widget.currPlayIndex];
-      final cn = ep['name_cn']?.toString().trim();
-      final name = ep['name']?.toString().trim();
-      if (cn != null && cn.isNotEmpty) return cn;
-      if (name != null && name.isNotEmpty) return name;
-    }
-    if (widget.currPlayIndex >= 0 &&
-        widget.currPlayIndex < widget.videoList.length) {
-      return widget.videoList[widget.currPlayIndex].title;
-    }
-    return '第${widget.currPlayIndex + 1}话';
-  }
-
   @override
   Widget build(BuildContext context) {
+    final shouldShowSidebar = _showSidebar && !_isFullScreen;
+    final showTitleBar =
+        Platform.isWindows && Instances.isDesktopPlatform && !_isFullScreen;
+
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Row(
+      body: Stack(
         children: [
-          Expanded(
-            child: _buildPlayerArea(context),
+          Row(
+            children: [
+              Expanded(
+                child: _buildPlayerArea(context),
+              ),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 240),
+                curve: Curves.easeOutCubic,
+                width: shouldShowSidebar ? 380 : 0,
+                child: ClipRect(
+                  child: OverflowBox(
+                    minWidth: 380,
+                    maxWidth: 380,
+                    alignment: Alignment.topLeft,
+                    child: _buildSidebar(context),
+                  ),
+                ),
+              ),
+            ],
           ),
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 260),
-            curve: Curves.easeOutCubic,
-            width: _showSidebar && !_isFullScreen ? 400 : 0,
-            child: ClipRect(
-              child: OverflowBox(
-                minWidth: 400,
-                maxWidth: 400,
-                alignment: Alignment.topLeft,
-                child: _buildSidebar(context),
+          if (showTitleBar)
+            const Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 32,
+              child: WindowsTitleBar(
+                backgroundColor: Colors.transparent,
+                foregroundColor: Colors.white70,
               ),
             ),
-          ),
         ],
       ),
     );
@@ -166,20 +170,10 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
 
   Widget _buildTopHeaderBar(BuildContext context) {
     final title = widget.data['title']?.toString() ?? '';
-    final epTitle = _currentEpisodeTitle;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withValues(alpha: 0.8),
-            Colors.black.withValues(alpha: 0.0),
-          ],
-        ),
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      color: Colors.black54,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -187,41 +181,24 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
             icon: const Icon(
               Icons.arrow_back_ios_new_rounded,
               color: Colors.white,
-              size: 20,
+              size: 18,
             ),
             onPressed: () => Navigator.of(context).pop(),
             tooltip: '返回',
             padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    letterSpacing: 0.3,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 1),
-                Text(
-                  'S1E${widget.currPlayIndex + 1}: $epTitle',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.white.withValues(alpha: 0.65),
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+            child: Text(
+              title,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
           _buildNetworkSpeedBadge(),
@@ -285,20 +262,20 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
         final speedText = formatBytesPerSecond(speed);
 
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 Icons.arrow_upward_rounded,
-                size: 14,
+                size: 13,
                 color: primaryColor,
               ),
               const SizedBox(width: 2),
               Text(
                 speedText,
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 11.5,
                   fontWeight: FontWeight.w600,
                   color: primaryColor,
                   fontFeatures: const [FontFeature.tabularFigures()],
@@ -319,18 +296,15 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
   }) {
     return Tooltip(
       message: tooltip,
-      waitDuration: const Duration(milliseconds: 300),
-      child: InkWell(
+      child: InkResponse(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
+        radius: 18,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          padding: const EdgeInsets.all(6),
           child: Icon(
             icon,
-            size: 20,
-            color: isActive
-                ? Colors.white
-                : Colors.white.withValues(alpha: 0.6),
+            size: 19,
+            color: isActive ? Colors.white : Colors.white70,
           ),
         ),
       ),
@@ -355,14 +329,14 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 SizedBox(
-                  width: 36,
-                  height: 36,
+                  width: 32,
+                  height: 32,
                   child: CircularProgressIndicator(
                     color: primaryColor,
                     strokeWidth: 2.5,
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
                 Text(
                   widget.isSearching ? '正在自动匹配源中...' : '正在加载视频...',
                   style: const TextStyle(
@@ -398,27 +372,27 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
                 const Icon(
                   Icons.error_outline_rounded,
                   color: Colors.redAccent,
-                  size: 48,
+                  size: 42,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 const Text(
                   '播放失败，请换源或重试',
-                  style: TextStyle(color: Colors.white, fontSize: 14),
+                  style: TextStyle(color: Colors.white, fontSize: 13.5),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
                 ElevatedButton.icon(
                   onPressed: widget.onSourceTap,
-                  icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+                  icon: const Icon(Icons.swap_horiz_rounded, size: 17),
                   label: const Text('切换播放源'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: primaryColor,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
+                      horizontal: 14,
+                      vertical: 8,
                     ),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(6),
                     ),
                   ),
                 ),
@@ -432,12 +406,12 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
 
   Widget _buildSidebar(BuildContext context) {
     return Container(
-      width: 400,
-      decoration: BoxDecoration(
-        color: const Color(0xFF141416),
+      width: 380,
+      decoration: const BoxDecoration(
+        color: Color(0xFF141416),
         border: Border(
           left: BorderSide(
-            color: Colors.white.withValues(alpha: 0.08),
+            color: Colors.white12,
             width: 1,
           ),
         ),
@@ -447,7 +421,7 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
           _buildSidebarTabs(),
           Expanded(
             child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
+              duration: const Duration(milliseconds: 180),
               child: _sidebarTabIndex == 0
                   ? _buildPlaylistTab()
                   : _buildCommentTab(),
@@ -460,14 +434,11 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
 
   Widget _buildSidebarTabs() {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 16, 16, 10),
-      padding: const EdgeInsets.all(4),
+      margin: const EdgeInsets.fromLTRB(14, 38, 14, 8),
+      padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: const Color(0xFF202024),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.06),
-        ),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         children: [
@@ -496,43 +467,40 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
     required String title,
   }) {
     final isSelected = _sidebarTabIndex == index;
-    return InkWell(
-      onTap: () => setState(() => _sidebarTabIndex = index),
-      borderRadius: BorderRadius.circular(7),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(vertical: 7),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF2D2D32) : Colors.transparent,
-          borderRadius: BorderRadius.circular(7),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.25),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ]
-              : null,
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              size: 16,
-              color: isSelected ? Colors.white : Colors.white54,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                color: isSelected ? Colors.white : Colors.white54,
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        onTap: () => setState(() => _sidebarTabIndex = index),
+        borderRadius: BorderRadius.circular(6),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected ? const Color(0xFF2E2E34) : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          alignment: Alignment.center,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 15,
+                color: isSelected ? Colors.white : Colors.white60,
               ),
-            ),
-          ],
+              const SizedBox(width: 5),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                  color: isSelected ? Colors.white : Colors.white60,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -550,7 +518,7 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
 
     return Padding(
       key: const ValueKey('intro_tab'),
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       child: WindowsEpisodeList(
         videoList: widget.videoList,
         currentIndex: widget.currPlayIndex,
@@ -598,7 +566,7 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
         child: CIslandCommentWidget(
           key: widget.commentKey,
           postId: pid,
