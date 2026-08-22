@@ -147,8 +147,6 @@ class _WatchPartySheetState extends State<WatchPartySheet> {
   }
 }
 
-// ================= 未加入视图 =================
-
 class _JoinView extends StatelessWidget {
   const _JoinView({
     required this.service,
@@ -290,8 +288,6 @@ class _JoinView extends StatelessWidget {
   }
 }
 
-// ================= 房间视图 =================
-
 class _RoomView extends StatelessWidget {
   const _RoomView({
     required this.service,
@@ -416,8 +412,6 @@ class _RoomView extends StatelessWidget {
     );
   }
 }
-
-// ================= 聊天 Tab =================
 
 class _ChatTab extends StatelessWidget {
   const _ChatTab({
@@ -555,8 +549,6 @@ class _ChatTab extends StatelessWidget {
     );
   }
 }
-
-// ================= 成员 Tab =================
 
 class _MembersTab extends StatelessWidget {
   const _MembersTab({

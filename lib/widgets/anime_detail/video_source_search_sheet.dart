@@ -362,35 +362,10 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              Container(
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? const Color(0xFF0F0E15).withValues(alpha: 0.96)
-                      : const Color(0xFFF8F9FC).withValues(alpha: 0.96),
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(24),
-                  ),
-                ),
-                child: _cover.isNotEmpty
-                    ? ClipRRect(
-                        borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(24),
-                        ),
-                        child: Opacity(
-                          opacity: 0.06,
-                          child: CachedNetworkImage(
-                            imageUrl: _cover,
-                            fit: BoxFit.cover,
-                            width: double.infinity,
-                            height: double.infinity,
-                            color: Colors.black.withValues(
-                              alpha: isDark ? 0.3 : 0.2,
-                            ),
-                            colorBlendMode: BlendMode.srcOver,
-                          ),
-                        ),
-                      )
-                    : null,
+              ColoredBox(
+                color: isDark
+                    ? const Color(0xFF0F0E15)
+                    : const Color(0xFFF8F9FC),
               ),
               SafeArea(
                 top: false,
@@ -1345,6 +1320,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
       borderRadius: BorderRadius.circular(8),
       child: CachedNetworkImage(
         imageUrl: url,
+        memCacheWidth: 300,
         fit: BoxFit.cover,
         width: 56,
         height: 74,

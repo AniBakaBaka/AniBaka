@@ -5,6 +5,7 @@ import 'package:baka/widgets/home/rank_section.dart';
 import 'package:baka/widgets/home/swiper_banner.dart';
 import 'package:baka/widgets/search/tag_filter_sheet.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 const _kWeekLabels = <String>['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
@@ -29,7 +30,7 @@ class WindowsHomePage extends StatelessWidget {
         loadMoreResetListenable: svc.tag,
         showInitialIndicator: false,
         child: CustomScrollView(
-          cacheExtent: 600,
+          scrollCacheExtent: const ScrollCacheExtent.pixels(600),
           slivers: [
             const SliverToBoxAdapter(child: SizedBox(height: 20)),
             _buildBanner(),
@@ -318,7 +319,10 @@ class WindowsHomePage extends StatelessWidget {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 160),
                 curve: Curves.easeOutCubic,
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: isSelected ? primary : Colors.transparent,
                   borderRadius: BorderRadius.circular(7),
@@ -368,8 +372,8 @@ class WindowsHomePage extends StatelessWidget {
                       color: tag == selected
                           ? primaryColor.withValues(alpha: 0.15)
                           : (theme.brightness == Brightness.dark
-                              ? Colors.white.withValues(alpha: 0.05)
-                              : Colors.black.withValues(alpha: 0.04)),
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : Colors.black.withValues(alpha: 0.04)),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: tag == selected
@@ -383,7 +387,9 @@ class WindowsHomePage extends StatelessWidget {
                       style: TextStyle(
                         color: tag == selected
                             ? primaryColor
-                            : theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.8),
+                            : theme.textTheme.bodyMedium?.color?.withValues(
+                                alpha: 0.8,
+                              ),
                         fontSize: 12.0,
                         fontWeight: tag == selected
                             ? FontWeight.w600
@@ -402,7 +408,9 @@ class WindowsHomePage extends StatelessWidget {
   Widget _buildMoreTagsButton(BuildContext context, String selected) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final secondaryColor = theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.6);
+    final secondaryColor = theme.textTheme.bodyMedium?.color?.withValues(
+      alpha: 0.6,
+    );
 
     return Material(
       color: Colors.transparent,

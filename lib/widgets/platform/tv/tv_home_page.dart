@@ -373,6 +373,7 @@ class _TvHomePageState extends State<TvHomePage> {
                 child: CachedNetworkImage(
                   key: ValueKey(backdropUrl),
                   imageUrl: backdropUrl,
+                  memCacheWidth: 1520,
                   fit: BoxFit.cover,
                   alignment: Alignment.topCenter,
                   width: double.infinity,
@@ -494,6 +495,7 @@ class _TvHomePageState extends State<TvHomePage> {
         child: CachedNetworkImage(
           key: ValueKey(logoUrl),
           imageUrl: logoUrl,
+          memCacheHeight: 170,
           fit: BoxFit.contain,
           alignment: Alignment.centerLeft,
           errorWidget: (context, url, error) => Text(

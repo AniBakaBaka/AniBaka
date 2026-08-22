@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 
 import 'package:baka/api/bgm.dart';
@@ -168,7 +166,7 @@ class HomeDataService {
       final offset = (page - 1) * pageSize;
       switch (selectedTag) {
         case pureTag:
-          return _responseItems(await getPost('', recommendTag, page, 50));
+          return getPost('', recommendTag, page, 50);
         case recommendTag:
           final subjects = await getTrendingSubjects(
             type: 2,
@@ -250,7 +248,7 @@ class HomeDataService {
   }
 
   static Future<HomeItems> _fetchSwipers() async {
-    final items = _responseItems(await getPost('', _swiperTag, 1, 6));
+    final items = await getPost('', _swiperTag, 1, 6);
 
     await Future.wait(
       items.map((item) async {
@@ -372,10 +370,6 @@ class HomeDataService {
       _homeCache.read(key, allowExpired: allowExpired);
 
   static HomeItems _itemList(Object? value) => (value as List).cast<Map>();
-
-  static HomeItems _responseItems(String response) =>
-      ((jsonDecode(response) as Map<String, dynamic>)['data'] as List)
-          .cast<Map>();
 }
 
 class _FeedNotifier extends ValueNotifier<HomeItems> {

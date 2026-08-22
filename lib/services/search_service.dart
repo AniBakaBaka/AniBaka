@@ -132,9 +132,7 @@ class SearchService {
     final gv = int.tryParse(query.substring(2));
     if (gv == null) return const [];
 
-    final response = jsonDecode(await getPostDetail(gv));
-    final detail = response['data'] as Map<String, dynamic>?;
-    return detail == null ? const [] : [detail];
+    return [await getPostDetail(gv)];
   }
 
   Future<List<Map<String, dynamic>>> _searchSelectedSource(

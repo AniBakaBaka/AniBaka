@@ -71,15 +71,11 @@ void main() {
       'syncplayRoom': '1234567890',
       'title': 'Show',
       'episodeIndex': 2,
-      'mediaSource': 'syncplay',
       'memberCount': 4,
-      'expiresAt': '2026-08-13T12:00:00Z',
     });
 
     expect(invite.memberCount, 4);
-    expect(invite.expiresAt, DateTime.utc(2026, 8, 13, 12));
     expect(invite.syncplayRoom, '1234567890');
-    expect(invite.mediaSource, 'syncplay');
   });
 
   test('watch party QR values accept links, app links, and invite codes', () {

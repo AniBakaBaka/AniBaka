@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:baka/api/bgm.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/pages/player/player_page.dart';
@@ -34,8 +32,7 @@ class _TagPageState extends State<TagPage> {
         );
         posts = BgmService.convertSearchToAppFormat(subjects);
       } else if (widget.uid != 0) {
-        final response = await getPost('', '', page, 15, uid: widget.uid);
-        posts = ((jsonDecode(response) as Map)['data'] as List).cast<Map>();
+        posts = await getPost('', '', page, 15, uid: widget.uid);
       }
 
       if (!mounted) return posts.isNotEmpty;

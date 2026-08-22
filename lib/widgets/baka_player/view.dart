@@ -19,6 +19,8 @@ import 'package:ios_orientation/ios_orientation.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'widgets/bottom_control.dart';
 import 'package:baka/services/navigation_service.dart';
+import 'package:baka/pages/setting/danmaku_settings_page.dart';
+import 'package:baka/pages/setting/subtitle_settings_page.dart';
 import 'widgets/danmaku_input_overlay.dart';
 import 'widgets/player_dialogs.dart';
 import 'widgets/player_indicators.dart';
@@ -357,12 +359,16 @@ class _BakaPlayerState extends State<BakaPlayer> {
           duration: const Duration(milliseconds: 250),
           reverseDuration: const Duration(milliseconds: 200),
           transitionBuilder: (child, animation) {
-            final slide = Tween<Offset>(
-              begin: const Offset(-0.2, 0),
-              end: Offset.zero,
-            ).animate(
-              CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-            );
+            final slide =
+                Tween<Offset>(
+                  begin: const Offset(-0.2, 0),
+                  end: Offset.zero,
+                ).animate(
+                  CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutCubic,
+                  ),
+                );
             return FadeTransition(
               opacity: animation,
               child: SlideTransition(position: slide, child: child),
@@ -374,9 +380,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
                   controller: widget.controller,
                   onClose: () => setState(() => _showPlayerInfoHud = false),
                 )
-              : const SizedBox.shrink(
-                  key: ValueKey('player_info_hud_empty'),
-                ),
+              : const SizedBox.shrink(key: ValueKey('player_info_hud_empty')),
         ),
       ),
     );
@@ -841,10 +845,8 @@ class _BakaPlayerState extends State<BakaPlayer> {
                       : Icons.closed_caption_disabled_rounded,
                   isWide: isWide,
                   onTap: () => controller.toggleSubtitle(),
-                  onLongPress: () => NavigationService.showSubtitleSettings(
-                    context,
-                    controller,
-                  ),
+                  onLongPress: () =>
+                      SubtitleSettingsPage.show(context, controller),
                   isActive: preferences.showSubtitle,
                 ),
               );
@@ -961,6 +963,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
         child: CachedNetworkImage(
           key: ValueKey(logoUrl),
           imageUrl: logoUrl,
+          memCacheHeight: 170,
           fit: BoxFit.contain,
           alignment: Alignment.centerLeft,
           errorWidget: (context, url, error) => Text(
@@ -1046,7 +1049,9 @@ class _BakaPlayerState extends State<BakaPlayer> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: isWide ? 300 : 200),
+                        constraints: BoxConstraints(
+                          maxWidth: isWide ? 300 : 200,
+                        ),
                         child: Text(
                           display,
                           style: TextStyle(
@@ -1128,7 +1133,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
                       final epIndex = mediaInfo.episodeIndex >= 0
                           ? mediaInfo.episodeIndex + 1
                           : 1;
-                      NavigationService.showDanmakuSettings(
+                      DanmakuSettingsPage.show(
                         context,
                         widget.controller.danmakuController,
                         defaultTitle: mediaInfo.title,

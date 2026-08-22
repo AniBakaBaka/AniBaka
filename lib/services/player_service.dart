@@ -269,11 +269,7 @@ class PlayerService {
         try {
           final response = await getPostDetail(postId);
           if (response.isNotEmpty) {
-            final postDetail =
-                (jsonDecode(response) as Map<String, dynamic>)['data'] as Map?;
-            if (postDetail != null) {
-              data.addAll(postDetail.cast<String, dynamic>());
-            }
+            data.addAll(response);
           }
         } catch (e) {
           debugPrint('[PlayerService] Failed to load post detail: $e');

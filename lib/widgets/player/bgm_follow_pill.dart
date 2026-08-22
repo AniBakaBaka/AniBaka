@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'package:baka/services/navigation_service.dart';
+import 'package:baka/pages/player/bgm_detail_page.dart';
 import 'package:baka/utils/bgm_utils.dart';
 
 class BgmFollowPill extends StatelessWidget {
@@ -44,7 +44,7 @@ class BgmFollowPill extends StatelessWidget {
               child: InkWell(
                 onTap: bgmInfo.subjectId == null
                     ? null
-                    : () => NavigationService.showBgmDetail(
+                    : () => BgmDetailPage.show(
                         context,
                         subjectId: bgmInfo.subjectId!,
                         title: title,

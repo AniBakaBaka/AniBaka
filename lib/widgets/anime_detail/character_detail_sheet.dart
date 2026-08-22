@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:baka/api/bgm.dart';
@@ -219,23 +218,20 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
   void initState() {
     super.initState();
     // 秒开预览：优先保留外部传入的角色基础信息
-    if (widget.initialData != null) {
-      _charInfo = Map<String, dynamic>.from(widget.initialData!);
-    }
+    _charInfo = widget.initialData;
     _loadData();
   }
 
   Future<void> _loadData() async {
     try {
-      final results = await Future.wait([
+      final results = await Future.wait<Object>([
         getBgmCharacterInfo(widget.characterId),
         getBgmCharacterComments(widget.characterId),
       ]);
       if (!mounted) return;
 
-      final infoData = jsonDecode(results[0]) as Map<String, dynamic>;
-      final commentsList = (jsonDecode(results[1]) as List<dynamic>)
-          .cast<Map<String, dynamic>>();
+      final infoData = results[0] as Map<String, dynamic>;
+      final commentsList = results[1] as List<Map<String, dynamic>>;
 
       setState(() {
         if (infoData.isNotEmpty) {

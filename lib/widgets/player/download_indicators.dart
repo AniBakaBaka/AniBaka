@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:baka/utils/format_utils.dart';
 
 import 'package:baka/models/download_task.dart';
+import 'package:baka/pages/player/download_page.dart';
 import 'package:baka/services/download_service.dart';
-import 'package:baka/services/navigation_service.dart';
 import 'package:baka/services/torrent/torrent_engine.dart';
 import 'package:baka/services/torrent/torrent_service.dart';
 
@@ -66,7 +66,7 @@ class _ActiveDownloadIndicatorState extends State<ActiveDownloadIndicator> {
     final theme = Theme.of(context);
 
     return GestureDetector(
-      onTap: () => NavigationService.showDownloadManager(context),
+      onTap: () => DownloadManagerPage.show(context),
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         padding: const EdgeInsets.all(12),

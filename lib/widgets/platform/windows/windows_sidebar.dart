@@ -1,7 +1,8 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:baka/instance.dart';
+import 'package:baka/pages/home/miniapp_page.dart';
 import 'package:baka/services/mine_service.dart';
 import 'package:baka/services/navigation_service.dart';
-import 'package:baka/services/settings_service.dart';
 import 'package:flutter/material.dart';
 
 class WindowsSidebar extends StatefulWidget {
@@ -20,11 +21,12 @@ class WindowsSidebar extends StatefulWidget {
 
 class _WindowsSidebarState extends State<WindowsSidebar> {
   late final MineService _mine = MineService();
-  late bool _isSidebarCollapsed = ThemeService.getSidebarCollapsed();
+  late bool _isSidebarCollapsed =
+      Instances.sp.getBool('sidebarCollapsed') ?? false;
 
   void _toggleSidebar() {
     setState(() => _isSidebarCollapsed = !_isSidebarCollapsed);
-    ThemeService.setSidebarCollapsed(_isSidebarCollapsed);
+    Instances.sp.setBool('sidebarCollapsed', _isSidebarCollapsed);
   }
 
   void _openLoginPage() {
@@ -76,7 +78,7 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
     }
     return ClipOval(
       child: CachedNetworkImage(
-        memCacheWidth: (size * 2).toInt(),
+        memCacheWidth: 80,
         imageUrl: avatarUrl,
         width: size,
         height: size,
@@ -147,8 +149,8 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
                     _mine.isBangumiLogin && !_mine.isLogin
                         ? 'Bangumi 登录'
                         : _mine.isLogin
-                            ? '已登录'
-                            : '打开登录',
+                        ? '已登录'
+                        : '打开登录',
                     style: TextStyle(
                       fontSize: 11,
                       color: theme.textTheme.bodySmall?.color?.withValues(
@@ -209,10 +211,12 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
         label: '里世界',
         isSelected: false,
         isCollapsed: _isSidebarCollapsed,
-        onTap: () => NavigationService.toWebView(
+        onTap: () => Navigator.push(
           context,
-          url: 'https://www.acgzone.cc',
-          title: '里世界',
+          MaterialPageRoute(
+            builder: (_) =>
+                const WebViewPage(url: 'https://www.acgzone.cc', title: '里世界'),
+          ),
         ),
       ),
     ];
@@ -284,8 +288,12 @@ class _NavItem extends StatelessWidget {
     final primary = theme.colorScheme.primary;
     final baseTextColor = theme.textTheme.bodyMedium?.color;
 
-    final fgColor = isSelected ? primary : baseTextColor?.withValues(alpha: 0.75);
-    final bgColor = isSelected ? primary.withValues(alpha: 0.12) : Colors.transparent;
+    final fgColor = isSelected
+        ? primary
+        : baseTextColor?.withValues(alpha: 0.75);
+    final bgColor = isSelected
+        ? primary.withValues(alpha: 0.12)
+        : Colors.transparent;
 
     return Material(
       color: Colors.transparent,
@@ -315,7 +323,9 @@ class _NavItem extends StatelessWidget {
                         label,
                         style: TextStyle(
                           color: fgColor,
-                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                          fontWeight: isSelected
+                              ? FontWeight.w600
+                              : FontWeight.w400,
                           fontSize: 13.5,
                         ),
                         overflow: TextOverflow.ellipsis,

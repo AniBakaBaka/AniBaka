@@ -31,6 +31,7 @@ class SourceIcon extends StatelessWidget {
         borderRadius: BorderRadius.circular(radius),
         child: CachedNetworkImage(
           imageUrl: url,
+          memCacheWidth: (size * 2).round(),
           width: size,
           height: size,
           fit: BoxFit.cover,

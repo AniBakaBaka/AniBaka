@@ -18,10 +18,10 @@ class WatchPartyMedia {
   factory WatchPartyMedia.fromJson(Map<String, dynamic> json) =>
       WatchPartyMedia(
         bgmSubjectId: (json['bgmSubjectId'] as num?)?.toInt(),
-        episodeIndex: (json['episodeIndex'] as num?)?.toInt() ?? 0,
-        title: json['title']?.toString() ?? '',
-        episodeTitle: json['episodeTitle']?.toString() ?? '',
-        duration: (json['duration'] as num?)?.toDouble() ?? 0,
+        episodeIndex: (json['episodeIndex'] as num).toInt(),
+        title: json['title'] as String,
+        episodeTitle: json['episodeTitle'] as String? ?? '',
+        duration: (json['duration'] as num).toDouble(),
       );
 
   final int? bgmSubjectId;
@@ -49,9 +49,9 @@ class WatchPartyPlayback {
 
   factory WatchPartyPlayback.fromJson(Map<String, dynamic> json) =>
       WatchPartyPlayback(
-        position: (json['position'] as num?)?.toDouble() ?? 0,
-        paused: json['paused'] as bool? ?? true,
-        setBy: json['setBy']?.toString() ?? '',
+        position: (json['position'] as num).toDouble(),
+        paused: json['paused'] as bool,
+        setBy: json['setBy'] as String? ?? '',
         doSeek: json['doSeek'] as bool? ?? false,
       );
 
@@ -73,12 +73,12 @@ class WatchPartyMember {
 
   factory WatchPartyMember.fromJson(Map<String, dynamic> json) =>
       WatchPartyMember(
-        id: json['id']?.toString() ?? '',
-        name: json['name']?.toString() ?? '',
-        protocol: json['protocol']?.toString() ?? 'anibaka',
-        verified: json['verified'] as bool? ?? false,
-        controller: json['controller'] as bool? ?? false,
-        ready: json['ready'] as bool? ?? false,
+        id: json['id'] as String,
+        name: json['name'] as String,
+        protocol: json['protocol'] as String,
+        verified: json['verified'] as bool,
+        controller: json['controller'] as bool,
+        ready: json['ready'] as bool,
       );
 
   final String id;
@@ -95,25 +95,20 @@ class WatchPartyChatMessage {
     required this.memberId,
     required this.username,
     required this.message,
-    required this.createdAt,
   });
 
   factory WatchPartyChatMessage.fromJson(Map<String, dynamic> json) =>
       WatchPartyChatMessage(
-        id: json['id']?.toString() ?? '',
-        memberId: json['memberId']?.toString() ?? '',
-        username: json['username']?.toString() ?? '',
-        message: json['message']?.toString() ?? '',
-        createdAt:
-            DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
-            DateTime.now(),
+        id: json['id'] as String,
+        memberId: json['memberId'] as String,
+        username: json['username'] as String,
+        message: json['message'] as String,
       );
 
   final String id;
   final String memberId;
   final String username;
   final String message;
-  final DateTime createdAt;
 }
 
 class WatchPartySnapshot {
@@ -132,51 +127,35 @@ class WatchPartySnapshot {
   });
 
   factory WatchPartySnapshot.fromJson(Map<String, dynamic> json) {
-    final rawPlayback = json['playback'];
-    final rawMedia = json['media'];
-    final rawMembers = json['members'] as List?;
-    final rawChat = json['chat'] as List?;
+    final rawMembers = json['members'] as List<dynamic>;
+    final rawChat = json['chat'] as List<dynamic>;
 
     return WatchPartySnapshot(
-      roomId: json['roomId']?.toString() ?? '',
-      inviteCode: json['inviteCode']?.toString() ?? '',
-      syncplayRoom: json['syncplayRoom']?.toString() ?? '',
-      ownerId: json['ownerId']?.toString() ?? '',
-      selfId: json['selfId']?.toString() ?? '',
-      revision: (json['revision'] as num?)?.toInt() ?? 0,
-      serverTime: (json['serverTime'] as num?)?.toInt() ?? 0,
-      playback: rawPlayback is Map<String, dynamic>
-          ? WatchPartyPlayback.fromJson(rawPlayback)
-          : (rawPlayback is Map
-              ? WatchPartyPlayback.fromJson(rawPlayback.cast<String, dynamic>())
-              : const WatchPartyPlayback()),
-      media: rawMedia is Map<String, dynamic>
-          ? WatchPartyMedia.fromJson(rawMedia)
-          : (rawMedia is Map
-              ? WatchPartyMedia.fromJson(rawMedia.cast<String, dynamic>())
-              : const WatchPartyMedia(episodeIndex: 0, title: '')),
-      members: rawMembers == null
-          ? const []
-          : [
-              for (final item in rawMembers)
-                if (item is Map)
-                  WatchPartyMember.fromJson(
-                    item is Map<String, dynamic>
-                        ? item
-                        : item.cast<String, dynamic>(),
-                  ),
-            ],
-      chat: rawChat == null
-          ? const []
-          : [
-              for (final item in rawChat)
-                if (item is Map)
-                  WatchPartyChatMessage.fromJson(
-                    item is Map<String, dynamic>
-                        ? item
-                        : item.cast<String, dynamic>(),
-                  ),
-            ],
+      roomId: json['roomId'] as String,
+      inviteCode: json['inviteCode'] as String,
+      syncplayRoom: json['syncplayRoom'] as String,
+      ownerId: json['ownerId'] as String? ?? '',
+      selfId: json['selfId'] as String? ?? '',
+      revision: (json['revision'] as num).toInt(),
+      serverTime: (json['serverTime'] as num).toInt(),
+      playback: WatchPartyPlayback.fromJson(
+        json['playback'] as Map<String, dynamic>,
+      ),
+      media: WatchPartyMedia.fromJson(json['media'] as Map<String, dynamic>),
+      members: List<WatchPartyMember>.generate(
+        rawMembers.length,
+        (index) => WatchPartyMember.fromJson(
+          rawMembers[index] as Map<String, dynamic>,
+        ),
+        growable: false,
+      ),
+      chat: List<WatchPartyChatMessage>.generate(
+        rawChat.length,
+        (index) => WatchPartyChatMessage.fromJson(
+          rawChat[index] as Map<String, dynamic>,
+        ),
+        growable: false,
+      ),
     );
   }
 
@@ -231,30 +210,24 @@ class WatchPartyInvite {
     required this.syncplayRoom,
     required this.title,
     required this.episodeIndex,
-    this.mediaSource = '',
     this.memberCount = 0,
-    this.expiresAt,
-    this.ticket = '',
     this.webSocketUrl = '',
     this.controllerPassword = '',
   });
 
   factory WatchPartyInvite.fromJson(Map<String, dynamic> json) =>
       WatchPartyInvite(
-        roomId: json['roomId']?.toString() ?? '',
-        inviteCode: json['inviteCode']?.toString() ?? '',
-        inviteUrl: json['inviteUrl']?.toString() ?? '',
-        syncplayHost: json['syncplayHost']?.toString() ?? '',
-        syncplayPort: (json['syncplayPort'] as num?)?.toInt() ?? 8999,
-        syncplayRoom: json['syncplayRoom']?.toString() ?? '',
-        title: json['title']?.toString() ?? '',
-        episodeIndex: (json['episodeIndex'] as num?)?.toInt() ?? 0,
-        mediaSource: json['mediaSource']?.toString() ?? '',
-        memberCount: (json['memberCount'] as num?)?.toInt() ?? 0,
-        expiresAt: DateTime.tryParse(json['expiresAt']?.toString() ?? ''),
-        ticket: json['ticket']?.toString() ?? '',
-        webSocketUrl: json['websocketUrl']?.toString() ?? '',
-        controllerPassword: json['controllerPassword']?.toString() ?? '',
+        roomId: json['roomId'] as String,
+        inviteCode: json['inviteCode'] as String,
+        inviteUrl: json['inviteUrl'] as String,
+        syncplayHost: json['syncplayHost'] as String,
+        syncplayPort: (json['syncplayPort'] as num).toInt(),
+        syncplayRoom: json['syncplayRoom'] as String,
+        title: json['title'] as String,
+        episodeIndex: (json['episodeIndex'] as num).toInt(),
+        memberCount: (json['memberCount'] as num).toInt(),
+        webSocketUrl: json['websocketUrl'] as String? ?? '',
+        controllerPassword: json['controllerPassword'] as String? ?? '',
       );
 
   final String roomId;
@@ -265,29 +238,7 @@ class WatchPartyInvite {
   final String syncplayRoom;
   final String title;
   final int episodeIndex;
-  final String mediaSource;
   final int memberCount;
-  final DateTime? expiresAt;
-  final String ticket;
   final String webSocketUrl;
   final String controllerPassword;
-}
-
-class WatchPartyConnectionInfo {
-  const WatchPartyConnectionInfo({
-    required this.roomId,
-    required this.ticket,
-    required this.webSocketUrl,
-  });
-
-  factory WatchPartyConnectionInfo.fromJson(Map<String, dynamic> json) =>
-      WatchPartyConnectionInfo(
-        roomId: json['roomId']?.toString() ?? '',
-        ticket: json['ticket']?.toString() ?? '',
-        webSocketUrl: json['websocketUrl']?.toString() ?? '',
-      );
-
-  final String roomId;
-  final String ticket;
-  final String webSocketUrl;
 }

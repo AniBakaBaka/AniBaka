@@ -1,9 +1,7 @@
-import 'dart:convert';
-
 import 'package:baka/api/post.dart';
+import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/services/bangumi_sync_service.dart';
-import 'package:baka/services/network_service.dart';
 import 'package:baka/utils/date_util.dart';
 import 'package:baka/utils/image_utils.dart';
 import 'package:baka/utils/reg_utils.dart';
@@ -15,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 Color? _commentMutedColor(ThemeData theme, {double alpha = 0.35}) =>
@@ -156,7 +155,7 @@ class CommentListState extends State<CommentList> {
     r'|\b(\d{1,2}:\d{2}(?::\d{2})?)\b',
   );
 
-  late final Map userInfo = getUserInfo();
+  AppUser get _user => Get.find<AppState>().user.value;
   List? _internalComments;
   int _requestSerial = 0;
   late MarkdownStyleSheet _markdownStyle;
@@ -222,10 +221,8 @@ class CommentListState extends State<CommentList> {
     List result;
 
     try {
-      final response = await getComments(widget.pid, widget.size ?? 80, '');
-      final decoded = jsonDecode(response);
       result = processCommentsList(
-        decoded is Map ? decoded['data'] as List? : null,
+        await getComments(widget.pid, widget.size ?? 80, ''),
       );
     } catch (error) {
       debugPrint('获取评论失败: $error');
@@ -404,7 +401,8 @@ class CommentListState extends State<CommentList> {
     final mutedColor = theme.textTheme.bodySmall?.color?.withValues(
       alpha: 0.35,
     );
-    final userName = userInfo['name']?.toString();
+    final user = _user;
+    final userName = user.isLoggedIn ? user.name : null;
     final likes = comment['uv']?.toString() ?? '';
     final isLiked = userName != null && likes.contains(userName);
     final replies = comment['replies'] is List
@@ -469,12 +467,11 @@ class CommentListState extends State<CommentList> {
                 _buildMarkdownImage(config.uri, theme),
           ),
           const SizedBox(height: 10),
-          if ((userInfo['id'] as num? ?? 0) != 0)
+          if (user.isLoggedIn)
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                if ((userInfo['level'] as num? ?? 0) > 1 ||
-                    userInfo['id'] == comment['uid']) ...[
+                if (user.level > 1 || user.id == comment['uid']) ...[
                   _buildActionButton(
                     icon: Icons.delete_outline_rounded,
                     color: mutedColor,
@@ -495,12 +492,11 @@ class CommentListState extends State<CommentList> {
                   onTap: () async {
                     HapticFeedback.selectionClick();
                     try {
-                      final response = await updateCommentUv(
+                      comment['uv'] = await updateCommentUv(
                         comment['id'],
                         userName,
                       );
                       if (!mounted) return;
-                      comment['uv'] = jsonDecode(response)['msg'];
                       setState(() {});
                     } catch (_) {
                       showSnackBar('操作失败');
@@ -721,7 +717,8 @@ class CommentListState extends State<CommentList> {
       showSnackBar('要写内容~');
       return;
     }
-    if ((userInfo['id'] as num? ?? 0) == 0) {
+    final user = _user;
+    if (!user.isLoggedIn) {
       showSnackBar(
         BangumiSyncService.instance.isConnected
             ? 'Bangumi 登录不能回复 AniBaka 评论，请先登录 AniBaka'
@@ -731,15 +728,15 @@ class CommentListState extends State<CommentList> {
     }
 
     try {
-      final response = await addComment({
+      final success = await addComment({
         'content': content,
         'pid': widget.pid,
-        'uid': userInfo['id'],
+        'uid': user.id,
         'rid': rid,
         'runame': runame,
         'read': 0,
       });
-      if (jsonDecode(response)['code'] == 200) {
+      if (success) {
         showSnackBar('发射成功');
         await _loadComments();
       }

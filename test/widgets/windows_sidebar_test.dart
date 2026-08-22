@@ -45,7 +45,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Bangumi 测试用户'), findsOneWidget);
-    expect(find.text('Bangumi 登录 · 历史仅本机'), findsOneWidget);
+    expect(find.text('Bangumi 登录'), findsOneWidget);
     final avatar = tester.widget<CachedNetworkImage>(
       find.byType(CachedNetworkImage).first,
     );

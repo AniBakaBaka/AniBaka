@@ -107,12 +107,7 @@ class AnimeDetailHeader extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildTitleOrLogo(
-                        title,
-                        detail.logoUrl,
-                        true,
-                        isDark,
-                      ),
+                      _buildTitleOrLogo(title, detail.logoUrl, true, isDark),
                       if (alias.isNotEmpty && alias != title) ...[
                         const SizedBox(height: 12),
                         Text(
@@ -187,11 +182,7 @@ class AnimeDetailHeader extends StatelessWidget {
               ],
               const Spacer(),
               if (hasScore)
-                _ScoreRow(
-                  score: score,
-                  scoreCount: scoreCount,
-                  isDark: isDark,
-                ),
+                _ScoreRow(score: score, scoreCount: scoreCount, isDark: isDark),
             ],
           ),
         );
@@ -223,6 +214,7 @@ class AnimeDetailHeader extends StatelessWidget {
       },
     );
   }
+
   Widget _buildTitleOrLogo(
     String title,
     String logoUrl,
@@ -236,6 +228,7 @@ class AnimeDetailHeader extends StatelessWidget {
         child: CachedNetworkImage(
           key: ValueKey(logoUrl),
           imageUrl: logoUrl,
+          memCacheHeight: 170,
           fit: BoxFit.contain,
           alignment: Alignment.centerLeft,
           errorWidget: (context, url, error) => Text(
@@ -467,10 +460,7 @@ class _DesktopScoreCorner extends StatelessWidget {
           compact: true,
           showLabels: true,
         ),
-        if (scoreCol != null) ...[
-          const SizedBox(width: 20),
-          scoreCol,
-        ],
+        if (scoreCol != null) ...[const SizedBox(width: 20), scoreCol],
       ],
     );
   }
@@ -497,8 +487,9 @@ class _TagsWrap extends StatelessWidget {
   Widget build(BuildContext context) {
     final limited = limit;
     final shown = limited == null ? tags : tags.take(limited).toList();
-    final overflow =
-        limited != null && tags.length > limited ? tags.length - limited : 0;
+    final overflow = limited != null && tags.length > limited
+        ? tags.length - limited
+        : 0;
 
     final allPills = <Widget>[
       if (updateTime != null && updateTime!.trim().isNotEmpty)
@@ -516,13 +507,7 @@ class _TagsWrap extends StatelessWidget {
         i,
         i + 7 > allPills.length ? allPills.length : i + 7,
       );
-      chunkedWraps.add(
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: chunk,
-        ),
-      );
+      chunkedWraps.add(Wrap(spacing: 6, runSpacing: 6, children: chunk));
     }
 
     return Column(
@@ -563,10 +548,7 @@ class _CollectionButton extends StatelessWidget {
   final AnimeCollection? collection;
   final VoidCallback onTap;
 
-  const _CollectionButton({
-    required this.collection,
-    required this.onTap,
-  });
+  const _CollectionButton({required this.collection, required this.onTap});
 
   @override
   Widget build(BuildContext context) {

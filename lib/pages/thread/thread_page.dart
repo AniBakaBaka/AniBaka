@@ -385,10 +385,7 @@ class _ThreadPageState extends State<ThreadPage>
   Widget _watchPartyCard(WatchPartyInvite room, ThemeData theme) {
     final hasTitle = room.title.trim().isNotEmpty;
     final title = hasTitle ? room.title.trim() : 'Syncplay 房间';
-    final isSyncplayMedia = room.mediaSource == 'syncplay';
-    final media = isSyncplayMedia
-        ? 'Syncplay · 房间 ${room.syncplayRoom}'
-        : hasTitle
+    final media = hasTitle
         ? 'EP${room.episodeIndex + 1}'
         : '房间 ${room.syncplayRoom}';
     final joining = _joiningRoomCode == room.inviteCode;

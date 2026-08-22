@@ -26,39 +26,20 @@ class MinePage extends StatefulWidget {
   State<StatefulWidget> createState() => _MinePageState();
 }
 
-class _MinePageState extends State<MinePage>
-    with SingleTickerProviderStateMixin {
+class _MinePageState extends State<MinePage> {
   late final MineService _svc = MineService();
-  late final AnimationController _controller;
-  late final Animation<double> _fadeAnimation;
   late final Worker _loginWorker;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _fadeAnimation = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeOut,
-    );
-    _loginWorker = ever(Get.find<AppState>().userInfo, (_) {
+    _loginWorker = ever(Get.find<AppState>().user, (_) {
       if (mounted) setState(() {});
     });
-    _controller.forward();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (context.reduceMotion) _controller.value = 1;
   }
 
   @override
   void dispose() {
-    _controller.dispose();
     _loginWorker.dispose();
     super.dispose();
   }
@@ -72,82 +53,79 @@ class _MinePageState extends State<MinePage>
       backgroundColor: theme.scaffoldBackgroundColor,
       body: AnnotatedRegion<SystemUiOverlayStyle>(
         value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
-        child: FadeTransition(
-          opacity: _fadeAnimation,
-          child: CustomScrollView(
-            physics: const BouncingScrollPhysics(
-              parent: AlwaysScrollableScrollPhysics(),
-            ),
-            slivers: [
-              _buildHeader(context, isDark),
-              SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                sliver: SliverList(
-                  delegate: SliverChildListDelegate([
-                    const SizedBox(height: 16),
-                    _buildDashboard(context, isDark),
-                    const SizedBox(height: 12),
-                    _buildFeatureCards(context, isDark),
-                    const SizedBox(height: 16),
-                    _buildSectionTitle(context, '设置与支持'),
-                    const SizedBox(height: 8),
-                    _buildMenuGroup(context, isDark, [
-                      _MenuItem(
-                        title: '主题模式',
-                        icon: Icons.brightness_6_outlined,
-                        onTap: _showThemeDialog,
-                        trailing: _buildTag(_svc.themeText, isDark),
-                      ),
-                      _MenuItem(
-                        title: 'APP线路',
-                        icon: Icons.swap_calls_outlined,
-                        onTap: _switchHost,
-                        trailing: _buildTag(_svc.currentHost, isDark),
-                      ),
-                      _MenuItem(
-                        title: '支持开发',
-                        icon: Icons.favorite_border,
-                        onTap: _showSponsorDialog,
-                        trailing: _buildTag(
-                          '推荐',
-                          isDark,
-                          color: Colors.pinkAccent,
-                        ),
-                      ),
-                      _MenuItem(
-                        title: '版本更新',
-                        icon: Icons.system_update_alt_rounded,
-                        onTap: _checkUpdate,
-                        trailing: _buildTag('v${Instances.appVersion}', isDark),
-                      ),
-                    ]),
-                    const SizedBox(height: 16),
-                    _buildSectionTitle(context, '法律声明'),
-                    const SizedBox(height: 8),
-                    _buildMenuGroup(context, isDark, [
-                      _MenuItem(
-                        title: '免责声明',
-                        icon: Icons.gavel_outlined,
-                        onTap: _showDisclaimerDialog,
-                      ),
-                    ]),
-                    const SizedBox(height: 24),
-                    Center(
-                      child: Text(
-                        'Baka v${Instances.appVersion}',
-                        style: TextStyle(
-                          color: isDark ? Colors.white30 : Colors.black38,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
+        child: CustomScrollView(
+          physics: const BouncingScrollPhysics(
+            parent: AlwaysScrollableScrollPhysics(),
+          ),
+          slivers: [
+            _buildHeader(context, isDark),
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  const SizedBox(height: 16),
+                  _buildDashboard(context, isDark),
+                  const SizedBox(height: 12),
+                  _buildFeatureCards(context, isDark),
+                  const SizedBox(height: 16),
+                  _buildSectionTitle(context, '设置与支持'),
+                  const SizedBox(height: 8),
+                  _buildMenuGroup(context, isDark, [
+                    _MenuItem(
+                      title: '主题模式',
+                      icon: Icons.brightness_6_outlined,
+                      onTap: _showThemeDialog,
+                      trailing: _buildTag(_svc.themeText, isDark),
+                    ),
+                    _MenuItem(
+                      title: 'APP线路',
+                      icon: Icons.swap_calls_outlined,
+                      onTap: _switchHost,
+                      trailing: _buildTag(_svc.currentHost, isDark),
+                    ),
+                    _MenuItem(
+                      title: '支持开发',
+                      icon: Icons.favorite_border,
+                      onTap: _showSponsorDialog,
+                      trailing: _buildTag(
+                        '推荐',
+                        isDark,
+                        color: Colors.pinkAccent,
                       ),
                     ),
-                    const SizedBox(height: 32),
+                    _MenuItem(
+                      title: '版本更新',
+                      icon: Icons.system_update_alt_rounded,
+                      onTap: _checkUpdate,
+                      trailing: _buildTag('v${Instances.appVersion}', isDark),
+                    ),
                   ]),
-                ),
+                  const SizedBox(height: 16),
+                  _buildSectionTitle(context, '法律声明'),
+                  const SizedBox(height: 8),
+                  _buildMenuGroup(context, isDark, [
+                    _MenuItem(
+                      title: '免责声明',
+                      icon: Icons.gavel_outlined,
+                      onTap: _showDisclaimerDialog,
+                    ),
+                  ]),
+                  const SizedBox(height: 24),
+                  Center(
+                    child: Text(
+                      'Baka v${Instances.appVersion}',
+                      style: TextStyle(
+                        color: isDark ? Colors.white30 : Colors.black38,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                ]),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

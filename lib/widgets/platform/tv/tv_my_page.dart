@@ -41,7 +41,7 @@ class _TvMyPageState extends State<TvMyPage> {
   @override
   void initState() {
     super.initState();
-    _loginWorker = ever(Get.find<AppState>().userInfo, (_) {
+    _loginWorker = ever(Get.find<AppState>().user, (_) {
       if (mounted) {
         setState(() {});
         _loadUserData();
@@ -115,7 +115,7 @@ class _TvMyPageState extends State<TvMyPage> {
 
       await Get.find<AppState>().saveLoginInfo(
         result['token'] as String,
-        Map<String, dynamic>.from(result['user'] as Map),
+        AppUser.fromJson(result['user'] as Map<String, dynamic>),
         refreshToken: result['refresh_token'] as String?,
         tokenExpiresAt: result['token_expires_at'] as String?,
       );
@@ -140,7 +140,10 @@ class _TvMyPageState extends State<TvMyPage> {
         backgroundColor: context.tvPanelBgColor,
         title: Text(
           '确认退出登录？',
-          style: TextStyle(color: context.tvTextColor, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: context.tvTextColor,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         content: Text(
           '退出后，播放历史将不再保存至 AniBaka 云端。',
@@ -165,7 +168,10 @@ class _TvMyPageState extends State<TvMyPage> {
                 color: Colors.redAccent.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Text('退出', style: TextStyle(color: Colors.redAccent)),
+              child: const Text(
+                '退出',
+                style: TextStyle(color: Colors.redAccent),
+              ),
             ),
           ),
         ],
@@ -230,9 +236,7 @@ class _TvMyPageState extends State<TvMyPage> {
                   ),
                   const SizedBox(height: 20),
                   Expanded(
-                    child: isLogin
-                        ? _buildStatsGrid()
-                        : _buildGuestInfoGrid(),
+                    child: isLogin ? _buildStatsGrid() : _buildGuestInfoGrid(),
                   ),
                   const SizedBox(height: 12),
                   Text(
@@ -266,16 +270,19 @@ class _TvMyPageState extends State<TvMyPage> {
             ),
             boxShadow: [
               BoxShadow(
-                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
+                color: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: 0.2),
                 blurRadius: 20,
                 spreadRadius: 2,
-              )
+              ),
             ],
           ),
           child: ClipOval(
             child: _mineService.avatarUrl.isNotEmpty
                 ? CachedNetworkImage(
                     imageUrl: _mineService.avatarUrl,
+                    memCacheWidth: 240,
                     fit: BoxFit.cover,
                   )
                 : Container(
@@ -303,10 +310,7 @@ class _TvMyPageState extends State<TvMyPage> {
         const SizedBox(height: 8),
         Text(
           _mineService.displaySubtitle,
-          style: TextStyle(
-            fontSize: 13,
-            color: context.tvTextSecondaryColor,
-          ),
+          style: TextStyle(fontSize: 13, color: context.tvTextSecondaryColor),
           textAlign: TextAlign.center,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
@@ -342,9 +346,7 @@ class _TvMyPageState extends State<TvMyPage> {
 
   Widget _buildLoginQrArea() {
     if (_isQrLoading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (_qrError != null) {
@@ -374,7 +376,10 @@ class _TvMyPageState extends State<TvMyPage> {
               ),
               child: const Text(
                 '重试',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),
@@ -396,10 +401,7 @@ class _TvMyPageState extends State<TvMyPage> {
         const SizedBox(height: 6),
         Text(
           '使用同一Wi-Fi下的手机扫码',
-          style: TextStyle(
-            fontSize: 12,
-            color: context.tvTextSecondaryColor,
-          ),
+          style: TextStyle(fontSize: 12, color: context.tvTextSecondaryColor),
         ),
         const SizedBox(height: 20),
         if (_qrContent != null)
@@ -413,7 +415,7 @@ class _TvMyPageState extends State<TvMyPage> {
                   color: Colors.black.withValues(alpha: 0.1),
                   blurRadius: 10,
                   spreadRadius: 2,
-                )
+                ),
               ],
             ),
             child: QrImageView(
@@ -546,10 +548,7 @@ class _TvMyPageState extends State<TvMyPage> {
       decoration: BoxDecoration(
         color: context.tvHighlightColor(0.04),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: context.tvHighlightColor(0.08),
-          width: 1,
-        ),
+        border: Border.all(color: context.tvHighlightColor(0.08), width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -580,10 +579,7 @@ class _TvMyPageState extends State<TvMyPage> {
           const SizedBox(height: 2),
           Text(
             subtitle,
-            style: TextStyle(
-              color: context.tvTextHintColor,
-              fontSize: 11,
-            ),
+            style: TextStyle(color: context.tvTextHintColor, fontSize: 11),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),

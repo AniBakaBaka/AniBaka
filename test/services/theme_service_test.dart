@@ -1,54 +1,60 @@
 import 'package:baka/instance.dart';
-import 'package:baka/services/settings_service.dart';
+import 'package:baka/app_state.dart';
 import 'package:baka/theme.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  late AppState state;
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     Instances.sp = await SharedPreferences.getInstance();
+    state = AppState()..onInit();
   });
 
+  tearDown(() => state.onClose());
+
   test('reduced visual effects are disabled by default', () {
-    expect(ThemeService.getReduceVisualEffects(), isFalse);
+    expect(state.reduceVisualEffects, isFalse);
   });
 
   test('dynamic color is disabled by default', () {
-    expect(ThemeService.getDynamicColor(), isFalse);
+    expect(state.dynamicColor, isFalse);
   });
 
   test('app font defaults to Noto Serif SC', () {
-    expect(ThemeService.getFontFamily(), 'Noto Serif SC');
+    expect(state.fontFamily, 'Noto Serif SC');
   });
 
   test('dynamic color preference persists', () async {
-    await ThemeService.setDynamicColor(true);
+    state.setDynamicColor(true);
 
-    expect(ThemeService.getDynamicColor(), isTrue);
+    expect(state.dynamicColor, isTrue);
     expect(Instances.sp.getBool('dynamic_color'), isTrue);
   });
 
   test('reduced visual effects preference persists', () async {
-    await ThemeService.setReduceVisualEffects(true);
+    state.setReduceVisualEffects(true);
 
-    expect(ThemeService.getReduceVisualEffects(), isTrue);
+    expect(state.reduceVisualEffects, isTrue);
     expect(Instances.sp.getBool('reduce_visual_effects'), isTrue);
   });
 
   test('supported font preference persists', () async {
-    await ThemeService.setFontFamily('Zen Maru Gothic');
+    state.setFontFamily('Zen Maru Gothic');
 
-    expect(ThemeService.getFontFamily(), 'Zen Maru Gothic');
+    expect(state.fontFamily, 'Zen Maru Gothic');
   });
 
   test('removed fonts fall back to the default font', () async {
     for (final font in ['Ma Shan Zheng', 'Noto Sans TC', 'Dela Gothic One']) {
       await Instances.sp.setString(AppFonts.spKey, font);
 
-      expect(ThemeService.getFontFamily(), AppFonts.defaultFont);
+      final restored = AppState()..onInit();
+      expect(restored.fontFamily, AppFonts.defaultFont);
+      restored.onClose();
     }
   });
 }

@@ -9,8 +9,10 @@ const Duration _bgmCacheTtl = Duration(minutes: 5);
 final _subjectCache = _MemoryCache<int, Map<String, dynamic>>(64);
 final _episodeCache = _MemoryCache<int, List<Map<String, dynamic>>>(8);
 final _relatedCache = _MemoryCache<int, List<Map<String, dynamic>>>(16);
-final _subjectCommentsCache = _MemoryCache<String, String>(16);
-final _episodeCommentsCache = _MemoryCache<int, String>(16);
+final _subjectCommentsCache = _MemoryCache<String, BgmCommentPage>(4);
+final _episodeCommentsCache = _MemoryCache<int, List<Map<String, dynamic>>>(8);
+
+typedef BgmCommentPage = ({List<Map<String, dynamic>> comments, int total});
 
 Future<List<Map<String, dynamic>>> searchBgmAnime(String title) async {
   final response = await _post(
@@ -78,33 +80,41 @@ Future<Map<String, List<Map<String, dynamic>>>> getBgmCalendar() async {
   return {for (final entry in data.entries) entry.key: _mapList(entry.value)};
 }
 
-Future<String> getBgmSubjectComments(
+Future<BgmCommentPage> getBgmSubjectComments(
   int subjectId, {
   int limit = 20,
   int offset = 0,
 }) {
   final cacheKey = '$subjectId:$limit:$offset';
-  return _subjectCommentsCache.get(
-    cacheKey,
-    () => _get(
-      '$_bgmNextBase/p1/subjects/$subjectId/comments?limit=$limit&offset=$offset',
-    ),
-  );
+  return _subjectCommentsCache.get(cacheKey, () async {
+    final json = _jsonMap(
+      await _get(
+        '$_bgmNextBase/p1/subjects/$subjectId/comments?limit=$limit&offset=$offset',
+      ),
+    );
+    return (
+      comments: _mapList(json['data']),
+      total: (json['total'] as num).toInt(),
+    );
+  });
 }
 
-Future<String> getBgmEpisodeComments(int episodeId) =>
+Future<List<Map<String, dynamic>>> getBgmEpisodeComments(int episodeId) =>
     _episodeCommentsCache.get(
       episodeId,
-      () => _get('$_bgmNextBase/p1/episodes/$episodeId/comments'),
+      () async => _mapList(
+        jsonDecode(await _get('$_bgmNextBase/p1/episodes/$episodeId/comments')),
+      ),
     );
 
-Future<String> getBgmCharacterInfo(int characterId) {
-  return _get('$_bgmNextBase/p1/characters/$characterId');
-}
+Future<Map<String, dynamic>> getBgmCharacterInfo(int characterId) async =>
+    _jsonMap(await _get('$_bgmNextBase/p1/characters/$characterId'));
 
-Future<String> getBgmCharacterComments(int characterId) {
-  return _get('$_bgmNextBase/p1/characters/$characterId/comments');
-}
+Future<List<Map<String, dynamic>>> getBgmCharacterComments(
+  int characterId,
+) async => _mapList(
+  jsonDecode(await _get('$_bgmNextBase/p1/characters/$characterId/comments')),
+);
 
 /// 通过标签搜索 BGM 动画
 ///
@@ -152,19 +162,22 @@ class _MemoryCache<K, V> {
   _MemoryCache(this.limit);
 
   final int limit;
-  final Map<K, ({DateTime expiresAt, Future<V> value})> _entries = {};
+  final Map<K, ({int expiresAt, Future<V> value})> _entries = {};
 
   Future<V> get(K key, Future<V> Function() load) {
-    final now = DateTime.now();
+    final now = DateTime.now().millisecondsSinceEpoch;
     final cached = _entries.remove(key);
-    if (cached != null && now.isBefore(cached.expiresAt)) {
+    if (cached != null && now < cached.expiresAt) {
       _entries[key] = cached;
       return cached.value;
     }
 
     if (_entries.length >= limit) _entries.remove(_entries.keys.first);
     final value = _load(key, load);
-    _entries[key] = (expiresAt: now.add(_bgmCacheTtl), value: value);
+    _entries[key] = (
+      expiresAt: now + _bgmCacheTtl.inMilliseconds,
+      value: value,
+    );
     return value;
   }
 

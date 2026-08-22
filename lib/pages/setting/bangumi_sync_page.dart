@@ -8,7 +8,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
-import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 const _bangumiIconAsset = 'assets/bangumi.svg';
@@ -69,7 +68,6 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
       if (mounted) setState(() => _busy = false);
     }
   }
-
 
   Future<void> _disconnect() async {
     if (_busy) return;
@@ -195,7 +193,10 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
                   report: _report,
                   lastSyncText: lastSyncAt == null
                       ? '尚未同步'
-                      : DateFormat('yyyy-MM-dd HH:mm').format(lastSyncAt),
+                      : lastSyncAt
+                            .toIso8601String()
+                            .substring(0, 16)
+                            .replaceFirst('T', ' '),
                   onSync: _sync,
                 ),
                 const SizedBox(height: 28),
@@ -416,16 +417,14 @@ class _AccountView extends StatelessWidget {
                   child: avatarUrl != null && avatarUrl.isNotEmpty
                       ? CachedNetworkImage(
                           imageUrl: avatarUrl,
+                          memCacheWidth: 80,
                           fit: BoxFit.cover,
                           errorWidget: (_, _, _) => SvgPicture.asset(
                             _bangumiIconAsset,
                             fit: BoxFit.cover,
                           ),
                         )
-                      : SvgPicture.asset(
-                          _bangumiIconAsset,
-                          fit: BoxFit.cover,
-                        ),
+                      : SvgPicture.asset(_bangumiIconAsset, fit: BoxFit.cover),
                 ),
               ),
               const SizedBox(width: 12),
@@ -551,11 +550,7 @@ class _SyncCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Icon(
-                    Icons.sync_rounded,
-                    size: 20,
-                    color: colors.primary,
-                  ),
+                  Icon(Icons.sync_rounded, size: 20, color: colors.primary),
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
@@ -613,7 +608,7 @@ class _SyncCard extends StatelessWidget {
                 !connected
                     ? '请先关联 Bangumi 账号以使用同步功能'
                     : (report?.summary ??
-                        '支持同步想看、在看、看过的进度与评分。首次同步冲突以 Bangumi 为准。'),
+                          '支持同步想看、在看、看过的进度与评分。首次同步冲突以 Bangumi 为准。'),
                 style: TextStyle(
                   fontSize: 12,
                   height: 1.4,

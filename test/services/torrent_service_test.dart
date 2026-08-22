@@ -84,4 +84,30 @@ void main() {
     expect(manager.readFileData(0, data.length), data);
     expect(manager.completedPieceIndices, [0]);
   });
+
+  test('contiguous torrent progress advances across out-of-order pieces', () {
+    final byte = Uint8List.fromList([7]);
+    final hash = sha1.convert(byte).bytes;
+    final metadata = TorrentMetadata(
+      infoHash: Uint8List.fromList(List<int>.filled(20, 1)),
+      rawInfoBytes: Uint8List(0),
+      name: 'pieces.bin',
+      pieceLength: 1,
+      pieces: Uint8List.fromList([...hash, ...hash, ...hash]),
+      files: const [TorrentFile(path: 'video.mp4', length: 3, offset: 0)],
+      totalSize: 3,
+      trackers: const [],
+    );
+    final manager = PieceManager(metadata: metadata, targetFileIndex: 0);
+    addTearDown(manager.dispose);
+
+    manager.onBlockReceived(1, 0, byte);
+    expect(manager.contiguousBytes, 0);
+    manager.onBlockReceived(0, 0, byte);
+    expect(manager.contiguousBytes, 2);
+    manager.onBlockReceived(2, 0, byte);
+
+    expect(manager.contiguousBytes, 3);
+    expect(manager.isComplete, isTrue);
+  });
 }

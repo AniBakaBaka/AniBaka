@@ -266,7 +266,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     AppNavItem(iconPath: 'assets/smiling-face', label: '我的'),
   ];
 
-  late final List<Widget> _pages;
+  late final List<Widget?> _pages;
   late final AppState _appState;
 
   int _lastBackPressTime = 0;
@@ -278,18 +278,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _appState = Get.find<AppState>();
 
-    _pages = Instances.isDesktopPlatform
-        ? const [
-            RepaintBoundary(child: HomePage()),
-            RepaintBoundary(child: ThreadPage()),
-            RepaintBoundary(child: MinePage()),
-          ]
-        : const [
-            RepaintBoundary(child: HomePage()),
-            RepaintBoundary(child: UpdateSchedulePage()),
-            RepaintBoundary(child: ThreadPage()),
-            RepaintBoundary(child: MinePage()),
-          ];
+    _pages = List<Widget?>.filled(Instances.isDesktopPlatform ? 3 : 4, null);
   }
 
   @override
@@ -324,6 +313,24 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     }
   }
 
+  Widget _pageAt(int index) {
+    final cached = _pages[index];
+    if (cached != null) return cached;
+    final page = Instances.isDesktopPlatform
+        ? switch (index) {
+            0 => const HomePage(),
+            1 => const ThreadPage(),
+            _ => const MinePage(),
+          }
+        : switch (index) {
+            0 => const HomePage(),
+            1 => const UpdateSchedulePage(),
+            2 => const ThreadPage(),
+            _ => const MinePage(),
+          };
+    return _pages[index] = RepaintBoundary(child: page);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (Instances.isTV) {
@@ -352,14 +359,15 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           children: [
             Column(
               children: [
-                if (Platform.isWindows && Instances.isDesktopPlatform) const WindowsTitleBar(),
+                if (Platform.isWindows && Instances.isDesktopPlatform)
+                  const WindowsTitleBar(),
                 if (Platform.isMacOS) const MacOSTitleBar(title: 'Baka'),
                 Expanded(
                   child: Row(
                     children: [
                       if (Instances.isDesktopPlatform)
                         Obx(() {
-                          _appState.userInfo.value;
+                          _appState.user.value;
                           return WindowsSidebar(
                             currentPageIndex: _appState.currentPageIndex.value,
                             onPageChange: _appState.changePage,
@@ -378,7 +386,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                               )
                                 TickerMode(
                                   enabled: index == currentIndex,
-                                  child: _pages[index],
+                                  child: index == currentIndex
+                                      ? _pageAt(index)
+                                      : (_pages[index] ??
+                                            const SizedBox.shrink()),
                                 ),
                             ],
                           );

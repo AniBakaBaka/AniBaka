@@ -72,7 +72,6 @@ dependencies:
   saver_gallery: ^4.1.2
   # 12.4.0 calls an iOS 26 SDK selector that Xcode 16 cannot compile.
   device_info_plus: 12.3.0
-  intl: ^0.20.3
   file_picker: ^11.0.2
   bitsdojo_window: ^0.1.6
   fullscreen_window: ^1.0.3

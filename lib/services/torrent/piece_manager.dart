@@ -31,6 +31,8 @@ class PieceManager {
       PieceState.pending,
     );
     _pieceStatesView = UnmodifiableListView(_pieceStates);
+    _remainingPieces = _pieceStates.length;
+    _firstIncompletePiece = _firstPiece;
     _cacheFile = File(
       '${Directory.systemTemp.path}${Platform.pathSeparator}'
       'anibaka-${metadata.infoHashHex}-$targetFileIndex.part',
@@ -40,7 +42,7 @@ class PieceManager {
 
   static const int blockSize = 16 * 1024;
   static const int maxPeerRequestSize = 128 * 1024;
-  static const Duration _requestTimeout = Duration(seconds: 8);
+  static const int _requestTimeoutMs = 8000;
   static const int _bufferTarget = 2 * 1024 * 1024;
 
   final TorrentMetadata metadata;
@@ -54,7 +56,11 @@ class PieceManager {
   late final RandomAccessFile _cache;
 
   final Map<int, Map<int, Uint8List>> _pieceBlocks = {};
-  final Map<int, Map<int, DateTime>> _requestedBlocks = {};
+  final Map<int, Map<int, int>> _requestedBlocks = {};
+  final Stopwatch _requestClock = Stopwatch()..start();
+  late int _remainingPieces;
+  late int _firstIncompletePiece;
+  int _contiguousBytes = 0;
   int _downloadedBytes = 0;
   int _torrentDownloadedBytes = 0;
   Completer<void> _nextEvent = Completer<void>();
@@ -75,12 +81,7 @@ class PieceManager {
       ? 1
       : (_downloadedBytes / targetFile.length).clamp(0, 1);
 
-  bool get isTargetComplete {
-    for (var i = _firstPiece; i <= _lastPiece; i++) {
-      if (_stateOf(i) != PieceState.completed) return false;
-    }
-    return true;
-  }
+  bool get isTargetComplete => _remainingPieces == 0;
 
   bool get isComplete => isTargetComplete;
 
@@ -95,15 +96,7 @@ class PieceManager {
       pieceIndex <= _lastPiece &&
       _stateOf(pieceIndex) == PieceState.completed;
 
-  int get contiguousBytes {
-    var bytes = 0;
-    for (var i = _firstPiece; i <= _lastPiece; i++) {
-      if (_stateOf(i) != PieceState.completed) break;
-      bytes +=
-          metadata.pieceSize(i) - (i == _firstPiece ? _firstPieceOffset : 0);
-    }
-    return math.min(bytes, targetFile.length);
-  }
+  int get contiguousBytes => _contiguousBytes;
 
   Future<void> get nextProgress => _nextEvent.future;
 
@@ -111,8 +104,8 @@ class PieceManager {
     required bool Function(int pieceIndex) peerHasPiece,
   }) {
     if (_disposed || isTargetComplete) return null;
-    final now = DateTime.now();
-    for (var piece = _firstPiece; piece <= _lastPiece; piece++) {
+    final now = _requestClock.elapsedMilliseconds;
+    for (var piece = _firstIncompletePiece; piece <= _lastPiece; piece++) {
       if (_stateOf(piece) == PieceState.completed || !peerHasPiece(piece)) {
         continue;
       }
@@ -122,8 +115,7 @@ class PieceManager {
       for (var offset = 0; offset < pieceSize; offset += blockSize) {
         if (blocks?.containsKey(offset) == true) continue;
         final requestedAt = requested?[offset];
-        if (requestedAt != null &&
-            now.difference(requestedAt) < _requestTimeout) {
+        if (requestedAt != null && now - requestedAt < _requestTimeoutMs) {
           continue;
         }
         _setState(piece, PieceState.downloading);
@@ -167,6 +159,8 @@ class PieceManager {
           ..setPositionSync(pieceIndex * metadata.pieceLength)
           ..writeFromSync(assembled);
         _setState(pieceIndex, PieceState.completed);
+        _remainingPieces--;
+        _advanceContiguousPrefix();
         _pieceBlocks.remove(pieceIndex);
         _requestedBlocks.remove(pieceIndex);
         onPieceCompleted?.call(pieceIndex);
@@ -242,6 +236,19 @@ class PieceManager {
 
   void _setState(int pieceIndex, PieceState state) {
     _pieceStates[pieceIndex - _firstPiece] = state;
+  }
+
+  void _advanceContiguousPrefix() {
+    while (_firstIncompletePiece <= _lastPiece &&
+        _stateOf(_firstIncompletePiece) == PieceState.completed) {
+      _contiguousBytes +=
+          metadata.pieceSize(_firstIncompletePiece) -
+          (_firstIncompletePiece == _firstPiece ? _firstPieceOffset : 0);
+      _firstIncompletePiece++;
+    }
+    if (_contiguousBytes > targetFile.length) {
+      _contiguousBytes = targetFile.length;
+    }
   }
 
   static int _blockBytes(Map<int, Uint8List> blocks) {

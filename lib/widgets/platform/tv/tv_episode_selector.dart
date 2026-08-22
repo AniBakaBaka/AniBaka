@@ -275,6 +275,7 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
                   child: stillUrl.isNotEmpty
                       ? CachedNetworkImage(
                           imageUrl: stillUrl,
+                          memCacheWidth: 420,
                           fit: BoxFit.cover,
                           placeholder: (context, url) => Container(
                             color: context.tvHighlightColor(0.08),
@@ -541,6 +542,7 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
                           child: stillUrl.isNotEmpty
                               ? CachedNetworkImage(
                                   imageUrl: stillUrl,
+                                  memCacheWidth: 420,
                                   fit: BoxFit.cover,
                                   placeholder: (context, url) => Container(
                                     color: context.tvHighlightColor(0.05),

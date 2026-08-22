@@ -246,11 +246,12 @@ class PeerConnection extends _PeerBase {
   final void Function(int bytes)? onUploaded;
 
   static const int _maxPendingRequests = 5;
-  static const Duration _requestTimeout = Duration(seconds: 8);
+  static const int _requestTimeoutMs = 8000;
 
   bool _choked = true;
   bool _amChoking = true;
-  final Map<({int pieceIndex, int begin}), DateTime> _pendingRequests = {};
+  final Map<({int pieceIndex, int begin}), int> _pendingRequests = {};
+  final Stopwatch _requestClock = Stopwatch()..start();
 
   Uint8List? _peerBitfield;
   bool _receivedBitfield = false;
@@ -310,7 +311,7 @@ class PeerConnection extends _PeerBase {
         break;
       }
       _pendingRequests[(pieceIndex: block.pieceIndex, begin: block.begin)] =
-          DateTime.now();
+          _requestClock.elapsedMilliseconds;
     }
   }
 
@@ -459,12 +460,14 @@ class PeerConnection extends _PeerBase {
   }
 
   void _expirePendingRequests() {
-    final now = DateTime.now();
-    final expired = _pendingRequests.entries
-        .where((entry) => now.difference(entry.value) >= _requestTimeout)
-        .map((entry) => entry.key)
-        .toList(growable: false);
-    for (final request in expired) {
+    final now = _requestClock.elapsedMilliseconds;
+    List<({int pieceIndex, int begin})>? expired;
+    for (final entry in _pendingRequests.entries) {
+      if (now - entry.value >= _requestTimeoutMs) {
+        (expired ??= []).add(entry.key);
+      }
+    }
+    for (final request in expired ?? const []) {
       _pendingRequests.remove(request);
       pieceManager.cancelBlockRequest(request.pieceIndex, request.begin);
     }

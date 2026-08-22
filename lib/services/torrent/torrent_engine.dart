@@ -93,7 +93,8 @@ class TorrentEngine {
   int _lastSpeedBytes = 0;
   int _lastUploadBytes = 0;
   int _uploadedBytes = 0;
-  DateTime _lastSpeedTime = DateTime.now();
+  final Stopwatch _speedClock = Stopwatch()..start();
+  int _lastSpeedAtMs = 0;
   double _downloadSpeed = 0;
   double _uploadSpeed = 0;
 
@@ -519,8 +520,8 @@ class TorrentEngine {
 
   /// 更新速度统计（从 getStats 中分离，消除 getter 副作用）
   void _updateSpeed() {
-    final now = DateTime.now();
-    final elapsed = now.difference(_lastSpeedTime).inMilliseconds;
+    final now = _speedClock.elapsedMilliseconds;
+    final elapsed = now - _lastSpeedAtMs;
     if (elapsed < 1000) return;
 
     final currentBytes = _pieceManager?.torrentDownloadedBytes ?? 0;
@@ -536,7 +537,7 @@ class TorrentEngine {
     );
     _lastSpeedBytes = currentBytes;
     _lastUploadBytes = totalUploaded;
-    _lastSpeedTime = now;
+    _lastSpeedAtMs = now;
   }
 
   /// 获取当前下载统计（强类型）

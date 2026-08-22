@@ -32,7 +32,6 @@ class DanmakuController extends ChangeNotifier {
     if (_lastPosition != null) {
       syncTime(_lastPosition!);
     }
-    notifyListeners();
   }
 
   Duration? _lastPosition;
@@ -70,7 +69,6 @@ class DanmakuController extends ChangeNotifier {
   void addItem(DanmakuItem item) {
     if (!_running) return;
     _listener?.onDanmakuInject(item);
-    notifyListeners();
   }
 
   void pause() {

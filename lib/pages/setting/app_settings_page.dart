@@ -1,10 +1,8 @@
-import 'dart:convert';
-import 'package:baka/api/post.dart';
 import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:get/get.dart';
 import 'package:baka/services/app_storage.dart';
-import 'package:baka/services/settings_service.dart';
+import 'package:baka/services/network_service.dart';
 import 'package:baka/utils/app_logger.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
@@ -29,6 +27,7 @@ class AppSettingsPage extends StatefulWidget {
 
 class _AppSettingsPageState extends State<AppSettingsPage> {
   final _appState = Get.find<AppState>();
+  final _loginService = LoginService();
 
   String _cacheSize = '计算中...';
   bool _isClearing = false;
@@ -36,8 +35,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
   bool _isSharingLogs = false;
 
   /// 会话数据只有 [AppState] 一份，页面不再自己 jsonDecode 一遍 `userinfo`。
-  Map<String, dynamic>? get _userInfo =>
-      _appState.isLoggedIn ? _appState.userInfo.value : null;
+  AppUser? get _user => _appState.isLoggedIn ? _appState.user.value : null;
 
   @override
   void initState() {
@@ -154,36 +152,14 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
   }
 
   Future<void> _updateUser(String key, String value) async {
-    final data = Map<String, dynamic>.from(_userInfo!);
-    data['pwd'] = '';
-    data[key] = value;
-    try {
-      final decoded = jsonDecode(await register(data));
-      if (decoded is! Map) throw const FormatException('更新响应格式无效');
-
-      final res = Map<String, dynamic>.from(decoded);
-      final success = res['code']?.toString() == '200';
-      final responseMessage = res['msg']?.toString().trim();
-      showSnackBar(
-        responseMessage?.isNotEmpty == true
-            ? responseMessage!
-            : (success ? '更新成功' : '更新失败'),
-        isError: !success,
-      );
-      if (success) {
-        final updated = Map<String, dynamic>.from(_userInfo!);
-        // 仅保留“支持密码修改”的兼容标记，不在本地持久化明文密码。
-        updated['pwd'] = '';
-        if (key != 'pwd') updated[key] = value;
-        await Instances.sp.setString('userinfo', jsonEncode(updated));
-        // triggerLoginRefresh 会从 SP 重新加载并广播，页面随之重建。
-        _appState.triggerLoginRefresh();
-        if (mounted) setState(() {});
-        HapticFeedback.mediumImpact();
-      }
-    } catch (e) {
-      showSnackBar('更新失败: $e');
-      HapticFeedback.heavyImpact();
+    final current = _user!;
+    final result = await _loginService.updateUser(current, key, value);
+    showSnackBar(result.message, isError: !result.success);
+    final updated = result.user;
+    if (updated != null) {
+      await _appState.saveUser(updated);
+      if (mounted) setState(() {});
+      HapticFeedback.mediumImpact();
     }
   }
 
@@ -209,13 +185,13 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
       builder: (dialogContext) => SimpleDialog(
         title: const Text('选择主题模式'),
         children: [
-          for (var mode = 0; mode < ThemeService.themeModeLabels.length; mode++)
+          for (var mode = 0; mode < AppState.themeModeLabels.length; mode++)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(dialogContext, mode),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(ThemeService.themeModeLabels[mode]),
+                  Text(AppState.themeModeLabels[mode]),
                   if (_appState.themeMode == mode)
                     Icon(
                       Icons.check_rounded,
@@ -230,13 +206,13 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
     if (selected != null) _appState.setThemeMode(selected);
   }
 
-  String get _themeModeLabel =>
-      ThemeService.themeModeLabel(_appState.themeMode);
+  String get _themeModeLabel => _appState.themeModeLabel;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isLoggedIn = _userInfo != null;
+    final user = _user;
+    final isLoggedIn = user != null;
 
     return Scaffold(
       body: CustomScrollView(
@@ -256,24 +232,24 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                     children: [
                       SettingsTile(
                         title: '昵称',
-                        value: _userInfo?['name'] ?? '未设置',
+                        value: user.name,
                         icon: Icons.person_outline_rounded,
                         onTap: () => _showUpdateDialog('修改昵称', 'name'),
                       ),
                       SettingsTile(
                         title: 'QQ',
-                        value: _userInfo?['qq'] ?? '未设置',
+                        value: user.qq,
                         icon: Icons.chat_bubble_outline_rounded,
                         onTap: () => _showUpdateDialog('修改QQ', 'qq'),
                       ),
                       SettingsTile(
                         title: '个性签名',
-                        value: _userInfo?['sign'] ?? '未设置',
+                        value: user.sign,
                         icon: Icons.edit_note_rounded,
                         onTap: () => _showUpdateDialog('修改签名', 'sign'),
-                        showDivider: _userInfo?['pwd'] != null,
+                        showDivider: user.hasPassword,
                       ),
-                      if (_userInfo?['pwd'] != null)
+                      if (user.hasPassword)
                         SettingsTile(
                           title: '修改密码',
                           value: '******',

@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -63,23 +62,19 @@ class _AnimeCommentsTabState extends State<AnimeCommentsTab>
     }
 
     try {
-      final response = await getBgmSubjectComments(
+      final page = await getBgmSubjectComments(
         widget.subjectId,
         limit: _commentPageSize,
         offset: _comments.length,
       );
       if (!mounted) return;
-      final parsed = jsonDecode(response) as Map<String, dynamic>;
-      final data = (parsed['data'] as List<dynamic>)
-          .cast<Map<String, dynamic>>();
-      final total = (parsed['total'] as num?)?.toInt() ?? 0;
       setState(() {
         if (loadMore) {
-          _comments.addAll(data);
+          _comments.addAll(page.comments);
         } else {
-          _comments = data;
+          _comments = page.comments;
         }
-        _commentTotal = total;
+        _commentTotal = page.total;
       });
       widget.onCommentsChanged?.call((_comments, _commentTotal));
     } catch (e) {
@@ -231,6 +226,7 @@ class _CommentItem extends StatelessWidget {
               ClipOval(
                 child: CachedNetworkImage(
                   imageUrl: avatarUrl,
+                  memCacheWidth: 80,
                   width: 32,
                   height: 32,
                   fit: BoxFit.cover,

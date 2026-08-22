@@ -178,6 +178,7 @@ class _Thumbnail extends StatelessWidget {
             ? fallback
             : CachedNetworkImage(
                 imageUrl: url!,
+                memCacheWidth: 192,
                 fit: BoxFit.cover,
                 placeholder: (_, _) => fallback,
                 errorWidget: (_, _, _) => fallback,

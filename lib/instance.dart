@@ -28,7 +28,6 @@ class Instances {
 
   static bool get isDesktopPlatform => Platform.isWindows || Platform.isMacOS;
 
-  // 保留现有调用契约：该字段历史上表示桌面布局，而不只表示 Windows。
   static bool get isWindows => isDesktopPlatform;
 
   static Future<void> init() async {
@@ -121,8 +120,5 @@ class Instances {
 extension ScreenUtils on BuildContext {
   bool get isTablet => MediaQuery.sizeOf(this).shortestSide >= 600;
 
-  /// 是否降低动效。走 `disableAnimationsOf` 只订阅该字段，
-  /// 而旧写法 `MediaQuery.maybeOf(this)` 会把调用方订阅到 MediaQuery 的每一个
-  /// 字段——键盘弹出、旋转、字号变化都会触发整页重建。
   bool get reduceMotion => MediaQuery.disableAnimationsOf(this);
 }

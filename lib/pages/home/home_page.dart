@@ -14,6 +14,7 @@ import 'package:baka/widgets/platform/tv/tv_home_page.dart';
 import 'package:baka/widgets/platform/windows/windows_home_page.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:get/get.dart';
@@ -103,7 +104,7 @@ class _HomePageState extends State<HomePage>
         showInitialIndicator: false,
         child: CustomScrollView(
           controller: _scrollController,
-          cacheExtent: 500,
+          scrollCacheExtent: const ScrollCacheExtent.pixels(500),
           physics: const BouncingScrollPhysics(),
           slivers: [
             _buildAppBar(),
@@ -289,7 +290,7 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildUserAvatar() {
     return Obx(() {
-      final avatar = _appState.userInfo.value['qq']?.toString() ?? '';
+      final avatar = _appState.user.value.qq;
       final isLoggedIn = _appState.isLoggedIn;
       final theme = Theme.of(context);
 
@@ -311,7 +312,7 @@ class _HomePageState extends State<HomePage>
           ),
           child: ClipOval(
             child: CachedNetworkImage(
-              memCacheWidth: 70,
+              memCacheWidth: 80,
               imageUrl: getAvatar(avatar: avatar),
               width: 32,
               height: 32,

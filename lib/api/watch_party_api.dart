@@ -18,14 +18,13 @@ final class WatchPartyApi {
 
   static Future<List<WatchPartyInvite>> listRooms() async {
     final data = await _data(NetUtils.get('$_baseUrl/rooms'));
-    final rooms = data['rooms'];
-    if (rooms is! List) throw StateError('一起看房间列表格式错误');
-    return rooms
-        .whereType<Map>()
-        .map(
-          (room) => WatchPartyInvite.fromJson(Map<String, dynamic>.from(room)),
-        )
-        .toList(growable: false);
+    final rooms = data['rooms'] as List<dynamic>;
+    return List<WatchPartyInvite>.generate(
+      rooms.length,
+      (index) =>
+          WatchPartyInvite.fromJson(rooms[index] as Map<String, dynamic>),
+      growable: false,
+    );
   }
 
   static Future<WatchPartyInvite> getInvite(String code) async {
@@ -33,14 +32,11 @@ final class WatchPartyApi {
     return WatchPartyInvite.fromJson(data);
   }
 
-  static Future<WatchPartyConnectionInfo> joinRoom(
-    String code,
-    String nickname,
-  ) async {
+  static Future<String> joinRoom(String code, String nickname) async {
     final data = await _data(
       NetUtils.post('$_baseUrl/invites/$code/join', {'nickname': nickname}),
     );
-    return WatchPartyConnectionInfo.fromJson(data);
+    return data['websocketUrl'] as String;
   }
 
   static Future<void> closeRoom(String roomId) async {
@@ -56,9 +52,9 @@ final class WatchPartyApi {
     final response = await request;
     if (response.isEmpty) throw StateError('一起看服务暂时不可用');
     final json = jsonDecode(response) as Map<String, dynamic>;
-    if (json['code'] != 0 || json['data'] is! Map) {
+    if (json['code'] != 0) {
       throw StateError(json['message']?.toString() ?? '一起看请求失败');
     }
-    return Map<String, dynamic>.from(json['data'] as Map);
+    return json['data'] as Map<String, dynamic>;
   }
 }

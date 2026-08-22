@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/models/playback_state.dart';
-import 'package:baka/services/navigation_service.dart';
+import 'package:baka/pages/setting/player_settings_page.dart';
 import 'package:baka/services/torrent/torrent_engine.dart';
 import 'package:baka/services/torrent/torrent_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
@@ -95,9 +95,7 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
         children: [
           Row(
             children: [
-              Expanded(
-                child: _buildPlayerArea(context),
-              ),
+              Expanded(child: _buildPlayerArea(context)),
               AnimatedContainer(
                 duration: const Duration(milliseconds: 240),
                 curve: Curves.easeOutCubic,
@@ -143,7 +141,8 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
               headerControl: _buildHeaderControls(context),
               full: false,
               onPickEpisode: widget.onPickEpisode,
-              hasNextEpisode: widget.currPlayIndex + 1 < widget.videoList.length,
+              hasNextEpisode:
+                  widget.currPlayIndex + 1 < widget.videoList.length,
               onNextEpisode: widget.currPlayIndex + 1 < widget.videoList.length
                   ? () => widget.onEpisodeChanged(widget.currPlayIndex + 1)
                   : null,
@@ -152,8 +151,7 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
                 widget.onFullScreenChanged(full);
               },
             ),
-          if (!widget.inited)
-            _buildLoadingState(context),
+          if (!widget.inited) _buildLoadingState(context),
           ValueListenableBuilder<PlaybackCoreState>(
             valueListenable: widget.controller.core,
             builder: (context, core, _) {
@@ -241,10 +239,7 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
         _buildHeaderIconButton(
           icon: Icons.settings_outlined,
           tooltip: '播放设置',
-          onTap: () => NavigationService.showPlayerSettings(
-            context,
-            widget.controller,
-          ),
+          onTap: () => PlayerSettingsPage.show(context, widget.controller),
         ),
       ],
     );
@@ -266,11 +261,7 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.arrow_upward_rounded,
-                size: 13,
-                color: primaryColor,
-              ),
+              Icon(Icons.arrow_upward_rounded, size: 13, color: primaryColor),
               const SizedBox(width: 2),
               Text(
                 speedText,
@@ -339,10 +330,7 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
                 const SizedBox(height: 14),
                 Text(
                   widget.isSearching ? '正在自动匹配源中...' : '正在加载视频...',
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 13,
-                  ),
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
                 ),
               ],
             ),
@@ -409,12 +397,7 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
       width: 380,
       decoration: const BoxDecoration(
         color: Color(0xFF141416),
-        border: Border(
-          left: BorderSide(
-            color: Colors.white12,
-            width: 1,
-          ),
-        ),
+        border: Border(left: BorderSide(color: Colors.white12, width: 1)),
       ),
       child: Column(
         children: [
@@ -512,7 +495,8 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
         ? rawEpisodes.cast<Map<String, dynamic>>()
         : null;
 
-    final summary = widget.data['summary']?.toString() ??
+    final summary =
+        widget.data['summary']?.toString() ??
         widget.data['content']?.toString() ??
         '';
 

@@ -65,7 +65,7 @@ class _TvQrLoginPageState extends State<TvQrLoginPage> {
 
       await Get.find<AppState>().saveLoginInfo(
         result['token'] as String,
-        Map<String, dynamic>.from(result['user'] as Map),
+        AppUser.fromJson(result['user'] as Map<String, dynamic>),
         refreshToken: result['refresh_token'] as String?,
         tokenExpiresAt: result['token_expires_at'] as String?,
       );

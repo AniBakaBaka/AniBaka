@@ -773,6 +773,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
         child: CachedNetworkImage(
           key: ValueKey(logoUrl),
           imageUrl: logoUrl,
+          memCacheHeight: 170,
           fit: BoxFit.contain,
           alignment: Alignment.centerLeft,
           errorWidget: (context, url, error) => Text(

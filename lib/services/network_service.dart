@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:baka/api/api_config.dart';
-import 'package:baka/api/post.dart';
 import 'package:baka/app_state.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:flutter/foundation.dart';
@@ -43,27 +42,6 @@ class NetUtils {
         !expiresAt.isAfter(DateTime.now().add(_refreshAdvance));
   }
 
-  static Future<void> saveTokenResponse(Map<String, dynamic> data) async {
-    final token = data['token'] as String?;
-    if (token == null || token.isEmpty) return;
-
-    await Instances.sp.setString('usertoken', token);
-    final refreshToken = data['refresh_token'] as String?;
-    if (refreshToken != null && refreshToken.isNotEmpty) {
-      await Instances.sp.setString('refresh_token', refreshToken);
-    }
-    final expiresIn = (data['expires_in'] as num?)?.toInt();
-    if (expiresIn != null) {
-      await Instances.sp.setString(
-        'token_expires_at',
-        DateTime.now()
-            .add(Duration(seconds: expiresIn))
-            .toUtc()
-            .toIso8601String(),
-      );
-    }
-  }
-
   static Future<bool> _doRefreshToken() async {
     try {
       final refreshToken = Instances.sp.getString('refresh_token');
@@ -81,7 +59,7 @@ class NetUtils {
       if (res.statusCode == 200 &&
           resData['code'] == 200 &&
           resData['token'] != null) {
-        await saveTokenResponse(resData);
+        await Get.find<AppState>().saveTokenResponse(resData);
         debugPrint('[NetUtils] Token刷新成功');
         return true;
       } else {
@@ -227,17 +205,9 @@ final class LanAddress {
   }
 }
 
-Map<String, dynamic> getUserInfo() {
-  final u = Instances.sp.getString('userinfo');
-  return u != null
-      ? jsonDecode(u) as Map<String, dynamic>
-      : <String, dynamic>{'id': 0};
-}
-
 /// 登录 / 注册业务服务。
 ///
-/// 与 [NetUtils] 同属认证与网络域：登录成功后通过 [NetUtils.saveTokenResponse]
-/// 落盘 token，再刷新 [AppState] 中的会话状态。
+/// 与 [NetUtils] 同属认证与网络域；登录结果在这里解析一次并交给 [AppState]。
 class LoginService {
   AppState get _appState => Get.find<AppState>();
 
@@ -247,7 +217,7 @@ class LoginService {
     required String pwd,
   }) async {
     try {
-      final response = await login({
+      final response = await NetUtils.post('${ApiConfig.host}/user/login', {
         'name': name.trim(),
         'pwd': pwd,
         'platform': 'app',
@@ -261,9 +231,9 @@ class LoginService {
         );
       }
 
-      await NetUtils.saveTokenResponse(res);
-      await Instances.sp.setString('userinfo', jsonEncode(res['user']));
-      _appState.triggerLoginRefresh();
+      final user = AppUser.fromJson(res['user'] as Map<String, dynamic>);
+      await _appState.saveTokenResponse(res);
+      await _appState.saveUser(user);
 
       return (success: true, message: '登录成功');
     } catch (e) {
@@ -279,7 +249,7 @@ class LoginService {
     required String qq,
   }) async {
     try {
-      final response = await register({
+      final response = await NetUtils.post('${ApiConfig.host}/user/register', {
         'name': name.trim(),
         'pwd': pwd,
         'qq': qq.trim(),
@@ -293,6 +263,38 @@ class LoginService {
     } catch (e) {
       debugPrint('注册错误: $e');
       return (success: false, message: '注册失败，请检查网络');
+    }
+  }
+
+  Future<({bool success, String message, AppUser? user})> updateUser(
+    AppUser current,
+    String field,
+    String value,
+  ) async {
+    try {
+      final response = await NetUtils.post('${ApiConfig.host}/user/register', {
+        'id': current.id,
+        'name': field == 'name' ? value : current.name,
+        'qq': field == 'qq' ? value : current.qq,
+        'sign': field == 'sign' ? value : current.sign,
+        'level': current.level,
+        'pwd': field == 'pwd' ? value : '',
+      });
+      final result = jsonDecode(response) as Map<String, dynamic>;
+      if (result['code'] != 200) {
+        return (
+          success: false,
+          message: result['msg']?.toString() ?? '更新失败',
+          user: null,
+        );
+      }
+      final updated = AppUser.fromJson(
+        result['data'] as Map<String, dynamic>,
+        retainedPasswordMarker: current.passwordMarker ?? '',
+      );
+      return (success: true, message: '更新成功', user: updated);
+    } catch (_) {
+      return (success: false, message: '更新失败，请检查网络', user: null);
     }
   }
 }

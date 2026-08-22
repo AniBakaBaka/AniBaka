@@ -3,8 +3,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:get/get.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/services/watch_party_link_service.dart';
 import 'package:baka/utils/toast_utils.dart';
@@ -57,7 +59,6 @@ class _QrScannerPageState extends State<QrScannerPage> {
       await _controller.stop();
       await HapticFeedback.mediumImpact();
       if (mounted) Navigator.of(context).pop();
-      await Future<void>.delayed(const Duration(milliseconds: 200));
       await WatchPartyLinkService.joinInvite(inviteCode);
       return;
     }
@@ -80,9 +81,9 @@ class _QrScannerPageState extends State<QrScannerPage> {
     final tokenExpiresAt = storedExpiry == null
         ? null
         : DateTime.tryParse(storedExpiry)?.toUtc().toIso8601String();
-    final userInfoStr = Instances.sp.getString('userinfo');
+    final appState = Get.find<AppState>();
 
-    if (token == null || token.isEmpty || userInfoStr == null) {
+    if (token == null || token.isEmpty || !appState.isLoggedIn) {
       if (mounted) {
         showSnackBar('请先在手机端登录');
         Navigator.of(context).pop();
@@ -91,7 +92,6 @@ class _QrScannerPageState extends State<QrScannerPage> {
     }
 
     try {
-      final user = jsonDecode(userInfoStr);
       final uri = Uri.parse(url);
       final request = await HttpClient()
           .postUrl(uri)
@@ -102,7 +102,7 @@ class _QrScannerPageState extends State<QrScannerPage> {
           'token': token,
           if (refreshToken?.isNotEmpty == true) 'refresh_token': refreshToken,
           'token_expires_at': ?tokenExpiresAt,
-          'user': user,
+          'user': appState.user.value.toJson(),
         }),
       );
       final response = await request.close().timeout(

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
@@ -790,11 +789,10 @@ class VideoSourceSearchController extends ChangeNotifier {
   }
 
   Future<List<Map<String, dynamic>>> _loadInternal(String keyword) async {
-    final response = await getSearch(keyword);
-    final raw = (jsonDecode(response) as Map<String, dynamic>)['data'] as List;
+    final raw = await getSearch(keyword);
     return [
       for (final item in raw)
-        if (item is Map && item['videos'] != null) item as Map<String, dynamic>,
+        if (item['videos'] != null) item,
     ];
   }
 

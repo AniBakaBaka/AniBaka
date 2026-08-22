@@ -95,8 +95,8 @@ class VersionService {
       final lastCheckTime = Instances.sp.getInt(_kLastCheckTimeKey) ?? 0;
       final now = DateTime.now().millisecondsSinceEpoch;
       if ((now - lastCheckTime) > 86400000) {
-        final map = jsonDecode(await getGonggao()) as Map<String, dynamic>;
-        announcementContent = map['data']['content'] as String? ?? '';
+        final announcement = await getPostDetail(1);
+        announcementContent = announcement['content'] as String? ?? '';
         await Instances.sp.setInt(_kLastCheckTimeKey, now);
         await Instances.sp.setString(
           _kAnnouncementContentKey,

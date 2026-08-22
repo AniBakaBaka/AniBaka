@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/api/watch_party_api.dart';
@@ -114,10 +112,9 @@ class ThreadService {
   }
 
   Future<List> _fetchPage(int pid, int page) async {
-    final response = await getComments(pid, pageSize, '', page: page);
-    final decoded = jsonDecode(response);
-    final data = decoded is Map ? decoded['data'] : null;
-    return CommentListState.processCommentsList(data is List ? data : null);
+    return CommentListState.processCommentsList(
+      await getComments(pid, pageSize, '', page: page),
+    );
   }
 
   /// 尝试用本地缓存填充 [tabIndex]；命中返回 true。
@@ -205,9 +202,7 @@ class ThreadService {
 
   Future<Map?> resolveGvLink(String gvId) async {
     try {
-      final response = await getPostDetail(int.parse(gvId));
-      final decoded = jsonDecode(response);
-      return decoded is Map ? decoded['data'] as Map? : null;
+      return await getPostDetail(int.parse(gvId));
     } catch (e) {
       debugPrint('解析 gv 链接失败: $e');
       return null;

@@ -1,7 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import 'package:baka/services/navigation_service.dart';
+import 'package:baka/pages/search/tag_page.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/date_util.dart';
 import 'package:baka/utils/reg_utils.dart';
@@ -96,7 +96,7 @@ class VideoDetailCard extends StatelessWidget {
             children: [
               ClipOval(
                 child: CachedNetworkImage(
-                  memCacheWidth: 60,
+                  memCacheWidth: 80,
                   imageUrl: getAvatar(avatar: detail['uqq'] ?? '3179737489'),
                   width: 18,
                   height: 18,
@@ -131,7 +131,6 @@ class VideoDetailCard extends StatelessWidget {
                             : null,
                       ),
 
-
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 10,
@@ -150,9 +149,8 @@ class VideoDetailCard extends StatelessWidget {
                             Icon(
                               Icons.subtitles_outlined,
                               size: 14,
-                              color: theme.textTheme.bodyMedium?.color?.withValues(
-                                alpha: 0.8,
-                              ),
+                              color: theme.textTheme.bodyMedium?.color
+                                  ?.withValues(alpha: 0.8),
                             ),
                             const SizedBox(width: 4),
                             Text(
@@ -160,9 +158,8 @@ class VideoDetailCard extends StatelessWidget {
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
-                                color: theme.textTheme.bodyMedium?.color?.withValues(
-                                  alpha: 0.8,
-                                ),
+                                color: theme.textTheme.bodyMedium?.color
+                                    ?.withValues(alpha: 0.8),
                               ),
                             ),
                           ],
@@ -212,7 +209,6 @@ class VideoDetailCard extends StatelessWidget {
                   ),
                 ),
               ),
-
             ],
           ),
           if (cachedTags.isNotEmpty || sourceName != null) ...[
@@ -258,7 +254,10 @@ class _TagChip extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
 
     return ScaleButton(
-      onTap: () => NavigationService.toTag(context, tag, 0),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => TagPage(tag, 0)),
+      ),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
@@ -364,4 +363,3 @@ class _SourceChip extends StatelessWidget {
     );
   }
 }
-

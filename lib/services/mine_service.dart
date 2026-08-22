@@ -5,7 +5,6 @@ import 'package:url_launcher/url_launcher_string.dart';
 import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/services/bangumi_sync_service.dart';
-import 'package:baka/services/settings_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/reg_utils.dart';
 import 'package:get/get.dart';
@@ -25,7 +24,7 @@ class MineService {
 
   String currentHost = Instances.sp.getString('host') ?? _primaryHost;
 
-  Map<String, dynamic> get userInfo => _appState.userInfo.value;
+  AppUser get user => _appState.user.value;
 
   bool get isLogin => _appState.isLoggedIn;
 
@@ -36,7 +35,7 @@ class MineService {
   BangumiAccount? get bangumiAccount => BangumiSyncService.instance.account;
 
   String get displayName {
-    if (isLogin) return userInfo['name'] ?? 'Baka 用户';
+    if (isLogin) return user.name;
     if (isBangumiLogin) {
       final account = bangumiAccount;
       return account?.nickname.isNotEmpty == true
@@ -47,12 +46,12 @@ class MineService {
   }
 
   String get displaySubtitle {
-    if (isLogin) return userInfo['sign'] ?? '这个人很懒，还没有签名';
+    if (isLogin) return user.sign.isEmpty ? '这个人很懒，还没有签名' : user.sign;
     if (isBangumiLogin) return 'Bangumi 登录 · 播放历史仅保存在本机';
     return '你还未登录哦〒▽〒';
   }
 
-  String get avatarQq => userInfo['qq'] ?? '';
+  String get avatarQq => user.qq;
 
   String get avatarUrl {
     if (isLogin) return getAvatar(avatar: avatarQq);
@@ -60,11 +59,11 @@ class MineService {
     return BgmUtils.bgmImageProxyUrl(source, width: 240);
   }
 
-  int get uid => userInfo['id'] ?? 0;
+  int get uid => user.id;
 
   int get themeMode => _appState.themeMode;
 
-  String get themeText => ThemeService.themeModeLabel(themeMode);
+  String get themeText => _appState.themeModeLabel;
 
   void switchTheme(int mode) => _appState.setThemeMode(mode);
 

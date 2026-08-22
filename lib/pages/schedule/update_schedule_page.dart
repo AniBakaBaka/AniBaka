@@ -6,38 +6,6 @@ import 'package:baka/instance.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-class UpdateScheduleController extends GetxController {
-  final scheduleData = RxList<HomeItems>(List.generate(7, (_) => <Map>[]));
-  final hasLoaded = false.obs;
-  final selectedDay = (DateTime.now().weekday - 1).obs;
-
-  @override
-  void onInit() {
-    super.onInit();
-    loadSchedule();
-  }
-
-  Future<void> loadSchedule() async {
-    try {
-      scheduleData.value = await HomeDataService.loadSharedXinfan();
-    } catch (e) {
-      debugPrint('加载更新时间表失败: $e');
-    } finally {
-      hasLoaded.value = true;
-    }
-  }
-
-  HomeItems getDataForDay(int dayIndex) => scheduleData[dayIndex];
-
-  void selectDay(int day) => selectedDay.value = day;
-
-  void goToToday() => selectedDay.value = DateTime.now().weekday - 1;
-
-  void nextDay() => selectedDay.value = (selectedDay.value + 1) % 7;
-
-  void prevDay() => selectedDay.value = (selectedDay.value - 1 + 7) % 7;
-}
-
 class UpdateSchedulePage extends StatefulWidget {
   const UpdateSchedulePage({super.key});
 
@@ -48,10 +16,10 @@ class UpdateSchedulePage extends StatefulWidget {
 class _UpdateSchedulePageState extends State<UpdateSchedulePage> {
   static const _weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
-  late final UpdateScheduleController _controller = Get.put(
-    UpdateScheduleController(),
-  );
   late final ScrollController _scrollController = ScrollController();
+  List<HomeItems> _scheduleData = List.generate(7, (_) => <Map>[]);
+  int _selectedDay = DateTime.now().weekday - 1;
+  bool _hasLoaded = false;
   AppState? _appState;
   double _lastScrollOffset = 0;
 
@@ -62,6 +30,7 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage> {
       _appState = Get.find<AppState>();
       _scrollController.addListener(_onScroll);
     }
+    _loadSchedule();
   }
 
   @override
@@ -80,60 +49,75 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final c = _controller;
-    final theme = Theme.of(context);
-
-    return Obx(() {
-      final selectedDay = c.selectedDay.value;
-      final currentDayData = c.getDataForDay(selectedDay);
-
-      return Scaffold(
-        appBar: _buildCustomAppBar(context, c),
-        body: RefreshWrapper(
-          onRefresh: c.loadSchedule,
-          onLoadMore: () async => false,
-          child: GestureDetector(
-            onHorizontalDragEnd: (details) {
-              final v = details.primaryVelocity ?? 0;
-              if (v < -300) {
-                c.nextDay();
-              } else if (v > 300) {
-                c.prevDay();
-              }
-            },
-            child: CustomScrollView(
-              controller: _scrollController,
-              physics: const BouncingScrollPhysics(),
-              slivers: [
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                  sliver: c.hasLoaded.value && currentDayData.isEmpty
-                      ? _buildEmptyState(theme)
-                      : _buildGrid(context, currentDayData),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
+  Future<void> _loadSchedule() async {
+    List<HomeItems>? data;
+    try {
+      data = await HomeDataService.loadSharedXinfan();
+    } catch (error) {
+      debugPrint('加载更新时间表失败: $error');
+    }
+    if (!mounted) return;
+    setState(() {
+      if (data != null) _scheduleData = data;
+      _hasLoaded = true;
     });
   }
 
-  Widget _buildWeekSelector(BuildContext context, UpdateScheduleController c) {
+  void _selectDay(int day) {
+    if (_selectedDay != day) setState(() => _selectedDay = day);
+  }
+
+  void _nextDay() => _selectDay((_selectedDay + 1) % 7);
+  void _previousDay() => _selectDay((_selectedDay + 6) % 7);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final currentDayData = _scheduleData[_selectedDay];
+
+    return Scaffold(
+      appBar: _buildCustomAppBar(context),
+      body: RefreshWrapper(
+        onRefresh: _loadSchedule,
+        onLoadMore: () async => false,
+        child: GestureDetector(
+          onHorizontalDragEnd: (details) {
+            final v = details.primaryVelocity ?? 0;
+            if (v < -300) {
+              _nextDay();
+            } else if (v > 300) {
+              _previousDay();
+            }
+          },
+          child: CustomScrollView(
+            controller: _scrollController,
+            physics: const BouncingScrollPhysics(),
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                sliver: _hasLoaded && currentDayData.isEmpty
+                    ? _buildEmptyState(theme)
+                    : _buildGrid(context, currentDayData),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWeekSelector(BuildContext context) {
     final now = DateTime.now();
     final today = now.weekday - 1;
     final theme = Theme.of(context);
     final primaryColor = theme.colorScheme.primary;
-    final selectedDay = c.selectedDay.value;
 
     return SizedBox(
       height: 50,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: List.generate(7, (index) {
-          final isSelected = selectedDay == index;
+          final isSelected = _selectedDay == index;
           final isToday = index == today;
           final targetDay = now.add(Duration(days: index - now.weekday + 1));
           final dateStr = '${targetDay.month}/${targetDay.day}';
@@ -142,7 +126,7 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage> {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 2),
               child: GestureDetector(
-                onTap: () => c.selectDay(index),
+                onTap: () => _selectDay(index),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   curve: Curves.easeInOut,
@@ -228,10 +212,7 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage> {
     );
   }
 
-  PreferredSizeWidget _buildCustomAppBar(
-    BuildContext context,
-    UpdateScheduleController c,
-  ) {
+  PreferredSizeWidget _buildCustomAppBar(BuildContext context) {
     final theme = Theme.of(context);
     final primaryColor = theme.colorScheme.primary;
     final now = DateTime.now();
@@ -276,7 +257,7 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage> {
                       color: primaryColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(18),
                       child: InkWell(
-                        onTap: c.goToToday,
+                        onTap: () => _selectDay(DateTime.now().weekday - 1),
                         borderRadius: BorderRadius.circular(18),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
@@ -304,7 +285,7 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                _buildWeekSelector(context, c),
+                _buildWeekSelector(context),
               ],
             ),
           ),

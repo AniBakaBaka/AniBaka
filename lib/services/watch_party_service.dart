@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:baka/api/watch_party_api.dart';
+import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/watch_party.dart';
-import 'package:baka/services/network_service.dart';
 import 'package:baka/services/player_service.dart';
 import 'package:baka/utils/app_logger.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
@@ -66,8 +66,10 @@ class WatchPartyService extends GetxService {
   bool _applyingRemote = false;
   bool? _lastPlaying;
   int _reconnectAttempt = 0;
+  int _requestSerial = 0;
   Completer<void>? _initialSnapshot;
-  final Map<String, DateTime> _pendingPings = {};
+  String? _pendingPingId;
+  final Stopwatch _pingClock = Stopwatch();
 
   @visibleForTesting
   bool get hasAttachedPlayer => _controller != null && _content != null;
@@ -91,13 +93,7 @@ class WatchPartyService extends GetxService {
     _inviteCode = invite.inviteCode;
     _nickname = _currentNickname();
     state.value = state.value.copyWith(invite: invite);
-    await _connect(
-      WatchPartyConnectionInfo(
-        roomId: invite.roomId,
-        ticket: invite.ticket,
-        webSocketUrl: invite.webSocketUrl,
-      ),
-    );
+    await _connect(invite.webSocketUrl);
   }
 
   Future<void> joinInvite(String code, {String? nickname}) async {
@@ -115,15 +111,15 @@ class WatchPartyService extends GetxService {
       WatchPartyApi.joinRoom(normalized, _nickname),
     ]);
     state.value = state.value.copyWith(invite: results[0] as WatchPartyInvite);
-    await _connect(results[1] as WatchPartyConnectionInfo);
+    await _connect(results[1] as String);
   }
 
-  Future<void> _connect(WatchPartyConnectionInfo info) async {
+  Future<void> _connect(String webSocketUrl) async {
     _intentionalDisconnect = false;
     await _channelSubscription?.cancel();
     await _channel?.sink.close();
     final channel = IOWebSocketChannel.connect(
-      Uri.parse(info.webSocketUrl),
+      Uri.parse(webSocketUrl),
       connectTimeout: const Duration(seconds: 10),
       pingInterval: const Duration(seconds: 20),
     );
@@ -156,9 +152,13 @@ class WatchPartyService extends GetxService {
     );
     _heartbeat?.cancel();
     _heartbeat = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (_pendingPingId != null && _pingClock.elapsed.inSeconds < 45) return;
       final requestId = _send('ping', const <String, Object>{});
       if (requestId.isNotEmpty) {
-        _pendingPings[requestId] = DateTime.now();
+        _pendingPingId = requestId;
+        _pingClock
+          ..reset()
+          ..start();
       }
     });
     await _initialSnapshot!.future.timeout(const Duration(seconds: 5));
@@ -243,7 +243,8 @@ class WatchPartyService extends GetxService {
     await _channelSubscription?.cancel();
     await _channel?.sink.close(ws_status.normalClosure);
     _channel = null;
-    _pendingPings.clear();
+    _pendingPingId = null;
+    _pingClock.stop();
     state.value = const WatchPartyViewState();
     await _controller?.configureWatchParty(connected: false, canControl: true);
   }
@@ -278,15 +279,19 @@ class WatchPartyService extends GetxService {
         final payload = envelope['payload'];
         if (current != null && payload is Map) {
           final message = WatchPartyChatMessage.fromJson(
-            Map<String, dynamic>.from(payload),
+            payload as Map<String, dynamic>,
           );
-          final history = [...current.chat, message];
+          final history = current.chat.length < 100
+              ? [...current.chat, message]
+              : <WatchPartyChatMessage>[
+                  for (var index = 1; index < current.chat.length; index++)
+                    current.chat[index],
+                  message,
+                ];
           state.value = state.value.copyWith(
             snapshot: current.copyWith(
               revision: (envelope['revision'] as num?)?.toInt(),
-              chat: history.length > 100
-                  ? history.sublist(history.length - 100)
-                  : history,
+              chat: history,
             ),
             error: '',
           );
@@ -295,17 +300,18 @@ class WatchPartyService extends GetxService {
       }
       if (type == 'pong') {
         final requestId = envelope['requestId']?.toString() ?? '';
-        final sentAt = _pendingPings.remove(requestId);
-        if (sentAt != null) {
+        if (requestId == _pendingPingId) {
+          _pendingPingId = null;
+          _pingClock.stop();
           state.value = state.value.copyWith(
-            latencyMs: DateTime.now().difference(sentAt).inMilliseconds,
+            latencyMs: _pingClock.elapsedMilliseconds,
           );
         }
         return;
       }
       if (envelope['payload'] is! Map) return;
       final snapshot = WatchPartySnapshot.fromJson(
-        Map<String, dynamic>.from(envelope['payload'] as Map),
+        envelope['payload'] as Map<String, dynamic>,
       );
       final previous = state.value.snapshot;
       state.value = state.value.copyWith(snapshot: snapshot, error: '');
@@ -433,7 +439,7 @@ class WatchPartyService extends GetxService {
   String _send(String type, Map<String, dynamic> payload) {
     final channel = _channel;
     if (channel == null || !state.value.connected) return '';
-    final requestId = DateTime.now().microsecondsSinceEpoch.toString();
+    final requestId = (++_requestSerial).toString();
     channel.sink.add(
       jsonEncode({
         'v': 1,
@@ -460,8 +466,11 @@ class WatchPartyService extends GetxService {
     _reconnectAttempt++;
     _reconnectTimer = Timer(Duration(seconds: delaySeconds), () async {
       try {
-        final connection = await WatchPartyApi.joinRoom(_inviteCode, _nickname);
-        await _connect(connection);
+        final webSocketUrl = await WatchPartyApi.joinRoom(
+          _inviteCode,
+          _nickname,
+        );
+        await _connect(webSocketUrl);
       } catch (_) {
         _onDisconnected();
       }
@@ -484,8 +493,8 @@ class WatchPartyService extends GetxService {
   );
 
   static String currentNickname() {
-    final name = getUserInfo()['name']?.toString();
-    return (name != null && name.isNotEmpty) ? name : 'AniBaka';
+    final user = Get.find<AppState>().user.value;
+    return user.isLoggedIn && user.name.isNotEmpty ? user.name : 'AniBaka';
   }
 
   String _currentNickname() => currentNickname();

@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:baka/api/bgm.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/services/bangumi_sync_service.dart';
@@ -494,14 +492,11 @@ class CIslandCommentWidgetState extends State<CIslandCommentWidget>
         return (episodeName: fallbackName, comments: const <_BgmComment>[]);
       }
 
-      final response = await getBgmEpisodeComments(episode!.episodeId!);
-      final decoded = jsonDecode(response);
+      final values = await getBgmEpisodeComments(episode!.episodeId!);
       final comments = <_BgmComment>[];
-      if (decoded is List) {
-        for (final value in decoded.take(30)) {
-          final comment = _parseBgmComment(value);
-          if (comment != null) comments.add(comment);
-        }
+      for (final value in values.take(30)) {
+        final comment = _parseBgmComment(value);
+        if (comment != null) comments.add(comment);
       }
       return (episodeName: episode.name, comments: comments);
     } catch (error) {
