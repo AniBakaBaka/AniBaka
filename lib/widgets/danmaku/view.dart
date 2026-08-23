@@ -478,12 +478,19 @@ class _DanmakuViewState extends State<DanmakuView>
     for (final track in _scrollTracks) {
       track.reset();
     }
-    _topBusyUntil.fillRange(0, _topBusyUntil.length, double.negativeInfinity);
-    _bottomBusyUntil.fillRange(
-      0,
-      _bottomBusyUntil.length,
-      double.negativeInfinity,
-    );
+    // A controller may replay its current position from attach() before this
+    // view receives its first layout. The pre-layout track lists are const
+    // empty lists, so even an empty fillRange is unsupported.
+    if (_topBusyUntil.isNotEmpty) {
+      _topBusyUntil.fillRange(0, _topBusyUntil.length, double.negativeInfinity);
+    }
+    if (_bottomBusyUntil.isNotEmpty) {
+      _bottomBusyUntil.fillRange(
+        0,
+        _bottomBusyUntil.length,
+        double.negativeInfinity,
+      );
+    }
   }
 
   void _clearActive() {

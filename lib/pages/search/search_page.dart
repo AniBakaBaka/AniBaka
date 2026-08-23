@@ -20,8 +20,6 @@ class SearchPage extends StatefulWidget {
 class _SearchPageState extends State<SearchPage> {
   static const _debounceDuration = Duration(milliseconds: 300);
   final _searchController = TextEditingController();
-  final _inFlightSearches =
-      <({int source, String query}), Future<List<Map<String, dynamic>>>>{};
   late final SearchService _searchService;
   Timer? _debounce;
 
@@ -76,20 +74,13 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     final searchId = ++_searchService.activeSearchId;
-    final key = (source: _searchService.selectedSourceIndex, query: query);
-
     _searchService.keyword = query;
     // Set loading before showing the result area so stale results never flash.
     _searchService.isLoading = true;
     _searchService.showResults = true;
 
-    final request = _inFlightSearches.putIfAbsent(
-      key,
-      () => _searchService.executeSearch(query),
-    );
-
     try {
-      final results = await request;
+      final results = await _searchService.executeSearch(query);
       if (!mounted || !_searchService.isActiveSearch(searchId)) return;
       _searchService.results = results;
     } catch (error) {
@@ -97,9 +88,6 @@ class _SearchPageState extends State<SearchPage> {
       if (!mounted || !_searchService.isActiveSearch(searchId)) return;
       _searchService.results = const [];
     } finally {
-      if (identical(_inFlightSearches[key], request)) {
-        _inFlightSearches.remove(key);
-      }
       if (mounted && _searchService.isActiveSearch(searchId)) {
         _searchService.isLoading = false;
       }
@@ -371,8 +359,6 @@ class _SearchPageState extends State<SearchPage> {
 
     await _searchService.reloadCustomSources();
     if (!mounted) return;
-    _inFlightSearches.clear();
-
     final query = _searchService.keyword.trim();
     if (query.isNotEmpty) await _search(query);
   }

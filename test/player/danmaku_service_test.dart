@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:baka/instance.dart';
 import 'package:baka/services/danmaku_service.dart';
 import 'package:baka/theme.dart';
@@ -60,6 +62,21 @@ void main() {
     expect(reparsed.single.color, const Color(0xFF00FF00));
   });
 
+  test('decodes large payloads through the worker path', () async {
+    final raw = jsonEncode({
+      'data': [
+        for (var index = 0; index < 600; index++)
+          {'m': 'large-$index', 'p': '${index / 10},1,16777215,0'},
+      ],
+    });
+    expect(raw.length, greaterThan(16 * 1024));
+
+    final items = await DanmakuService.decode(raw);
+    expect(items, hasLength(600));
+    expect(items.first.text, 'large-0');
+    expect(items.last.text, 'large-599');
+  });
+
   test('LRU cache enforces episode and item budgets', () {
     const item = DanmakuItem('x');
     for (var index = 0; index < DanmakuService.maxCachedEpisodes + 1; index++) {
@@ -84,7 +101,7 @@ void main() {
 
     await DanmakuService.saveSettings(controller);
     final restored = DanmakuController();
-    await DanmakuService.loadSettings(restored);
+    DanmakuService.loadSettings(restored);
 
     expect(restored.option.fontFamily, 'Zen Maru Gothic');
   });
@@ -97,7 +114,7 @@ void main() {
 
     await DanmakuService.setFontFamily('Sawarabi Gothic');
     final controller = DanmakuController();
-    await DanmakuService.loadSettings(controller);
+    DanmakuService.loadSettings(controller);
 
     expect(controller.option.fontFamily, 'Sawarabi Gothic');
     expect(controller.option.fontSize, 26);
@@ -108,7 +125,7 @@ void main() {
     await Instances.sp.setString('danmaku_settings', '{"fontSize":18}');
     final controller = DanmakuController();
 
-    await DanmakuService.loadSettings(controller);
+    DanmakuService.loadSettings(controller);
 
     expect(controller.option.fontFamily, AppFonts.defaultFont);
   });

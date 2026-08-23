@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 class DanmakuController extends ChangeNotifier {
   DanmakuController();
 
-  DanmakuListener? _listener;
+  final Set<DanmakuListener> _listeners = <DanmakuListener>{};
 
   bool _running = true;
   double _playbackRate = 1.0;
@@ -40,60 +40,82 @@ class DanmakuController extends ChangeNotifier {
     final rate = value > 0 ? value : 1.0;
     if (_playbackRate == rate) return;
     _playbackRate = rate;
-    _listener?.onDanmakuPlaybackRateChanged(rate);
+    for (final listener in _listeners.toList(growable: false)) {
+      listener.onDanmakuPlaybackRateChanged(rate);
+    }
   }
 
   /// 设置整集弹幕（须按 time 升序）
   void setItems(List<DanmakuItem> items) {
     _items = items;
-    _listener?.onDanmakuItemsChanged();
+    for (final listener in _listeners.toList(growable: false)) {
+      listener.onDanmakuItemsChanged();
+    }
     notifyListeners();
   }
 
   /// 同步播放进度，视图以此为时间锚点（seek 亦由此感知）
   void syncTime(Duration position) {
     _lastPosition = position;
-    if (timeOffset == 0) {
-      _listener?.onDanmakuTimeSync(position);
-    } else {
-      final offsetMs = (timeOffset * 1000).round();
-      final adjustedMs = (position.inMilliseconds - offsetMs).clamp(
-        0,
-        86400000,
-      );
-      _listener?.onDanmakuTimeSync(Duration(milliseconds: adjustedMs));
+    final adjustedPosition = _adjustedPosition(position);
+    for (final listener in _listeners.toList(growable: false)) {
+      listener.onDanmakuTimeSync(adjustedPosition);
     }
+  }
+
+  Duration _adjustedPosition(Duration position) {
+    if (timeOffset == 0) return position;
+    final offsetMs = (timeOffset * 1000).round();
+    final adjustedMs = (position.inMilliseconds - offsetMs).clamp(0, 86400000);
+    return Duration(milliseconds: adjustedMs);
   }
 
   /// 立即注入弹幕（如用户发送）
   void addItem(DanmakuItem item) {
     if (!_running) return;
-    _listener?.onDanmakuInject(item);
+    for (final listener in _listeners.toList(growable: false)) {
+      listener.onDanmakuInject(item);
+    }
   }
 
   void pause() {
     if (!_running) return;
     _running = false;
-    _listener?.onDanmakuPause();
+    for (final listener in _listeners.toList(growable: false)) {
+      listener.onDanmakuPause();
+    }
   }
 
   void resume() {
     if (_running) return;
     _running = true;
-    _listener?.onDanmakuResume();
+    for (final listener in _listeners.toList(growable: false)) {
+      listener.onDanmakuResume();
+    }
   }
 
   /// 清空数据与屏幕（切集时调用）
   void reset() {
     _items = const [];
-    _listener?.onDanmakuReset();
+    final position = _lastPosition;
+    final adjustedPosition = position == null
+        ? null
+        : _adjustedPosition(position);
+    for (final listener in _listeners.toList(growable: false)) {
+      listener.onDanmakuReset();
+      if (adjustedPosition != null) {
+        listener.onDanmakuTimeSync(adjustedPosition);
+      }
+    }
     notifyListeners();
   }
 
   void updateOption(DanmakuOption option) {
     final old = _option;
     _option = option;
-    _listener?.onDanmakuOptionChanged(option, old);
+    for (final listener in _listeners.toList(growable: false)) {
+      listener.onDanmakuOptionChanged(option, old);
+    }
   }
 
   /// 屏蔽词过滤，由视图在弹幕入场时调用
@@ -108,11 +130,20 @@ class DanmakuController extends ChangeNotifier {
       blockColor && color.toARGB32() != Colors.white.toARGB32();
 
   void attach(DanmakuListener listener) {
-    _listener = listener;
+    if (!_listeners.add(listener)) return;
+    final position = _lastPosition;
+    if (position != null) {
+      listener.onDanmakuTimeSync(_adjustedPosition(position));
+    }
+    if (_running) {
+      listener.onDanmakuResume();
+    } else {
+      listener.onDanmakuPause();
+    }
   }
 
   void detach(DanmakuListener listener) {
-    if (identical(_listener, listener)) _listener = null;
+    _listeners.remove(listener);
   }
 }
 

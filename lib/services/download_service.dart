@@ -31,8 +31,6 @@ class DownloadService {
   List<DownloadTask> get tasks => _tasks.value;
 
   bool _initialized = false;
-  final _readyCompleter = Completer<void>();
-  Future<void> get ready => _readyCompleter.future;
 
   final _dio = Dio(
     BaseOptions(
@@ -48,15 +46,14 @@ class DownloadService {
   final Map<String, CancelToken> _cancelTokens = {};
   bool _saveScheduled = false;
 
-  Future<void> init() async {
+  void init() {
     if (_initialized) return;
     _initialized = true;
-    await _load();
-    _readyCompleter.complete();
+    _load();
     _processQueue();
   }
 
-  Future<void> _load() async {
+  void _load() {
     try {
       final storedTasks = AppStorage.downloadTasksBox.get(_storageKey);
       if (storedTasks is List) {

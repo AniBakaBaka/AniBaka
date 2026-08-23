@@ -63,11 +63,12 @@ class ThreadService {
   Future<List<WatchPartyInvite>> refreshWatchRooms() {
     final running = _watchRoomsTask;
     if (running != null) return running;
-    final task = _refreshWatchRooms();
-    _watchRoomsTask = task;
-    return task.whenComplete(() {
+    late final Future<List<WatchPartyInvite>> task;
+    task = _refreshWatchRooms().whenComplete(() {
       if (identical(_watchRoomsTask, task)) _watchRoomsTask = null;
     });
+    _watchRoomsTask = task;
+    return task;
   }
 
   Future<List<WatchPartyInvite>> _refreshWatchRooms() async {

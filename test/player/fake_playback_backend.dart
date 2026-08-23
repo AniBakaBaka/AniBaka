@@ -16,6 +16,8 @@ class FakePlaybackBackend implements PlaybackBackend {
   final _tracks = StreamController<Tracks>.broadcast(sync: true);
 
   bool initialized = false;
+  int initializeCount = 0;
+  Completer<void>? initializeGate;
   bool disposed = false;
   bool _isPlaying = false;
   Duration _currentPosition = Duration.zero;
@@ -65,7 +67,12 @@ class FakePlaybackBackend implements PlaybackBackend {
   String? get currentMediaUri => _currentMediaUri;
 
   @override
-  Future<void> initialize({String? videoRenderer}) async => initialized = true;
+  Future<void> initialize({String? videoRenderer}) async {
+    initializeCount++;
+    final gate = initializeGate;
+    if (gate != null) await gate.future;
+    initialized = true;
+  }
 
   @override
   Future<void> open(

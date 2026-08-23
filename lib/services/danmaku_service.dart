@@ -1,6 +1,7 @@
 import 'dart:collection';
 import 'dart:convert';
 
+import 'package:baka/api/request_cache.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/theme.dart';
@@ -16,32 +17,36 @@ class DanmakuService {
   static const String _blockColorKey = 'danmaku_block_color';
   static const int maxCachedEpisodes = 3;
   static const int maxCachedItems = 8000;
+  static const int _workerDecodeThresholdBytes = 16 * 1024;
 
   static final LinkedHashMap<String, List<DanmakuItem>> _cache =
       LinkedHashMap<String, List<DanmakuItem>>();
-  static final Map<String, Future<List<DanmakuItem>>> _loads = {};
+  // Use a new field name after changing its type. During Flutter hot reload,
+  // an existing static field retains its old value; reusing the old
+  // `_loads` name after migrating it from Map to RequestDeduplicator makes the
+  // generated getter try to return that stale Map as a RequestDeduplicator.
+  static final RequestDeduplicator<String, List<DanmakuItem>> _inFlightLoads =
+      RequestDeduplicator<String, List<DanmakuItem>>();
   static int _cachedItemCount = 0;
 
   static Future<List<DanmakuItem>> fetch({
     required int subjectId,
     required int episodeIndex,
     required Iterable<String> titles,
-  }) async {
+  }) {
     final cacheKey = '$subjectId-$episodeIndex';
     final cached = _readCache(cacheKey);
-    if (cached != null) return cached;
-    final pending = _loads[cacheKey];
-    if (pending != null) return pending;
+    if (cached != null) return SynchronousFuture(cached);
 
-    final load = _fetchFirstAvailableDanmaku(subjectId, episodeIndex, titles);
-    _loads[cacheKey] = load;
-    try {
-      final items = await load;
+    return _inFlightLoads.run(cacheKey, () async {
+      final items = await _fetchFirstAvailableDanmaku(
+        subjectId,
+        episodeIndex,
+        titles,
+      );
       if (items.isNotEmpty) _putCache(cacheKey, items);
       return items;
-    } finally {
-      if (identical(_loads[cacheKey], load)) _loads.remove(cacheKey);
-    }
+    });
   }
 
   static List<DanmakuItem>? _readCache(String key) {
@@ -83,14 +88,22 @@ class DanmakuService {
   }
 
   /// Decodes the API `{data: [...]}` payload and the local `[...]` file format.
-  /// Passing the response text to the worker avoids decoding a second dynamic
-  /// object graph on the UI isolate before producing the typed list.
+  /// Small payloads stay on the UI isolate to avoid isolate startup/copy cost;
+  /// larger payloads pass only the response text to a worker, avoiding a
+  /// second dynamic object graph on the UI isolate.
   static Future<List<DanmakuItem>> decode(String raw) {
     if (raw.isEmpty) return SynchronousFuture(const []);
+    if (raw.length < _workerDecodeThresholdBytes) {
+      try {
+        return SynchronousFuture(_decodeDanmakuItems(raw));
+      } catch (error, stackTrace) {
+        return Future.error(error, stackTrace);
+      }
+    }
     return compute(_decodeDanmakuItems, raw);
   }
 
-  static Future<void> loadSettings(DanmakuController controller) async {
+  static void loadSettings(DanmakuController controller) {
     final preferences = Instances.sp;
     final option = _readOption();
     controller.blockWords = BgmUtils.parseJsonList(
@@ -186,7 +199,7 @@ class DanmakuService {
   @visibleForTesting
   static void clearCache() {
     _cache.clear();
-    _loads.clear();
+    _inFlightLoads.clear();
     _cachedItemCount = 0;
   }
 
@@ -224,8 +237,7 @@ List<DanmakuItem> _decodeDanmakuItems(String raw) {
     if (type == null || (type != 1 && type != 3 && type != 4 && type != 5)) {
       continue;
     }
-    
-    
+
     final thirdComma = parameters.indexOf(',', secondComma + 1);
     final colorStart = thirdComma < 0 ? secondComma + 1 : thirdComma + 1;
     final fourthComma = thirdComma < 0

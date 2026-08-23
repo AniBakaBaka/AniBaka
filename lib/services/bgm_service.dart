@@ -41,9 +41,9 @@ class BgmService {
     return info;
   }
 
-  static Future<List<BgmSubjectInfo>> searchSubjects(String keyword) async {
+  static Future<List<BgmSubjectInfo>> searchSubjects(String keyword) {
     final query = _SearchTitle.from(keyword);
-    if (query.normalized.isEmpty) return const [];
+    if (query.normalized.isEmpty) return SynchronousFuture(const []);
     return _search(query);
   }
 

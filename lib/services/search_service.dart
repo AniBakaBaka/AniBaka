@@ -1,10 +1,10 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
 import 'package:baka/source/source_registry.dart';
 import 'package:baka/api/post.dart';
+import 'package:baka/api/request_cache.dart';
 import 'package:baka/services/bgm_service.dart';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/instance.dart';
@@ -61,6 +61,11 @@ class SearchService {
 
   int activeSearchId = 0;
   bool _disposed = false;
+  final _searchRequests =
+      RequestDeduplicator<
+        ({int source, String query}),
+        List<Map<String, dynamic>>
+      >();
 
   final SourceAdapterService _sourceAdapterService =
       SourceAdapterService.instance;
@@ -109,20 +114,23 @@ class SearchService {
 
   bool isActiveSearch(int searchId) => searchId == activeSearchId;
 
-  Future<List<Map<String, dynamic>>> executeSearch(String searchKey) async {
-    if (_disposed) return const [];
+  Future<List<Map<String, dynamic>>> executeSearch(String searchKey) {
+    if (_disposed) return SynchronousFuture(const []);
     final query = searchKey.trim();
-    if (query.isEmpty) return const [];
+    if (query.isEmpty) return SynchronousFuture(const []);
 
     keyword = query;
-    final searchResults = await _resolveSearch(query);
-    if (!_isGvKey(query)) addSearchHistory(query);
-    return searchResults;
+    final source = selectedSourceIndex;
+    return _searchRequests.run((source: source, query: query), () async {
+      final searchResults = await _resolveSearch(query, source);
+      if (!_isGvKey(query)) addSearchHistory(query);
+      return searchResults;
+    });
   }
 
-  Future<List<Map<String, dynamic>>> _resolveSearch(String query) {
+  Future<List<Map<String, dynamic>>> _resolveSearch(String query, int source) {
     if (_isGvKey(query)) return _searchByGv(query);
-    return _searchSelectedSource(query);
+    return _searchSelectedSource(query, source);
   }
 
   bool _isGvKey(String query) =>
@@ -137,9 +145,10 @@ class SearchService {
 
   Future<List<Map<String, dynamic>>> _searchSelectedSource(
     String searchKey,
+    int source,
   ) async {
     try {
-      if (selectedSourceIndex == 0) {
+      if (source == 0) {
         final subjects = await BgmService.searchSubjects(searchKey);
         return [
           for (final subject in subjects)
@@ -163,7 +172,7 @@ class SearchService {
         ];
       }
 
-      final builtinIndex = selectedSourceIndex - 1;
+      final builtinIndex = source - 1;
       if (builtinIndex >= 0 && builtinIndex < builtinAdapterSources.length) {
         return _sourceAdapterService.search(
           builtinAdapterSources[builtinIndex].key,
@@ -245,6 +254,7 @@ class SearchService {
     if (_disposed) return;
     _disposed = true;
     activeSearchId++;
+    _searchRequests.clear();
     resultsNotifier.dispose();
     selectedSourceIndexNotifier.dispose();
     keywordNotifier.dispose();

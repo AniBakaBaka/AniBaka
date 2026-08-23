@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -25,13 +26,14 @@ class WebViewPageState extends State<WebViewPage> {
 
   late WebViewController _mobileController;
   late webview_windows.WebviewController _desktopController;
+  StreamSubscription<dynamic>? _desktopMessageSubscription;
   bool _isReady = false;
 
   @override
   void initState() {
     super.initState();
     if (_isDesktop) {
-      _initDesktopWebView();
+      unawaited(_initDesktopWebView());
     } else {
       _initMobileWebView();
     }
@@ -86,9 +88,19 @@ class WebViewPageState extends State<WebViewPage> {
   Future<void> _initDesktopWebView() async {
     _desktopController = webview_windows.WebviewController();
     await _desktopController.initialize();
+    if (!mounted) {
+      _desktopController.dispose();
+      return;
+    }
     await _desktopController.loadUrl(widget.url);
+    if (!mounted) {
+      _desktopController.dispose();
+      return;
+    }
 
-    _desktopController.webMessage.listen((message) async {
+    _desktopMessageSubscription = _desktopController.webMessage.listen((
+      message,
+    ) async {
       final json = _handleJsMessage(jsonDecode(message));
       if (json != null) {
         await _desktopController.executeScript(
@@ -97,7 +109,7 @@ class WebViewPageState extends State<WebViewPage> {
       }
     });
 
-    if (mounted) setState(() => _isReady = true);
+    setState(() => _isReady = true);
   }
 
   @override
@@ -189,7 +201,10 @@ class WebViewPageState extends State<WebViewPage> {
 
   @override
   void dispose() {
-    if (_isDesktop) _desktopController.dispose();
+    if (_isDesktop) {
+      unawaited(_desktopMessageSubscription?.cancel());
+      _desktopController.dispose();
+    }
     super.dispose();
   }
 }

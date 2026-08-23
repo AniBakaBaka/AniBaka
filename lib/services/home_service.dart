@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:baka/api/bgm.dart';
 import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/api/post.dart';
+import 'package:baka/api/request_cache.dart';
 import 'package:baka/services/app_storage.dart';
 import 'package:baka/services/bgm_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
@@ -27,7 +28,8 @@ class HomeDataService {
 
   static const String _swiperTag = '幻灯';
   static const String _swiperCacheKey = 'home_swiper_backdrop_v2';
-  static final Map<String, Future<Object>> _requests = {};
+  static final RequestDeduplicator<String, Object> _requests =
+      RequestDeduplicator<String, Object>();
 
   final _feed = _FeedNotifier();
   final ValueNotifier<HomeItems> swipers = ValueNotifier(const []);
@@ -45,6 +47,7 @@ class HomeDataService {
   int _feedRequest = 0;
   bool _loadingFeed = false;
   Future<void>? _firstPageTask;
+  ({String tag, bool force})? _firstPageKey;
 
   ValueNotifier<HomeItems> get feed => _feed;
   ValueNotifier<List<HomeItems>> get ranks => _ranks;
@@ -92,16 +95,27 @@ class HomeDataService {
   }
 
   Future<void> loadFeed({bool force = false}) {
-    final task = _loadFirstPage(force: force);
-    _firstPageTask = task;
-    return task.whenComplete(() {
-      if (identical(_firstPageTask, task)) _firstPageTask = null;
+    final key = (tag: tag.value, force: force);
+    final running = _firstPageTask;
+    if (running != null && _firstPageKey == key) return running;
+
+    late final Future<void> task;
+    task = _loadFirstPage(selectedTag: key.tag, force: force).whenComplete(() {
+      if (identical(_firstPageTask, task)) {
+        _firstPageTask = null;
+        _firstPageKey = null;
+      }
     });
+    _firstPageTask = task;
+    _firstPageKey = key;
+    return task;
   }
 
-  Future<void> _loadFirstPage({required bool force}) async {
+  Future<void> _loadFirstPage({
+    required String selectedTag,
+    required bool force,
+  }) async {
     final request = ++_feedRequest;
-    final selectedTag = tag.value;
     _loadingFeed = true;
 
     try {
@@ -354,16 +368,13 @@ class HomeDataService {
       if (cached != null) return Future.value(cached);
     }
 
-    return _requests[key] ??= loader()
-        .then((data) {
-          _homeCache.write(key, data);
-          return data;
-        })
-        .whenComplete(() {
-          // 块回调返回 void；表达式回调会返回刚移除的同一个 Future，
-          // 使 whenComplete 等待自身，首次请求因此永远无法发布到 UI。
-          _requests.remove(key);
-        });
+    return _requests.run(key, () async {
+      final data = await loader();
+      // 先完成缓存写入再发布结果，关闭“请求已结束但缓存尚不可见”的
+      // 重复请求窗口。
+      await _homeCache.write(key, data);
+      return data;
+    });
   }
 
   static Object? _readCache(String key, {bool allowExpired = false}) =>

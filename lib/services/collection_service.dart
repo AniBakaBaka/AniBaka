@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:baka/api/anibaka_api.dart';
+import 'package:baka/api/request_cache.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/services/bangumi_sync_service.dart';
@@ -10,7 +11,13 @@ class CollectionService {
   const CollectionService._();
 
   static const _localKey = 'local_anime_collections_v1';
-  static Future<List<AnimeCollection>>? _bangumiCollectionRequest;
+  static final _bangumiCollectionRequests =
+      RequestDeduplicator<void, List<AnimeCollection>>();
+  static final _listRequests =
+      RequestDeduplicator<
+        ({int page, int pageSize, int? status, int? bgmId}),
+        CollectionListResponse?
+      >();
   static List<AnimeCollection>? _localCache;
   static Map<int, AnimeCollection> _localByBgmId = const {};
   static Map<int, AnimeCollection> _localByPostId = const {};
@@ -52,6 +59,17 @@ class CollectionService {
     int pageSize = 20,
     int? status,
     int? bgmId,
+  }) => _listRequests.run(
+    (page: page, pageSize: pageSize, status: status, bgmId: bgmId),
+    () =>
+        _getList(page: page, pageSize: pageSize, status: status, bgmId: bgmId),
+  );
+
+  static Future<CollectionListResponse?> _getList({
+    required int page,
+    required int pageSize,
+    required int? status,
+    required int? bgmId,
   }) async {
     if (!isLocalMode) {
       return AniBakaApi.getCollections(
@@ -162,15 +180,10 @@ class CollectionService {
   }
 
   static Future<List<AnimeCollection>> _refreshBangumiCollections() {
-    final active = _bangumiCollectionRequest;
-    if (active != null) return active;
-    final request = _fetchAndStoreBangumiCollections();
-    _bangumiCollectionRequest = request;
-    return request.whenComplete(() {
-      if (identical(_bangumiCollectionRequest, request)) {
-        _bangumiCollectionRequest = null;
-      }
-    });
+    return _bangumiCollectionRequests.run(
+      null,
+      _fetchAndStoreBangumiCollections,
+    );
   }
 
   static Future<List<AnimeCollection>>

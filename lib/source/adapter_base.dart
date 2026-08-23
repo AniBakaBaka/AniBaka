@@ -369,13 +369,14 @@ abstract class AdapterBase {
 
   /// Starts any source-specific authorization refresh required while the
   /// resolved media is actively playing.
-  Future<void> startPlaybackKeepAlive(String mediaUrl) async {}
+  Future<void> startPlaybackKeepAlive(String mediaUrl) =>
+      SynchronousFuture(null);
 
   /// Allows adapters to prepare a stable player-facing representation of a
   /// resolved media URL, for example by materializing a remote HLS manifest.
   Future<({String url, Map<String, String> httpHeaders})> preparePlaybackMedia(
     ({String url, Map<String, String> httpHeaders}) media,
-  ) async => media;
+  ) => SynchronousFuture(media);
 
   /// Stops the active playback authorization refresh, if any.
   void stopPlaybackKeepAlive() {}

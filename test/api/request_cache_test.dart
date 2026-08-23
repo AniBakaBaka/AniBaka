@@ -72,4 +72,23 @@ void main() {
       expect(loads, 2);
     },
   );
+
+  test('deduplicator returns the exact in-flight Future', () async {
+    final requests = RequestDeduplicator<String, int>();
+    final gate = Completer<int>();
+    var loads = 0;
+
+    Future<int> load() {
+      loads++;
+      return gate.future;
+    }
+
+    final first = requests.run('same', load);
+    final second = requests.run('same', load);
+    expect(identical(first, second), isTrue);
+    expect(loads, 1);
+
+    gate.complete(9);
+    expect(await first, 9);
+  });
 }

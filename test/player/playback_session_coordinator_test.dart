@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:baka/instance.dart';
 import 'package:baka/services/media_session_service.dart';
 import 'package:baka/services/playback_session_coordinator.dart';
@@ -55,6 +57,37 @@ void main() {
       const Duration(seconds: 30),
       const Duration(seconds: 50),
     ]);
+    await controller.dispose();
+  });
+
+  test('concurrent starts share initialization completion', () async {
+    final gate = Completer<void>();
+    final backend = FakePlaybackBackend()..initializeGate = gate;
+    final controller = PlaybackController(backend: backend);
+    final coordinator = PlaybackSessionCoordinator(
+      controller: controller,
+      danmakuController: DanmakuController(),
+      content: _RecordingPlayerService(),
+      onNextEpisode: () {},
+      onPreviousEpisode: () {},
+      mediaSession: MediaSessionService(),
+    );
+
+    final first = coordinator.start();
+    final second = coordinator.start();
+    expect(identical(first, second), isTrue);
+    expect(backend.initializeCount, 1);
+
+    var secondCompleted = false;
+    second.then((_) => secondCompleted = true);
+    await Future<void>.delayed(Duration.zero);
+    expect(secondCompleted, isFalse);
+
+    gate.complete();
+    await Future.wait([first, second]);
+    expect(secondCompleted, isTrue);
+
+    await coordinator.dispose();
     await controller.dispose();
   });
 }

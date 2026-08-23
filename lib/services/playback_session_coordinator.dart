@@ -37,18 +37,20 @@ class PlaybackSessionCoordinator {
   StreamSubscription<Duration>? _seekSubscription;
   int _lastCheckpointPositionMs = 0;
   int _lastPersistedPositionMs = -1;
-  bool _started = false;
+  Future<void>? _startFuture;
   bool _disposed = false;
   MediaSessionService? _attachedMediaSession;
 
-  Future<void> start() async {
-    if (_started || _disposed) return;
-    _started = true;
+  Future<void> start() {
+    if (_disposed) return SynchronousFuture(null);
+    return _startFuture ??= _start();
+  }
+
+  Future<void> _start() async {
     controller.attachDanmaku(danmakuController);
-    await Future.wait([
-      controller.initialize(),
-      DanmakuService.loadSettings(danmakuController),
-    ]);
+    final initialize = controller.initialize();
+    DanmakuService.loadSettings(danmakuController);
+    await initialize;
     if (_disposed) return;
 
     _lastCheckpointPositionMs =

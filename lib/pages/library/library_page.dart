@@ -26,6 +26,7 @@ class _LibraryPageState extends State<LibraryPage> {
   CollectionStats? _stats;
   late int _selectedIndex = widget.initialIndex;
   bool _isCollectionLoading = false;
+  int _collectionGeneration = 0;
   int? _collectionStatusFilter;
   int _collectionPage = 1;
   bool _hasMoreCollection = true;
@@ -60,29 +61,41 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   Future<void> _loadInitialData() async {
+    final generation = ++_collectionGeneration;
+    final status = _collectionStatusFilter;
     setState(() => _isCollectionLoading = true);
     try {
-      await Future.wait([
-        CollectionService.getStats().then((res) {
-          if (res != null) _stats = res;
-        }),
-        CollectionService.getList(
-          page: 1,
-          pageSize: 20,
-          status: _collectionStatusFilter,
-        ).then((res) {
-          if (res != null) {
-            _collectionList = res.list;
-            _hasMoreCollection = _collectionList.length < res.total;
-          }
-        }),
+      final results = await Future.wait<Object?>([
+        CollectionService.getStats(),
+        CollectionService.getList(page: 1, pageSize: 20, status: status),
         if (_isLoggedIn)
           PlayHistorySyncService.syncRemoteToLocal().then((_) {
-            _historyList = PlayHistorySyncService.getHistoryList();
+            return PlayHistorySyncService.getHistoryList();
           }),
       ]);
+      if (!mounted ||
+          generation != _collectionGeneration ||
+          status != _collectionStatusFilter) {
+        return;
+      }
+
+      final stats = results[0] as CollectionStats?;
+      final response = results[1] as CollectionListResponse?;
+      setState(() {
+        if (stats != null) _stats = stats;
+        if (response != null) {
+          _collectionPage = 1;
+          _collectionList = response.list;
+          _hasMoreCollection = _collectionList.length < response.total;
+        }
+        if (results.length > 2) {
+          _historyList = results[2] as List<Map<String, dynamic>>;
+        }
+      });
     } finally {
-      if (mounted) setState(() => _isCollectionLoading = false);
+      if (mounted && generation == _collectionGeneration) {
+        setState(() => _isCollectionLoading = false);
+      }
     }
   }
 
@@ -92,16 +105,24 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   Future<void> _fetchCollectionData({bool reset = true}) async {
-    if (_isCollectionLoading) return;
+    if (!reset && _isCollectionLoading) return;
+    final generation = reset ? ++_collectionGeneration : _collectionGeneration;
+    final status = _collectionStatusFilter;
+    final page = reset ? 1 : _collectionPage + 1;
     setState(() => _isCollectionLoading = true);
     try {
-      final page = reset ? 1 : _collectionPage + 1;
       final response = await CollectionService.getList(
         page: page,
         pageSize: 20,
-        status: _collectionStatusFilter,
+        status: status,
       );
-      if (response != null && mounted) {
+      if (response == null ||
+          !mounted ||
+          generation != _collectionGeneration ||
+          status != _collectionStatusFilter) {
+        return;
+      }
+      setState(() {
         _collectionPage = page;
         if (reset) {
           _collectionList = response.list;
@@ -109,11 +130,13 @@ class _LibraryPageState extends State<LibraryPage> {
           _collectionList.addAll(response.list);
         }
         _hasMoreCollection = _collectionList.length < response.total;
-      }
+      });
     } catch (e) {
       debugPrint('获取收藏列表失败: $e');
     } finally {
-      if (mounted) setState(() => _isCollectionLoading = false);
+      if (mounted && generation == _collectionGeneration) {
+        setState(() => _isCollectionLoading = false);
+      }
     }
   }
 

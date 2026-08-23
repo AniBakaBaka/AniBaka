@@ -67,6 +67,8 @@ final class RequestDeduplicator<K, V> {
     _requests[key] = request;
     return request;
   }
+
+  void clear() => _requests.clear();
 }
 
 final class _RequestEntry<V> {

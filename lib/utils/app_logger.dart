@@ -44,6 +44,7 @@ class AppLogger {
   File? _logFile;
   int _currentLogFileBytes = 0;
   bool _initialized = false;
+  Future<void>? _initFuture;
   bool _errorHandlersInstalled = false;
   Future<void> _writeQueue = Future<void>.value();
 
@@ -67,9 +68,9 @@ class AppLogger {
     );
   }
 
-  Future<void> init() async {
-    if (_initialized) return;
+  Future<void> init() => _initFuture ??= _initialize();
 
+  Future<void> _initialize() async {
     _logDirectory = await _resolveLogDirectory();
     if (!await _logDirectory!.exists()) {
       await _logDirectory!.create(recursive: true);

@@ -484,6 +484,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
 
   Widget _buildDanmaku() {
     if (!widget.danmakuEnabled ||
+        (!widget.full && _fullscreenRouteActive) ||
         (!widget.full && !Instances.isDesktopPlatform)) {
       return const SizedBox.shrink();
     }
