@@ -35,6 +35,9 @@ class AnimeDetailPlaceholder extends StatefulWidget {
 class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   late final int? _postId;
 
+  Animation<double>? _routeAnimation;
+  bool _initialRouteTransitionFinished = false;
+
   late List<Map<String, dynamic>> _initialComments;
   late int _initialCommentTotal;
 
@@ -87,6 +90,46 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     _loadInitialData();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final animation = ModalRoute.of(context)?.animation;
+    if (!identical(animation, _routeAnimation)) {
+      _routeAnimation?.removeStatusListener(_handleRouteAnimationStatus);
+      _routeAnimation = animation;
+      animation?.addStatusListener(_handleRouteAnimationStatus);
+    }
+    if (animation == null || animation.status == AnimationStatus.completed) {
+      _initialRouteTransitionFinished = true;
+    }
+  }
+
+  void _handleRouteAnimationStatus(AnimationStatus status) {
+    if (status != AnimationStatus.completed ||
+        _initialRouteTransitionFinished ||
+        !mounted) {
+      return;
+    }
+    setState(() => _initialRouteTransitionFinished = true);
+  }
+
+  void _updateInitialState(VoidCallback update) {
+    if (!mounted) return;
+    if (_initialRouteTransitionFinished) {
+      setState(update);
+    } else {
+      // Keep the Hero destination stable while the route is moving. The
+      // completed animation listener publishes accumulated results together.
+      update();
+    }
+  }
+
+  @override
+  void dispose() {
+    _routeAnimation?.removeStatusListener(_handleRouteAnimationStatus);
+    super.dispose();
+  }
+
   void _startWatching() {
     if (_detail.logoUrl.isNotEmpty) {
       widget.data['logoUrl'] = _detail.logoUrl;
@@ -99,8 +142,10 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     if (_subjectId == null) {
       try {
         await BgmService.resolveFromData(widget.data);
-        _bgmInfo = BgmUtils.readFromData(widget.data);
-        if (mounted) setState(() => _rebuildDetail());
+        _updateInitialState(() {
+          _bgmInfo = BgmUtils.readFromData(widget.data);
+          _rebuildDetail();
+        });
       } catch (e) {
         debugPrint('解析bgmId失败: $e');
       }
@@ -108,7 +153,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
 
     final bgmId = _subjectId;
     if (bgmId == null) {
-      if (mounted) setState(() => _isCollectionLoading = false);
+      _updateInitialState(() => _isCollectionLoading = false);
       return;
     }
 
@@ -117,10 +162,10 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     if (_anibakaData == null) {
       AniBakaApi.getAnimeDetail(bgmId)
           .then((data) {
-            if (!mounted) return;
-            _anibakaData = BgmUtils.asMap(data);
-            _rebuildDetail();
-            setState(() {});
+            _updateInitialState(() {
+              _anibakaData = BgmUtils.asMap(data);
+              _rebuildDetail();
+            });
           })
           .catchError((_) {});
     }
@@ -129,11 +174,11 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     if (_detailData == null) {
       getBgmSubject(bgmId)
           .then((data) {
-            if (!mounted) return;
-            _detailData = data;
-            widget.data['bgmDetailData'] = data;
-            _rebuildDetail();
-            setState(() {});
+            _updateInitialState(() {
+              _detailData = data;
+              widget.data['bgmDetailData'] = data;
+              _rebuildDetail();
+            });
           })
           .catchError((_) {});
     }
@@ -141,14 +186,13 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     // Phase 3: 收藏状态独立加载
     CollectionService.getByBgmId(bgmId)
         .then((collection) {
-          if (!mounted) return;
-          setState(() {
+          _updateInitialState(() {
             _collection = collection;
             _isCollectionLoading = false;
           });
         })
         .catchError((_) {
-          if (mounted) setState(() => _isCollectionLoading = false);
+          _updateInitialState(() => _isCollectionLoading = false);
         });
   }
 
@@ -304,16 +348,17 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              CachedNetworkImage(
-                imageUrl: backgroundUrl,
-                fit: BoxFit.cover,
-                alignment: Alignment.topCenter,
-                memCacheWidth: isWide ? 1280 : 720,
-                useOldImageOnUrlChange: true,
-                fadeInDuration: Duration.zero,
-                fadeOutDuration: Duration.zero,
-                errorWidget: (context, url, error) => const SizedBox(),
-              ),
+              if (_initialRouteTransitionFinished && backgroundUrl.isNotEmpty)
+                CachedNetworkImage(
+                  imageUrl: backgroundUrl,
+                  fit: BoxFit.cover,
+                  alignment: Alignment.topCenter,
+                  memCacheWidth: isWide ? 1280 : 720,
+                  useOldImageOnUrlChange: true,
+                  fadeInDuration: Duration.zero,
+                  fadeOutDuration: Duration.zero,
+                  errorWidget: (context, url, error) => const SizedBox(),
+                ),
               Positioned.fill(
                 child: Container(
                   decoration: BoxDecoration(
@@ -403,6 +448,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                             updateTime: widget.data['time']?.toString(),
                             category: widget.data['sort']?.toString(),
                             heroTag: coverHeroTag(widget.data),
+                            enableCoverEffects: _initialRouteTransitionFinished,
                             collection: _collection,
                             isCollectionLoading: _isCollectionLoading,
                             onCollectionTap: _handleCollectionTap,

@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:baka/api/api_config.dart';
 import 'package:baka/services/network_service.dart';
 import 'package:baka/utils/bgm_utils.dart';
@@ -15,17 +13,14 @@ Future<List<Map<String, dynamic>>> getPost(
   Object uid = '',
   Object uv = '',
 }) async {
-  final response = await NetUtils.get(
+  final response = await NetUtils.getJson<Map<String, dynamic>>(
     '$host/posts?status=$status&sort=$sort&tag=$tag&uid=$uid&uv=$uv&page=$page&pageSize=$pageSize',
   );
-  return ((jsonDecode(response) as Map<String, dynamic>)['data']
-          as List<dynamic>)
-      .cast<Map<String, dynamic>>();
+  return (response!['data'] as List<dynamic>).cast<Map<String, dynamic>>();
 }
 
 Future<Map<String, dynamic>> getPostDetail(int pid) async =>
-    (jsonDecode(await NetUtils.get('$host/post/$pid'))
-            as Map<String, dynamic>)['data']
+    (await NetUtils.getJson<Map<String, dynamic>>('$host/post/$pid'))!['data']
         as Map<String, dynamic>;
 
 Future<String> getPlayUrl(String url) {
@@ -33,8 +28,9 @@ Future<String> getPlayUrl(String url) {
 }
 
 Future<List<Map<String, dynamic>>> getSearch(String? key) async =>
-    ((jsonDecode(await NetUtils.get('$host/search/posts?key=$key'))
-                as Map<String, dynamic>)['data']
+    (((await NetUtils.getJson<Map<String, dynamic>>(
+              '$host/search/posts?key=$key',
+            ))!['data'])
             as List<dynamic>)
         .cast<Map<String, dynamic>>();
 
@@ -44,11 +40,10 @@ Future<List<dynamic>> getComments(
   String? runame, {
   int page = 1,
 }) async {
-  final response = await NetUtils.get(
+  final response = await NetUtils.getJson<Map<String, dynamic>>(
     '$host/comments?pid=$pid&runame=$runame&page=$page&pageSize=$pageSize',
   );
-  return (jsonDecode(response) as Map<String, dynamic>)['data']
-      as List<dynamic>;
+  return response!['data'] as List<dynamic>;
 }
 
 Future<String> getDanmu(int bgmId, int episodeIndex, String? title) {
@@ -63,15 +58,20 @@ Future<String> getDanmu(int bgmId, int episodeIndex, String? title) {
 }
 
 Future<bool> addComment(Map<String, Object?> data) async =>
-    (jsonDecode(await NetUtils.post('$host/comment/add', data))
-        as Map<String, dynamic>)['code'] ==
+    (await NetUtils.postJson<Map<String, dynamic>>(
+      '$host/comment/add',
+      data,
+    ))?['code'] ==
     200;
 
-Future<String> checkAppUpdateApi() {
-  return NetUtils.get('https://version.anibaka.com/');
-}
+Future<Map<String, dynamic>> checkAppUpdateApi() async =>
+    (await NetUtils.getJson<Map<String, dynamic>>(
+      'https://version.anibaka.com/',
+    ))!;
 
 Future<String> updateCommentUv(Object cid, Object? name) async =>
-    (jsonDecode(await NetUtils.post('$host/comment/uv?cid=$cid&name=$name', {}))
-            as Map<String, dynamic>)['msg']
+    (await NetUtils.postJson<Map<String, dynamic>>(
+          '$host/comment/uv?cid=$cid&name=$name',
+          {},
+        ))!['msg']
         as String;

@@ -4,16 +4,17 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:url_launcher/url_launcher_string.dart';
 
 import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/pages/library/library_page.dart';
 import 'package:baka/pages/login/qr_scanner_page.dart';
 import 'package:baka/pages/media_library/media_library_page.dart';
+import 'package:baka/pages/mine/mine_profile.dart';
 import 'package:baka/pages/player/download_page.dart';
 import 'package:baka/pages/setting/app_settings_page.dart';
 import 'package:baka/pages/source/source_management_page.dart';
-import 'package:baka/services/mine_service.dart';
 import 'package:baka/services/version_service.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/common/scale_button.dart';
@@ -27,13 +28,13 @@ class MinePage extends StatefulWidget {
 }
 
 class _MinePageState extends State<MinePage> {
-  late final MineService _svc = MineService();
+  late final AppState _app = Get.find<AppState>();
   late final Worker _loginWorker;
 
   @override
   void initState() {
     super.initState();
-    _loginWorker = ever(Get.find<AppState>().user, (_) {
+    _loginWorker = ever(_app.user, (_) {
       if (mounted) setState(() {});
     });
   }
@@ -75,13 +76,13 @@ class _MinePageState extends State<MinePage> {
                       title: '主题模式',
                       icon: Icons.brightness_6_outlined,
                       onTap: _showThemeDialog,
-                      trailing: _buildTag(_svc.themeText, isDark),
+                      trailing: _buildTag(_app.themeModeLabel, isDark),
                     ),
                     _MenuItem(
                       title: 'APP线路',
                       icon: Icons.swap_calls_outlined,
                       onTap: _switchHost,
-                      trailing: _buildTag(_svc.currentHost, isDark),
+                      trailing: _buildTag(_app.currentHost, isDark),
                     ),
                     _MenuItem(
                       title: '支持开发',
@@ -136,9 +137,9 @@ class _MinePageState extends State<MinePage> {
   }
 
   Widget _buildHeader(BuildContext context, bool isDark) {
-    final bool isLogin = _svc.isLogin;
-    final bool hasIdentity = _svc.hasIdentity;
-    final avatarUrl = _svc.avatarUrl;
+    final bool isLogin = _app.isLoggedIn;
+    final bool hasIdentity = _app.hasIdentity;
+    final avatarUrl = _app.avatarUrl;
 
     return SliverToBoxAdapter(
       child: SafeArea(
@@ -173,7 +174,7 @@ class _MinePageState extends State<MinePage> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      _svc.displayName,
+                      _app.displayName,
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
@@ -182,7 +183,7 @@ class _MinePageState extends State<MinePage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    if (_svc.isBangumiLogin && !isLogin) ...[
+                    if (_app.isBangumiLogin && !isLogin) ...[
                       const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -207,7 +208,7 @@ class _MinePageState extends State<MinePage> {
                     ],
                     const SizedBox(height: 2),
                     Text(
-                      _svc.displaySubtitle,
+                      _app.displaySubtitle,
                       style: TextStyle(
                         fontSize: 13,
                         color: isDark ? Colors.white54 : Colors.black54,
@@ -220,7 +221,7 @@ class _MinePageState extends State<MinePage> {
                       GestureDetector(
                         onTap: _copyUid,
                         child: Text(
-                          'UID: ${_svc.uid}',
+                          'UID: ${_app.user.value.id}',
                           style: TextStyle(
                             fontSize: 10,
                             fontFamily: 'monospace',
@@ -455,7 +456,11 @@ class _MinePageState extends State<MinePage> {
   }
 
   Future<void> _copyUid() async {
-    final copied = await _svc.copyUid();
+    final uid = _app.user.value.id;
+    final copied = uid != 0;
+    if (copied) {
+      await Clipboard.setData(ClipboardData(text: uid.toString()));
+    }
     if (copied && mounted) showSnackBar('UID 已复制');
   }
 
@@ -479,13 +484,13 @@ class _MinePageState extends State<MinePage> {
     return SimpleDialogOption(
       onPressed: () {
         Navigator.pop(context);
-        setState(() => _svc.switchTheme(mode));
+        setState(() => _app.setThemeMode(mode));
       },
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(title),
-          if (_svc.themeMode == mode)
+          if (_app.themeMode == mode)
             Icon(
               Icons.check,
               color: Theme.of(context).colorScheme.primary,
@@ -497,15 +502,21 @@ class _MinePageState extends State<MinePage> {
   }
 
   void _switchHost() {
-    _svc.switchHost();
+    _app.switchHost();
     setState(() {});
-    showSnackBar('已切换至 ${_svc.currentHost}，重启生效');
+    showSnackBar('已切换至 ${_app.currentHost}，重启生效');
   }
 
   Future<void> _joinQqGroup() async {
-    final success = await _svc.joinQqGroup();
+    var success = false;
+    try {
+      success = await launchUrlString(
+        communityGroupUrl,
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (_) {}
     if (!success && mounted) {
-      showSnackBar('无法打开 QQ 群 ${MineService.qqGroupNumber}，请稍后重试');
+      showSnackBar('无法打开 QQ 群 $communityGroupNumber，请稍后重试');
     }
   }
 
@@ -536,7 +547,7 @@ class _MinePageState extends State<MinePage> {
                 borderRadius: BorderRadius.circular(10),
               ),
               child: SelectableText(
-                MineService.tronUsdtAddress,
+                tronUsdtAddress,
                 style: TextStyle(
                   fontFamily: 'monospace',
                   fontSize: 11,
@@ -559,7 +570,9 @@ class _MinePageState extends State<MinePage> {
               Expanded(
                 child: FilledButton(
                   onPressed: () async {
-                    await _svc.copySponsorAddress();
+                    await Clipboard.setData(
+                      const ClipboardData(text: tronUsdtAddress),
+                    );
                     if (ctx.mounted) Navigator.pop(ctx);
                     showSnackBar('USDT-TRC20 收款地址已复制');
                   },

@@ -19,6 +19,7 @@ class PlayHistorySyncService {
   static const _minPositionToSaveMs = 10000;
   static const _completionThreshold = 0.95;
   static const _platform = 'app';
+  static final Map<String, List<Map<String, dynamic>>> _memory = {};
 
   /// Fields needed to resume playback and render history cards.
   static const _snapshotKeys = <String>{
@@ -65,21 +66,25 @@ class PlayHistorySyncService {
 
   static int _watchTime(Map record) => record['watchTime'] as int? ?? 0;
 
-  static Iterable<Map<String, dynamic>> _storedRecords(String key) sync* {
-    if (!Hive.isBoxOpen(AppStorage.playHistoryBoxName)) return;
+  static List<Map<String, dynamic>> _readList(String key) {
+    final cached = _memory[key];
+    if (cached != null) return cached;
+    if (!Hive.isBoxOpen(AppStorage.playHistoryBoxName)) return const [];
     final stored = AppStorage.playHistoryBox.get(key);
-    if (stored is! List) return;
+    if (stored is! List) return const [];
+    final records = <Map<String, dynamic>>[];
     for (final item in stored) {
       if (item is Map<String, dynamic>) {
-        yield item;
+        records.add(item);
       } else if (item is Map) {
-        yield item.cast<String, dynamic>();
+        records.add(item.cast<String, dynamic>());
       }
     }
+    return _memory[key] = List.unmodifiable(records);
   }
 
-  static List<Map<String, dynamic>> _readList(String key) =>
-      _storedRecords(key).toList(growable: false);
+  static Iterable<Map<String, dynamic>> _storedRecords(String key) =>
+      _readList(key);
 
   static bool _sameAnime(Map left, Map right) {
     final leftBgmId = BgmUtils.toInt(left['bgmId']);
@@ -190,8 +195,14 @@ class PlayHistorySyncService {
     return list.sublist(0, _maxHistoryCount);
   }
 
+  static Future<void> _write(String key, List<Map<String, dynamic>> list) {
+    final owned = List<Map<String, dynamic>>.unmodifiable(list);
+    _memory[key] = owned;
+    return AppStorage.playHistoryBox.put(key, owned);
+  }
+
   static Future<void> _persist(List<Map<String, dynamic>> list) =>
-      AppStorage.playHistoryBox.put(_historyKey, list);
+      _write(_historyKey, list);
 
   /// 获取历史记录列表
   static List<Map<String, dynamic>> getHistoryList() {
@@ -251,7 +262,7 @@ class PlayHistorySyncService {
       next.add(item);
       if (next.length >= _maxHistoryCount) break;
     }
-    await AppStorage.playHistoryBox.put(_resumeKey, next);
+    await _write(_resumeKey, next);
   }
 
   /// 从远程服务器拉取历史记录并合并到本地
@@ -334,9 +345,6 @@ class PlayHistorySyncService {
 
   /// 清除所有历史记录
   static Future<void> clearHistory() async {
-    await Future.wait([
-      _persist(const []),
-      AppStorage.playHistoryBox.put(_resumeKey, const []),
-    ]);
+    await Future.wait([_persist(const []), _write(_resumeKey, const [])]);
   }
 }

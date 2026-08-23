@@ -44,7 +44,7 @@ class BundledRuleStore {
     'mgnacg': 1,
     'ios_mifun': 4,
     'xifanacg': 4,
-    'tvtfun': 7,
+    'tvtfun': 8,
     'moonci': 1,
     'silisili': 0,
   };

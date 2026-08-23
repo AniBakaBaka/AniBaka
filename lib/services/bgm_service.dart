@@ -1,4 +1,5 @@
 import 'package:baka/api/bgm.dart';
+import 'package:baka/api/request_cache.dart';
 import 'package:baka/services/app_storage.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:flutter/foundation.dart';
@@ -16,9 +17,17 @@ class BgmService {
   );
 
   // Map 保持插入顺序；命中时移动到末尾，形成一个轻量 LRU。
-  static final Map<String, Future<BgmSubjectInfo?>> _titleCache = {};
-  static final Map<String, Future<List<BgmSubjectInfo>>> _searchCache = {};
-  static final Map<int, Future<BgmSubjectInfo?>> _detailCache = {};
+  static final _titleCache = RequestCache<String, BgmSubjectInfo?>(
+    limit: _memoryCacheLimit,
+    shouldCache: (value) => value != null,
+  );
+  static final _searchCache = RequestCache<String, List<BgmSubjectInfo>>(
+    limit: _memoryCacheLimit,
+  );
+  static final _detailCache = RequestCache<int, BgmSubjectInfo?>(
+    limit: _memoryCacheLimit,
+    shouldCache: (value) => value != null,
+  );
 
   static Future<BgmInfo> resolveFromData(Map data) async {
     final existing = BgmUtils.readFromData(data);
@@ -47,20 +56,13 @@ class BgmService {
 
     final rawEpisodes = await getBgmEpisodes(subjectId);
 
-    final episodes = <({double sort, int? id, String name})>[];
-    for (final raw in rawEpisodes) {
-      final nameCn = raw['name_cn']?.toString() ?? '';
-      episodes.add((
-        sort: BgmUtils.toDouble(raw['sort']) ?? 0,
-        id: BgmUtils.toInt(raw['id']),
-        name: nameCn.isNotEmpty ? nameCn : raw['name']?.toString() ?? '',
-      ));
-    }
-
-    if (episodeIndex >= episodes.length) return null;
-    episodes.sort((a, b) => a.sort.compareTo(b.sort));
-    final episode = episodes[episodeIndex];
-    return (episodeId: episode.id, name: episode.name);
+    if (episodeIndex >= rawEpisodes.length) return null;
+    final episode = rawEpisodes[episodeIndex];
+    final nameCn = episode['name_cn'] as String;
+    return (
+      episodeId: BgmUtils.toInt(episode['id']),
+      name: nameCn.isNotEmpty ? nameCn : episode['name'] as String,
+    );
   }
 
   static Future<BgmSubjectInfo?> resolveSubject({
@@ -76,8 +78,7 @@ class BgmService {
     final query = _SearchTitle.from(title);
     if (query.normalized.isEmpty) return null;
 
-    final subject = await _remember(
-      _titleCache,
+    final subject = await _titleCache.get(
       query.cacheKey,
       () => _findSubject(query),
     );
@@ -155,7 +156,7 @@ class BgmService {
   static Future<List<BgmSubjectInfo>> _search(_SearchTitle query) async {
     final key = query.cacheKey;
     try {
-      return await _remember(_searchCache, key, () async {
+      return await _searchCache.get(key, () async {
         return _parseSearchResults(await searchBgmAnime(query.original));
       });
     } catch (error) {
@@ -206,12 +207,10 @@ class BgmService {
 
   static Future<BgmSubjectInfo?> _detail(int subjectId) async {
     try {
-      final subject = await _remember(_detailCache, subjectId, () async {
+      return await _detailCache.get(subjectId, () async {
         final detail = await getBgmSubject(subjectId);
         return _subjectFromMap(detail, id: subjectId, hasDetail: true);
       });
-      if (subject == null) _detailCache.remove(subjectId);
-      return subject;
     } catch (error) {
       _detailCache.remove(subjectId);
       debugPrint('BGM detail failed: $error');
@@ -277,23 +276,6 @@ class BgmService {
 
     final query = _SearchTitle.from(title);
     return query.normalized.isEmpty ? null : 'bgm_score_${query.cacheKey}';
-  }
-
-  static Future<T> _remember<K, T>(
-    Map<K, Future<T>> cache,
-    K key,
-    Future<T> Function() load,
-  ) {
-    final cached = cache.remove(key);
-    if (cached != null) {
-      cache[key] = cached;
-      return cached;
-    }
-
-    if (cache.length >= _memoryCacheLimit) cache.remove(cache.keys.first);
-    final future = load();
-    cache[key] = future;
-    return future;
   }
 
   static List<Map<String, dynamic>> convertTrendingToAppFormat(

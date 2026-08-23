@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:baka/api/post.dart';
@@ -55,8 +54,7 @@ class VersionService {
   }
 
   static Future<UpdateInfo> checkUpdateInfo() async {
-    final appInfo =
-        jsonDecode(await checkAppUpdateApi()) as Map<String, dynamic>;
+    final appInfo = await checkAppUpdateApi();
     final localVersion = Instances.appVersion;
 
     final appUpdate = appInfo['app_update'] as Map<String, dynamic>;

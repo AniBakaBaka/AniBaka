@@ -29,18 +29,78 @@
       "op": "follow"
     },
     {
+      "op": "setVar",
+      "name": "tvtDetailJson",
+      "value": "{url:raw}"
+    },
+    {
+      "op": "json",
+      "path": "data.slug"
+    },
+    {
+      "op": "setVar",
+      "name": "tvtVideoSlug",
+      "value": "{url:raw}"
+    },
+    {
+      "op": "template",
+      "value": "{tvtDetailJson:raw}"
+    },
+    {
       "op": "jsonEpisodes",
       "sourcesPath": "data.playSources",
       "episodesKey": "episodes",
       "sourceNameKey": "name",
       "episodeNameKey": "name",
-      "episodeIdTemplate": "{id:raw}"
+      "episodeIdTemplate": "{id:raw}|{tvtVideoSlug:raw}"
     }
   ],
   "play": [
     {
+      "op": "setVar",
+      "name": "tvtPackedEpisode",
+      "value": "{episodeId:raw}"
+    },
+    {
+      "op": "regex",
+      "pattern": "^([^|]+)\\|(.+)$",
+      "group": 1
+    },
+    {
+      "op": "setVar",
+      "name": "tvtEpisodeId",
+      "value": "{url:raw}"
+    },
+    {
+      "op": "template",
+      "value": "{tvtPackedEpisode:raw}"
+    },
+    {
+      "op": "regex",
+      "pattern": "^([^|]+)\\|(.+)$",
+      "group": 2
+    },
+    {
+      "op": "setVar",
+      "name": "tvtVideoSlug",
+      "value": "{url:raw}"
+    },
+    {
       "op": "fetch",
-      "url": "/api/videos/resolve-play-url?episodeId={episodeId}"
+      "url": "/video/{tvtVideoSlug}/play?source=0&episode=0",
+      "headers": {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Referer": "https://www.tvtfun.net/video/{tvtVideoSlug}"
+      }
+    },
+    {
+      "op": "fetch",
+      "url": "/api/videos/resolve-play-url?episodeId={tvtEpisodeId}",
+      "headers": {
+        "Accept": "application/json",
+        "Referer": "https://www.tvtfun.net/video/{tvtVideoSlug}/play?source=0&episode=0",
+        "X-Play-Ctx": "eyJmIjozMDAsInYiOjEsInciOjEyODAsImhndCI6NzIwLCJwIjoxfQ=="
+      }
     },
     {
       "op": "setMediaHeaders",

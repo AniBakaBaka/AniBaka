@@ -2,12 +2,23 @@ import 'dart:async';
 import 'package:baka/instance.dart';
 
 import 'package:baka/services/navigation_service.dart';
-import 'package:baka/services/settings_service.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher_string.dart';
+
+const _swiperHiddenUntilKey = 'swiper_hidden_until';
+
+DateTime? _swiperHiddenUntil() =>
+    DateTime.tryParse(Instances.sp.getString(_swiperHiddenUntilKey) ?? '');
+
+bool _isSwiperHidden() {
+  final hiddenUntil = _swiperHiddenUntil();
+  if (hiddenUntil != null && hiddenUntil.isAfter(DateTime.now())) return true;
+  Instances.sp.remove(_swiperHiddenUntilKey);
+  return false;
+}
 
 class SwiperBanner extends StatefulWidget {
   final List<Map> swiperData;
@@ -22,7 +33,7 @@ class _SwiperBannerState extends State<SwiperBanner> {
   late final CarouselController _carouselController = CarouselController();
   final ValueNotifier<int> _currentIndexNotifier = ValueNotifier<int>(0);
   Timer? _timer;
-  bool _showSwiper = !SwiperSettingsService.isHidden;
+  bool _showSwiper = !_isSwiperHidden();
   bool _isInteracting = false;
   bool _reduceVisualEffects = false;
   bool _tickerEnabled = true;
@@ -100,16 +111,20 @@ class _SwiperBannerState extends State<SwiperBanner> {
   void _toggleSwiper() {
     setState(() => _showSwiper = !_showSwiper);
     if (_showSwiper) {
-      SwiperSettingsService.show();
+      Instances.sp.remove(_swiperHiddenUntilKey);
     } else {
-      SwiperSettingsService.hide();
+      Instances.sp.setString(
+        _swiperHiddenUntilKey,
+        DateTime.now().add(const Duration(days: 14)).toIso8601String(),
+      );
     }
     _restartAutoPlay();
   }
 
   Future<void> _showSettingsDialog() async {
     HapticFeedback.mediumImpact();
-    final remainingDays = SwiperSettingsService.remainingDays;
+    final remainingDays =
+        _swiperHiddenUntil()?.difference(DateTime.now()).inDays ?? 0;
     final confirmed = await showAppConfirmDialog(
       context,
       title: 'Banner 设置',

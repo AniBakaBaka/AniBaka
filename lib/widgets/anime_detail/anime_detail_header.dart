@@ -15,6 +15,7 @@ class AnimeDetailHeader extends StatelessWidget {
   final String? updateTime;
   final String? category;
   final Object heroTag;
+  final bool enableCoverEffects;
   final AnimeCollection? collection;
   final bool isCollectionLoading;
   final VoidCallback onCollectionTap;
@@ -26,6 +27,7 @@ class AnimeDetailHeader extends StatelessWidget {
     required this.collection,
     required this.isCollectionLoading,
     required this.onCollectionTap,
+    this.enableCoverEffects = true,
     this.onSearchTap,
     this.updateTime,
     this.category,
@@ -99,6 +101,7 @@ class AnimeDetailHeader extends StatelessWidget {
                   imageUrl: imageUrl,
                   heroTag: heroTag,
                   isDark: isDark,
+                  enableEffects: enableCoverEffects,
                   width: coverWidth,
                   height: coverHeight,
                 ),
@@ -193,6 +196,7 @@ class AnimeDetailHeader extends StatelessWidget {
               imageUrl: imageUrl,
               heroTag: heroTag,
               isDark: isDark,
+              enableEffects: enableCoverEffects,
               width: coverWidth,
               height: coverHeight,
             ),
@@ -266,6 +270,7 @@ class _CoverImage extends StatelessWidget {
   final String imageUrl;
   final Object heroTag;
   final bool isDark;
+  final bool enableEffects;
   final double width;
   final double height;
 
@@ -273,6 +278,7 @@ class _CoverImage extends StatelessWidget {
     required this.imageUrl,
     required this.heroTag,
     required this.isDark,
+    required this.enableEffects,
     this.width = 130,
     this.height = 182,
   });
@@ -305,13 +311,15 @@ class _CoverImage extends StatelessWidget {
                 : Colors.black.withValues(alpha: 0.04),
             width: 0.5,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.16),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
+          boxShadow: enableEffects
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.16),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : null,
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(11.5),
@@ -323,7 +331,9 @@ class _CoverImage extends StatelessWidget {
                   useOldImageOnUrlChange: true,
                   fadeInDuration: Duration.zero,
                   fadeOutDuration: Duration.zero,
-                  memCacheWidth: (width * 2).round(),
+                  // Reuse the card's decoded image during the Hero flight.
+                  // Upgrade to the larger detail image after the route settles.
+                  memCacheWidth: enableEffects ? (width * 2).round() : 300,
                   placeholder: (context, url) => fallback,
                   errorWidget: (context, url, error) => fallback,
                 ),

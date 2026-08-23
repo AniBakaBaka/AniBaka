@@ -8,7 +8,6 @@ import 'package:baka/instance.dart';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/models/rule_hub.dart';
 import 'package:baka/services/source/source_codec.dart';
-import 'package:baka/services/source/rule_version_store.dart';
 import 'package:baka/services/source_adapter_service.dart';
 import 'package:baka/source/source_registry.dart';
 import 'package:baka/source/store/bundled_rule_store.dart';
@@ -203,7 +202,7 @@ class RuleRepositoryService extends ChangeNotifier {
           ? catalog.builtinSourceById(item.id)
           : catalog.customSourceById(item.id);
       final installedVersion =
-          Instances.sp.getInt(ruleHubVersionKey(item.id)) ??
+          Instances.sp.getInt(SourceCatalog.installedVersionKey(item.id)) ??
           (builtin ? BundledRuleStore.versionFor(item.id) : 0);
       result[item] = (
         source: source,
@@ -217,8 +216,10 @@ class RuleRepositoryService extends ChangeNotifier {
     return result;
   }
 
-  Future<void> _saveInstalledVersion(RuleHubItem item) =>
-      Instances.sp.setInt(ruleHubVersionKey(item.id), item.version);
+  Future<void> _saveInstalledVersion(RuleHubItem item) => Instances.sp.setInt(
+    SourceCatalog.installedVersionKey(item.id),
+    item.version,
+  );
 
   RuleHubIndex _parseIndex(String body, String url) => RuleHubIndex.fromJson(
     jsonDecode(body) as Map<String, dynamic>,

@@ -138,7 +138,7 @@ class _LibraryPageState extends State<LibraryPage> {
       if (_isLoggedIn) {
         AniBakaApi.clearPlayHistory().catchError((_) => false);
       }
-      if (mounted) setState(() => _historyList.clear());
+      if (mounted) setState(() => _historyList = const []);
     }
   }
 

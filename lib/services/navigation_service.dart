@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:baka/pages/anime_detail/anime_detail_page.dart';
 import 'package:baka/pages/player/player_page.dart';
 import 'package:baka/pages/search/search_page.dart';
 import 'package:baka/pages/source/source_management_page.dart';
@@ -11,18 +12,25 @@ class NavigationService {
   static PageRoute<void> _slideRoute(Widget page, {Duration? duration}) {
     return platformPageRoute<void>(
       builder: (_) => page,
-      transitionDuration: duration ?? const Duration(milliseconds: 350),
+      transitionDuration: duration ?? const Duration(milliseconds: 380),
+      reverseTransitionDuration: duration ?? const Duration(milliseconds: 360),
       transitionsBuilder: (_, animation, _, child) {
         final curved = CurvedAnimation(
           parent: animation,
+          curve: const Cubic(0.22, 1.0, 0.36, 1.0),
+          reverseCurve: const Cubic(0.32, 0.0, 0.67, 0.0),
+        );
+        final fade = CurvedAnimation(
+          parent: animation,
           curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
         );
         return SlideTransition(
           position: Tween(
-            begin: const Offset(0.3, 0.0),
+            begin: const Offset(0.12, 0.0),
             end: Offset.zero,
           ).animate(curved),
-          child: FadeTransition(opacity: animation, child: child),
+          child: FadeTransition(opacity: fade, child: child),
         );
       },
     );
@@ -35,13 +43,16 @@ class NavigationService {
     int? posIndex,
     bool autoMatch = false,
   }) {
-    // PlayerService enriches its data with resolved source/episode state.
-    // Keep that route-local so returning to the same card still opens detail.
+    // Detail and later playback enrich their route data independently. Keep
+    // those mutations away from the source card while retaining its episode.
     final routeData = Map<String, dynamic>.from(data);
+    if (posIndex != null) routeData['currPlayIndex'] = posIndex;
     Navigator.push(
       context,
       _slideRoute(
-        PlayerPage(data: routeData, posIndex: posIndex, autoMatch: autoMatch),
+        autoMatch
+            ? PlayerPage(data: routeData, posIndex: posIndex, autoMatch: true)
+            : AnimeDetailPage(data: routeData),
       ),
     );
   }

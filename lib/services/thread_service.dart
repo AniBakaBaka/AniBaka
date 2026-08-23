@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:baka/api/post.dart';
-import 'package:baka/api/watch_party_api.dart';
+import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/models/watch_party.dart';
 import 'package:baka/services/app_storage.dart';
 import 'package:baka/widgets/comment/comment_card.dart';
@@ -73,7 +73,7 @@ class ThreadService {
   Future<List<WatchPartyInvite>> _refreshWatchRooms() async {
     watchRoomsRefreshing = true;
     try {
-      final rooms = await WatchPartyApi.listRooms();
+      final rooms = await AniBakaApi.listWatchRooms();
       watchRooms = rooms;
       watchRoomsError = '';
       return rooms;

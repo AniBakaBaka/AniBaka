@@ -53,8 +53,27 @@ class MatchMemoryService {
   static const Duration ttl = Duration(days: 14);
   static const int maxEntries = 200;
   static const String _storageKey = 'match_memory_v1';
+  static const String _aliasesKey = 'video_source_search_aliases';
 
   static Map<String, MatchMemoryEntry>? _cache;
+  static Map<String, List<String>>? _aliases;
+
+  static List<String> readAliases(String key, {String? fallbackKey}) {
+    final aliases = _readAliases();
+    return aliases[key] ??
+        (fallbackKey == null ? null : aliases[fallbackKey]) ??
+        const [];
+  }
+
+  static Future<void> saveAliases(String key, List<String> values) async {
+    final aliases = _readAliases();
+    if (values.isEmpty) {
+      aliases.remove(key);
+    } else {
+      aliases[key] = values;
+    }
+    await Instances.sp.setString(_aliasesKey, jsonEncode(aliases));
+  }
 
   static MatchMemoryEntry? read({required String title, int? bgmId}) {
     final entry = _readAll()[keyFor(bgmId: bgmId, title: title)];
@@ -119,6 +138,18 @@ class MatchMemoryService {
     } catch (_) {
       return _cache = {};
     }
+  }
+
+  static Map<String, List<String>> _readAliases() {
+    final cached = _aliases;
+    if (cached != null) return cached;
+    final raw = Instances.sp.getString(_aliasesKey);
+    if (raw == null || raw.isEmpty) return _aliases = {};
+    final decoded = jsonDecode(raw) as Map<String, dynamic>;
+    return _aliases = {
+      for (final entry in decoded.entries)
+        entry.key: (entry.value as List<dynamic>).cast<String>(),
+    };
   }
 
   static void _prune(Map<String, MatchMemoryEntry> map) {

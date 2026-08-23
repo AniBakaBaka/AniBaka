@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:baka/api/watch_party_api.dart';
+import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/watch_party.dart';
@@ -89,7 +89,7 @@ class WatchPartyService extends GetxService {
       status: WatchPartyConnectionStatus.connecting,
       error: '',
     );
-    final invite = await WatchPartyApi.createRoom(_currentMedia(content));
+    final invite = await AniBakaApi.createWatchRoom(_currentMedia(content));
     _inviteCode = invite.inviteCode;
     _nickname = _currentNickname();
     state.value = state.value.copyWith(invite: invite);
@@ -107,8 +107,8 @@ class WatchPartyService extends GetxService {
       error: '',
     );
     final results = await Future.wait<Object>([
-      WatchPartyApi.getInvite(normalized),
-      WatchPartyApi.joinRoom(normalized, _nickname),
+      AniBakaApi.getWatchInvite(normalized),
+      AniBakaApi.joinWatchRoom(normalized, _nickname),
     ]);
     state.value = state.value.copyWith(invite: results[0] as WatchPartyInvite);
     await _connect(results[1] as String);
@@ -252,7 +252,7 @@ class WatchPartyService extends GetxService {
   Future<void> closeRoom() async {
     final roomId = state.value.snapshot?.roomId ?? state.value.invite?.roomId;
     if (roomId == null || roomId.isEmpty) return;
-    await WatchPartyApi.closeRoom(roomId);
+    await AniBakaApi.closeWatchRoom(roomId);
     await leave();
   }
 
@@ -466,7 +466,7 @@ class WatchPartyService extends GetxService {
     _reconnectAttempt++;
     _reconnectTimer = Timer(Duration(seconds: delaySeconds), () async {
       try {
-        final webSocketUrl = await WatchPartyApi.joinRoom(
+        final webSocketUrl = await AniBakaApi.joinWatchRoom(
           _inviteCode,
           _nickname,
         );

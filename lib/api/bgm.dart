@@ -1,21 +1,35 @@
-import 'dart:convert';
-
+import 'package:baka/api/request_cache.dart';
 import 'package:baka/services/network_service.dart';
 
 const String _bgmApiBase = 'https://bgm.anibaka.com';
 const String _bgmNextBase = 'https://p1.anibaka.com';
 const Duration _bgmCacheTtl = Duration(minutes: 5);
 
-final _subjectCache = _MemoryCache<int, Map<String, dynamic>>(64);
-final _episodeCache = _MemoryCache<int, List<Map<String, dynamic>>>(8);
-final _relatedCache = _MemoryCache<int, List<Map<String, dynamic>>>(16);
-final _subjectCommentsCache = _MemoryCache<String, BgmCommentPage>(4);
-final _episodeCommentsCache = _MemoryCache<int, List<Map<String, dynamic>>>(8);
+final _subjectCache = RequestCache<int, Map<String, dynamic>>(
+  limit: 64,
+  ttl: _bgmCacheTtl,
+);
+final _episodeCache = RequestCache<int, List<Map<String, dynamic>>>(
+  limit: 8,
+  ttl: _bgmCacheTtl,
+);
+final _relatedCache = RequestCache<int, List<Map<String, dynamic>>>(
+  limit: 16,
+  ttl: _bgmCacheTtl,
+);
+final _subjectCommentsCache = RequestCache<String, BgmCommentPage>(
+  limit: 4,
+  ttl: _bgmCacheTtl,
+);
+final _episodeCommentsCache = RequestCache<int, List<Map<String, dynamic>>>(
+  limit: 8,
+  ttl: _bgmCacheTtl,
+);
 
 typedef BgmCommentPage = ({List<Map<String, dynamic>> comments, int total});
 
 Future<List<Map<String, dynamic>>> searchBgmAnime(String title) async {
-  final response = await _post(
+  final response = await NetUtils.postJson<Map<String, dynamic>>(
     '$_bgmApiBase/v0/search/subjects?limit=10&offset=0',
     {
       'keyword': title,
@@ -25,36 +39,46 @@ Future<List<Map<String, dynamic>>> searchBgmAnime(String title) async {
       },
     },
   );
-  return _mapList(_jsonMap(response)['data']);
+  return _mapList(response!['data']);
 }
 
 Future<Map<String, dynamic>> getBgmSubject(int subjectId) {
   return _subjectCache.get(
     subjectId,
-    () async => _jsonMap(await _get('$_bgmApiBase/v0/subjects/$subjectId')),
+    () async => (await NetUtils.getJson<Map<String, dynamic>>(
+      '$_bgmApiBase/v0/subjects/$subjectId',
+    ))!,
   );
 }
 
 Future<List<Map<String, dynamic>>> getBgmEpisodes(int subjectId) {
   return _episodeCache.get(subjectId, () async {
-    final response = await _get(
+    final response = await NetUtils.getJson<Map<String, dynamic>>(
       '$_bgmApiBase/v0/episodes?subject_id=$subjectId&type=0&limit=200',
     );
-    return _mapList(_jsonMap(response)['data']);
+    final episodes = _mapList(response!['data']);
+    episodes.sort(
+      (left, right) => (left['sort'] as num).compareTo(right['sort'] as num),
+    );
+    return episodes;
   });
 }
 
 /// 角色响应通常远大于条目本身，只由角色页按需读取，不驻留全局缓存。
 Future<List<Map<String, dynamic>>> getBgmCharacters(int subjectId) async {
-  final response = await _get('$_bgmApiBase/v0/subjects/$subjectId/characters');
-  return _mapList(jsonDecode(response));
+  final response = await NetUtils.getJson<List<dynamic>>(
+    '$_bgmApiBase/v0/subjects/$subjectId/characters',
+  );
+  return _mapList(response);
 }
 
 Future<List<Map<String, dynamic>>> getBgmRelatedSubjects(int subjectId) {
   return _relatedCache.get(
     subjectId,
     () async => _mapList(
-      jsonDecode(await _get('$_bgmApiBase/v0/subjects/$subjectId/subjects')),
+      await NetUtils.getJson<List<dynamic>>(
+        '$_bgmApiBase/v0/subjects/$subjectId/subjects',
+      ),
     ),
   );
 }
@@ -64,10 +88,10 @@ Future<List<Map<String, dynamic>>> getTrendingSubjects({
   int limit = 24,
   int offset = 0,
 }) async {
-  final response = await _get(
+  final response = await NetUtils.getJson<Map<String, dynamic>>(
     '$_bgmNextBase/p1/trending/subjects?type=$type&limit=$limit&offset=$offset',
   );
-  return _mapList(_jsonMap(response)['data']);
+  return _mapList(response!['data']);
 }
 
 /// BGM 每日放送（一周更新表）。
@@ -75,8 +99,9 @@ Future<List<Map<String, dynamic>>> getTrendingSubjects({
 /// 返回以星期为 key（1=周一 … 7=周日）的 Map，值为
 /// `[{subject: {...}, watchers: n}]`，subject 与 trending 接口同构。
 Future<Map<String, List<Map<String, dynamic>>>> getBgmCalendar() async {
-  final response = await _get('$_bgmNextBase/p1/calendar');
-  final data = _jsonMap(response);
+  final data = (await NetUtils.getJson<Map<String, dynamic>>(
+    '$_bgmNextBase/p1/calendar',
+  ))!;
   return {for (final entry in data.entries) entry.key: _mapList(entry.value)};
 }
 
@@ -87,11 +112,9 @@ Future<BgmCommentPage> getBgmSubjectComments(
 }) {
   final cacheKey = '$subjectId:$limit:$offset';
   return _subjectCommentsCache.get(cacheKey, () async {
-    final json = _jsonMap(
-      await _get(
-        '$_bgmNextBase/p1/subjects/$subjectId/comments?limit=$limit&offset=$offset',
-      ),
-    );
+    final json = (await NetUtils.getJson<Map<String, dynamic>>(
+      '$_bgmNextBase/p1/subjects/$subjectId/comments?limit=$limit&offset=$offset',
+    ))!;
     return (
       comments: _mapList(json['data']),
       total: (json['total'] as num).toInt(),
@@ -103,17 +126,23 @@ Future<List<Map<String, dynamic>>> getBgmEpisodeComments(int episodeId) =>
     _episodeCommentsCache.get(
       episodeId,
       () async => _mapList(
-        jsonDecode(await _get('$_bgmNextBase/p1/episodes/$episodeId/comments')),
+        await NetUtils.getJson<List<dynamic>>(
+          '$_bgmNextBase/p1/episodes/$episodeId/comments',
+        ),
       ),
     );
 
 Future<Map<String, dynamic>> getBgmCharacterInfo(int characterId) async =>
-    _jsonMap(await _get('$_bgmNextBase/p1/characters/$characterId'));
+    (await NetUtils.getJson<Map<String, dynamic>>(
+      '$_bgmNextBase/p1/characters/$characterId',
+    ))!;
 
 Future<List<Map<String, dynamic>>> getBgmCharacterComments(
   int characterId,
 ) async => _mapList(
-  jsonDecode(await _get('$_bgmNextBase/p1/characters/$characterId/comments')),
+  await NetUtils.getJson<List<dynamic>>(
+    '$_bgmNextBase/p1/characters/$characterId/comments',
+  ),
 );
 
 /// 通过标签搜索 BGM 动画
@@ -134,7 +163,7 @@ Future<List<Map<String, dynamic>>> searchBgmByTag(
   if (tags.isNotEmpty) filter['tag'] = tags;
   if (airDate != null && airDate.isNotEmpty) filter['air_date'] = airDate;
 
-  final response = await _post(
+  final response = await NetUtils.postJson<Map<String, dynamic>>(
     '$_bgmApiBase/v0/search/subjects?limit=$limit&offset=$offset',
     {
       // Bangumi now rejects an empty keyword. `*` keeps this as a filter-only
@@ -144,49 +173,8 @@ Future<List<Map<String, dynamic>>> searchBgmByTag(
       'filter': filter,
     },
   );
-  return _mapList(_jsonMap(response)['data']);
+  return _mapList(response!['data']);
 }
-
-Future<String> _get(String url) => NetUtils.get(url);
-
-Future<String> _post(String url, Map<String, dynamic> body) =>
-    NetUtils.post(url, body);
-
-Map<String, dynamic> _jsonMap(String source) =>
-    jsonDecode(source) as Map<String, dynamic>;
 
 List<Map<String, dynamic>> _mapList(Object? value) =>
     (value as List<dynamic>).cast<Map<String, dynamic>>();
-
-class _MemoryCache<K, V> {
-  _MemoryCache(this.limit);
-
-  final int limit;
-  final Map<K, ({int expiresAt, Future<V> value})> _entries = {};
-
-  Future<V> get(K key, Future<V> Function() load) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final cached = _entries.remove(key);
-    if (cached != null && now < cached.expiresAt) {
-      _entries[key] = cached;
-      return cached.value;
-    }
-
-    if (_entries.length >= limit) _entries.remove(_entries.keys.first);
-    final value = _load(key, load);
-    _entries[key] = (
-      expiresAt: now + _bgmCacheTtl.inMilliseconds,
-      value: value,
-    );
-    return value;
-  }
-
-  Future<V> _load(K key, Future<V> Function() load) async {
-    try {
-      return await load();
-    } catch (_) {
-      _entries.remove(key);
-      rethrow;
-    }
-  }
-}

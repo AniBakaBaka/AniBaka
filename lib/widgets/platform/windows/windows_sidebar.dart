@@ -1,9 +1,11 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/pages/home/miniapp_page.dart';
-import 'package:baka/services/mine_service.dart';
+import 'package:baka/pages/mine/mine_profile.dart';
 import 'package:baka/services/navigation_service.dart';
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 
 class WindowsSidebar extends StatefulWidget {
   final int currentPageIndex;
@@ -20,7 +22,7 @@ class WindowsSidebar extends StatefulWidget {
 }
 
 class _WindowsSidebarState extends State<WindowsSidebar> {
-  late final MineService _mine = MineService();
+  late final AppState _app = Get.find<AppState>();
   late bool _isSidebarCollapsed =
       Instances.sp.getBool('sidebarCollapsed') ?? false;
 
@@ -72,7 +74,7 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
   }
 
   Widget _buildAvatar(double size) {
-    final avatarUrl = _mine.avatarUrl;
+    final avatarUrl = _app.avatarUrl;
     if (avatarUrl.isEmpty) {
       return _buildAvatarFallback(size);
     }
@@ -112,7 +114,7 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
     if (_isSidebarCollapsed) {
       return Center(
         child: Tooltip(
-          message: _mine.isLogin ? '账号与 Bangumi' : '登录',
+          message: _app.isLoggedIn ? '账号与 Bangumi' : '登录',
           child: InkResponse(
             onTap: _openLoginPage,
             radius: 24,
@@ -137,7 +139,7 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    _mine.hasIdentity ? _mine.displayName : '点击登录',
+                    _app.hasIdentity ? _app.displayName : '点击登录',
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -146,9 +148,9 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    _mine.isBangumiLogin && !_mine.isLogin
+                    _app.isBangumiLogin && !_app.isLoggedIn
                         ? 'Bangumi 登录'
-                        : _mine.isLogin
+                        : _app.isLoggedIn
                         ? '已登录'
                         : '打开登录',
                     style: TextStyle(

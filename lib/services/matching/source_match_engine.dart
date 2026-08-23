@@ -1,7 +1,6 @@
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/utils/bgm_utils.dart';
 
-import 'auto_match_strategy.dart';
 import 'title_matcher.dart';
 
 /// 参与匹配的候选条目。特征惰性计算，同一实例可复用多轮排序。
@@ -98,19 +97,19 @@ class SourceMatchScore {
 
   /// 结果刚到时立刻发起「目录 + 媒体」探针（竞速优先）。
   bool get shouldProbeImmediately =>
-      confidence >= AutoMatchStrategy.immediateProbeConfidence &&
+      confidence >= SourceMatchEngine.immediateProbeConfidence &&
       !seasonConflict &&
       !severeEpisodeConflict;
 
   /// 全源搜索结束后的兜底探针阈值（略放宽，仍拒绝季/集硬冲突）。
   bool get shouldProbeOnFinalPass =>
-      confidence >= AutoMatchStrategy.finalProbeConfidence &&
+      confidence >= SourceMatchEngine.finalProbeConfidence &&
       !seasonConflict &&
       !severeEpisodeConflict;
 
   /// 标题极高置信：优先插队探测。
   bool get isHighConfidenceTitle =>
-      confidence >= AutoMatchStrategy.priorityProbeConfidence &&
+      confidence >= SourceMatchEngine.priorityProbeConfidence &&
       !seasonConflict &&
       !severeEpisodeConflict;
 }
@@ -118,6 +117,17 @@ class SourceMatchScore {
 /// 候选源排序：标题相似度为主，季度/集数/类型做有界修正。
 class SourceMatchEngine {
   const SourceMatchEngine();
+
+  static const double immediateProbeConfidence = 0.70;
+  static const double priorityProbeConfidence = 0.82;
+  static const double finalProbeConfidence = 0.60;
+  static const int raceConcurrency = 5;
+  static const int maxLinesPerCandidate = 2;
+  static const int keywordsPerSourceAuto = 1;
+  static const int keywordsPerSourceManual = 2;
+  static const Duration candidateBudget = Duration(milliseconds: 5500);
+  static const Duration sourceSearchBudget = Duration(seconds: 30);
+  static const Duration wallClock = Duration(seconds: 12);
 
   List<SourceMatchScore> rank(
     Iterable<SourceMatchCandidate> candidates,

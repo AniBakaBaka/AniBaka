@@ -12,6 +12,9 @@ class CollectionService {
   static const _localKey = 'local_anime_collections_v1';
   static Future<List<AnimeCollection>>? _bangumiCollectionRequest;
   static List<AnimeCollection>? _localCache;
+  static Map<int, AnimeCollection> _localByBgmId = const {};
+  static Map<int, AnimeCollection> _localByPostId = const {};
+  static CollectionStats _localStats = CollectionStats();
 
   static bool get isLocalMode => Instances.userToken.isEmpty;
   static bool get isBangumiMode =>
@@ -108,23 +111,14 @@ class CollectionService {
   static Future<CollectionStats?> getStats() async {
     if (!isLocalMode) return AniBakaApi.getCollectionStats();
     if (isBangumiMode) await _refreshBangumiCollections();
-    final counts = <int, int>{};
-    for (final item in _readLocal()) {
-      counts.update(item.status, (value) => value + 1, ifAbsent: () => 1);
-    }
-    return CollectionStats(
-      wish: counts[CollectionStatus.wish.value] ?? 0,
-      collect: counts[CollectionStatus.collect.value] ?? 0,
-      doing: counts[CollectionStatus.doing.value] ?? 0,
-      onHold: counts[CollectionStatus.onHold.value] ?? 0,
-      dropped: counts[CollectionStatus.dropped.value] ?? 0,
-      total: counts.values.fold(0, (sum, value) => sum + value),
-    );
+    _readLocal();
+    return _localStats;
   }
 
   static Future<AnimeCollection?> getByPostId(int postId) async {
     if (!isLocalMode) return AniBakaApi.getCollectionByPostId(postId);
-    return _firstWhereOrNull(_readLocal(), (item) => item.postId == postId);
+    _readLocal();
+    return _localByPostId[postId];
   }
 
   static Future<AnimeCollection?> getByBgmId(
@@ -143,7 +137,8 @@ class CollectionService {
       await _upsertLocal(merged);
       return merged;
     }
-    return _firstWhereOrNull(_readLocal(), (item) => item.bgmId == bgmId);
+    _readLocal();
+    return _localByBgmId[bgmId];
   }
 
   static Future<bool> delete(int postId) async {
@@ -249,16 +244,18 @@ class CollectionService {
     final cached = _localCache;
     if (cached != null) return cached;
     final raw = Instances.sp.getString(_localKey);
-    if (raw == null || raw.isEmpty) return _localCache = [];
+    if (raw == null || raw.isEmpty) return _replaceLocal(<AnimeCollection>[]);
     final decoded = jsonDecode(raw) as List<dynamic>;
-    return _localCache = decoded
-        .cast<Map<String, dynamic>>()
-        .map(AnimeCollection.fromJson)
-        .toList(growable: true);
+    return _replaceLocal(
+      decoded
+          .cast<Map<String, dynamic>>()
+          .map(AnimeCollection.fromJson)
+          .toList(growable: true),
+    );
   }
 
   static Future<void> _writeLocal(List<AnimeCollection> items) {
-    _localCache = items;
+    _replaceLocal(items);
     final json = StringBuffer('[');
     for (var i = 0; i < items.length; i++) {
       if (i > 0) json.write(',');
@@ -266,6 +263,32 @@ class CollectionService {
     }
     json.write(']');
     return Instances.sp.setString(_localKey, json.toString());
+  }
+
+  static List<AnimeCollection> _replaceLocal(List<AnimeCollection> items) {
+    final byBgmId = <int, AnimeCollection>{};
+    final byPostId = <int, AnimeCollection>{};
+    final counts = List<int>.filled(CollectionStatus.values.length, 0);
+    for (final item in items) {
+      final bgmId = item.bgmId;
+      if (bgmId != null) byBgmId.putIfAbsent(bgmId, () => item);
+      final postId = item.postId;
+      if (postId != null) byPostId.putIfAbsent(postId, () => item);
+      final status = CollectionStatus.fromValue(item.status);
+      if (status != null) counts[status.index]++;
+    }
+    _localCache = items;
+    _localByBgmId = byBgmId;
+    _localByPostId = byPostId;
+    _localStats = CollectionStats(
+      wish: counts[CollectionStatus.wish.index],
+      collect: counts[CollectionStatus.collect.index],
+      doing: counts[CollectionStatus.doing.index],
+      onHold: counts[CollectionStatus.onHold.index],
+      dropped: counts[CollectionStatus.dropped.index],
+      total: items.length,
+    );
+    return items;
   }
 
   static bool _sameIdentity(AnimeCollection a, AnimeCollection b) {

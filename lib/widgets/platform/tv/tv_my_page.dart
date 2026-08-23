@@ -7,7 +7,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
-import 'package:baka/services/mine_service.dart';
+import 'package:baka/pages/mine/mine_profile.dart';
 import 'package:baka/services/qr_login_server.dart';
 import 'package:baka/services/collection_service.dart';
 import 'package:baka/services/play_history_sync_service.dart';
@@ -26,7 +26,7 @@ class TvMyPage extends StatefulWidget {
 }
 
 class _TvMyPageState extends State<TvMyPage> {
-  final MineService _mineService = MineService();
+  late final AppState _app = Get.find<AppState>();
   final QrLoginServer _qrServer = QrLoginServer();
   late final Worker _loginWorker;
 
@@ -51,7 +51,7 @@ class _TvMyPageState extends State<TvMyPage> {
   }
 
   void _loadUserData() {
-    if (!_mineService.isLogin) {
+    if (!_app.isLoggedIn) {
       _startQrServer();
     } else {
       _qrServer.stop();
@@ -101,7 +101,7 @@ class _TvMyPageState extends State<TvMyPage> {
       }
 
       _qrTimeoutTimer = Timer(const Duration(minutes: 5), () {
-        if (mounted && !_mineService.isLogin) {
+        if (mounted && !_app.isLoggedIn) {
           setState(() {
             _qrError = '二维码已过期，请点击刷新';
           });
@@ -194,7 +194,7 @@ class _TvMyPageState extends State<TvMyPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isLogin = _mineService.isLogin;
+    final isLogin = _app.isLoggedIn;
 
     return Focus(
       canRequestFocus: false,
@@ -279,9 +279,9 @@ class _TvMyPageState extends State<TvMyPage> {
             ],
           ),
           child: ClipOval(
-            child: _mineService.avatarUrl.isNotEmpty
+            child: _app.avatarUrl.isNotEmpty
                 ? CachedNetworkImage(
-                    imageUrl: _mineService.avatarUrl,
+                    imageUrl: _app.avatarUrl,
                     memCacheWidth: 240,
                     fit: BoxFit.cover,
                   )
@@ -297,7 +297,7 @@ class _TvMyPageState extends State<TvMyPage> {
         ),
         const SizedBox(height: 20),
         Text(
-          _mineService.displayName,
+          _app.displayName,
           style: TextStyle(
             fontSize: 24,
             fontWeight: FontWeight.w900,
@@ -309,7 +309,7 @@ class _TvMyPageState extends State<TvMyPage> {
         ),
         const SizedBox(height: 8),
         Text(
-          _mineService.displaySubtitle,
+          _app.displaySubtitle,
           style: TextStyle(fontSize: 13, color: context.tvTextSecondaryColor),
           textAlign: TextAlign.center,
           maxLines: 2,
@@ -515,12 +515,12 @@ class _TvMyPageState extends State<TvMyPage> {
           icon: Icons.alt_route_rounded,
           title: '应用线路',
           value: '切换',
-          subtitle: '当前: ${_mineService.currentHost}',
+          subtitle: '当前: ${_app.currentHost}',
           color: Colors.tealAccent,
           onPressed: () {
-            _mineService.switchHost();
+            _app.switchHost();
             setState(() {});
-            showSnackBar('线路已切换至 ${_mineService.currentHost}');
+            showSnackBar('线路已切换至 ${_app.currentHost}');
           },
         ),
         _buildStatsCard(

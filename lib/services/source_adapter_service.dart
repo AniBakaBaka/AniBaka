@@ -7,7 +7,6 @@ import 'package:baka/instance.dart';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/services/app_storage.dart';
 import 'package:baka/services/source/source_codec.dart';
-import 'package:baka/services/source/rule_version_store.dart';
 import 'package:baka/source/engine/rule_validator.dart';
 import 'package:baka/source/pipeline_source_adapter.dart';
 import 'package:baka/source/store/bundled_rule_store.dart';
@@ -215,6 +214,7 @@ class SourceAdapterService {
 ///
 /// Derived views are rebuilt only on mutation, not on every read.
 class SourceCatalog extends ChangeNotifier {
+  static const String _ruleVersionKeyPrefix = 'rule_hub_version:';
   static const String _disabledKeysKey = 'disabled_builtin_sources';
   static const String _orderKeysKey = 'ordered_builtin_sources';
   static const String _customSourcesKey = 'custom_sources';
@@ -240,6 +240,9 @@ class SourceCatalog extends ChangeNotifier {
   }
 
   static final SourceCatalog instance = SourceCatalog._();
+
+  static String installedVersionKey(String sourceId) =>
+      '$_ruleVersionKeyPrefix$sourceId';
 
   late Set<String> _disabledKeys;
   late List<AdapterDescriptor> _allSources;
@@ -313,7 +316,7 @@ class SourceCatalog extends ChangeNotifier {
     void loadBuiltinOverride(CustomSourceConfig source) {
       if (_bundledRuleReplacesKnownLegacyOverride(source)) {
         storageChanged = true;
-        staleVersionKeys.add(ruleHubVersionKey(source.id));
+        staleVersionKeys.add(installedVersionKey(source.id));
         return;
       }
       final current = _builtinOverrides[source.id];
@@ -365,7 +368,9 @@ class SourceCatalog extends ChangeNotifier {
     if (source.id != 'xifanacg') return false;
     final legacyHost = Uri.tryParse(source.baseUrl)?.host.toLowerCase();
     if (legacyHost != 'anime.xifanacg.com') return false;
-    final installedVersion = Instances.sp.getInt(ruleHubVersionKey(source.id));
+    final installedVersion = Instances.sp.getInt(
+      installedVersionKey(source.id),
+    );
     return installedVersion == null ||
         BundledRuleStore.versionFor(source.id) > installedVersion;
   }

@@ -137,15 +137,10 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
 
     try {
       final rawEpisodes = await getBgmEpisodes(subjectId);
-
-      final epNumbers = <int>[];
-      if (rawEpisodes.isNotEmpty) {
-        for (final raw in rawEpisodes) {
-          final sort = BgmUtils.toDouble(raw['sort']) ?? 0;
-          if (sort > 0) epNumbers.add(sort.round());
-        }
-        epNumbers.sort();
-      }
+      final epNumbers = <int>[
+        for (final raw in rawEpisodes)
+          if ((raw['sort'] as num).toDouble() > 0) (raw['sort'] as num).round(),
+      ];
 
       if (mounted) {
         setState(() {

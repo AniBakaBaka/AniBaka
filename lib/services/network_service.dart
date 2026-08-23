@@ -172,6 +172,27 @@ class NetUtils {
   static Future<String> delete(String url, {Object? data}) {
     return _send('DELETE', url, data: data);
   }
+
+  static Future<T?> getJson<T>(
+    String url, {
+    Duration? timeout,
+    bool notifyOnError = true,
+  }) =>
+      _decodeJson<T>(get(url, timeout: timeout, notifyOnError: notifyOnError));
+
+  static Future<T?> postJson<T>(String url, Object? data) =>
+      _decodeJson<T>(post(url, data));
+
+  static Future<T?> putJson<T>(String url, Object? data) =>
+      _decodeJson<T>(put(url, data));
+
+  static Future<T?> deleteJson<T>(String url, {Object? data}) =>
+      _decodeJson<T>(delete(url, data: data));
+
+  static Future<T?> _decodeJson<T>(Future<String> request) async {
+    final response = await request;
+    return response.isEmpty ? null : jsonDecode(response) as T;
+  }
 }
 
 /// Shared LAN address selection for QR login and TV log export.
@@ -217,13 +238,13 @@ class LoginService {
     required String pwd,
   }) async {
     try {
-      final response = await NetUtils.post('${ApiConfig.host}/user/login', {
-        'name': name.trim(),
-        'pwd': pwd,
-        'platform': 'app',
-      });
-
-      final res = jsonDecode(response) as Map<String, dynamic>;
+      final res = await NetUtils.postJson<Map<String, dynamic>>(
+        '${ApiConfig.host}/user/login',
+        {'name': name.trim(), 'pwd': pwd, 'platform': 'app'},
+      );
+      if (res == null) {
+        return (success: false, message: '登录失败，请检查网络');
+      }
       if (res['code'] != 200) {
         return (
           success: false,
@@ -249,13 +270,13 @@ class LoginService {
     required String qq,
   }) async {
     try {
-      final response = await NetUtils.post('${ApiConfig.host}/user/register', {
-        'name': name.trim(),
-        'pwd': pwd,
-        'qq': qq.trim(),
-      });
-
-      final res = jsonDecode(response) as Map<String, dynamic>;
+      final res = await NetUtils.postJson<Map<String, dynamic>>(
+        '${ApiConfig.host}/user/register',
+        {'name': name.trim(), 'pwd': pwd, 'qq': qq.trim()},
+      );
+      if (res == null) {
+        return (success: false, message: '注册失败，请检查网络');
+      }
       final bool ok = res['code'] == 200;
       final String msg = res['msg']?.toString() ?? (ok ? '注册成功' : '注册失败');
 
@@ -272,15 +293,20 @@ class LoginService {
     String value,
   ) async {
     try {
-      final response = await NetUtils.post('${ApiConfig.host}/user/register', {
-        'id': current.id,
-        'name': field == 'name' ? value : current.name,
-        'qq': field == 'qq' ? value : current.qq,
-        'sign': field == 'sign' ? value : current.sign,
-        'level': current.level,
-        'pwd': field == 'pwd' ? value : '',
-      });
-      final result = jsonDecode(response) as Map<String, dynamic>;
+      final result = await NetUtils.postJson<Map<String, dynamic>>(
+        '${ApiConfig.host}/user/register',
+        {
+          'id': current.id,
+          'name': field == 'name' ? value : current.name,
+          'qq': field == 'qq' ? value : current.qq,
+          'sign': field == 'sign' ? value : current.sign,
+          'level': current.level,
+          'pwd': field == 'pwd' ? value : '',
+        },
+      );
+      if (result == null) {
+        return (success: false, message: '更新失败，请检查网络', user: null);
+      }
       if (result['code'] != 200) {
         return (
           success: false,

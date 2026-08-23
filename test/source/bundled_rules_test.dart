@@ -87,20 +87,42 @@ void main() {
     expect(rule.search.last.str('listPath'), 'data.videos');
     expect(rule.search.last.str('detailUrlTemplate'), '/api/videos/{id}');
 
-    expect(rule.detail.map((step) => step.op), ['follow', 'jsonEpisodes']);
+    expect(rule.detail.map((step) => step.op), [
+      'follow',
+      'setVar',
+      'json',
+      'setVar',
+      'template',
+      'jsonEpisodes',
+    ]);
     expect(rule.detail.last.str('sourcesPath'), 'data.playSources');
-    expect(rule.detail.last.str('episodeIdTemplate'), '{id:raw}');
+    expect(
+      rule.detail.last.str('episodeIdTemplate'),
+      '{id:raw}|{tvtVideoSlug:raw}',
+    );
 
     expect(rule.play.map((step) => step.op), [
+      'setVar',
+      'regex',
+      'setVar',
+      'template',
+      'regex',
+      'setVar',
+      'fetch',
       'fetch',
       'setMediaHeaders',
       'json',
     ]);
     expect(
-      rule.play.first.str('url'),
-      '/api/videos/resolve-play-url?episodeId={episodeId}',
+      rule.play[6].str('url'),
+      '/video/{tvtVideoSlug}/play?source=0&episode=0',
     );
-    expect(rule.play[1].str('jsonPath'), 'data.headers');
+    expect(
+      rule.play[7].str('url'),
+      '/api/videos/resolve-play-url?episodeId={tvtEpisodeId}',
+    );
+    expect((rule.play[7].params['headers'] as Map)['X-Play-Ctx'], isNotEmpty);
+    expect(rule.play[8].str('jsonPath'), 'data.headers');
     expect(rule.play.last.str('path'), 'data.url');
   });
 

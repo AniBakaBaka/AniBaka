@@ -6,8 +6,6 @@ import 'package:baka/source/source_registry.dart';
 import 'package:baka/source/video_url_extractor.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/models/playback_episode.dart';
-import 'package:baka/services/settings_service.dart';
-import 'package:baka/services/matching/auto_match_strategy.dart';
 import 'package:baka/services/matching/match_memory_service.dart';
 import 'package:baka/services/matching/media_readiness.dart';
 import 'package:baka/services/matching/source_match_engine.dart';
@@ -241,7 +239,7 @@ class VideoSourceSearchController extends ChangeNotifier {
   static const Duration _mediaTimeout = Duration(milliseconds: 3000);
 
   /// 单候选总预算：与手动点选「一次 prepare」同级。
-  static const Duration _candidateBudget = AutoMatchStrategy.candidateBudget;
+  static const Duration _candidateBudget = SourceMatchEngine.candidateBudget;
 
   /// 手动点选时稍放宽。
   static const Duration _manualMediaTimeout = Duration(milliseconds: 5500);
@@ -250,17 +248,17 @@ class VideoSourceSearchController extends ChangeNotifier {
   static const Duration _memoryTimeout = Duration(milliseconds: 4500);
 
   /// 自动匹配快速竞速阶段的墙钟上限；到时后仍会等待在途源完成。
-  static const Duration _autoMatchWallClock = AutoMatchStrategy.wallClock;
+  static const Duration _autoMatchWallClock = SourceMatchEngine.wallClock;
 
   /// 单个源搜索上限，避免某个无响应源让完整搜索永远无法收尾。
   static const Duration _autoSourceSearchBudget =
-      AutoMatchStrategy.sourceSearchBudget;
+      SourceMatchEngine.sourceSearchBudget;
 
   /// 自动匹配并发：同时按「手动点选」路径处理的候选数。
-  static const int _autoProbeConcurrency = AutoMatchStrategy.raceConcurrency;
+  static const int _autoProbeConcurrency = SourceMatchEngine.raceConcurrency;
 
   /// 自动匹配每候选最多线路。
-  static const int _autoMatchMaxLines = AutoMatchStrategy.maxLinesPerCandidate;
+  static const int _autoMatchMaxLines = SourceMatchEngine.maxLinesPerCandidate;
 
   /// 手动点选最多尝试线路。
   static const int _manualMaxLines = 4;
@@ -339,7 +337,7 @@ class VideoSourceSearchController extends ChangeNotifier {
   }
 
   List<String> _readManualAliases() {
-    final raw = AliasStorageService.readAliases(
+    final raw = MatchMemoryService.readAliases(
       _aliasKey,
       fallbackKey: 'title:${_norm(title)}',
     );
@@ -376,7 +374,7 @@ class VideoSourceSearchController extends ChangeNotifier {
     if (!added) return false;
     manualAliases = next;
     notifyListeners();
-    await AliasStorageService.saveAliases(_aliasKey, next);
+    await MatchMemoryService.saveAliases(_aliasKey, next);
     await startSearch();
     return true;
   }
@@ -387,7 +385,7 @@ class VideoSourceSearchController extends ChangeNotifier {
         .where((a) => _norm(a) != _norm(alias))
         .toList();
     notifyListeners();
-    await AliasStorageService.saveAliases(_aliasKey, manualAliases);
+    await MatchMemoryService.saveAliases(_aliasKey, manualAliases);
     await startSearch();
   }
 
@@ -695,13 +693,13 @@ class VideoSourceSearchController extends ChangeNotifier {
     final raceKws = keywords
         .take(
           autoMatchMode
-              ? AutoMatchStrategy.keywordsPerSourceAuto
-              : AutoMatchStrategy.keywordsPerSourceManual,
+              ? SourceMatchEngine.keywordsPerSourceAuto
+              : SourceMatchEngine.keywordsPerSourceManual,
         )
         .toList();
     final extraKeywords = autoMatchMode
         ? const <String>[]
-        : keywords.skip(AutoMatchStrategy.keywordsPerSourceManual).toList();
+        : keywords.skip(SourceMatchEngine.keywordsPerSourceManual).toList();
 
     if (raceKws.isNotEmpty) {
       attempted += raceKws.length;
