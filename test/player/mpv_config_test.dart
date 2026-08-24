@@ -63,6 +63,27 @@ void main() {
     expect(properties, isNot(contains('vo')));
   });
 
+  test('Android Anime4K uses a signed half-float framebuffer', () {
+    final properties = buildPlayerProperties(
+      videoRenderer: 'gpu',
+      videoEnhancementEnabled: true,
+      android: true,
+    );
+
+    expect(properties['fbo-format'], 'rgba16f');
+    expect(
+      buildVideoEnhancementFramebufferProperties(
+        enabled: false,
+        android: true,
+      )['fbo-format'],
+      'rgba8',
+    );
+    expect(
+      buildVideoEnhancementFramebufferProperties(enabled: true, android: false),
+      isEmpty,
+    );
+  });
+
   test('Android falls gpu-next back to the conservative gpu profile', () {
     final properties = buildPlayerProperties(
       videoRenderer: 'gpu-next',

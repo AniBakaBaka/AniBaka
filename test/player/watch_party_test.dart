@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:baka/instance.dart';
 import 'package:baka/models/watch_party.dart';
 import 'package:baka/services/player_service.dart';
@@ -8,6 +10,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'fake_playback_backend.dart';
+
+const _invite = WatchPartyInvite(
+  roomId: 'room-1',
+  inviteCode: 'invite-1',
+  inviteUrl: 'https://www.anibaka.com/watch/invite-1',
+  syncplayHost: 'sync.anibaka.com',
+  syncplayPort: 8999,
+  syncplayRoom: '1234567890',
+  title: 'Show',
+  episodeIndex: 0,
+);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -98,6 +111,56 @@ void main() {
       isNull,
     );
   });
+
+  test('failed join request leaves connecting state retryable', () async {
+    var ticketRequested = false;
+    final service = WatchPartyService(
+      getInviteRequest: (_) async => throw StateError('房间不存在'),
+      joinRoomRequest: (_, _) async {
+        ticketRequested = true;
+        return 'ws://unused';
+      },
+    );
+
+    await expectLater(
+      service.joinInvite('missing-room', nickname: 'Tester'),
+      throwsA(isA<StateError>()),
+    );
+
+    expect(service.state.value.status, WatchPartyConnectionStatus.failed);
+    expect(service.state.value.error, '房间不存在');
+    expect(ticketRequested, isFalse);
+    await service.leave();
+  });
+
+  test(
+    'leaving invalidates an in-flight join before it requests a ticket',
+    () async {
+      final inviteCompleter = Completer<WatchPartyInvite>();
+      var ticketRequests = 0;
+      final service = WatchPartyService(
+        getInviteRequest: (_) => inviteCompleter.future,
+        joinRoomRequest: (_, _) async {
+          ticketRequests++;
+          return 'ws://unused';
+        },
+      );
+
+      final joining = service.joinInvite('invite-1', nickname: 'Tester');
+      await Future<void>.delayed(Duration.zero);
+      expect(service.state.value.status, WatchPartyConnectionStatus.connecting);
+
+      await service.leave();
+      inviteCompleter.complete(_invite);
+      await joining;
+
+      expect(ticketRequests, 0);
+      expect(
+        service.state.value.status,
+        WatchPartyConnectionStatus.disconnected,
+      );
+    },
+  );
 
   test(
     'viewer controls are blocked while remote room updates still apply',

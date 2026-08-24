@@ -71,10 +71,10 @@ vec4 hook() {
 //!WIDTH conv2d_tf.w
 //!HEIGHT conv2d_tf.h
 //!COMPONENTS 4
-#define go_0(x_off, y_off) (max((conv2d_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max((conv2d_tf1_texOff(vec2(x_off, y_off))), 0.0))
-#define go_2(x_off, y_off) (max(-(conv2d_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_3(x_off, y_off) (max(-(conv2d_tf1_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max((conv2d_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_2(x_off, y_off) (max(-(conv2d_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_3(x_off, y_off) (max(-(conv2d_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(0.010346764, 0.07230188, -0.24734616, -0.09937907, 0.02228549, -0.19550583, -0.019540425, -0.1037373, 0.033996485, -0.075554, -0.20228972, 0.07090153, -0.09194035, -0.058972966, 0.1768268, 0.27517542) * go_0(-1.0, -1.0);
     result += mat4(0.020078976, 0.12433655, -0.1620775, 0.036401592, 0.079748705, 0.11660013, 0.17917652, -0.017513236, -0.18936846, 0.24478136, -0.45726213, -0.045004416, -0.08295188, 0.067733586, -0.080548316, 0.2744211) * go_0(-1.0, 0.0);
@@ -123,10 +123,10 @@ vec4 hook() {
 //!WIDTH conv2d_tf.w
 //!HEIGHT conv2d_tf.h
 //!COMPONENTS 4
-#define go_0(x_off, y_off) (max((conv2d_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max((conv2d_tf1_texOff(vec2(x_off, y_off))), 0.0))
-#define go_2(x_off, y_off) (max(-(conv2d_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_3(x_off, y_off) (max(-(conv2d_tf1_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max((conv2d_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_2(x_off, y_off) (max(-(conv2d_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_3(x_off, y_off) (max(-(conv2d_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(-0.040142782, 0.0288423, 0.07569487, -0.01490842, 0.14402796, -0.13682005, 0.027765118, 0.03907358, 0.07117706, 0.058157545, -0.23862502, -0.057674367, -0.19220531, 0.0147159435, -0.18028538, 0.0963821) * go_0(-1.0, -1.0);
     result += mat4(-0.1676744, -0.11937339, 0.12137117, 0.07119485, 0.14148116, -0.043578617, -0.029261118, -0.0016938087, -0.057269357, -0.080076694, 0.12193026, 0.07326153, -0.056278303, -0.01630716, -0.03792076, 0.1483611) * go_0(-1.0, 0.0);
@@ -175,10 +175,10 @@ vec4 hook() {
 //!WIDTH conv2d_1_tf.w
 //!HEIGHT conv2d_1_tf.h
 //!COMPONENTS 4
-#define go_0(x_off, y_off) (max((conv2d_1_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max((conv2d_1_tf1_texOff(vec2(x_off, y_off))), 0.0))
-#define go_2(x_off, y_off) (max(-(conv2d_1_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_3(x_off, y_off) (max(-(conv2d_1_tf1_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_1_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max((conv2d_1_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_2(x_off, y_off) (max(-(conv2d_1_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_3(x_off, y_off) (max(-(conv2d_1_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(-0.069641694, 0.104958326, 0.14786446, 0.027633663, -0.004279524, -0.020451711, 0.0883571, -0.016224537, 0.13585235, 0.11078269, 0.20198658, -0.042161036, 0.020466218, 0.20994963, 0.20072585, -0.028024657) * go_0(-1.0, -1.0);
     result += mat4(0.050872434, 0.12874635, 0.1298729, 0.115810685, 0.07087254, 0.09885682, 0.23018982, 0.19187538, 0.10953604, 0.0033836907, -0.13325337, 0.09830315, -0.06528767, 0.05096927, -0.016355392, -0.039334368) * go_0(-1.0, 0.0);
@@ -227,10 +227,10 @@ vec4 hook() {
 //!WIDTH conv2d_1_tf.w
 //!HEIGHT conv2d_1_tf.h
 //!COMPONENTS 4
-#define go_0(x_off, y_off) (max((conv2d_1_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max((conv2d_1_tf1_texOff(vec2(x_off, y_off))), 0.0))
-#define go_2(x_off, y_off) (max(-(conv2d_1_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_3(x_off, y_off) (max(-(conv2d_1_tf1_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_1_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max((conv2d_1_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_2(x_off, y_off) (max(-(conv2d_1_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_3(x_off, y_off) (max(-(conv2d_1_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(-0.15104648, 0.05522861, -0.0654341, -0.053517453, -0.08264124, -0.0062249107, -0.20364265, -0.05015117, -0.18837251, 0.030655831, 0.046844713, -0.20673253, -0.14042036, -0.05655449, 0.13994302, 0.011745607) * go_0(-1.0, -1.0);
     result += mat4(-0.16517559, 0.1489214, -0.09149559, 0.025003506, -0.124926426, 0.16974348, -0.020857265, 0.08017403, 0.21836148, 0.0025619378, 0.2331612, 0.085599184, -0.030934382, -0.055194855, 0.09527726, -0.10081552) * go_0(-1.0, 0.0);
@@ -279,10 +279,10 @@ vec4 hook() {
 //!WIDTH conv2d_2_tf.w
 //!HEIGHT conv2d_2_tf.h
 //!COMPONENTS 4
-#define go_0(x_off, y_off) (max((conv2d_2_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max((conv2d_2_tf1_texOff(vec2(x_off, y_off))), 0.0))
-#define go_2(x_off, y_off) (max(-(conv2d_2_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_3(x_off, y_off) (max(-(conv2d_2_tf1_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_2_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max((conv2d_2_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_2(x_off, y_off) (max(-(conv2d_2_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_3(x_off, y_off) (max(-(conv2d_2_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(0.1851775, 0.053705044, 0.033816848, -0.018555025, -0.21204336, -0.01706974, 0.088259794, -0.13126148, 0.10729598, -0.043457437, 0.08634712, 0.09220895, 0.062131613, -0.01995871, 0.05181067, 0.18520063) * go_0(-1.0, -1.0);
     result += mat4(0.1662002, -0.14197104, -0.052809287, 0.025287712, -0.08330898, -0.08998097, -0.15642618, -0.14941245, -0.03481203, 0.061857622, 0.26051775, -0.0005498248, 0.086427025, 0.024108192, -0.12418039, 0.022286376) * go_0(-1.0, 0.0);
@@ -331,10 +331,10 @@ vec4 hook() {
 //!WIDTH conv2d_2_tf.w
 //!HEIGHT conv2d_2_tf.h
 //!COMPONENTS 4
-#define go_0(x_off, y_off) (max((conv2d_2_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max((conv2d_2_tf1_texOff(vec2(x_off, y_off))), 0.0))
-#define go_2(x_off, y_off) (max(-(conv2d_2_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_3(x_off, y_off) (max(-(conv2d_2_tf1_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_2_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max((conv2d_2_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_2(x_off, y_off) (max(-(conv2d_2_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_3(x_off, y_off) (max(-(conv2d_2_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(-0.026301445, -0.021575214, 0.22165509, 0.059994068, 0.03341161, 0.1831188, 0.20342293, 0.110160105, 0.03908121, 0.020673111, 0.07239561, 0.038754333, 0.15266368, 0.16526422, 0.062376205, -0.09759537) * go_0(-1.0, -1.0);
     result += mat4(0.19817191, 0.10267733, 0.17744653, 0.23283184, 0.18810122, 0.2708428, -0.12651879, 0.020756349, 0.039632563, -0.22201295, 0.04873703, 0.09159713, 0.13838065, 0.21169297, 0.30816007, 0.044463675) * go_0(-1.0, 0.0);
@@ -383,10 +383,10 @@ vec4 hook() {
 //!WIDTH conv2d_3_tf.w
 //!HEIGHT conv2d_3_tf.h
 //!COMPONENTS 4
-#define go_0(x_off, y_off) (max((conv2d_3_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max((conv2d_3_tf1_texOff(vec2(x_off, y_off))), 0.0))
-#define go_2(x_off, y_off) (max(-(conv2d_3_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_3(x_off, y_off) (max(-(conv2d_3_tf1_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_3_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max((conv2d_3_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_2(x_off, y_off) (max(-(conv2d_3_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_3(x_off, y_off) (max(-(conv2d_3_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(-0.06738501, 0.034009207, -0.21538448, 0.14296548, 0.12896985, -0.23526315, -0.08848608, 0.019602662, 0.14937137, 0.11353096, 0.11884168, -0.016765572, 0.030985225, 0.046430565, 0.06614828, -0.19202724) * go_0(-1.0, -1.0);
     result += mat4(-0.10326068, 0.11014975, 0.17069744, -0.21474148, 0.16761585, 0.13434832, -0.101021074, 0.006307025, 0.07478008, -0.1060066, 0.035315692, 0.033488914, -0.24906659, 0.06269967, 0.11120735, -0.040928528) * go_0(-1.0, 0.0);
@@ -435,10 +435,10 @@ vec4 hook() {
 //!WIDTH conv2d_3_tf.w
 //!HEIGHT conv2d_3_tf.h
 //!COMPONENTS 4
-#define go_0(x_off, y_off) (max((conv2d_3_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max((conv2d_3_tf1_texOff(vec2(x_off, y_off))), 0.0))
-#define go_2(x_off, y_off) (max(-(conv2d_3_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_3(x_off, y_off) (max(-(conv2d_3_tf1_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_3_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max((conv2d_3_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_2(x_off, y_off) (max(-(conv2d_3_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_3(x_off, y_off) (max(-(conv2d_3_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(-0.25835788, 0.050451655, -0.1845038, -0.07232528, 0.1323318, 0.26276684, 0.10842882, -0.083056524, 0.17426784, -0.3594826, 0.2728965, 0.08388844, -0.004007842, 0.020535901, -0.051425606, 0.07750436) * go_0(-1.0, -1.0);
     result += mat4(-0.11410436, 0.014572361, -0.27057216, -0.023974562, 0.05234827, 0.15328228, -0.17502303, -0.3199359, 0.12188045, -0.095813684, 0.024145132, 0.0856916, -0.027453909, -0.043129764, 0.16971985, 0.021623038) * go_0(-1.0, 0.0);
@@ -487,10 +487,10 @@ vec4 hook() {
 //!WIDTH conv2d_4_tf.w
 //!HEIGHT conv2d_4_tf.h
 //!COMPONENTS 4
-#define go_0(x_off, y_off) (max((conv2d_4_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max((conv2d_4_tf1_texOff(vec2(x_off, y_off))), 0.0))
-#define go_2(x_off, y_off) (max(-(conv2d_4_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_3(x_off, y_off) (max(-(conv2d_4_tf1_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_4_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max((conv2d_4_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_2(x_off, y_off) (max(-(conv2d_4_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_3(x_off, y_off) (max(-(conv2d_4_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(0.018134737, -0.2296755, -0.07276725, -0.029795367, 0.05382051, 0.092847414, -0.024469728, -0.1674685, 0.0017946451, 0.30074653, 0.0034195695, -0.04892261, 0.18229689, -0.20116119, -0.12702174, -0.08259108) * go_0(-1.0, -1.0);
     result += mat4(-0.1357695, -0.08149211, 0.09314453, -0.21966846, 0.34740716, 0.043606415, 0.04225903, 0.034449834, 0.17248215, 0.39148283, -0.13868807, -0.010550686, 0.044238456, -0.09693464, -0.005044985, 0.24383289) * go_0(-1.0, 0.0);
@@ -539,10 +539,10 @@ vec4 hook() {
 //!WIDTH conv2d_4_tf.w
 //!HEIGHT conv2d_4_tf.h
 //!COMPONENTS 4
-#define go_0(x_off, y_off) (max((conv2d_4_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max((conv2d_4_tf1_texOff(vec2(x_off, y_off))), 0.0))
-#define go_2(x_off, y_off) (max(-(conv2d_4_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_3(x_off, y_off) (max(-(conv2d_4_tf1_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_4_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max((conv2d_4_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_2(x_off, y_off) (max(-(conv2d_4_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_3(x_off, y_off) (max(-(conv2d_4_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(0.047881734, -0.09396414, -0.2839081, 0.3140853, 0.052613556, 0.09940423, 0.23960467, -0.022228222, -0.12065009, 0.07898222, 0.08657881, 0.010852739, -0.050450284, 0.01683982, 0.031813968, 0.053060856) * go_0(-1.0, -1.0);
     result += mat4(-0.10252411, -0.03116448, -0.30114275, -0.0316799, -0.017501019, -0.03006003, -0.2095696, 0.10134927, -0.3901916, -0.15335023, -0.11955071, 0.1337449, 0.101239376, -0.25044814, 0.2128469, 0.018979514) * go_0(-1.0, 0.0);
@@ -591,10 +591,10 @@ vec4 hook() {
 //!WIDTH conv2d_5_tf.w
 //!HEIGHT conv2d_5_tf.h
 //!COMPONENTS 4
-#define go_0(x_off, y_off) (max((conv2d_5_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max((conv2d_5_tf1_texOff(vec2(x_off, y_off))), 0.0))
-#define go_2(x_off, y_off) (max(-(conv2d_5_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_3(x_off, y_off) (max(-(conv2d_5_tf1_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_5_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max((conv2d_5_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_2(x_off, y_off) (max(-(conv2d_5_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_3(x_off, y_off) (max(-(conv2d_5_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(-0.082203194, 0.021720003, 0.03725474, -0.08048348, 0.2063248, -0.033020593, -0.17585336, 0.06476272, 0.012244563, 0.026554609, 0.014708393, 0.26606125, 0.14248778, 0.12817341, -0.039826933, -0.12751861) * go_0(-1.0, -1.0);
     result += mat4(0.24573852, 0.19695967, -0.06257417, -0.04782871, 0.3511875, -0.018083302, -0.077342674, 0.15247667, 0.20321761, -0.07479984, -0.09548503, 0.08109568, -0.23808748, 0.07246303, -0.004242619, 0.16162953) * go_0(-1.0, 0.0);
@@ -643,10 +643,10 @@ vec4 hook() {
 //!WIDTH conv2d_5_tf.w
 //!HEIGHT conv2d_5_tf.h
 //!COMPONENTS 4
-#define go_0(x_off, y_off) (max((conv2d_5_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max((conv2d_5_tf1_texOff(vec2(x_off, y_off))), 0.0))
-#define go_2(x_off, y_off) (max(-(conv2d_5_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_3(x_off, y_off) (max(-(conv2d_5_tf1_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_5_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max((conv2d_5_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_2(x_off, y_off) (max(-(conv2d_5_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_3(x_off, y_off) (max(-(conv2d_5_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(0.17082009, 0.031344634, -0.06131912, 0.00887183, -0.01528174, 0.12943709, 0.24537678, 0.008178781, -0.312396, -0.023583878, 0.07827866, -0.1231261, 0.15081584, -0.18161978, -0.25179705, -0.036934935) * go_0(-1.0, -1.0);
     result += mat4(-0.05768411, 0.16785417, -0.1788644, -0.0067257965, 0.021445744, 0.10066516, -0.23864186, 0.1450302, 0.12892793, 0.19856106, -0.24444748, 0.16531628, -0.044425935, -0.02775357, 0.009059946, -0.12958384) * go_0(-1.0, 0.0);
@@ -695,10 +695,10 @@ vec4 hook() {
 //!WIDTH conv2d_6_tf.w
 //!HEIGHT conv2d_6_tf.h
 //!COMPONENTS 4
-#define go_0(x_off, y_off) (max((conv2d_6_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max((conv2d_6_tf1_texOff(vec2(x_off, y_off))), 0.0))
-#define go_2(x_off, y_off) (max(-(conv2d_6_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_3(x_off, y_off) (max(-(conv2d_6_tf1_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_6_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max((conv2d_6_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_2(x_off, y_off) (max(-(conv2d_6_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_3(x_off, y_off) (max(-(conv2d_6_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(0.21919365, 0.36627784, 0.12603314, 0.24306288, 0.06447028, 0.06472204, -0.05997039, -0.15651788, 0.017059859, -0.006497198, -0.4189735, 0.021636713, -0.23887977, -0.014220949, 0.031113686, -0.17342716) * go_0(-1.0, -1.0);
     result += mat4(-0.10818789, -0.03273837, 0.33918005, -0.19290088, 0.0955361, -0.34107623, -0.054906327, -0.18083344, -0.060723677, 0.24395694, 0.112975016, -0.07254578, -0.14389384, 0.13235968, -0.15054801, -0.26216486) * go_0(-1.0, 0.0);
@@ -747,10 +747,10 @@ vec4 hook() {
 //!WIDTH conv2d_6_tf.w
 //!HEIGHT conv2d_6_tf.h
 //!COMPONENTS 4
-#define go_0(x_off, y_off) (max((conv2d_6_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max((conv2d_6_tf1_texOff(vec2(x_off, y_off))), 0.0))
-#define go_2(x_off, y_off) (max(-(conv2d_6_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_3(x_off, y_off) (max(-(conv2d_6_tf1_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_6_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max((conv2d_6_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_2(x_off, y_off) (max(-(conv2d_6_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_3(x_off, y_off) (max(-(conv2d_6_tf1_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(-0.36016628, 0.019064043, 0.3073228, 0.16891135, 0.026739368, 0.31136194, 0.11260383, -0.26918694, 0.0419928, -0.3365078, 0.20189743, -0.04136312, 0.039564647, 0.033199426, 0.18768296, -0.017119858) * go_0(-1.0, -1.0);
     result += mat4(0.28663483, -0.41716507, 0.059281543, 0.043736435, 0.0028875466, 0.13817391, -0.12543318, -0.2794053, -0.023528943, 0.10610115, 0.09100278, 0.040132936, -0.21949205, -0.027810011, -0.0301218, 0.084047124) * go_0(-1.0, 0.0);
@@ -811,34 +811,34 @@ vec4 hook() {
 //!SAVE MAIN
 //!WIDTH conv2d_1_tf.w
 //!HEIGHT conv2d_1_tf.h
-#define g_0 (max((conv2d_1_tf_tex(conv2d_1_tf_pos)), 0.0))
-#define g_1 (max((conv2d_1_tf1_tex(conv2d_1_tf1_pos)), 0.0))
-#define g_2 (max(-(conv2d_1_tf_tex(conv2d_1_tf_pos)), 0.0))
-#define g_3 (max(-(conv2d_1_tf1_tex(conv2d_1_tf1_pos)), 0.0))
-#define g_4 (max((conv2d_2_tf_tex(conv2d_2_tf_pos)), 0.0))
-#define g_5 (max((conv2d_2_tf1_tex(conv2d_2_tf1_pos)), 0.0))
-#define g_6 (max(-(conv2d_2_tf_tex(conv2d_2_tf_pos)), 0.0))
-#define g_7 (max(-(conv2d_2_tf1_tex(conv2d_2_tf1_pos)), 0.0))
-#define g_8 (max((conv2d_3_tf_tex(conv2d_3_tf_pos)), 0.0))
-#define g_9 (max((conv2d_3_tf1_tex(conv2d_3_tf1_pos)), 0.0))
-#define g_10 (max(-(conv2d_3_tf_tex(conv2d_3_tf_pos)), 0.0))
-#define g_11 (max(-(conv2d_3_tf1_tex(conv2d_3_tf1_pos)), 0.0))
-#define g_12 (max((conv2d_4_tf_tex(conv2d_4_tf_pos)), 0.0))
-#define g_13 (max((conv2d_4_tf1_tex(conv2d_4_tf1_pos)), 0.0))
-#define g_14 (max(-(conv2d_4_tf_tex(conv2d_4_tf_pos)), 0.0))
-#define g_15 (max(-(conv2d_4_tf1_tex(conv2d_4_tf1_pos)), 0.0))
-#define g_16 (max((conv2d_5_tf_tex(conv2d_5_tf_pos)), 0.0))
-#define g_17 (max((conv2d_5_tf1_tex(conv2d_5_tf1_pos)), 0.0))
-#define g_18 (max(-(conv2d_5_tf_tex(conv2d_5_tf_pos)), 0.0))
-#define g_19 (max(-(conv2d_5_tf1_tex(conv2d_5_tf1_pos)), 0.0))
-#define g_20 (max((conv2d_6_tf_tex(conv2d_6_tf_pos)), 0.0))
-#define g_21 (max((conv2d_6_tf1_tex(conv2d_6_tf1_pos)), 0.0))
-#define g_22 (max(-(conv2d_6_tf_tex(conv2d_6_tf_pos)), 0.0))
-#define g_23 (max(-(conv2d_6_tf1_tex(conv2d_6_tf1_pos)), 0.0))
-#define g_24 (max((conv2d_7_tf_tex(conv2d_7_tf_pos)), 0.0))
-#define g_25 (max((conv2d_7_tf1_tex(conv2d_7_tf1_pos)), 0.0))
-#define g_26 (max(-(conv2d_7_tf_tex(conv2d_7_tf_pos)), 0.0))
-#define g_27 (max(-(conv2d_7_tf1_tex(conv2d_7_tf1_pos)), 0.0))
+#define g_0 (max((conv2d_1_tf_tex(conv2d_1_tf_pos)), vec4(0.0)))
+#define g_1 (max((conv2d_1_tf1_tex(conv2d_1_tf1_pos)), vec4(0.0)))
+#define g_2 (max(-(conv2d_1_tf_tex(conv2d_1_tf_pos)), vec4(0.0)))
+#define g_3 (max(-(conv2d_1_tf1_tex(conv2d_1_tf1_pos)), vec4(0.0)))
+#define g_4 (max((conv2d_2_tf_tex(conv2d_2_tf_pos)), vec4(0.0)))
+#define g_5 (max((conv2d_2_tf1_tex(conv2d_2_tf1_pos)), vec4(0.0)))
+#define g_6 (max(-(conv2d_2_tf_tex(conv2d_2_tf_pos)), vec4(0.0)))
+#define g_7 (max(-(conv2d_2_tf1_tex(conv2d_2_tf1_pos)), vec4(0.0)))
+#define g_8 (max((conv2d_3_tf_tex(conv2d_3_tf_pos)), vec4(0.0)))
+#define g_9 (max((conv2d_3_tf1_tex(conv2d_3_tf1_pos)), vec4(0.0)))
+#define g_10 (max(-(conv2d_3_tf_tex(conv2d_3_tf_pos)), vec4(0.0)))
+#define g_11 (max(-(conv2d_3_tf1_tex(conv2d_3_tf1_pos)), vec4(0.0)))
+#define g_12 (max((conv2d_4_tf_tex(conv2d_4_tf_pos)), vec4(0.0)))
+#define g_13 (max((conv2d_4_tf1_tex(conv2d_4_tf1_pos)), vec4(0.0)))
+#define g_14 (max(-(conv2d_4_tf_tex(conv2d_4_tf_pos)), vec4(0.0)))
+#define g_15 (max(-(conv2d_4_tf1_tex(conv2d_4_tf1_pos)), vec4(0.0)))
+#define g_16 (max((conv2d_5_tf_tex(conv2d_5_tf_pos)), vec4(0.0)))
+#define g_17 (max((conv2d_5_tf1_tex(conv2d_5_tf1_pos)), vec4(0.0)))
+#define g_18 (max(-(conv2d_5_tf_tex(conv2d_5_tf_pos)), vec4(0.0)))
+#define g_19 (max(-(conv2d_5_tf1_tex(conv2d_5_tf1_pos)), vec4(0.0)))
+#define g_20 (max((conv2d_6_tf_tex(conv2d_6_tf_pos)), vec4(0.0)))
+#define g_21 (max((conv2d_6_tf1_tex(conv2d_6_tf1_pos)), vec4(0.0)))
+#define g_22 (max(-(conv2d_6_tf_tex(conv2d_6_tf_pos)), vec4(0.0)))
+#define g_23 (max(-(conv2d_6_tf1_tex(conv2d_6_tf1_pos)), vec4(0.0)))
+#define g_24 (max((conv2d_7_tf_tex(conv2d_7_tf_pos)), vec4(0.0)))
+#define g_25 (max((conv2d_7_tf1_tex(conv2d_7_tf1_pos)), vec4(0.0)))
+#define g_26 (max(-(conv2d_7_tf_tex(conv2d_7_tf_pos)), vec4(0.0)))
+#define g_27 (max(-(conv2d_7_tf1_tex(conv2d_7_tf1_pos)), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(0.09689336, 0.06046458, 0.072598994, 0.0, 0.11994565, 0.104477674, 0.09302802, 0.0, -0.05718302, 0.050438102, 0.08814741, 0.0, 0.0308889, 0.0033925986, -0.01715605, 0.0) * g_0;
     result += mat4(-0.028314235, 0.06597744, 0.0966897, 0.0, 0.035656154, 0.07770106, 0.075551905, 0.0, 0.0001793458, -0.000479495, -0.00297406, 0.0, -0.053916585, -0.016807461, -0.0057141334, 0.0) * g_1;

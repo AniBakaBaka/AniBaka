@@ -64,20 +64,36 @@ void main() {
     );
 
     // 移动端低档优先性能，但仍保留常规 Restore 让效果可见（Soft 太含蓄）。
-    expect(
-      low,
-      [
-        'Anime4K_Clamp_Highlights.glsl',
-        'AniBaka_Clear_v1.glsl',
-        'Anime4K_Restore_CNN_M.glsl',
-        'Anime4K_Upscale_CNN_x2_S.glsl',
-      ],
-    );
+    expect(low, [
+      'Anime4K_Clamp_Highlights.glsl',
+      'AniBaka_Clear_v1.glsl',
+      'Anime4K_Restore_CNN_M.glsl',
+      'Anime4K_Upscale_CNN_x2_S.glsl',
+    ]);
     expect(low, isNot(contains('Anime4K_Restore_CNN_Soft_M.glsl')));
     expect(high, isNot(contains('Anime4K_Restore_CNN_VL.glsl')));
     expect(high, isNot(contains('Anime4K_Upscale_CNN_x2_VL.glsl')));
     expect(ultra, contains('Anime4K_Restore_CNN_M.glsl'));
     expect(ultra, contains('Anime4K_Upscale_CNN_x2_S.glsl'));
+  });
+
+  test('CNN shaders use GLES-compatible vector activation bounds', () {
+    final shaders = Directory(
+      'assets/anime4k',
+    ).listSync().whereType<File>().where((file) => file.path.contains('_CNN_'));
+    var vectorBounds = 0;
+
+    for (final shader in shaders) {
+      final source = shader.readAsStringSync();
+      expect(
+        source,
+        isNot(contains('), 0.0))')),
+        reason: '${shader.path} still compares a vec4 texture with a scalar',
+      );
+      vectorBounds += 'vec4(0.0)'.allMatches(source).length;
+    }
+
+    expect(vectorBounds, 384);
   });
 
   test('maps exactly to the four user-facing levels', () {

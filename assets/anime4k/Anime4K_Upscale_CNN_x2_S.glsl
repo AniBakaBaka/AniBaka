@@ -51,8 +51,8 @@ vec4 hook() {
 //!HEIGHT conv2d_tf.h
 //!COMPONENTS 4
 //!WHEN OUTPUT.w MAIN.w / 1.200 > OUTPUT.h MAIN.h / 1.200 > *
-#define go_0(x_off, y_off) (max((conv2d_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max(-(conv2d_tf_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max(-(conv2d_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(-0.011029496, 0.05866063, -0.09460646, -0.017664742, -0.022488879, 0.18384217, -0.00397663, -0.064733066, 0.08466802, 0.10667488, 8.0212536e-05, 0.0908869, 0.13580276, 0.00097438256, 0.12176522, -0.08218466) * go_0(-1.0, -1.0);
     result += mat4(0.16062798, -0.10190268, 0.03280682, 0.05621916, -0.009684231, -0.08464307, 0.17058301, -0.096469186, 0.1967505, -0.1450099, 0.093607284, -0.28240147, -0.21377413, 0.10079291, -0.1741522, 0.17330575) * go_0(-1.0, 0.0);
@@ -83,8 +83,8 @@ vec4 hook() {
 //!HEIGHT conv2d_1_tf.h
 //!COMPONENTS 4
 //!WHEN OUTPUT.w MAIN.w / 1.200 > OUTPUT.h MAIN.h / 1.200 > *
-#define go_0(x_off, y_off) (max((conv2d_1_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max(-(conv2d_1_tf_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_1_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max(-(conv2d_1_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(-0.036115196, -0.06971895, -0.07508942, 0.016036168, 0.12120111, 0.24536026, 0.044755507, -0.20663576, 0.029635755, -0.15427187, 0.027148994, -0.20795093, 0.10170582, 0.077919215, 0.66063017, -0.4632968) * go_0(-1.0, -1.0);
     result += mat4(-0.0052889925, -0.019060908, -0.08660142, -0.022095207, -0.08097976, -0.015142803, -0.18552722, -0.078493506, -0.16293915, -0.20099808, -0.08370822, 0.3701389, 0.09094984, 0.2487225, 0.24338846, 0.044003833) * go_0(-1.0, 0.0);
@@ -115,8 +115,8 @@ vec4 hook() {
 //!HEIGHT conv2d_2_tf.h
 //!COMPONENTS 4
 //!WHEN OUTPUT.w MAIN.w / 1.200 > OUTPUT.h MAIN.h / 1.200 > *
-#define go_0(x_off, y_off) (max((conv2d_2_tf_texOff(vec2(x_off, y_off))), 0.0))
-#define go_1(x_off, y_off) (max(-(conv2d_2_tf_texOff(vec2(x_off, y_off))), 0.0))
+#define go_0(x_off, y_off) (max((conv2d_2_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
+#define go_1(x_off, y_off) (max(-(conv2d_2_tf_texOff(vec2(x_off, y_off))), vec4(0.0)))
 vec4 hook() {
     vec4 result = mat4(0.019100675, -0.014241565, 0.004667036, -0.03865062, 0.106731094, 0.026099661, 0.014594411, -0.011881356, 0.0040967264, -0.004626336, 0.006469508, 0.010875305, -0.033909045, -0.085905954, 0.07861378, 0.019452631) * go_0(-1.0, -1.0);
     result += mat4(0.20777655, -0.060354974, 0.0023840065, -0.064121604, -0.17397617, 0.019293457, -0.09707183, 0.080641985, 0.01025124, -0.017382381, 0.008661793, -0.010995665, 0.21943407, -0.115574986, 0.14471593, -0.068836235) * go_0(-1.0, 0.0);

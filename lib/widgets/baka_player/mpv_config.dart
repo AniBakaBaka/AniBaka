@@ -40,6 +40,7 @@ const lowMemoryPlayerProperties = <String, String>{
 Map<String, String> buildPlayerProperties({
   String hwdecMode = 'auto',
   String videoRenderer = 'gpu',
+  bool videoEnhancementEnabled = false,
   bool lowMemoryMode = false,
   bool? android,
   String? mediaUri,
@@ -51,7 +52,11 @@ Map<String, String> buildPlayerProperties({
     ...playerProperties,
     if (lowMemoryMode) ...lowMemoryPlayerProperties,
     'hwdec': effectiveHwdec(hwdecMode, videoRenderer, android: android),
-    ...buildVideoRendererProperties(videoRenderer, android: android),
+    ...buildVideoRendererProperties(
+      videoRenderer,
+      android: android,
+      videoEnhancementEnabled: videoEnhancementEnabled,
+    ),
     'demuxer-lavf-o': isNetwork
         ? networkDemuxerLavfOptions
         : localDemuxerLavfOptions,
@@ -85,20 +90,24 @@ Map<String, String> buildRendererSwitchProperties({
 /// 渲染器对应的 mpv 渲染属性。
 ///
 /// Android 的 vo 只能是 `gpu`（media_kit 默认）或 `mediacodec_embed`，
-/// 两者都使用保守缩放；额外固定 rgba8 帧缓冲并关闭去色带 / 补帧等高显存
-/// 处理，避免 Mali-G52 这类低显存 GPU 在 rgba16f 中间纹理上 OOM。
+/// 两者都使用保守缩放并关闭去色带 / 补帧等高显存处理。普通播放使用
+/// rgba8；Anime4K 启用时才切到 CNN 中间纹理所需的 rgba16f。
 /// `gpu-next` 仅存在于桌面端（libmpv 的缩放档位），Android 传入时按 gpu
 /// 处理。
 Map<String, String> buildVideoRendererProperties(
   String renderer, {
   bool? android,
+  bool videoEnhancementEnabled = false,
 }) {
   final isAndroid = android ?? Platform.isAndroid;
   if (isAndroid) {
-    return const <String, String>{
+    return <String, String>{
       'gpu-context': 'android',
       'profile': 'fast',
-      'fbo-format': 'rgba8',
+      // Anime4K CNN passes keep signed, high precision activations in
+      // intermediate textures. rgba8 clamps those values and produces weak
+      // output or coloured residuals; use half-float only while enabled.
+      'fbo-format': videoEnhancementEnabled ? 'rgba16f' : 'rgba8',
       'deband': 'no',
       'interpolation': 'no',
       'scale': 'bilinear',
@@ -120,8 +129,6 @@ Map<String, String> buildVideoRendererProperties(
       'sigmoid-upscaling': 'yes',
     };
   }
-
-
   return const <String, String>{
     'scale': 'bilinear',
     'cscale': 'bilinear',
@@ -130,6 +137,15 @@ Map<String, String> buildVideoRendererProperties(
     'linear-downscaling': 'no',
     'sigmoid-upscaling': 'no',
   };
+}
+
+Map<String, String> buildVideoEnhancementFramebufferProperties({
+  required bool enabled,
+  bool? android,
+}) {
+  final isAndroid = android ?? Platform.isAndroid;
+  if (!isAndroid) return const <String, String>{};
+  return <String, String>{'fbo-format': enabled ? 'rgba16f' : 'rgba8'};
 }
 
 String sanitizePlaybackError(Object error) {

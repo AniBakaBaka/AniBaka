@@ -36,10 +36,11 @@ class WatchPartyViewState {
     WatchPartySnapshot? snapshot,
     String? error,
     int? latencyMs,
+    bool clearInvite = false,
     bool clearSnapshot = false,
   }) => WatchPartyViewState(
     status: status ?? this.status,
-    invite: invite ?? this.invite,
+    invite: clearInvite ? null : (invite ?? this.invite),
     snapshot: clearSnapshot ? null : (snapshot ?? this.snapshot),
     error: error ?? this.error,
     latencyMs: latencyMs ?? this.latencyMs,
@@ -47,9 +48,21 @@ class WatchPartyViewState {
 }
 
 class WatchPartyService extends GetxService {
+  WatchPartyService({
+    Future<WatchPartyInvite> Function(WatchPartyMedia media)? createRoomRequest,
+    Future<WatchPartyInvite> Function(String code)? getInviteRequest,
+    Future<String> Function(String code, String nickname)? joinRoomRequest,
+  }) : _createRoomRequest = createRoomRequest ?? AniBakaApi.createWatchRoom,
+       _getInviteRequest = getInviteRequest ?? AniBakaApi.getWatchInvite,
+       _joinRoomRequest = joinRoomRequest ?? AniBakaApi.joinWatchRoom;
+
   static WatchPartyService get instance => Get.find<WatchPartyService>();
 
   final state = ValueNotifier<WatchPartyViewState>(const WatchPartyViewState());
+  final Future<WatchPartyInvite> Function(WatchPartyMedia media)
+  _createRoomRequest;
+  final Future<WatchPartyInvite> Function(String code) _getInviteRequest;
+  final Future<String> Function(String code, String nickname) _joinRoomRequest;
 
   IOWebSocketChannel? _channel;
   StreamSubscription<dynamic>? _channelSubscription;
@@ -67,6 +80,7 @@ class WatchPartyService extends GetxService {
   bool? _lastPlaying;
   int _reconnectAttempt = 0;
   int _requestSerial = 0;
+  int _connectionGeneration = 0;
   Completer<void>? _initialSnapshot;
   String? _pendingPingId;
   final Stopwatch _pingClock = Stopwatch();
@@ -85,59 +99,108 @@ class WatchPartyService extends GetxService {
     final content = _content;
     if (content == null) throw StateError('请先打开要观看的视频');
     if (Instances.userToken.isEmpty) throw StateError('创建房间需要先登录 AniBaka');
-    state.value = state.value.copyWith(
-      status: WatchPartyConnectionStatus.connecting,
-      error: '',
-    );
-    final invite = await AniBakaApi.createWatchRoom(_currentMedia(content));
-    _inviteCode = invite.inviteCode;
-    _nickname = _currentNickname();
-    state.value = state.value.copyWith(invite: invite);
-    await _connect(invite.webSocketUrl);
+    final generation = _beginConnection();
+    try {
+      final invite = await _createRoomRequest(_currentMedia(content));
+      if (!_isCurrentConnection(generation)) return;
+      _inviteCode = invite.inviteCode;
+      _nickname = _currentNickname();
+      state.value = state.value.copyWith(invite: invite);
+      await _connect(invite.webSocketUrl, generation);
+    } catch (error) {
+      if (!_isCurrentConnection(generation)) return;
+      if (state.value.status != WatchPartyConnectionStatus.failed) {
+        _setFailure(_connectionError(error, '创建一起看房间失败'));
+      }
+      rethrow;
+    }
   }
 
   Future<void> joinInvite(String code, {String? nickname}) async {
     final normalized = code.trim();
     if (normalized.isEmpty) throw StateError('请输入邀请码');
+    final generation = _beginConnection();
     _inviteCode = normalized;
     _nickname = (nickname ?? _currentNickname()).trim();
     if (_nickname.isEmpty) _nickname = 'AniBaka';
+    try {
+      // Fetch public room metadata before issuing the one-time join ticket. A
+      // failed metadata request must not leave an unused ticket behind.
+      final invite = await _getInviteRequest(normalized);
+      if (!_isCurrentConnection(generation)) return;
+      final webSocketUrl = await _joinRoomRequest(normalized, _nickname);
+      if (!_isCurrentConnection(generation)) return;
+      state.value = state.value.copyWith(invite: invite);
+      await _connect(webSocketUrl, generation);
+    } catch (error) {
+      if (!_isCurrentConnection(generation)) return;
+      if (state.value.status != WatchPartyConnectionStatus.failed) {
+        _setFailure(_connectionError(error, '加入一起看房间失败'));
+      }
+      rethrow;
+    }
+  }
+
+  int _beginConnection() {
+    final generation = ++_connectionGeneration;
+    _intentionalDisconnect = false;
+    _reconnectTimer?.cancel();
+    _heartbeat?.cancel();
+    final previousSubscription = _channelSubscription;
+    final previousChannel = _channel;
+    _channelSubscription = null;
+    _channel = null;
+    _pendingPingId = null;
+    _pingClock.stop();
+    unawaited(previousSubscription?.cancel());
+    unawaited(previousChannel?.sink.close(ws_status.goingAway));
     state.value = state.value.copyWith(
       status: WatchPartyConnectionStatus.connecting,
       error: '',
+      clearInvite: true,
+      clearSnapshot: true,
     );
-    final results = await Future.wait<Object>([
-      AniBakaApi.getWatchInvite(normalized),
-      AniBakaApi.joinWatchRoom(normalized, _nickname),
-    ]);
-    state.value = state.value.copyWith(invite: results[0] as WatchPartyInvite);
-    await _connect(results[1] as String);
+    return generation;
   }
 
-  Future<void> _connect(String webSocketUrl) async {
+  bool _isCurrentConnection(int generation, [IOWebSocketChannel? channel]) =>
+      generation == _connectionGeneration &&
+      (channel == null || identical(channel, _channel));
+
+  Future<void> _connect(String webSocketUrl, int generation) async {
+    if (!_isCurrentConnection(generation)) return;
     _intentionalDisconnect = false;
-    await _channelSubscription?.cancel();
-    await _channel?.sink.close();
+    final previousSubscription = _channelSubscription;
+    final previousChannel = _channel;
+    _channelSubscription = null;
+    _channel = null;
+    await previousSubscription?.cancel();
+    await previousChannel?.sink.close();
+    if (!_isCurrentConnection(generation)) return;
     final channel = IOWebSocketChannel.connect(
       Uri.parse(webSocketUrl),
       connectTimeout: const Duration(seconds: 10),
       pingInterval: const Duration(seconds: 20),
     );
     _channel = channel;
-    _initialSnapshot = Completer<void>();
+    final initialSnapshot = Completer<void>();
+    _initialSnapshot = initialSnapshot;
     try {
       await channel.ready;
     } catch (error) {
-      _setFailure('无法连接一起看房间');
+      if (_isCurrentConnection(generation, channel)) {
+        _channel = null;
+        _setFailure('无法连接一起看房间');
+      }
+      await channel.sink.close(ws_status.goingAway);
       rethrow;
     }
-    state.value = state.value.copyWith(
-      status: WatchPartyConnectionStatus.connected,
-      error: '',
-    );
-    _reconnectAttempt = 0;
+    if (!_isCurrentConnection(generation, channel)) {
+      await channel.sink.close(ws_status.goingAway);
+      return;
+    }
     _channelSubscription = channel.stream.listen(
-      _onMessage,
+      (raw) => _onMessage(generation, channel, raw),
       onError: (Object error, StackTrace stackTrace) {
         AppLogger.instance.warning(
           'Watch-party socket error',
@@ -145,11 +208,16 @@ class WatchPartyService extends GetxService {
           error: error,
           stackTrace: stackTrace,
         );
-        _onDisconnected();
+        _onDisconnected(generation, channel);
       },
-      onDone: _onDisconnected,
+      onDone: () => _onDisconnected(generation, channel),
       cancelOnError: true,
     );
+    state.value = state.value.copyWith(
+      status: WatchPartyConnectionStatus.connected,
+      error: '',
+    );
+    _reconnectAttempt = 0;
     _heartbeat?.cancel();
     _heartbeat = Timer.periodic(const Duration(seconds: 15), (_) {
       if (_pendingPingId != null && _pingClock.elapsed.inSeconds < 45) return;
@@ -161,7 +229,20 @@ class WatchPartyService extends GetxService {
           ..start();
       }
     });
-    await _initialSnapshot!.future.timeout(const Duration(seconds: 5));
+    try {
+      await initialSnapshot.future.timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      if (_isCurrentConnection(generation, channel)) {
+        _setFailure('连接成功，但未收到房间状态');
+        _heartbeat?.cancel();
+        await _channelSubscription?.cancel();
+        _channelSubscription = null;
+        await channel.sink.close(ws_status.goingAway);
+        if (identical(_channel, channel)) _channel = null;
+      }
+      rethrow;
+    }
+    if (!_isCurrentConnection(generation, channel)) return;
     await _controller?.configureWatchParty(
       connected: true,
       canControl: state.value.snapshot?.canControl ?? false,
@@ -190,9 +271,7 @@ class WatchPartyService extends GetxService {
       );
       final snapshot = state.value.snapshot;
       if (snapshot != null) {
-        _remoteApplyChain = _remoteApplyChain.then(
-          (_) => _applySnapshot(snapshot, null),
-        );
+        _queueRemoteApply(_connectionGeneration, snapshot, null);
       }
     }
   }
@@ -237,26 +316,34 @@ class WatchPartyService extends GetxService {
   }
 
   Future<void> leave() async {
+    final generation = ++_connectionGeneration;
     _intentionalDisconnect = true;
     _reconnectTimer?.cancel();
     _heartbeat?.cancel();
-    await _channelSubscription?.cancel();
-    await _channel?.sink.close(ws_status.normalClosure);
+    final subscription = _channelSubscription;
+    final channel = _channel;
+    _channelSubscription = null;
     _channel = null;
     _pendingPingId = null;
     _pingClock.stop();
     state.value = const WatchPartyViewState();
+    await subscription?.cancel();
+    await channel?.sink.close(ws_status.normalClosure);
+    if (!_isCurrentConnection(generation)) return;
     await _controller?.configureWatchParty(connected: false, canControl: true);
   }
 
   Future<void> closeRoom() async {
+    final generation = _connectionGeneration;
     final roomId = state.value.snapshot?.roomId ?? state.value.invite?.roomId;
     if (roomId == null || roomId.isEmpty) return;
     await AniBakaApi.closeWatchRoom(roomId);
+    if (!_isCurrentConnection(generation)) return;
     await leave();
   }
 
-  void _onMessage(dynamic raw) {
+  void _onMessage(int generation, IOWebSocketChannel channel, dynamic raw) {
+    if (!_isCurrentConnection(generation, channel)) return;
     if (raw is! String) return;
     try {
       final envelope = jsonDecode(raw) as Map<String, dynamic>;
@@ -325,9 +412,7 @@ class WatchPartyService extends GetxService {
           canControl: snapshot.canControl,
         ),
       );
-      _remoteApplyChain = _remoteApplyChain.then(
-        (_) => _applySnapshot(snapshot, previous),
-      );
+      _queueRemoteApply(generation, snapshot, previous);
     } catch (error, stackTrace) {
       AppLogger.instance.warning(
         'Invalid watch-party message',
@@ -338,10 +423,36 @@ class WatchPartyService extends GetxService {
     }
   }
 
+  void _queueRemoteApply(
+    int generation,
+    WatchPartySnapshot snapshot,
+    WatchPartySnapshot? previous,
+  ) {
+    _remoteApplyChain = _remoteApplyChain
+        .then((_) async {
+          if (!_isCurrentConnection(generation) || !state.value.connected) {
+            return;
+          }
+          await _applySnapshot(generation, snapshot, previous);
+        })
+        .catchError((Object error, StackTrace stackTrace) {
+          // A transient seek/episode-switch failure must not poison every
+          // later room update in the serialized apply chain.
+          AppLogger.instance.warning(
+            'Unable to apply watch-party snapshot',
+            tag: 'WatchParty',
+            error: error,
+            stackTrace: stackTrace,
+          );
+        });
+  }
+
   Future<void> _applySnapshot(
+    int generation,
     WatchPartySnapshot snapshot,
     WatchPartySnapshot? previous,
   ) async {
+    if (!_isCurrentConnection(generation) || !state.value.connected) return;
     final controller = _controller;
     final content = _content;
     if (controller == null || content == null) return;
@@ -353,6 +464,7 @@ class WatchPartyService extends GetxService {
         remoteMedia.episodeIndex >= 0 &&
         remoteMedia.episodeIndex < content.videoList.length) {
       await _onEpisodeRequested?.call(remoteMedia.episodeIndex);
+      if (!_isCurrentConnection(generation) || !state.value.connected) return;
     }
     final selfName = snapshot.self?.name;
     if (selfName != null &&
@@ -451,9 +563,20 @@ class WatchPartyService extends GetxService {
     return requestId;
   }
 
-  void _onDisconnected() {
+  void _onDisconnected(int generation, IOWebSocketChannel channel) {
+    if (!_isCurrentConnection(generation, channel)) return;
+    _channel = null;
+    _channelSubscription = null;
+    _scheduleReconnect(generation);
+  }
+
+  void _scheduleReconnect(int generation) {
     _heartbeat?.cancel();
-    if (_intentionalDisconnect || _inviteCode.isEmpty) return;
+    if (!_isCurrentConnection(generation) ||
+        _intentionalDisconnect ||
+        _inviteCode.isEmpty) {
+      return;
+    }
     state.value = state.value.copyWith(
       status: WatchPartyConnectionStatus.reconnecting,
       error: '连接已断开，正在重连',
@@ -466,13 +589,18 @@ class WatchPartyService extends GetxService {
     _reconnectAttempt++;
     _reconnectTimer = Timer(Duration(seconds: delaySeconds), () async {
       try {
-        final webSocketUrl = await AniBakaApi.joinWatchRoom(
-          _inviteCode,
-          _nickname,
+        final webSocketUrl = await _joinRoomRequest(_inviteCode, _nickname);
+        if (!_isCurrentConnection(generation)) return;
+        await _connect(webSocketUrl, generation);
+      } catch (error, stackTrace) {
+        if (!_isCurrentConnection(generation)) return;
+        AppLogger.instance.warning(
+          'Unable to reconnect watch party',
+          tag: 'WatchParty',
+          error: error,
+          stackTrace: stackTrace,
         );
-        await _connect(webSocketUrl);
-      } catch (_) {
-        _onDisconnected();
+        _scheduleReconnect(generation);
       }
     });
   }
@@ -482,6 +610,11 @@ class WatchPartyService extends GetxService {
       status: WatchPartyConnectionStatus.failed,
       error: message,
     );
+  }
+
+  String _connectionError(Object error, String fallback) {
+    final message = error.toString().replaceFirst('Bad state: ', '').trim();
+    return message.isEmpty ? fallback : message;
   }
 
   WatchPartyMedia _currentMedia(PlayerService content) => WatchPartyMedia(

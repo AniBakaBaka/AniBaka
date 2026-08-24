@@ -98,7 +98,17 @@ class PlaybackController {
   }
 
   Future<void> _initialize() async {
-    final loaded = PlaybackSettingsService.loadAll();
+    final stored = PlaybackSettingsService.loadAll();
+    var loaded = stored;
+    if (Platform.isAndroid &&
+        loaded.videoRenderer == mediacodecEmbedRenderer &&
+        loaded.videoEnhancementMode != VideoEnhancementMode.off) {
+      // Direct MediaCodec rendering bypasses mpv's GPU shader pipeline. Keep
+      // the explicitly selected compatibility renderer and disable the stale
+      // enhancement flag instead of claiming Anime4K was applied.
+      loaded = loaded.copyWith(videoEnhancementMode: VideoEnhancementMode.off);
+      await PlaybackSettingsService.saveChanges(stored, loaded);
+    }
     if (_disposed) return;
     _persistedPreferences = loaded;
     preferences.value = loaded;
@@ -736,6 +746,22 @@ class PlaybackController {
     // 保证会话内应用值与持久化值一致（resetPreferences 同样受益）。
     final hwdec = PlaybackSettingsService.normalizeHwdecMode(next.hwdecMode);
     if (hwdec != next.hwdecMode) next = next.copyWith(hwdecMode: hwdec);
+    if (Platform.isAndroid) {
+      final rendererChanged = previous.videoRenderer != next.videoRenderer;
+      final enhancementChanged =
+          previous.videoEnhancementMode != next.videoEnhancementMode;
+      if (rendererChanged &&
+          next.videoRenderer == mediacodecEmbedRenderer &&
+          next.videoEnhancementMode != VideoEnhancementMode.off) {
+        // Choosing the direct compatibility renderer takes precedence.
+        next = next.copyWith(videoEnhancementMode: VideoEnhancementMode.off);
+      } else if (enhancementChanged &&
+          next.videoEnhancementMode != VideoEnhancementMode.off &&
+          next.videoRenderer == mediacodecEmbedRenderer) {
+        // Enabling Anime4K is an explicit request for the GPU shader path.
+        next = next.copyWith(videoRenderer: 'gpu');
+      }
+    }
     if (previous == next) return;
     preferences.value = next;
     if (previous.longPressSpeed != next.longPressSpeed) {
@@ -874,6 +900,8 @@ class PlaybackController {
       buildPlayerProperties(
         hwdecMode: preferences.value.hwdecMode,
         videoRenderer: preferences.value.videoRenderer,
+        videoEnhancementEnabled:
+            preferences.value.videoEnhancementMode != VideoEnhancementMode.off,
         lowMemoryMode: PlaybackSettingsService.getLowMemoryMode(),
         mediaUri: _lastOpenUri,
       ),
@@ -934,8 +962,38 @@ class PlaybackController {
   Future<void> _syncVideoEnhancement() async {
     final mode = preferences.value.videoEnhancementMode;
     final pipeline = selectEnhancementPipeline(mode);
+    if (Platform.isAndroid &&
+        preferences.value.videoRenderer == mediacodecEmbedRenderer &&
+        pipeline != VideoEnhancementPipeline.off) {
+      await _backend.setNativeProperty('glsl-shaders', '');
+      if (_disposed) return;
+      enhancement.value = enhancement.value.copyWith(
+        requestedMode: mode,
+        appliedPipeline: VideoEnhancementPipeline.off,
+        fallbackReason: 'mediacodec_embed 直接输出不经过 GPU 着色器',
+      );
+      return;
+    }
+
+    final framebuffer = buildVideoEnhancementFramebufferProperties(
+      enabled: pipeline != VideoEnhancementPipeline.off,
+    );
+    if (pipeline == VideoEnhancementPipeline.off) {
+      // Clear signed CNN passes before returning Android to an unsigned 8-bit
+      // framebuffer, otherwise one transition frame can contain bad residuals.
+      await _backend.setNativeProperty('glsl-shaders', '');
+      for (final entry in framebuffer.entries) {
+        await _backend.setNativeProperty(entry.key, entry.value);
+      }
+    } else {
+      for (final entry in framebuffer.entries) {
+        await _backend.setNativeProperty(entry.key, entry.value);
+      }
+    }
     final shaderPath = await Anime4K.shaderPath(pipeline);
-    await _backend.setNativeProperty('glsl-shaders', shaderPath);
+    if (pipeline != VideoEnhancementPipeline.off) {
+      await _backend.setNativeProperty('glsl-shaders', shaderPath);
+    }
     if (_disposed) return;
     enhancement.value = enhancement.value.copyWith(
       requestedMode: mode,
