@@ -3,8 +3,9 @@
 # Flutter plugins that use JNI, reflection, or are referenced from
 # AndroidManifest/services must keep their class names.
 
-# Flutter engine (defensive; flutter_embedding also ships consumer rules).
--keep class io.flutter.** { *; }
+# Flutter's Gradle plugin and embedding provide their own R8 rules. Keeping the
+# entire embedding would also retain its optional Play Store deferred-component
+# implementation, which is not used by this APK and requires Play Core classes.
 
 # audio_service: MediaBrowserService / MediaSessionService are referenced
 # from the manifest and via reflection by the plugin.
