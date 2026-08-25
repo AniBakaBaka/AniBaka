@@ -193,11 +193,14 @@ class _BakaPlayerState extends State<BakaPlayer> {
         controller.setVolume(
           (await FlutterVolumeController.getVolume()) ?? 0.0,
         );
-        FlutterVolumeController.addListener((double value) {
-          if (mounted && _visibleVerticalIndicator != _VerticalControl.volume) {
-            controller.setVolume(value);
-          }
-        });
+        if (!Platform.isAndroid) {
+          FlutterVolumeController.addListener((double value) {
+            if (mounted &&
+                _visibleVerticalIndicator != _VerticalControl.volume) {
+              controller.setVolume(value);
+            }
+          });
+        }
       } catch (_) {}
 
       if (_canAdjustScreenBrightness) {
@@ -248,7 +251,9 @@ class _BakaPlayerState extends State<BakaPlayer> {
   void dispose() {
     widget.controller.core.removeListener(_maybeAutoEnterFullscreen);
     if (_ownsPlayerFocusNode) _playerFocusNode.dispose();
-    if (!widget.full) FlutterVolumeController.removeListener();
+    if (!widget.full && !Platform.isAndroid) {
+      FlutterVolumeController.removeListener();
+    }
     _indicatorTimer?.cancel();
     _doubleSpeedTimer?.cancel();
     _seekTimer?.cancel();

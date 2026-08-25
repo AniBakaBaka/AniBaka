@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -21,10 +22,21 @@ class HttpClient extends http.BaseClient {
     request.headers['Content-Type'] = 'application/json';
     return _inner.send(request);
   }
+
+  @override
+  void close() => _inner.close();
 }
 
 class NetUtils {
-  static final httpClient = HttpClient(http.Client());
+  static HttpClient _httpClient = HttpClient(http.Client());
+  static HttpClient get httpClient => _httpClient;
+
+  @visibleForTesting
+  static void resetHttpClientForTesting() {
+    _httpClient.close();
+    _httpClient = HttpClient(http.Client());
+  }
+
   static const _refreshAdvance = Duration(seconds: 30);
 
   /// 并发刷新锁：多个请求同时 401 时只发起一次 refresh
@@ -82,7 +94,8 @@ class NetUtils {
     Duration? timeout,
     bool notifyOnError = true,
   }) async {
-    if (kDebugMode) debugPrint('http $method $url');
+    final elapsed = Stopwatch()..start();
+    if (kDebugMode) debugPrint('http start $method $url');
     final isAuthRequest =
         url.contains('/user/login') || url.contains('/user/refresh');
     if (!isRetry && !isAuthRequest && _tokenExpiresSoon()) {
@@ -98,37 +111,28 @@ class NetUtils {
     http.Response httpResponse;
     try {
       final uri = Uri.parse(url);
-      switch (method) {
-        case 'GET':
-          final request = httpClient.get(uri, headers: headers);
-          httpResponse = timeout == null
-              ? await request
-              : await request.timeout(timeout);
-        case 'PUT':
-          httpResponse = await httpClient.put(
-            uri,
-            body: jsonEncode(data),
-            headers: headers,
-          );
-        case 'DELETE':
-          httpResponse = await httpClient.delete(
-            uri,
-            body: data != null ? jsonEncode(data) : null,
-            headers: headers,
-          );
-        default:
-          httpResponse = await httpClient.post(
-            uri,
-            body: jsonEncode(data),
-            headers: headers,
-          );
-      }
+      httpResponse = await _executeRequest(
+        method,
+        uri,
+        headers: headers,
+        data: data,
+        timeout: timeout,
+      );
     } catch (e) {
-      debugPrint('http error $e');
+      debugPrint(
+        'http error $method $url after ${elapsed.elapsedMilliseconds}ms: $e',
+      );
       if (notifyOnError) {
         showSnackBar('网络连接失败，请检查网络和线路＞︿＜', isError: true);
       }
       return '';
+    }
+
+    if (kDebugMode) {
+      debugPrint(
+        'http done $method $url status=${httpResponse.statusCode} '
+        'after ${elapsed.elapsedMilliseconds}ms',
+      );
     }
 
     if (httpResponse.statusCode == 401 && !isAuthRequest) {
@@ -153,6 +157,37 @@ class NetUtils {
     return httpResponse.body;
   }
 
+  static Future<http.Response> _executeRequest(
+    String method,
+    Uri uri, {
+    required Map<String, String> headers,
+    required Object? data,
+    required Duration? timeout,
+  }) {
+    final abort = Completer<void>();
+    final request = http.AbortableRequest(
+      method,
+      uri,
+      abortTrigger: abort.future,
+    )..headers.addAll(headers);
+    if (data != null && method != 'GET') {
+      request.body = jsonEncode(data);
+    }
+
+    final response = httpClient.send(request).then(http.Response.fromStream);
+    if (timeout == null) return response;
+    return response.timeout(
+      timeout,
+      onTimeout: () {
+        if (!abort.isCompleted) abort.complete();
+        throw TimeoutException(
+          '$method $uri did not complete within $timeout',
+          timeout,
+        );
+      },
+    );
+  }
+
   static Future<String> get(
     String url, {
     Duration? timeout,
@@ -161,8 +196,19 @@ class NetUtils {
     return _send('GET', url, timeout: timeout, notifyOnError: notifyOnError);
   }
 
-  static Future<String> post(String url, Object? data) {
-    return _send('POST', url, data: data);
+  static Future<String> post(
+    String url,
+    Object? data, {
+    Duration? timeout,
+    bool notifyOnError = true,
+  }) {
+    return _send(
+      'POST',
+      url,
+      data: data,
+      timeout: timeout,
+      notifyOnError: notifyOnError,
+    );
   }
 
   static Future<String> put(String url, Object? data) {
@@ -180,8 +226,14 @@ class NetUtils {
   }) =>
       _decodeJson<T>(get(url, timeout: timeout, notifyOnError: notifyOnError));
 
-  static Future<T?> postJson<T>(String url, Object? data) =>
-      _decodeJson<T>(post(url, data));
+  static Future<T?> postJson<T>(
+    String url,
+    Object? data, {
+    Duration? timeout,
+    bool notifyOnError = true,
+  }) => _decodeJson<T>(
+    post(url, data, timeout: timeout, notifyOnError: notifyOnError),
+  );
 
   static Future<T?> putJson<T>(String url, Object? data) =>
       _decodeJson<T>(put(url, data));

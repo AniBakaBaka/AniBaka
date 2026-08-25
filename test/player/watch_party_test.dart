@@ -74,6 +74,26 @@ void main() {
     expect(snapshot.members.last.verified, isFalse);
   });
 
+  test(
+    'snapshot normalizes nullable server collections once at the boundary',
+    () {
+      final snapshot = WatchPartySnapshot.fromJson({
+        'roomId': 'room-1',
+        'inviteCode': 'invite-1',
+        'syncplayRoom': '1234567890',
+        'revision': 1,
+        'serverTime': 1700000000000,
+        'playback': {'position': 0, 'paused': true},
+        'media': {'episodeIndex': 0, 'title': 'Show', 'duration': 1440},
+        'members': null,
+        'chat': null,
+      });
+
+      expect(snapshot.members, isEmpty);
+      expect(snapshot.chat, isEmpty);
+    },
+  );
+
   test('invite parses active room list metadata', () {
     final invite = WatchPartyInvite.fromJson({
       'roomId': 'room-1',

@@ -218,17 +218,14 @@ class WatchPartyService extends GetxService {
       error: '',
     );
     _reconnectAttempt = 0;
+    _pendingPingId = null;
+    _pingClock.stop();
+    _sendPing();
     _heartbeat?.cancel();
-    _heartbeat = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (_pendingPingId != null && _pingClock.elapsed.inSeconds < 45) return;
-      final requestId = _send('ping', const <String, Object>{});
-      if (requestId.isNotEmpty) {
-        _pendingPingId = requestId;
-        _pingClock
-          ..reset()
-          ..start();
-      }
-    });
+    _heartbeat = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _sendPing(),
+    );
     try {
       await initialSnapshot.future.timeout(const Duration(seconds: 5));
     } on TimeoutException {
@@ -240,7 +237,7 @@ class WatchPartyService extends GetxService {
         await channel.sink.close(ws_status.goingAway);
         if (identical(_channel, channel)) _channel = null;
       }
-      rethrow;
+      throw StateError('连接成功，但未收到房间状态');
     }
     if (!_isCurrentConnection(generation, channel)) return;
     await _controller?.configureWatchParty(
@@ -420,7 +417,21 @@ class WatchPartyService extends GetxService {
         error: error,
         stackTrace: stackTrace,
       );
+      final initialSnapshot = _initialSnapshot;
+      if (initialSnapshot != null && !initialSnapshot.isCompleted) {
+        initialSnapshot.completeError(StateError('无法解析一起看房间状态'), stackTrace);
+      }
     }
+  }
+
+  void _sendPing() {
+    if (_pendingPingId != null && _pingClock.elapsed.inSeconds < 45) return;
+    final requestId = _send('ping', const <String, Object>{});
+    if (requestId.isEmpty) return;
+    _pendingPingId = requestId;
+    _pingClock
+      ..reset()
+      ..start();
   }
 
   void _queueRemoteApply(

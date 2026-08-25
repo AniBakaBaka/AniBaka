@@ -127,8 +127,10 @@ class WatchPartySnapshot {
   });
 
   factory WatchPartySnapshot.fromJson(Map<String, dynamic> json) {
-    final rawMembers = json['members'] as List<dynamic>;
-    final rawChat = json['chat'] as List<dynamic>;
+    // Go encodes a nil slice as null. Normalize that wire representation at
+    // the API boundary so the rest of the app owns one typed empty list.
+    final rawMembers = json['members'] as List<dynamic>? ?? const <dynamic>[];
+    final rawChat = json['chat'] as List<dynamic>? ?? const <dynamic>[];
 
     return WatchPartySnapshot(
       roomId: json['roomId'] as String,

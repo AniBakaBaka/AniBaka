@@ -11,6 +11,7 @@ final class AniBakaApi {
 
   static const _animeDetailCacheLimit = 24;
   static const _episodeStillsCacheLimit = 24;
+  static const _watchRequestTimeout = Duration(seconds: 20);
 
   static final _animeDetails = RequestCache<int, Map<String, dynamic>?>(
     limit: _animeDetailCacheLimit,
@@ -166,7 +167,7 @@ final class AniBakaApi {
       return _readMap(
         NetUtils.getJson(
           uri.toString(),
-          timeout: const Duration(seconds: 6),
+          timeout: const Duration(seconds: 15),
           notifyOnError: false,
         ),
       );
@@ -203,7 +204,12 @@ final class AniBakaApi {
 
   static Future<WatchPartyInvite> createWatchRoom(WatchPartyMedia media) async {
     final data = await _requiredData(
-      NetUtils.postJson('$_watchBaseUrl/rooms', {'media': media.toJson()}),
+      NetUtils.postJson(
+        '$_watchBaseUrl/rooms',
+        {'media': media.toJson()},
+        timeout: _watchRequestTimeout,
+        notifyOnError: false,
+      ),
       unavailable: '一起看服务暂时不可用',
       failed: '创建一起看房间失败',
     );
@@ -212,7 +218,11 @@ final class AniBakaApi {
 
   static Future<List<WatchPartyInvite>> listWatchRooms() async {
     final data = await _requiredData(
-      NetUtils.getJson('$_watchBaseUrl/rooms'),
+      NetUtils.getJson(
+        '$_watchBaseUrl/rooms',
+        timeout: _watchRequestTimeout,
+        notifyOnError: false,
+      ),
       unavailable: '一起看服务暂时不可用',
       failed: '获取一起看房间失败',
     );
@@ -227,7 +237,11 @@ final class AniBakaApi {
 
   static Future<WatchPartyInvite> getWatchInvite(String code) async {
     final data = await _requiredData(
-      NetUtils.getJson('$_watchBaseUrl/invites/$code'),
+      NetUtils.getJson(
+        '$_watchBaseUrl/invites/$code',
+        timeout: _watchRequestTimeout,
+        notifyOnError: false,
+      ),
       unavailable: '一起看服务暂时不可用',
       failed: '获取邀请失败',
     );
@@ -236,9 +250,12 @@ final class AniBakaApi {
 
   static Future<String> joinWatchRoom(String code, String nickname) async {
     final data = await _requiredData(
-      NetUtils.postJson('$_watchBaseUrl/invites/$code/join', {
-        'nickname': nickname,
-      }),
+      NetUtils.postJson(
+        '$_watchBaseUrl/invites/$code/join',
+        {'nickname': nickname},
+        timeout: _watchRequestTimeout,
+        notifyOnError: false,
+      ),
       unavailable: '一起看服务暂时不可用',
       failed: '加入一起看房间失败',
     );
