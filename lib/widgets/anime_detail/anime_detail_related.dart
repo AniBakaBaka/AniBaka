@@ -1,3 +1,4 @@
+import 'package:baka/core/content_filter.dart';
 import 'package:flutter/material.dart';
 
 import 'package:baka/api/bgm.dart';
@@ -47,6 +48,7 @@ class _AnimeDetailRelatedSectionState extends State<AnimeDetailRelatedSection>
       items.add({
         'id': id,
         'bgmId': id,
+        'nsfw': raw['nsfw'] == true,
         'title': nameCN.isEmpty ? raw['name'] as String : nameCN,
         'bgmImageUrl': image,
         'sort': '番剧',
@@ -61,6 +63,13 @@ class _AnimeDetailRelatedSectionState extends State<AnimeDetailRelatedSection>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    return ListenableBuilder(
+      listenable: contentFilter,
+      builder: (context, _) => _buildItems(),
+    );
+  }
+
+  Widget _buildItems() {
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: _items,
       builder: (context, snapshot) {
@@ -69,20 +78,22 @@ class _AnimeDetailRelatedSectionState extends State<AnimeDetailRelatedSection>
           return const Center(child: Text('相关动画加载失败'));
         }
         final loading = snapshot.connectionState != ConnectionState.done;
-        final items = snapshot.data;
-        if (!loading && items!.isEmpty) {
+        final items = contentFilter.visibleItems(
+          snapshot.data ?? const <Map<String, dynamic>>[],
+        );
+        if (!loading && items.isEmpty) {
           return const Center(child: Text('暂无相关动画'));
         }
         return SizedBox(
           height: 260,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: loading ? 5 : items!.length,
+            itemCount: loading ? 5 : items.length,
             separatorBuilder: (_, _) => const SizedBox(width: 14),
             itemBuilder: (context, index) {
               final item = loading
                   ? const <String, dynamic>{'title': '相关动画标题占位', 'image': ''}
-                  : items![index];
+                  : items[index];
               return SizedBox(
                 width: 140,
                 child: AppSkeletonizer(

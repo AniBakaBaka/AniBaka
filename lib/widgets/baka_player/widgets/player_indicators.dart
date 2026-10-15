@@ -48,67 +48,77 @@ class PlayerToastIndicators extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<int>(
-      valueListenable: controller.toastRevision,
-      builder: (context, _, _) {
-        final overlay = controller.overlay.value;
-        final timeline = controller.timeline.value;
-        final longPressRate = overlay.longPressRate;
-        final showSpeed = overlay.doubleSpeed;
-        final showProgress = timeline.seeking;
-        final showBoth = showSpeed && showProgress;
+    return ValueSelector<PlayerOverlayState, double?>(
+      valueListenable: controller.overlay,
+      select: (state) => state.doubleSpeed ? state.longPressRate : null,
+      builder: (context, rate) =>
+          ValueSelector<PlaybackTimelineState, (Duration, Duration)?>(
+            valueListenable: controller.timeline,
+            select: (state) =>
+                state.seeking ? (state.previewPosition, state.duration) : null,
+            builder: (context, preview) {
+              final longPressRate = rate ?? 0;
+              final showSpeed = rate != null;
+              final showProgress = preview != null;
+              final showBoth = showSpeed && showProgress;
 
-        return IgnorePointer(
-          child: Align(
-            alignment: Alignment.topCenter,
-            child: FractionalTranslation(
-              translation: const Offset(0, 0.3),
-              child: SizedBox(
-                width: _toastIndicatorWidth * 2 + _toastIndicatorGap,
-                height: 36,
-                child: Stack(
-                  children: [
-                    _AnimatedIndicator(
-                      condition: showSpeed,
-                      alignment: Alignment(showBoth ? -1 : 0, 0),
-                      child: _PlayerToastIndicator(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              longPressRate < 0
-                                  ? Icons.fast_rewind_rounded
-                                  : longPressRate == 0
-                                  ? Icons.pause_rounded
-                                  : Icons.fast_forward_rounded,
-                              color: Colors.white,
-                              size: 16,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              _formatLongPressRate(longPressRate),
-                              style: _whiteTextStyle.copyWith(
-                                fontWeight: FontWeight.bold,
+              return IgnorePointer(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: FractionalTranslation(
+                    translation: const Offset(0, 0.3),
+                    child: SizedBox(
+                      width: _toastIndicatorWidth * 2 + _toastIndicatorGap,
+                      height: 36,
+                      child: Stack(
+                        children: [
+                          _AnimatedIndicator(
+                            condition: showSpeed,
+                            alignment: Alignment(showBoth ? -1 : 0, 0),
+                            child: _PlayerToastIndicator(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    longPressRate < 0
+                                        ? Icons.fast_rewind_rounded
+                                        : longPressRate == 0
+                                        ? Icons.pause_rounded
+                                        : Icons.fast_forward_rounded,
+                                    color: Colors.white,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _formatLongPressRate(longPressRate),
+                                    style: _whiteTextStyle.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
-                        ),
+                          ),
+                          _AnimatedIndicator(
+                            condition: showProgress,
+                            alignment: Alignment(showBoth ? 1 : 0, 0),
+                            child: _PlayerToastIndicator(
+                              child: preview == null
+                                  ? const SizedBox.shrink()
+                                  : _TimeProgressLabel(
+                                      position: preview.$1,
+                                      total: preview.$2,
+                                    ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    _AnimatedIndicator(
-                      condition: showProgress,
-                      alignment: Alignment(showBoth ? 1 : 0, 0),
-                      child: _PlayerToastIndicator(
-                        child: _TimeProgressLabel(timeline: timeline),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
-        );
-      },
     );
   }
 }
@@ -383,21 +393,18 @@ class _PlayerToastIndicator extends StatelessWidget {
 }
 
 class _TimeProgressLabel extends StatelessWidget {
-  final PlaybackTimelineState timeline;
+  final Duration position;
+  final Duration total;
 
-  const _TimeProgressLabel({required this.timeline});
+  const _TimeProgressLabel({required this.position, required this.total});
 
   @override
   Widget build(BuildContext context) {
-    final total = timeline.duration;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          timeline.previewPosition.toTimeString(
-            reference: total,
-            includeDays: true,
-          ),
+          position.toTimeString(reference: total, includeDays: true),
           style: _whiteTextStyle.copyWith(fontWeight: FontWeight.bold),
         ),
         Text(' / ', style: _whiteTextStyle.copyWith(color: Colors.white54)),

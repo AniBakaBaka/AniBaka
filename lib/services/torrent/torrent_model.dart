@@ -1,4 +1,4 @@
-﻿import 'dart:typed_data';
+import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:baka/services/torrent/bencode.dart';
 
@@ -59,7 +59,10 @@ class TorrentMetadata {
   });
 
   /// 从 .torrent 文件字节解析
-  factory TorrentMetadata.fromBytes(Uint8List data) {
+  factory TorrentMetadata.fromBytes(
+    Uint8List data, {
+    Iterable<String> trackers = const [],
+  }) {
     final decoded = Bencode.decodeWithRange(data, 'info');
     final root = decoded.root;
     final info = root['info'] as Map<String, dynamic>;
@@ -71,15 +74,15 @@ class TorrentMetadata {
 
     final infoHash = Uint8List.fromList(sha1.convert(rawInfoBytes).bytes);
 
-    final trackers = <String>{};
+    final trackerUrls = <String>{...trackers};
     final announce = root['announce'];
-    if (announce != null) trackers.add(bencodeString(announce));
+    if (announce != null) trackerUrls.add(bencodeString(announce));
     final announceList = root['announce-list'];
     if (announceList is List) {
       for (final tier in announceList) {
         if (tier is! List) continue;
         for (final url in tier) {
-          trackers.add(bencodeString(url));
+          trackerUrls.add(bencodeString(url));
         }
       }
     }
@@ -88,7 +91,7 @@ class TorrentMetadata {
       info: info,
       infoHash: infoHash,
       rawInfoBytes: rawInfoBytes,
-      trackers: trackers,
+      trackers: trackerUrls,
     );
   }
 
@@ -116,7 +119,7 @@ class TorrentMetadata {
     required Iterable<String> trackers,
   }) {
     final name = bencodeString(info['name']);
-    final pieceLength = bencodeInt(info['piece length']);
+    final pieceLength = (info['piece length'] as int);
     final pieces = info['pieces'] as Uint8List;
 
     final files = <TorrentFile>[];
@@ -126,12 +129,12 @@ class TorrentMetadata {
       for (final entry in rawFiles) {
         final f = entry as Map<String, dynamic>;
         final path = (f['path'] as List).map(bencodeString).join('/');
-        final length = bencodeInt(f['length']);
+        final length = (f['length'] as int);
         files.add(TorrentFile(path: path, length: length, offset: totalSize));
         totalSize += length;
       }
     } else {
-      final length = bencodeInt(info['length']);
+      final length = (info['length'] as int);
       files.add(TorrentFile(path: name, length: length, offset: 0));
       totalSize = length;
     }
@@ -161,24 +164,19 @@ class TorrentMetadata {
     return pieceIndex == pieceCount - 1 && tail != 0 ? tail : pieceLength;
   }
 
-  /// 找到主视频文件索引：优先按视频扩展名挑最大；若无匹配则取整体最大文件。
+  /// Select the largest video; non-media files are not playback candidates.
   int? findVideoFileIndex() {
-    if (files.isEmpty) return null;
-    int videoIdx = -1, videoSize = -1;
-    int largestIdx = 0, largestSize = files[0].length;
+    int? videoIdx;
+    var videoSize = 0;
     for (var i = 0; i < files.length; i++) {
       final f = files[i];
-      if (f.length > largestSize) {
-        largestIdx = i;
-        largestSize = f.length;
-      }
       final lower = f.path.toLowerCase();
       if (_videoExts.any(lower.endsWith) && f.length > videoSize) {
         videoIdx = i;
         videoSize = f.length;
       }
     }
-    return videoIdx >= 0 ? videoIdx : largestIdx;
+    return videoIdx;
   }
 
   @override
@@ -218,7 +216,7 @@ class MagnetLink {
   /// Tracker 列表
   final List<String> trackers;
 
-  /// BEP 9/缓存不可用时可直接下载元数据的精确来源（BEP 9 `xs`）。
+  /// Magnet `xs` HTTP sources for the original .torrent file.
   final List<String> exactSources;
 
   const MagnetLink({

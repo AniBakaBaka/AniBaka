@@ -1,3 +1,5 @@
+import 'page.dart';
+
 enum WatchPartyConnectionStatus {
   disconnected,
   connecting,
@@ -127,11 +129,6 @@ class WatchPartySnapshot {
   });
 
   factory WatchPartySnapshot.fromJson(Map<String, dynamic> json) {
-    // Go encodes a nil slice as null. Normalize that wire representation at
-    // the API boundary so the rest of the app owns one typed empty list.
-    final rawMembers = json['members'] as List<dynamic>? ?? const <dynamic>[];
-    final rawChat = json['chat'] as List<dynamic>? ?? const <dynamic>[];
-
     return WatchPartySnapshot(
       roomId: json['roomId'] as String,
       inviteCode: json['inviteCode'] as String,
@@ -144,20 +141,8 @@ class WatchPartySnapshot {
         json['playback'] as Map<String, dynamic>,
       ),
       media: WatchPartyMedia.fromJson(json['media'] as Map<String, dynamic>),
-      members: List<WatchPartyMember>.generate(
-        rawMembers.length,
-        (index) => WatchPartyMember.fromJson(
-          rawMembers[index] as Map<String, dynamic>,
-        ),
-        growable: false,
-      ),
-      chat: List<WatchPartyChatMessage>.generate(
-        rawChat.length,
-        (index) => WatchPartyChatMessage.fromJson(
-          rawChat[index] as Map<String, dynamic>,
-        ),
-        growable: false,
-      ),
+      members: parseList(json['members'], WatchPartyMember.fromJson),
+      chat: parseList(json['chat'], WatchPartyChatMessage.fromJson),
     );
   }
 

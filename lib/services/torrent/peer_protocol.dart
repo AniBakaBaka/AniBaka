@@ -65,11 +65,13 @@ abstract class _PeerBase {
   bool _connected = false;
   bool _handshakeDone = false;
   bool _sentHandshake = false;
-  bool _postHandshakeSent = false;
   bool _remoteSupportsExtensions = false;
   int? _remoteUtMetadataId;
 
-  final BytesBuilder _buffer = BytesBuilder(copy: true);
+  Uint8List? _frame;
+  int _frameOffset = 0;
+  int _frameLength = _handshakeLen;
+  bool _readingLength = false;
   Completer<bool>? _handshake;
 
   _PeerBase({
@@ -79,6 +81,7 @@ abstract class _PeerBase {
   });
 
   bool get isConnected => _connected;
+  int get _maxMessageLength => _metadataBlockSize + 1024;
 
   /// 子类实现：握手完成后发送的初始消息。
   void _sendPostHandshakeMessages();
@@ -93,14 +96,15 @@ abstract class _PeerBase {
   void _onDisconnected() {}
 
   void disconnect() {
+    if (_disconnected) return;
     _disconnected = true;
     _connecting?.cancel();
     unawaited(_subscription?.cancel());
     _subscription = null;
     final completer = _handshake;
     if (completer != null && !completer.isCompleted) completer.complete(false);
-    if (!_connected && _socket == null) return;
     _connected = false;
+    _frame = null;
     _onDisconnected();
     _socket?.destroy();
     _socket = null;
@@ -132,34 +136,31 @@ abstract class _PeerBase {
       disconnect();
       return false;
     }
-    return true;
+    return _connected;
   }
 
   void _sendHandshake() {
     if (!_connected || _socket == null || _sentHandshake) return;
-    final reserved = Uint8List(8);
-    reserved[5] |= _extensionProtocolMask;
-    if (peerId.length != 20) {
-      throw StateError('BitTorrent peer id must be exactly 20 bytes');
-    }
-    final buf = BytesBuilder()
-      ..addByte(19)
-      ..add(utf8.encode(_protocolName))
-      ..add(reserved)
-      ..add(infoHash)
-      ..add(peerId);
+    final buf = Uint8List(_handshakeLen)
+      ..[0] = 19
+      ..setRange(1, 20, _protocolName.codeUnits)
+      ..[_extensionReservedByteOffset] = _extensionProtocolMask
+      ..setRange(28, 48, infoHash)
+      ..setRange(48, 68, peerId);
     _sentHandshake = true;
-    _socket!.add(buf.toBytes());
+    _socket!.add(buf);
   }
 
-  bool _sendMessage(int type, [Uint8List? payload]) {
+  bool _sendMessage(int type, [Uint8List? payload, Uint8List? tail]) {
     if (!_connected || _socket == null) return false;
     final payloadLen = payload?.length ?? 0;
-    final msg = ByteData(4 + 1 + payloadLen);
-    msg.setUint32(0, 1 + payloadLen);
+    final tailLen = tail?.length ?? 0;
+    final msg = ByteData(4 + 1 + payloadLen + tailLen);
+    msg.setUint32(0, 1 + payloadLen + tailLen);
     msg.setUint8(4, type);
     final bytes = Uint8List.view(msg.buffer);
     if (payload != null) bytes.setRange(5, 5 + payloadLen, payload);
+    if (tail != null) bytes.setRange(5 + payloadLen, bytes.length, tail);
     try {
       _socket!.add(bytes);
       return true;
@@ -170,27 +171,46 @@ abstract class _PeerBase {
   }
 
   bool _sendExtended(int extendedId, Uint8List body) {
-    final payload = Uint8List(1 + body.length)
-      ..[0] = extendedId
-      ..setRange(1, 1 + body.length, body);
-    return _sendMessage(BtMessage.extended, payload);
+    return _sendMessage(
+      BtMessage.extended,
+      Uint8List(1)..[0] = extendedId,
+      body,
+    );
   }
 
   void _onData(Uint8List data) {
-    _buffer.add(data);
-    _processBuffer();
+    var offset = 0;
+    try {
+      while (offset < data.length && !_disconnected) {
+        if (_frame == null && data.length - offset >= _frameLength) {
+          final end = offset + _frameLength;
+          _processFrame(Uint8List.sublistView(data, offset, end));
+          offset = end;
+          continue;
+        }
+        final frame = _frame ??= Uint8List(_frameLength);
+        final count = math.min(
+          _frameLength - _frameOffset,
+          data.length - offset,
+        );
+        frame.setRange(_frameOffset, _frameOffset + count, data, offset);
+        _frameOffset += count;
+        offset += count;
+        if (_frameOffset == _frameLength) {
+          _frame = null;
+          _frameOffset = 0;
+          _processFrame(frame);
+        }
+      }
+    } on FormatException {
+      disconnect();
+    } on RangeError {
+      disconnect();
+    }
   }
 
-  void _processBuffer() {
-    final bytes = _buffer.toBytes();
-    _buffer.clear();
-    var offset = 0;
-
+  void _processFrame(Uint8List bytes) {
     if (!_handshakeDone) {
-      if (bytes.length < _handshakeLen) {
-        _buffer.add(bytes);
-        return;
-      }
       if (bytes[0] != 19 ||
           utf8.decode(Uint8List.sublistView(bytes, 1, 20)) != _protocolName ||
           !_bytesEqual(Uint8List.sublistView(bytes, 28, 48), infoHash)) {
@@ -203,39 +223,25 @@ abstract class _PeerBase {
       _handshakeDone = true;
       if (!_sentHandshake) _sendHandshake();
       _handshake?.complete(true);
-      _sendPostHandshakeMessagesOnce();
-      offset = _handshakeLen;
-    }
-
-    while (offset + 4 <= bytes.length) {
-      final msgLen = ByteData.sublistView(
-        bytes,
-        offset,
-        offset + 4,
-      ).getUint32(0);
-      if (msgLen == 0) {
-        offset += 4;
-        continue;
+      _sendPostHandshakeMessages();
+    } else if (_readingLength) {
+      final length = ByteData.sublistView(bytes).getUint32(0);
+      if (length == 0) return;
+      if (length > _maxMessageLength) {
+        disconnect();
+        return;
       }
-      if (offset + 4 + msgLen > bytes.length) break;
-
-      final type = bytes[offset + 4];
-      final payload = msgLen > 1
-          ? Uint8List.sublistView(bytes, offset + 5, offset + 4 + msgLen)
-          : null;
-      _dispatchMessage(type, payload);
-      offset += 4 + msgLen;
+      _frameLength = length;
+      _readingLength = false;
+      return;
+    } else {
+      _dispatchMessage(
+        bytes[0],
+        bytes.length > 1 ? Uint8List.sublistView(bytes, 1) : null,
+      );
     }
-
-    if (offset < bytes.length) {
-      _buffer.add(Uint8List.sublistView(bytes, offset));
-    }
-  }
-
-  void _sendPostHandshakeMessagesOnce() {
-    if (_postHandshakeSent || !_connected) return;
-    _postHandshakeSent = true;
-    _sendPostHandshakeMessages();
+    _frameLength = 4;
+    _readingLength = true;
   }
 
   void _dispatchMessage(int type, Uint8List? payload) {
@@ -263,7 +269,7 @@ abstract class _PeerBase {
       if (decoded is! Map) return;
       final extensions = decoded['m'];
       if (extensions is Map) {
-        final id = bencodeInt(extensions['ut_metadata'] ?? 0);
+        final id = (extensions['ut_metadata'] as int?) ?? 0;
         _remoteUtMetadataId = id > 0 ? id : null;
       }
       _onExtendedHandshakeParsed(decoded);
@@ -272,12 +278,19 @@ abstract class _PeerBase {
 
   /// 子类可覆盖以从扩展握手中提取额外字段（如 metadata_size）。
   void _onExtendedHandshakeParsed(Map handshake) {}
+
+  void _sendMetadataReject(int piece) {
+    final remoteId = _remoteUtMetadataId;
+    if (remoteId != null) {
+      _sendExtended(remoteId, Bencode.encode({'msg_type': 2, 'piece': piece}));
+    }
+  }
 }
 
 class PeerConnection extends _PeerBase {
   final PieceManager pieceManager;
-  final Uint8List metadataBytes;
   final void Function(int bytes)? onUploaded;
+  final void Function()? onDisconnected;
 
   static const int _maxPendingRequests = 5;
   static const int _requestTimeoutMs = 8000;
@@ -288,20 +301,24 @@ class PeerConnection extends _PeerBase {
   final Stopwatch _requestClock = Stopwatch()..start();
 
   Uint8List? _peerBitfield;
-  bool _receivedBitfield = false;
-
   Timer? _keepAliveTimer;
+  Timer? _requestTimer;
 
   PeerConnection({
     required super.address,
-    required super.infoHash,
     required super.peerId,
     required this.pieceManager,
     this.onUploaded,
-    Uint8List? metadataBytes,
-  }) : metadataBytes = metadataBytes ?? pieceManager.metadata.rawInfoBytes;
+    this.onDisconnected,
+  }) : super(infoHash: pieceManager.metadata.infoHash);
 
-  bool get isChoked => _choked;
+  Uint8List get metadataBytes => pieceManager.metadata.rawInfoBytes;
+
+  @override
+  int get _maxMessageLength => math.max(
+    super._maxMessageLength,
+    (pieceManager.metadata.pieceCount + 7) ~/ 8 + 1,
+  );
 
   /// 主动连接 + 握手。
   Future<bool> connect() async {
@@ -309,6 +326,7 @@ class PeerConnection extends _PeerBase {
       final socket = await _openSocket();
       if (!await _doHandshake(socket, sendFirst: true)) return false;
     } catch (_) {
+      disconnect();
       return false;
     }
     _startKeepAlive();
@@ -324,17 +342,19 @@ class PeerConnection extends _PeerBase {
 
   void _startKeepAlive() {
     _keepAliveTimer = Timer.periodic(
-      const Duration(seconds: 60),
+      const Duration(minutes: 2),
       (_) => _socket?.add(Uint8List(4)),
     );
   }
 
   /// 填充下载请求流水线。
   void fillRequestPipeline() {
-    if (_choked || !_connected || pieceManager.isComplete) return;
-    _expirePendingRequests();
+    final bitfield = _peerBitfield;
+    if (_choked || !_connected || pieceManager.isComplete || bitfield == null) {
+      return;
+    }
     while (_pendingRequests.length < _maxPendingRequests) {
-      final block = pieceManager.nextBlock(peerHasPiece: _peerHasPiece);
+      final block = pieceManager.nextBlock(bitfield);
       if (block == null) break;
       if (!_sendRequest(block.pieceIndex, block.begin, block.length)) {
         pieceManager.cancelBlockRequest(block.pieceIndex, block.begin);
@@ -343,6 +363,7 @@ class PeerConnection extends _PeerBase {
       _pendingRequests[(pieceIndex: block.pieceIndex, begin: block.begin)] =
           _requestClock.elapsedMilliseconds;
     }
+    _scheduleRequestTimeout();
   }
 
   void announcePiece(int pieceIndex) {
@@ -356,11 +377,13 @@ class PeerConnection extends _PeerBase {
     _keepAliveTimer?.cancel();
     _keepAliveTimer = null;
     _releasePendingRequests();
+    _peerBitfield = null;
+    onDisconnected?.call();
   }
 
   bool _peerHasPiece(int pieceIndex) {
     final bitfield = _peerBitfield;
-    if (bitfield == null) return !_receivedBitfield;
+    if (bitfield == null) return false;
     final byteIndex = pieceIndex ~/ 8;
     return byteIndex < bitfield.length &&
         bitfield[byteIndex] & (0x80 >> (pieceIndex % 8)) != 0;
@@ -383,20 +406,12 @@ class PeerConnection extends _PeerBase {
   }
 
   void _sendPiece(int pieceIndex, int begin, Uint8List block) {
-    final payload = Uint8List(8 + block.length);
-    final view = ByteData.sublistView(payload);
-    view
+    final header = ByteData(8)
       ..setUint32(0, pieceIndex)
       ..setUint32(4, begin);
-    payload.setRange(8, payload.length, block);
-    if (_sendMessage(BtMessage.piece, payload)) {
-      _recordUploaded(block.length);
+    if (_sendMessage(BtMessage.piece, Uint8List.view(header.buffer), block)) {
+      onUploaded?.call(block.length);
     }
-  }
-
-  void _recordUploaded(int bytes) {
-    if (bytes <= 0) return;
-    onUploaded?.call(bytes);
   }
 
   void _sendBitfield() {
@@ -404,7 +419,6 @@ class PeerConnection extends _PeerBase {
     final bytes = Uint8List((totalPieces + 7) ~/ 8);
     var hasAny = false;
     for (final pieceIndex in pieceManager.completedPieceIndices) {
-      if (pieceIndex < 0 || pieceIndex >= totalPieces) continue;
       bytes[pieceIndex ~/ 8] |= 0x80 >> (pieceIndex % 8);
       hasAny = true;
     }
@@ -445,8 +459,8 @@ class PeerConnection extends _PeerBase {
             final bitfield = _peerBitfield ??= Uint8List(
               (pieceManager.metadata.pieceCount + 7) ~/ 8,
             );
-            _receivedBitfield = true;
             bitfield[piece ~/ 8] |= 0x80 >> (piece % 8);
+            fillRequestPipeline();
           }
         }
       case BtMessage.bitfield:
@@ -454,7 +468,6 @@ class PeerConnection extends _PeerBase {
           final expected = (pieceManager.metadata.pieceCount + 7) ~/ 8;
           if (payload.length == expected) {
             _peerBitfield = Uint8List.fromList(payload);
-            _receivedBitfield = true;
             _releaseUnavailableRequests();
           }
         }
@@ -484,36 +497,44 @@ class PeerConnection extends _PeerBase {
     final begin = view.getUint32(4);
     final block = Uint8List.sublistView(payload, 8);
 
-    _pendingRequests.remove((pieceIndex: pieceIndex, begin: begin));
+    if (_pendingRequests.remove((pieceIndex: pieceIndex, begin: begin)) ==
+        null) {
+      return;
+    }
+    pieceManager.cancelBlockRequest(pieceIndex, begin);
     pieceManager.onBlockReceived(pieceIndex, begin, block);
     fillRequestPipeline();
   }
 
-  void _expirePendingRequests() {
-    final now = _requestClock.elapsedMilliseconds;
-    List<({int pieceIndex, int begin})>? expired;
-    for (final entry in _pendingRequests.entries) {
-      if (now - entry.value >= _requestTimeoutMs) {
-        (expired ??= []).add(entry.key);
-      }
-    }
-    for (final request in expired ?? const []) {
-      _pendingRequests.remove(request);
-      pieceManager.cancelBlockRequest(request.pieceIndex, request.begin);
-    }
+  void _scheduleRequestTimeout() {
+    _requestTimer?.cancel();
+    if (_pendingRequests.isEmpty) return;
+    final remaining =
+        _pendingRequests.values.first +
+        _requestTimeoutMs -
+        _requestClock.elapsedMilliseconds;
+    _requestTimer = Timer(Duration(milliseconds: math.max(0, remaining)), () {
+      final deadline = _requestClock.elapsedMilliseconds - _requestTimeoutMs;
+      _pendingRequests.removeWhere((request, sentAt) {
+        if (sentAt > deadline) return false;
+        pieceManager.cancelBlockRequest(request.pieceIndex, request.begin);
+        return true;
+      });
+      fillRequestPipeline();
+    });
   }
 
   void _releaseUnavailableRequests() {
-    final unavailable = _pendingRequests.keys
-        .where((request) => !_peerHasPiece(request.pieceIndex))
-        .toList(growable: false);
-    for (final request in unavailable) {
-      _pendingRequests.remove(request);
+    _pendingRequests.removeWhere((request, _) {
+      if (_peerHasPiece(request.pieceIndex)) return false;
       pieceManager.cancelBlockRequest(request.pieceIndex, request.begin);
-    }
+      return true;
+    });
   }
 
   void _releasePendingRequests() {
+    _requestTimer?.cancel();
+    _requestTimer = null;
     for (final request in _pendingRequests.keys) {
       pieceManager.cancelBlockRequest(request.pieceIndex, request.begin);
     }
@@ -525,8 +546,8 @@ class PeerConnection extends _PeerBase {
     try {
       final decoded = Bencode.decodePrefix(body).value;
       if (decoded is! Map) return;
-      final msgType = bencodeInt(decoded['msg_type'] ?? -1);
-      final piece = bencodeInt(decoded['piece'] ?? -1);
+      final msgType = decoded['msg_type'] as int;
+      final piece = decoded['piece'] as int;
       if (msgType == 0) _sendMetadataPieceOrReject(piece);
     } catch (_) {}
   }
@@ -554,23 +575,16 @@ class PeerConnection extends _PeerBase {
       ..setRange(header.length, header.length + block.length, block);
     final remoteId = _remoteUtMetadataId;
     if (remoteId != null && _sendExtended(remoteId, body)) {
-      _recordUploaded(block.length);
+      onUploaded?.call(block.length);
     }
-  }
-
-  void _sendMetadataReject(int piece) {
-    final remoteId = _remoteUtMetadataId;
-    if (remoteId == null) return;
-    _sendExtended(remoteId, Bencode.encode({'msg_type': 2, 'piece': piece}));
   }
 }
 
 class MetadataPeerConnection extends _PeerBase {
-  int? _metadataSize;
-  int _inFlight = 0;
-
+  Uint8List? _metadataBytes;
+  int _nextPiece = 0;
+  int _receivedBytes = 0;
   final Set<int> _requestedPieces = {};
-  List<Uint8List?>? _metadataPieces;
   Completer<Uint8List?>? _metadataResult;
 
   MetadataPeerConnection({
@@ -586,25 +600,23 @@ class MetadataPeerConnection extends _PeerBase {
       final socket = await _openSocket();
       _metadataResult = Completer<Uint8List?>();
 
-      // 覆盖 disconnect 以同时完成 metadata result
       if (!await _doHandshake(socket, sendFirst: true)) return null;
-
-      try {
-        return await _metadataResult!.future.timeout(
-          timeout,
-          onTimeout: () => null,
-        );
-      } finally {
-        disconnect();
-      }
+      return await _metadataResult!.future.timeout(
+        timeout,
+        onTimeout: () => null,
+      );
     } catch (_) {
       return null;
+    } finally {
+      disconnect();
     }
   }
 
   @override
   void _onDisconnected() {
     _completeMetadata(null);
+    _metadataBytes = null;
+    _requestedPieces.clear();
   }
 
   void _completeMetadata(Uint8List? metadata) {
@@ -632,16 +644,13 @@ class MetadataPeerConnection extends _PeerBase {
 
   @override
   void _onExtendedHandshakeParsed(Map handshake) {
-    final size = bencodeInt(handshake['metadata_size'] ?? 0);
+    final size = (handshake['metadata_size'] as int?) ?? 0;
     if (size <= 0 || size > _maxMetadataSize || _remoteUtMetadataId == null) {
       _completeMetadata(null);
       return;
     }
-    _metadataSize = size;
-    _metadataPieces = List<Uint8List?>.filled(
-      (size + _metadataBlockSize - 1) ~/ _metadataBlockSize,
-      null,
-    );
+    if (_metadataBytes != null) return;
+    _metadataBytes = Uint8List(size);
     _requestMoreMetadata();
   }
 
@@ -651,8 +660,8 @@ class MetadataPeerConnection extends _PeerBase {
       final decoded = Bencode.decodePrefix(body);
       final header = decoded.value;
       if (header is! Map) return;
-      final msgType = bencodeInt(header['msg_type'] ?? -1);
-      final piece = bencodeInt(header['piece'] ?? -1);
+      final msgType = header['msg_type'] as int;
+      final piece = header['piece'] as int;
 
       if (msgType == 0) {
         _sendMetadataReject(piece);
@@ -665,26 +674,26 @@ class MetadataPeerConnection extends _PeerBase {
       }
 
       if (msgType != 1 || piece < 0) return;
-      final pieces = _metadataPieces;
-      final size = _metadataSize;
-      if (pieces == null || size == null || piece >= pieces.length) return;
-
-      final totalSize = bencodeInt(header['total_size'] ?? size);
+      final bytes = _metadataBytes;
+      if (bytes == null || !_requestedPieces.remove(piece)) return;
+      final size = bytes.length;
+      final totalSize = header['total_size'] as int;
       if (totalSize != size) {
         _completeMetadata(null);
         return;
       }
 
       final block = Uint8List.sublistView(body, decoded.end);
-      if (block.length != _metadataPieceLength(piece)) {
+      final start = piece * _metadataBlockSize;
+      if (block.length != math.min(_metadataBlockSize, size - start)) {
         _completeMetadata(null);
         return;
       }
-      pieces[piece] = Uint8List.fromList(block);
-      if (_inFlight > 0) _inFlight--;
+      bytes.setRange(start, start + block.length, block);
+      _receivedBytes += block.length;
 
-      if (pieces.every((item) => item != null)) {
-        _completeMetadata(_assembleMetadata());
+      if (_receivedBytes == size) {
+        _completeMetadata(bytes);
       } else {
         _requestMoreMetadata();
       }
@@ -694,56 +703,19 @@ class MetadataPeerConnection extends _PeerBase {
   }
 
   void _requestMoreMetadata() {
-    final pieces = _metadataPieces;
-    if (pieces == null) return;
-    while (_inFlight < 4) {
-      final nextPiece = _nextMetadataPiece();
-      if (nextPiece == null) return;
-      if (!_sendMetadataRequest(nextPiece)) {
+    final bytes = _metadataBytes!;
+    while (_requestedPieces.length < 4 &&
+        _nextPiece * _metadataBlockSize < bytes.length) {
+      final piece = _nextPiece++;
+      if (!_sendExtended(
+        _remoteUtMetadataId!,
+        Bencode.encode({'msg_type': 0, 'piece': piece}),
+      )) {
         _completeMetadata(null);
         return;
       }
-      _requestedPieces.add(nextPiece);
-      _inFlight++;
+      _requestedPieces.add(piece);
     }
-  }
-
-  int? _nextMetadataPiece() {
-    final pieces = _metadataPieces;
-    if (pieces == null) return null;
-    for (var i = 0; i < pieces.length; i++) {
-      if (pieces[i] == null && !_requestedPieces.contains(i)) return i;
-    }
-    return null;
-  }
-
-  bool _sendMetadataRequest(int piece) {
-    final remoteId = _remoteUtMetadataId;
-    if (remoteId == null) return false;
-    return _sendExtended(
-      remoteId,
-      Bencode.encode({'msg_type': 0, 'piece': piece}),
-    );
-  }
-
-  void _sendMetadataReject(int piece) {
-    final remoteId = _remoteUtMetadataId;
-    if (remoteId == null) return;
-    _sendExtended(remoteId, Bencode.encode({'msg_type': 2, 'piece': piece}));
-  }
-
-  int _metadataPieceLength(int piece) {
-    final size = _metadataSize ?? 0;
-    final start = piece * _metadataBlockSize;
-    return math.min(_metadataBlockSize, size - start);
-  }
-
-  Uint8List _assembleMetadata() {
-    final builder = BytesBuilder(copy: false);
-    for (final piece in _metadataPieces!) {
-      builder.add(piece!);
-    }
-    return builder.toBytes();
   }
 }
 

@@ -7,10 +7,12 @@ import 'package:baka/api/bangumi_account_api.dart';
 import 'package:baka/api/bgm.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/core/http_request.dart';
+import 'package:baka/app/app_runtime.dart' show MonitoredImageCache;
 import 'package:baka/services/account/login_service.dart';
 import 'package:baka/services/account/bangumi_session.dart';
 import 'package:baka/api/playback.dart';
 import 'package:baka/models/collection.dart';
+import 'package:baka/models/play_history.dart';
 import 'package:baka/models/app_user.dart';
 import 'package:baka/pages/login/login_page.dart';
 import 'package:baka/utils/toast_utils.dart';
@@ -23,6 +25,8 @@ import 'package:baka/instance.dart';
 import 'package:baka/core/api_transport.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
+import 'package:file/memory.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:get/get.dart' hide ContextExtensionss;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -62,6 +66,194 @@ void main() {
     );
     addTearDown(client.close);
   }
+
+  test('network notices throttle bursts while requests still fail', () async {
+    var now = DateTime.utc(2026);
+    var notices = 0;
+    final policy = NetworkNotices(
+      onNetworkError: () => notices++,
+      onImageFailures: () => fail('No images were requested'),
+      now: () => now,
+    );
+    addTearDown(policy.dispose);
+    for (final error in <Object>[
+      const ApiException('denied', statusCode: 403),
+      const ApiException('missing', statusCode: 404),
+      const FormatException('invalid JSON'),
+      StateError('account changed'),
+      http.RequestAbortedException(),
+    ]) {
+      policy.reportNetworkError(error);
+    }
+    expect(notices, 0);
+    final offline = http.ClientException('offline');
+    useClient(
+      MockClient((_) async => throw offline),
+      onError: policy.reportNetworkError,
+    );
+    await Future.wait(
+      List.generate(
+        20,
+        (_) => expectLater(
+          apiTransport.getJson<Object>('$host/offline'),
+          throwsA(same(offline)),
+        ),
+      ),
+    );
+    expect(notices, 1);
+    now = now.add(const Duration(seconds: 59));
+    policy.reportNetworkError(TimeoutException('timeout'));
+    expect(notices, 1);
+    now = now.add(const Duration(seconds: 1));
+    policy.reportNetworkError(
+      const ApiException('unavailable', statusCode: 503),
+    );
+    expect(notices, 2);
+  });
+
+  testWidgets(
+    'image hints require distinct failures and a high failure ratio',
+    (tester) async {
+      var imageNotices = 0;
+      var networkNotices = 0;
+      final policy = NetworkNotices(
+        onNetworkError: () => networkNotices++,
+        onImageFailures: () => imageNotices++,
+      );
+      addTearDown(policy.dispose);
+      for (var i = 0; i < 20; i++) {
+        policy.reportImageResult('', succeeded: false);
+        policy.reportImageResult('file:///cover$i.jpg', succeeded: false);
+        policy.reportImageResult('https://images.test/0.jpg', succeeded: false);
+      }
+      for (var i = 1; i < 7; i++) {
+        policy.reportImageResult(
+          'https://images.test/$i.jpg',
+          succeeded: false,
+        );
+      }
+      await tester.pump(const Duration(seconds: 2));
+      expect(imageNotices, 0, reason: 'Seven unique failures are insufficient');
+      policy.reportImageResult('https://images.test/7.jpg', succeeded: false);
+      for (var i = 0; i < 4; i++) {
+        policy.reportImageStarted('https://images.test/ok$i.jpg');
+      }
+      await tester.pump(const Duration(seconds: 2));
+      expect(
+        imageNotices,
+        0,
+        reason: 'Pending loads are included before judging the failure ratio',
+      );
+      for (var i = 0; i < 4; i++) {
+        policy.reportImageResult(
+          'https://images.test/ok$i.jpg',
+          succeeded: true,
+        );
+      }
+      for (var i = 8; i < 12; i++) {
+        policy.reportImageResult(
+          'https://images.test/$i.jpg',
+          succeeded: false,
+        );
+      }
+      await tester.pump(const Duration(seconds: 2));
+      expect(imageNotices, 1);
+      policy.reportNetworkError(http.ClientException('offline'));
+      expect(
+        networkNotices,
+        0,
+        reason: 'The image hint covers network failures',
+      );
+    },
+  );
+
+  testWidgets(
+    'image hints expire old failures, cool down and stop on disposal',
+    (tester) async {
+      var now = DateTime.utc(2026);
+      var imageNotices = 0;
+      final policy = NetworkNotices(
+        onNetworkError: () {},
+        onImageFailures: () => imageNotices++,
+        now: () => now,
+      );
+      addTearDown(policy.dispose);
+      void failImages(int start, int end) {
+        for (var i = start; i < end; i++) {
+          policy.reportImageResult(
+            'https://images.test/$i.jpg',
+            succeeded: false,
+          );
+        }
+      }
+
+      failImages(0, 4);
+      now = now.add(const Duration(seconds: 61));
+      failImages(4, 8);
+      await tester.pump(const Duration(seconds: 2));
+      expect(
+        imageNotices,
+        0,
+        reason: 'Old isolated failures do not accumulate',
+      );
+      failImages(8, 12);
+      policy.reportImageResult('https://images.test/8.jpg', succeeded: true);
+      await tester.pump(const Duration(seconds: 2));
+      expect(imageNotices, 0, reason: 'A successful retry cancels the hint');
+      failImages(8, 9);
+      await tester.pump(const Duration(seconds: 2));
+      expect(imageNotices, 1);
+      now = now.add(const Duration(minutes: 9, seconds: 59));
+      failImages(12, 24);
+      await tester.pump(const Duration(seconds: 2));
+      expect(imageNotices, 1);
+      now = now.add(const Duration(seconds: 1));
+      failImages(24, 25);
+      await tester.pump(const Duration(seconds: 2));
+      expect(imageNotices, 2);
+      now = now.add(const Duration(minutes: 10));
+      failImages(25, 33);
+      policy.dispose();
+      await tester.pump(const Duration(seconds: 2));
+      expect(imageNotices, 2);
+    },
+  );
+
+  testWidgets('cached images survive refresh failures without a region hint', (
+    tester,
+  ) async {
+    var imageNotices = 0;
+    final policy = NetworkNotices(
+      onNetworkError: () => fail('Images use the aggregate hint'),
+      onImageFailures: () => imageNotices++,
+    );
+    addTearDown(policy.dispose);
+    final file = MemoryFileSystem().file('/cover.jpg');
+    final offline = http.ClientException('offline');
+    final delegate = _ImageCache((url) async* {
+      if (url.contains('/cached/')) {
+        yield FileInfo(file, FileSource.Cache, DateTime.utc(2020), url);
+      }
+      throw offline;
+    });
+    final cache = MonitoredImageCache(delegate, policy);
+    for (var i = 0; i < 8; i++) {
+      await expectLater(
+        cache.getImageFile('https://images.test/cached/$i.jpg', maxWidth: 300),
+        emitsInOrder([isA<FileInfo>(), emitsError(same(offline)), emitsDone]),
+      );
+    }
+    await tester.pump(const Duration(seconds: 2));
+    expect(imageNotices, 0);
+    for (var i = 0; i < 20; i++) {
+      await expectLater(
+        cache.getFileStream('https://images.test/failed/$i.jpg'),
+        emitsInOrder([emitsError(same(offline)), emitsDone]),
+      );
+    }
+    await tester.pump(const Duration(seconds: 2));
+    expect(imageNotices, 1);
+  });
 
   test(
     'HTTP, envelope, JSON and network failures retain distinct semantics',
@@ -131,12 +323,12 @@ void main() {
         isNull,
       );
       await expectLater(
-        apiTransport.get('$host/offline', notifyOnError: false),
+        apiTransport.getJson<Object>('$host/offline', notifyOnError: false),
         throwsA(same(offline)),
       );
       expect(notices, 0);
       await expectLater(
-        apiTransport.get('$host/offline'),
+        apiTransport.getJson<Object>('$host/offline'),
         throwsA(same(offline)),
       );
       expect(notices, 1);
@@ -199,7 +391,7 @@ void main() {
     expect(requests.last.queryParameters, {'key': '中文 & x=y#z'});
     await getSearch(null);
     expect(requests.last.queryParameters.containsKey('key'), isFalse);
-    await getComments(null, 20, null);
+    await getComments(null, 20);
     expect(requests.last.queryParameters, {'page': '1', 'pageSize': '20'});
     await getPost('动画&', '#tag', 1, 20);
     expect(requests.last.queryParameters['sort'], '动画&');
@@ -208,6 +400,80 @@ void main() {
     expect(requests.last.queryParameters, {'cid': 'a&b'});
     useClient(MockClient((_) async => http.Response('{"code":200}', 200)));
     await expectLater(updateCommentUv(1, 'name'), throwsFormatException);
+  });
+
+  test(
+    'required AniBaka results cannot become optional collection absence',
+    () async {
+      var body = '{"code":200,"data":null}';
+      useClient(MockClient((_) async => http.Response(body, 200)));
+      const collection = AnimeCollection(bgmId: 42, status: 3);
+      await expectLater(
+        AniBakaApi.saveCollection(collection),
+        throwsFormatException,
+      );
+      await expectLater(AniBakaApi.getCollections(), throwsFormatException);
+      await expectLater(AniBakaApi.getCollectionStats(), throwsFormatException);
+      await expectLater(AniBakaApi.getPlayHistory(), throwsFormatException);
+      expect(await AniBakaApi.getCollectionByBgmId(42), isNull);
+      expect(await AniBakaApi.getCollectionByPostId(42), isNull);
+
+      body =
+          '{"code":200,"data":{"list":[],"total":0,"page":1,"page_size":20}}';
+      expect((await AniBakaApi.getCollections()).list, isEmpty);
+      expect(await AniBakaApi.getPlayHistory(), isEmpty);
+      body = '{"code":200,"data":{"status":3,"bgm_id":42}}';
+      expect((await AniBakaApi.saveCollection(collection)).bgmId, 42);
+
+      body = '{"code":500,"msg":"save failed"}';
+      await expectLater(
+        AniBakaApi.saveCollection(collection),
+        throwsA(isA<ApiException>()),
+      );
+    },
+  );
+
+  test(
+    'history upload sends its contract without rebuilding the ignored response',
+    () async {
+      const history = PlayHistory(
+        videoId: 42,
+        videoTitle: 'Example',
+        videoDuration: 120,
+        playProgress: 60,
+      );
+      useClient(
+        MockClient((request) async {
+          expect(request.method, 'POST');
+          expect(request.url.path, '/api/v1/play-history');
+          expect(jsonDecode(request.body), history.toJson());
+          return http.Response(
+            jsonEncode({'code': 200, 'data': history.toJson()}),
+            200,
+          );
+        }),
+      );
+      await AniBakaApi.savePlayHistory(history);
+    },
+  );
+
+  test('danmu follows the sidecar data envelope', () async {
+    var body = '{"success":true,"data":[{"c":"1,1,25,16777215","m":"hello"}]}';
+    useClient(
+      MockClient((request) async {
+        expect(request.url.path, '/danmu/list');
+        expect(request.url.queryParameters['gv'], '42');
+        expect(request.url.queryParameters['p'], '1');
+        return http.Response(body, 200);
+      }),
+    );
+    expect(await getDanmu(42, 1, 'Example'), [
+      {'c': '1,1,25,16777215', 'm': 'hello'},
+    ]);
+    body = '{"success":false,"data":[]}';
+    expect(await getDanmu(42, 1, 'Example'), isEmpty);
+    body = '[]';
+    await expectLater(getDanmu(42, 1, 'Example'), throwsFormatException);
   });
 
   test(
@@ -467,7 +733,7 @@ void main() {
         }),
       );
       await expectLater(
-        apiTransport.get('$host/redirect'),
+        apiTransport.getJson<Object>('$host/redirect'),
         throwsA(isA<ApiException>().having((e) => e.statusCode, 'status', 302)),
       );
       final first = await AniBakaApi.getAnimeDetail(543210);
@@ -742,7 +1008,7 @@ void main() {
     // Leave the response pending so only the client's timeout can finish it.
     server.listen((request) {});
 
-    final result = apiTransport.post(
+    final result = apiTransport.postJson<Object>(
       'http://${server.address.address}:${server.port}/slow',
       const {'value': 1},
       timeout: const Duration(milliseconds: 50),
@@ -781,4 +1047,27 @@ class _StreamingClient extends http.BaseClient {
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) =>
       handle(request);
+}
+
+class _ImageCache extends Fake implements BaseCacheManager, ImageCacheManager {
+  _ImageCache(this.responses);
+  final Stream<FileResponse> Function(String url) responses;
+
+  @override
+  Stream<FileResponse> getFileStream(
+    String url, {
+    String? key,
+    Map<String, String>? headers,
+    bool withProgress = false,
+  }) => responses(url);
+
+  @override
+  Stream<FileResponse> getImageFile(
+    String url, {
+    String? key,
+    Map<String, String>? headers,
+    bool withProgress = false,
+    int? maxHeight,
+    int? maxWidth,
+  }) => responses(url);
 }

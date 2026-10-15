@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:typed_data';
 
 /// Bencode 编解码器 — BitTorrent 元数据的标准序列化格式
@@ -29,12 +29,12 @@ class Bencode {
     Uint8List data,
     String topKey,
   ) {
-    final reader = _Reader(data);
+    final reader = _Reader(data, topKey: topKey);
     final root = reader.read();
     if (root is! Map<String, dynamic>) {
       throw const FormatException('Bencode: 顶层必须是字典');
     }
-    final range = reader.topRanges[topKey];
+    final range = reader.range;
     if (range == null) {
       throw FormatException('Bencode: 顶层未找到键 "$topKey"');
     }
@@ -104,10 +104,10 @@ class _Reader {
   int _pos = 0;
   int _depth = 0;
 
-  /// 顶层字典中每个键 → (start, end)
-  final Map<String, (int, int)> topRanges = {};
+  final String? topKey;
+  (int, int)? range;
 
-  _Reader(this.data);
+  _Reader(this.data, {this.topKey});
 
   int get position => _pos;
 
@@ -171,7 +171,7 @@ class _Reader {
       final key = utf8.decode(_readBytes(), allowMalformed: true);
       final start = _pos;
       dict[key] = read();
-      if (isTop) topRanges[key] = (start, _pos);
+      if (isTop && key == topKey) range = (start, _pos);
       if (_pos >= data.length) {
         throw const FormatException('Bencode: 字典缺少结束符');
       }
@@ -184,5 +184,3 @@ class _Reader {
 
 String bencodeString(Object? value) =>
     utf8.decode(value as Uint8List, allowMalformed: true);
-
-int bencodeInt(Object? value) => value as int;

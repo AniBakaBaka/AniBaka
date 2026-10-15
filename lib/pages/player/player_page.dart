@@ -1,4 +1,5 @@
 import 'package:baka/models/bgm.dart';
+import 'package:baka/core/content_filter.dart';
 import 'package:baka/source/runtime/source_operation.dart';
 import 'package:baka/services/source/source_repository.dart';
 import 'package:baka/services/playback/history_repository.dart';
@@ -40,7 +41,7 @@ import 'package:baka/widgets/platform/tv/tv_anime_detail.dart';
 import 'package:baka/widgets/platform/tv/tv_player_layout.dart';
 import 'package:baka/widgets/platform/windows/windows_player_layout.dart';
 import 'package:baka/widgets/player/download_indicators.dart';
-import 'package:baka/widgets/player/source_switch_sheet.dart';
+import 'package:baka/widgets/anime_detail/video_source_search_sheet.dart';
 import 'package:baka/widgets/player/video_detail_card.dart';
 import 'package:baka/widgets/player/player_tab.dart';
 import 'package:baka/widgets/watch_party/watch_party_sheet.dart';
@@ -86,7 +87,6 @@ class _PlayerPageState extends State<PlayerPage>
   );
 
   late final PlaybackContent _svc;
-  late Map<String, dynamic> _detailData;
   late final WatchPartyService _watchParty;
   late final MediaSessionService _mediaSession;
   late final TabController _tabController;
@@ -115,7 +115,7 @@ class _PlayerPageState extends State<PlayerPage>
 
   void _bumpPageData() {
     if (!mounted) return;
-    setState(() => _detailData = _svc.buildDetailData());
+    setState(() {});
   }
 
   List<PlaybackEpisode> get videoList => _svc.videoList;
@@ -132,6 +132,22 @@ class _PlayerPageState extends State<PlayerPage>
   String? _refreshedMediaKey;
 
   bool _isStale(int requestId) => !mounted || requestId != _playbackGeneration;
+
+  bool get _isNsfw =>
+      ContentFilter.isNsfw(_svc.data) || _svc.bgmDetailData?['nsfw'] == true;
+  bool get _isContentHidden => contentFilter.value && _isNsfw;
+
+  void _onContentFilterChanged() {
+    if (_isContentHidden) {
+      ++_playbackGeneration;
+      _sourceOperation?.cancel();
+      _autoMatchController?.cancelSearch();
+      unawaited(ctr.pause());
+    } else if (_isNsfw && !inited) {
+      unawaited(_loadInitialData());
+    }
+    _bumpPageData();
+  }
 
   /// 下载任务 id 由「源 + 剧集 id + 集数」拼成，必须在接管新数据后跟着变，
   /// 否则下载进度条会匹配不到本地任务。
@@ -185,7 +201,7 @@ class _PlayerPageState extends State<PlayerPage>
       request: widget.request,
       posIndex: widget.posIndex,
     );
-    _detailData = _svc.buildDetailData();
+    contentFilter.addListener(_onContentFilterChanged);
     _sourceSearchController = VideoSourceSearchController.takeCachedFor(
       seedData: _svc.data,
     );
@@ -209,11 +225,12 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   void _startHeadlessAutoMatch() {
+    if (_isContentHidden) return;
     if (!mounted || _autoMatchController != null) return;
     _terminalFailure = null;
     late final VideoSourceSearchController search;
     search = VideoSourceSearchController(
-      seedData: _detailData,
+      seedData: _svc.buildDetailData(),
       autoMatchMode: true,
       targetEpisodeIndex: currPlayIndex,
       onMatchFound: (resolvedData) {
@@ -261,6 +278,10 @@ class _PlayerPageState extends State<PlayerPage>
       if (!mounted) return;
       await _svc.ensureBgmDetail();
       if (!mounted) return;
+      if (_isContentHidden) {
+        _onContentFilterChanged();
+        return;
+      }
       _updateCachedTagsFromBgm();
       ctr.setMediaInfo(_svc.currentMediaInfo);
       _bumpPageData();
@@ -289,6 +310,7 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   Future<void> _loadInitialData({bool allowSourceMatch = true}) async {
+    if (_isContentHidden) return;
     final requestId = _playbackGeneration;
     unawaited(_loadBgmMetaOnly());
     try {
@@ -351,6 +373,7 @@ class _PlayerPageState extends State<PlayerPage>
 
   @override
   void dispose() {
+    contentFilter.removeListener(_onContentFilterChanged);
     WidgetsBinding.instance.removeObserver(this);
     _sourceOperation?.cancel();
     _sourceOperation?.close();
@@ -468,6 +491,7 @@ class _PlayerPageState extends State<PlayerPage>
     bool autoplay = true,
     bool? filterHlsAds,
   }) async {
+    if (_isContentHidden) return;
     if (_isStale(requestId)) return;
     if (!identical(SourceOperation.current, _sourceOperation)) {
       _sourceOperation?.cancel();
@@ -496,9 +520,14 @@ class _PlayerPageState extends State<PlayerPage>
   ) async {
     try {
       final subjectId = context.subjectId;
-      if (subjectId == null || _isStale(requestId)) return;
+      if (subjectId == null ||
+          context.bound ||
+          _isStale(requestId) ||
+          !identical(context, ctr.skipContext)) {
+        return;
+      }
       final episodes = await getBgmEpisodes(subjectId);
-      if (_isStale(requestId)) return;
+      if (_isStale(requestId) || !identical(context, ctr.skipContext)) return;
       final episodeId = matchSkipEpisode(title, episodes);
       if (episodeId != null) {
         ctr.setSkipContext(context.bind(subjectId, episodeId));
@@ -596,7 +625,7 @@ class _PlayerPageState extends State<PlayerPage>
               : Duration.zero);
       final progress = PlaybackProgress(
         history: historyRepository,
-        request: _svc.request,
+        request: _svc.request.copyWith(metadataUpdates: {'nsfw': _isNsfw}),
         videoKey: _svc.videoKey,
         start: start,
         bgmId: _svc.bgmInfo.subjectId,
@@ -629,13 +658,18 @@ class _PlayerPageState extends State<PlayerPage>
         seriesKey: SkipContext.sourceIdentity([
           _svc.request.source,
           _svc.request.contentId,
+          _sourceNames != null && currUrl <= _sourceNames!.length
+              ? _sourceNames![currUrl - 1]
+              : currUrl,
         ]),
         // Display metadata may come from fuzzy title search; only an explicit
         // playback identity (or a saved personal binding) can drive a seek.
         subjectId: BgmInfo.fromData(_svc.data).subjectId,
       );
       ctr.setSkipContext(skipContext);
-      unawaited(_bindSkipEpisode(requestId, skipContext, _currentEpisodeTitle));
+      unawaited(
+        _bindSkipEpisode(requestId, ctr.skipContext!, _currentEpisodeTitle),
+      );
       _lastPlaybackFailure = null;
       if (!_svc.isLocalSource && videoList.isNotEmpty) {
         await historyRepository.rememberEpisode(
@@ -735,7 +769,7 @@ class _PlayerPageState extends State<PlayerPage>
       }
 
       // 2. 全自动自动匹配并无缝切换至下一个有效视频源
-      final seedData = _detailData;
+      final seedData = _svc.buildDetailData();
       final controller = _sourceSearchController ??=
           VideoSourceSearchController.takeSharedFor(seedData: seedData);
 
@@ -892,6 +926,12 @@ class _PlayerPageState extends State<PlayerPage>
 
   @override
   Widget build(BuildContext context) {
+    if (_isContentHidden) {
+      return Scaffold(
+        appBar: AppBar(),
+        body: const Center(child: Text('已隐藏 NSFW 内容')),
+      );
+    }
     if (_isLocalSource) return _buildLocalLayout(context);
     final source = _svc.request.source.trim();
     final isPureBgmSubject = source.isEmpty || source == 'bgm';
@@ -900,8 +940,11 @@ class _PlayerPageState extends State<PlayerPage>
         _autoMatchController == null &&
         _terminalFailure == null) {
       return Instances.isTV
-          ? TvAnimeDetailPlaceholder(data: _detailData, episodes: videoList)
-          : AnimeDetailPlaceholder(data: _detailData);
+          ? TvAnimeDetailPlaceholder(
+              data: _svc.buildDetailData(),
+              episodes: videoList,
+            )
+          : AnimeDetailPlaceholder(data: _svc.buildDetailData());
     }
     if (Instances.isTV) return _buildTvLayout(context);
     if (isWindows || context.isTablet) {
@@ -912,11 +955,7 @@ class _PlayerPageState extends State<PlayerPage>
 
   Widget _buildTvLayout(BuildContext context) {
     return TvPlayerLayout(
-      data: _detailData,
-      videoList: videoList,
-      currPlayIndex: currPlayIndex,
-      currUrl: currUrl,
-      sourceNames: _sourceNames,
+      content: _svc,
       inited: inited,
       controller: ctr,
       danmakuController: danmakuController,
@@ -933,16 +972,10 @@ class _PlayerPageState extends State<PlayerPage>
   Widget _buildWindowsTabletLayout(BuildContext context) {
     return _withImmersiveStatusBar(
       WindowsPlayerLayout(
-        torrent: _svc.torrent,
-        data: _detailData,
-        videoList: videoList,
-        currPlayIndex: currPlayIndex,
-        currUrl: currUrl,
-        sourceNames: _sourceNames,
+        content: _svc,
         inited: inited,
         controller: ctr,
         danmakuController: danmakuController,
-        bgmInfo: _bgmInfo,
         followNotifier: _followNotifier,
         sourceName: _currentSourceName,
         lineName: _currentLineName,
@@ -995,12 +1028,12 @@ class _PlayerPageState extends State<PlayerPage>
   Future<void> _openSourceSwitchSheet() async {
     if (_isLocalSource) return;
 
-    final seedData = _detailData;
+    final seedData = _svc.buildDetailData();
 
     final searchController = _sourceSearchController ??=
         VideoSourceSearchController.takeSharedFor(seedData: seedData);
 
-    final selection = await SourceSwitchSheet.show(
+    final selection = await VideoSourceSearchSheet.show(
       context,
       seedData: seedData,
       currentEpisodeIndex: currPlayIndex,
@@ -1374,7 +1407,7 @@ class _PlayerPageState extends State<PlayerPage>
       isFullScreen: downloadMode
           ? _playerFullscreen.value
           : _playerFullscreen.value && !isWindows,
-      postDetail: _detailData,
+      postDetail: _svc.buildDetailData(),
       urlResolver: _svc.resolveEpisodeUrl,
       startInDownloadMode: downloadMode,
       currentLineIndex: downloadMode ? null : currUrl,
@@ -1401,8 +1434,7 @@ class _PlayerPageState extends State<PlayerPage>
       child: Column(
         children: [
           VideoDetailCard(
-            detail: _detailData,
-            bgmInfo: _bgmInfo,
+            content: _svc,
             followNotifier: _followNotifier,
             cachedTags: _cachedTags,
             onFollowPressed: toggleFollow,

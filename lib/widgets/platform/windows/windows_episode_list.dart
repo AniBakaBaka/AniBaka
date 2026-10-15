@@ -18,9 +18,11 @@ class WindowsEpisodeList extends StatefulWidget {
     required this.videoList,
     required this.currentIndex,
     required this.onEpisodeSelected,
+    required this.currUrl,
+    required this.onUrlChanged,
     super.key,
     this.title,
-    this.bgmInfo,
+    this.bgmInfo = const BgmInfo(),
     this.followNotifier,
     this.onFollowPressed,
     this.sourceName,
@@ -28,12 +30,9 @@ class WindowsEpisodeList extends StatefulWidget {
     this.onSourceTap,
     this.isSearching = false,
     this.danmakuController,
-    this.onUrlSelected,
     this.onDownloadPressed,
-    this.currUrl,
     this.sourceNames,
-    this.bgmId,
-    this.bgmEpisodes,
+    this.bgmEpisodes = const [],
     this.fallbackCoverUrl,
     this.torrent,
   });
@@ -41,17 +40,16 @@ class WindowsEpisodeList extends StatefulWidget {
   final List<PlaybackEpisode> videoList;
   final int currentIndex;
   final ValueChanged<int> onEpisodeSelected;
-  final void Function(int, int)? onUrlSelected;
+  final ValueChanged<int> onUrlChanged;
   final VoidCallback? onDownloadPressed;
-  final int? currUrl;
+  final int currUrl;
   final List<String>? sourceNames;
-  final int? bgmId;
-  final List<Map<String, dynamic>>? bgmEpisodes;
+  final List<Map<String, dynamic>> bgmEpisodes;
   final String? fallbackCoverUrl;
   final TorrentService? torrent;
 
   final String? title;
-  final BgmInfo? bgmInfo;
+  final BgmInfo bgmInfo;
   final ValueNotifier<bool>? followNotifier;
   final VoidCallback? onFollowPressed;
   final String? sourceName;
@@ -137,18 +135,20 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
           );
         }
         return _WindowsEpisodeListItem(
-          key: ValueKey((widget.bgmId, i)),
+          key: ValueKey((widget.bgmInfo.subjectId, i)),
           index: i,
           item: item,
           isPlaying: i == widget.currentIndex,
-          bgmId: widget.bgmId,
-          bgmEpisodes: widget.bgmEpisodes,
+          bgmId: widget.bgmInfo.subjectId,
+          bgmEpisode: i < widget.bgmEpisodes.length
+              ? widget.bgmEpisodes[i]
+              : null,
           fallbackCoverUrl: widget.fallbackCoverUrl,
           currUrl: widget.currUrl,
           sourceNames: widget.sourceNames,
           primaryColor: primaryColor,
           onEpisodeSelected: widget.onEpisodeSelected,
-          onUrlSelected: widget.onUrlSelected,
+          onUrlChanged: widget.onUrlChanged,
         );
       },
       childCount: itemCount,
@@ -277,7 +277,7 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
               valueListenable: widget.followNotifier!,
               builder: (context, isFollowed, _) => BgmFollowPill(
                 title: title,
-                bgmInfo: widget.bgmInfo ?? const BgmInfo(),
+                bgmInfo: widget.bgmInfo,
                 isFollowed: isFollowed,
                 onFollowPressed: widget.onFollowPressed!,
               ),
@@ -498,26 +498,26 @@ class _WindowsEpisodeListItem extends StatefulWidget {
   final PlaybackEpisode item;
   final bool isPlaying;
   final int? bgmId;
-  final List<Map<String, dynamic>>? bgmEpisodes;
+  final Map<String, dynamic>? bgmEpisode;
   final String? fallbackCoverUrl;
-  final int? currUrl;
+  final int currUrl;
   final List<String>? sourceNames;
   final Color primaryColor;
   final ValueChanged<int> onEpisodeSelected;
-  final void Function(int, int)? onUrlSelected;
+  final ValueChanged<int> onUrlChanged;
 
   const _WindowsEpisodeListItem({
     required this.index,
     required this.item,
     required this.isPlaying,
     required this.bgmId,
-    required this.bgmEpisodes,
+    required this.bgmEpisode,
     required this.fallbackCoverUrl,
     required this.currUrl,
     required this.sourceNames,
     required this.primaryColor,
     required this.onEpisodeSelected,
-    required this.onUrlSelected,
+    required this.onUrlChanged,
     super.key,
   });
 
@@ -548,10 +548,7 @@ class _WindowsEpisodeListItemState extends State<_WindowsEpisodeListItem> {
   Widget _buildItemContent(BuildContext context, Map<String, dynamic>? still) {
     final index = widget.index;
     final item = widget.item;
-    final bgmEpisodes = widget.bgmEpisodes;
-    final episode = bgmEpisodes != null && index < bgmEpisodes.length
-        ? bgmEpisodes[index]
-        : null;
+    final episode = widget.bgmEpisode;
     final name = episode != null
         ? trimmed(episode['name_cn']) ?? trimmed(episode['name']) ?? item.title
         : trimmed(still?['name']) ?? item.title.trim();
@@ -566,11 +563,16 @@ class _WindowsEpisodeListItemState extends State<_WindowsEpisodeListItem> {
         trimmed(episode?['airdate']) ?? trimmed(still?['air_date']) ?? '';
     final overview =
         trimmed(still?['overview']) ?? trimmed(episode?['desc']) ?? '暂无本集剧情简介';
-    final stillUrl =
-        trimmed(still?['still_url']) ??
-        trimmed(still?['still_thumb']) ??
-        widget.fallbackCoverUrl ??
-        '';
+    var stillUrl =
+        trimmed(still?['still_thumb']) ?? trimmed(still?['still_url']);
+    final stills = still?['stills'];
+    if (stillUrl == null && stills is List) {
+      for (final image in stills) {
+        if (image is! Map) continue;
+        stillUrl = trimmed(image['thumbnail']) ?? trimmed(image['url']);
+        if (stillUrl != null) break;
+      }
+    }
     final isPlaying = widget.isPlaying;
     final primaryColor = widget.primaryColor;
     final lineCount = item.availableLineIndexes.length;
@@ -603,7 +605,9 @@ class _WindowsEpisodeListItemState extends State<_WindowsEpisodeListItem> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildCoverThumbnail(stillUrl),
+                    _buildCoverThumbnail(
+                      stillUrl ?? widget.fallbackCoverUrl ?? '',
+                    ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
@@ -694,15 +698,10 @@ class _WindowsEpisodeListItemState extends State<_WindowsEpisodeListItem> {
                     ),
                   ),
                   WindowsLineSelector(
-                    availableLineIndexes: item.availableLineIndexes.toList(
-                      growable: false,
-                    ),
-                    lineCount: lineCount,
-                    currUrl: widget.currUrl ?? 1,
-                    onUrlChanged: (urlIndex) =>
-                        widget.onUrlSelected?.call(index, urlIndex),
+                    availableLineIndexes: item.availableLineIndexes,
+                    currUrl: widget.currUrl,
+                    onUrlChanged: widget.onUrlChanged,
                     sourceNames: widget.sourceNames,
-                    isInline: true,
                   ),
                 ],
               ],

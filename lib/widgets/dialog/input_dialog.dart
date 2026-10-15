@@ -1,123 +1,71 @@
 import 'package:flutter/material.dart';
 
-/// 选择对话框选项
-class SelectionOption<T> {
-  final T value;
-  final String label;
-  final String? subtitle;
+const _actionShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(12)),
+);
+const _actionStyle = ButtonStyle(
+  padding: WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 12)),
+  shape: WidgetStatePropertyAll(_actionShape),
+);
+final _boldPattern = RegExp(r'\*\*(.*?)\*\*');
 
-  const SelectionOption({
-    required this.value,
-    required this.label,
-    this.subtitle,
-  });
-}
-
-class _DialogConstants {
-  static const double borderRadius = 24.0;
-  static const double actionBorderRadius = 12.0;
-  static const EdgeInsets contentPadding = EdgeInsets.all(24);
-  static const EdgeInsets actionButtonPadding = EdgeInsets.symmetric(
-    vertical: 12,
-  );
-  static const double actionSpacing = 12.0;
-  static const double maxWidthRatio = 0.9;
-  static const double maxWidthLimit = 500.0;
-  static const double minDialogWidth = 280.0;
-
-  static RoundedRectangleBorder get actionShape => RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(actionBorderRadius),
-  );
-}
-
-/// App对话框基础组件
-/// 使用Theme系统，响应式布局，正确处理滚动
 class AppDialog extends StatelessWidget {
   final String title;
-  final String? content;
-  final Widget? contentWidget;
-  final List<Widget>? actions;
+  final Widget? content;
+  final Widget? actions;
+  final bool scrollable;
 
   const AppDialog({
     required this.title,
     super.key,
     this.content,
-    this.contentWidget,
     this.actions,
+    this.scrollable = true,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final textTheme = theme.textTheme;
-    final screenWidth = MediaQuery.of(context).size.width;
-
-    final maxWidth = (screenWidth * _DialogConstants.maxWidthRatio).clamp(
-      _DialogConstants.minDialogWidth,
-      _DialogConstants.maxWidthLimit,
-    );
-
-    final contentArea =
-        contentWidget ??
-        (content != null
-            ? _buildFormattedContent(
-                content!,
-                textTheme.bodyMedium,
-                colorScheme.onSurfaceVariant,
-                colorScheme.onSurface,
-              )
-            : null);
-
+    final size = MediaQuery.sizeOf(context);
     return Dialog(
-      backgroundColor: colorScheme.surface,
-      surfaceTintColor: colorScheme.surfaceTint,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(_DialogConstants.borderRadius),
+      backgroundColor: theme.colorScheme.surface,
+      surfaceTintColor: theme.colorScheme.surfaceTint,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(24)),
       ),
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: maxWidth,
-          maxHeight: MediaQuery.of(context).size.height * 0.8,
+          maxWidth: (size.width * 0.9).clamp(280, 500),
+          maxHeight: size.height * 0.8,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: _DialogConstants.contentPadding,
+              padding: const EdgeInsets.all(24),
               child: Text(
                 title,
-                style: textTheme.titleLarge?.copyWith(
+                style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.bold,
-                  color: colorScheme.onSurface,
+                  color: theme.colorScheme.onSurface,
                 ),
               ),
             ),
-            if (contentArea != null)
+            if (content != null)
               Flexible(
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.only(
-                    left: _DialogConstants.contentPadding.left,
-                    right: _DialogConstants.contentPadding.right,
-                    bottom: 16,
-                  ),
-                  child: contentArea,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+                  child: scrollable
+                      ? SingleChildScrollView(child: content)
+                      : content,
                 ),
               ),
-            if (actions != null && actions!.isNotEmpty)
+            if (actions != null)
               Padding(
-                padding: EdgeInsets.only(
-                  left: _DialogConstants.contentPadding.left,
-                  right: _DialogConstants.contentPadding.right,
-                  bottom: _DialogConstants.contentPadding.bottom,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: actions!,
-                ),
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                child: actions,
               ),
           ],
         ),
@@ -126,26 +74,72 @@ class AppDialog extends StatelessWidget {
   }
 }
 
-/// App输入对话框
+/// 一个确认按钮，可选取消按钮；取消和关闭均不返回结果。
+class AppDialogActions extends StatelessWidget {
+  final String confirmText;
+  final VoidCallback onConfirm;
+  final String? cancelText;
+  final bool isDestructive;
+
+  const AppDialogActions({
+    required this.confirmText,
+    required this.onConfirm,
+    this.cancelText,
+    this.isDestructive = false,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        if (cancelText != null) ...[
+          Expanded(
+            child: FilledButton.tonal(
+              onPressed: () => Navigator.pop(context),
+              style: _actionStyle,
+              child: Text(cancelText!),
+            ),
+          ),
+          const SizedBox(width: 12),
+        ],
+        Expanded(
+          child: cancelText == null && !isDestructive
+              ? FilledButton.tonal(
+                  onPressed: onConfirm,
+                  style: _actionStyle,
+                  child: Text(confirmText),
+                )
+              : FilledButton(
+                  onPressed: onConfirm,
+                  style: isDestructive
+                      ? _actionStyle.copyWith(
+                          backgroundColor: WidgetStatePropertyAll(colors.error),
+                          foregroundColor: WidgetStatePropertyAll(
+                            colors.onError,
+                          ),
+                        )
+                      : _actionStyle,
+                  child: Text(confirmText),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
 class _InputDialog extends StatefulWidget {
   final String title;
   final String? hintText;
-  final String? initialValue;
-  final int maxLines;
   final String confirmText;
-  final String cancelText;
-  final TextInputType? keyboardType;
   final bool obscureText;
 
   const _InputDialog({
     required this.title,
-    this.hintText = '请输入...',
-    this.initialValue,
-    this.maxLines = 1,
-    this.confirmText = '确定',
-    this.cancelText = '取消',
-    this.keyboardType,
-    this.obscureText = false,
+    required this.hintText,
+    required this.confirmText,
+    required this.obscureText,
   });
 
   @override
@@ -153,220 +147,75 @@ class _InputDialog extends StatefulWidget {
 }
 
 class _InputDialogState extends State<_InputDialog> {
-  late final TextEditingController _controller;
-  late final FocusNode _focusNode;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialValue);
-    _focusNode = FocusNode();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _focusNode.requestFocus();
-    });
-  }
+  final _controller = TextEditingController();
 
   @override
   void dispose() {
     _controller.dispose();
-    _focusNode.dispose();
     super.dispose();
   }
 
-  void _handleConfirm() {
-    Navigator.pop(context, _controller.text);
-  }
-
-  void _handleCancel() => Navigator.pop(context);
+  void _confirm() => Navigator.pop(context, _controller.text);
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final inputTheme = theme.inputDecorationTheme;
-
     return AppDialog(
       title: widget.title,
-      contentWidget: TextField(
+      content: TextField(
         controller: _controller,
-        focusNode: _focusNode,
-        keyboardType: widget.keyboardType,
+        autofocus: true,
         obscureText: widget.obscureText,
         autocorrect: !widget.obscureText,
         enableSuggestions: !widget.obscureText,
-        maxLines: widget.maxLines,
         decoration: InputDecoration(
           hintText: widget.hintText,
           filled: true,
           fillColor:
-              inputTheme.fillColor ?? colorScheme.surfaceContainerHighest,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(
-              _DialogConstants.actionBorderRadius,
-            ),
+              theme.inputDecorationTheme.fillColor ??
+              theme.colorScheme.surfaceContainerHighest,
+          border: const OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(12)),
             borderSide: BorderSide.none,
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(
-              _DialogConstants.actionBorderRadius,
-            ),
-            borderSide: BorderSide(color: colorScheme.primary, width: 2),
+            borderRadius: const BorderRadius.all(Radius.circular(12)),
+            borderSide: BorderSide(color: theme.colorScheme.primary, width: 2),
           ),
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 16,
             vertical: 12,
           ),
         ),
-        onSubmitted: (_) => _handleConfirm(),
+        onSubmitted: (_) => _confirm(),
       ),
-      actions: [
-        _buildDialogActionRow(
-          context,
-          cancelText: widget.cancelText,
-          confirmText: widget.confirmText,
-          onCancel: _handleCancel,
-          onConfirm: _handleConfirm,
-        ),
-      ],
+      actions: AppDialogActions(
+        cancelText: '取消',
+        confirmText: widget.confirmText,
+        onConfirm: _confirm,
+      ),
     );
   }
 }
 
-Widget _buildDialogActionRow(
-  BuildContext context, {
-  required String cancelText,
-  required String confirmText,
-  required VoidCallback onCancel,
-  required VoidCallback onConfirm,
-  bool isDestructive = false,
-}) {
-  final colorScheme = Theme.of(context).colorScheme;
-  return Row(
-    children: [
-      Expanded(
-        child: FilledButton.tonal(
-          onPressed: onCancel,
-          style: FilledButton.styleFrom(
-            padding: _DialogConstants.actionButtonPadding,
-            shape: _DialogConstants.actionShape,
-          ),
-          child: Text(cancelText),
-        ),
-      ),
-      const SizedBox(width: _DialogConstants.actionSpacing),
-      Expanded(
-        child: FilledButton(
-          onPressed: onConfirm,
-          style: FilledButton.styleFrom(
-            padding: _DialogConstants.actionButtonPadding,
-            backgroundColor: isDestructive ? colorScheme.error : null,
-            foregroundColor: isDestructive ? colorScheme.onError : null,
-            shape: _DialogConstants.actionShape,
-          ),
-          child: Text(confirmText),
-        ),
-      ),
-    ],
-  );
-}
-
-/// App确认对话框
-class _ConfirmDialog extends StatelessWidget {
-  final String title;
-  final String content;
-  final String confirmText;
-  final String cancelText;
-  final bool isDestructive;
-
-  const _ConfirmDialog({
-    required this.title,
-    required this.content,
-    this.confirmText = '确定',
-    this.cancelText = '取消',
-    this.isDestructive = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return AppDialog(
-      title: title,
-      content: content,
-      actions: [
-        _buildDialogActionRow(
-          context,
-          cancelText: cancelText,
-          confirmText: confirmText,
-          onCancel: () => Navigator.pop(context, false),
-          onConfirm: () => Navigator.pop(context, true),
-          isDestructive: isDestructive,
-        ),
-      ],
-    );
-  }
-}
-
-/// App信息对话框（单按钮）
-class _InfoDialog extends StatelessWidget {
-  final String title;
-  final String content;
-  final String buttonText;
-
-  const _InfoDialog({
-    required this.title,
-    required this.content,
-    this.buttonText = '我知道了',
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return AppDialog(
-      title: title,
-      content: content,
-      actions: [
-        FilledButton.tonal(
-          onPressed: () => Navigator.pop(context),
-          style: FilledButton.styleFrom(
-            padding: _DialogConstants.actionButtonPadding,
-            minimumSize: const Size(double.infinity, 0),
-            shape: _DialogConstants.actionShape,
-          ),
-          child: Text(buttonText),
-        ),
-      ],
-    );
-  }
-}
-
-/// 显示输入对话框。确认时返回输入内容，取消时返回 null。
+/// 确认返回输入内容，取消或关闭返回 null。
 Future<String?> showAppInputDialog(
   BuildContext context, {
   required String title,
   String? hintText,
-  String? initialValue,
-  int maxLines = 1,
   String confirmText = '确定',
-  String cancelText = '取消',
-  TextInputType? keyboardType,
   bool obscureText = false,
-  bool barrierDismissible = true,
-}) {
-  return showDialog<String>(
-    context: context,
-    barrierDismissible: barrierDismissible,
-    builder: (context) => _InputDialog(
-      title: title,
-      hintText: hintText,
-      initialValue: initialValue,
-      maxLines: maxLines,
-      confirmText: confirmText,
-      cancelText: cancelText,
-      keyboardType: keyboardType,
-      obscureText: obscureText,
-    ),
-  );
-}
+}) => showDialog<String>(
+  context: context,
+  builder: (context) => _InputDialog(
+    title: title,
+    hintText: hintText,
+    confirmText: confirmText,
+    obscureText: obscureText,
+  ),
+);
 
-/// 显示确认对话框。确认返回 true，取消或关闭返回 false。
+/// 确认返回 true，取消或关闭返回 false。
 Future<bool> showAppConfirmDialog(
   BuildContext context, {
   required String title,
@@ -375,204 +224,119 @@ Future<bool> showAppConfirmDialog(
   String cancelText = '取消',
   bool isDestructive = false,
   bool barrierDismissible = false,
-}) async {
-  return await showDialog<bool>(
-        context: context,
-        barrierDismissible: barrierDismissible,
-        builder: (context) => _ConfirmDialog(
-          title: title,
-          content: content,
-          confirmText: confirmText,
+}) async =>
+    await showDialog<bool>(
+      context: context,
+      barrierDismissible: barrierDismissible,
+      builder: (context) => AppDialog(
+        title: title,
+        content: _formattedContent(context, content),
+        actions: AppDialogActions(
           cancelText: cancelText,
+          confirmText: confirmText,
+          onConfirm: () => Navigator.pop(context, true),
           isDestructive: isDestructive,
         ),
-      ) ??
-      false;
-}
+      ),
+    ) ==
+    true;
 
-/// 显示App信息对话框
 Future<void> showAppInfoDialog(
   BuildContext context, {
   required String title,
   required String content,
   String buttonText = '我知道了',
   bool barrierDismissible = true,
-}) {
-  return showDialog<void>(
-    context: context,
-    barrierDismissible: barrierDismissible,
-    builder: (context) =>
-        _InfoDialog(title: title, content: content, buttonText: buttonText),
-  );
-}
+}) => showDialog<void>(
+  context: context,
+  barrierDismissible: barrierDismissible,
+  builder: (context) => AppDialog(
+    title: title,
+    content: _formattedContent(context, content),
+    actions: AppDialogActions(
+      confirmText: buttonText,
+      onConfirm: () => Navigator.pop(context),
+    ),
+  ),
+);
 
-/// App选择对话框
-class _SelectionDialog<T> extends StatelessWidget {
-  final String title;
-  final List<SelectionOption<T>> options;
-  final T? currentValue;
-  final String cancelText;
-
-  const _SelectionDialog({
-    required this.title,
-    required this.options,
-    this.currentValue,
-    this.cancelText = '取消',
-    super.key,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-
-    return AppDialog(
-      title: title,
-      contentWidget: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: options.map((option) {
-          final isSelected = option.value == currentValue;
-          return InkWell(
-            onTap: () => Navigator.pop(context, option.value),
-            borderRadius: BorderRadius.circular(
-              _DialogConstants.actionBorderRadius,
-            ),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              margin: const EdgeInsets.only(bottom: 4),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(
-                  _DialogConstants.actionBorderRadius,
-                ),
-                color: isSelected
-                    ? colorScheme.primaryContainer.withValues(alpha: 0.5)
-                    : null,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          option.label,
-                          style: textTheme.bodyLarge?.copyWith(
-                            fontWeight: isSelected
-                                ? FontWeight.w600
-                                : FontWeight.w400,
-                            color: isSelected
-                                ? colorScheme.primary
-                                : colorScheme.onSurface,
-                          ),
-                        ),
-                        if (option.subtitle != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 2),
-                            child: Text(
-                              option.subtitle!,
-                              style: textTheme.bodySmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  if (isSelected)
-                    Icon(
-                      Icons.check_rounded,
-                      color: colorScheme.primary,
-                      size: 20,
-                    ),
-                ],
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-      actions: [
-        FilledButton.tonal(
-          onPressed: () => Navigator.pop(context),
-          style: FilledButton.styleFrom(
-            padding: _DialogConstants.actionButtonPadding,
-            minimumSize: const Size(double.infinity, 0),
-            shape: _DialogConstants.actionShape,
-          ),
-          child: Text(cancelText),
-        ),
-      ],
-    );
-  }
-}
-
-/// 显示App选择对话框
-///
-/// 返回选中的值，取消或点击外部返回 null
+/// 直接使用调用方的数据，按需构建可见选项；取消或关闭返回 null。
 Future<T?> showAppSelectionDialog<T>(
   BuildContext context, {
   required String title,
-  required List<SelectionOption<T>> options,
-  T? currentValue,
-  String cancelText = '取消',
-  bool barrierDismissible = true,
-}) {
-  return showDialog<T>(
-    context: context,
-    barrierDismissible: barrierDismissible,
-    builder: (context) => _SelectionDialog<T>(
+  required List<T> options,
+  required String Function(T) label,
+  required bool Function(T) isSelected,
+  String? Function(T)? subtitle,
+}) => showDialog<T>(
+  context: context,
+  builder: (context) {
+    final theme = Theme.of(context);
+    return AppDialog(
       title: title,
-      options: options,
-      currentValue: currentValue,
-      cancelText: cancelText,
-    ),
-  );
-}
+      scrollable: false,
+      content: ListView.builder(
+        shrinkWrap: true,
+        primary: false,
+        padding: EdgeInsets.zero,
+        itemCount: options.length,
+        itemBuilder: (context, index) {
+          final option = options[index];
+          final selected = isSelected(option);
+          final description = subtitle?.call(option);
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: ListTile(
+              shape: _actionShape,
+              selected: selected,
+              selectedTileColor: theme.colorScheme.primaryContainer.withValues(
+                alpha: 0.5,
+              ),
+              title: Text(
+                label(option),
+                style: TextStyle(
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+              subtitle: description == null ? null : Text(description),
+              trailing: selected
+                  ? const Icon(Icons.check_rounded, size: 20)
+                  : null,
+              onTap: () => Navigator.pop(context, option),
+            ),
+          );
+        },
+      ),
+      actions: AppDialogActions(
+        confirmText: '取消',
+        onConfirm: () => Navigator.pop(context),
+      ),
+    );
+  },
+);
 
-Widget _buildFormattedContent(
-  String content,
-  TextStyle? baseStyle,
-  Color defaultColor,
-  Color boldColor,
-) {
-  final style = (baseStyle ?? const TextStyle(fontSize: 14)).copyWith(
+Widget _formattedContent(BuildContext context, String content) {
+  final theme = Theme.of(context);
+  final style = theme.textTheme.bodyMedium!.copyWith(
     height: 1.6,
-    color: defaultColor,
+    color: theme.colorScheme.onSurfaceVariant,
   );
-  final boldStyle = style.copyWith(
+  final boldStyle = TextStyle(
     fontWeight: FontWeight.bold,
-    color: boldColor,
+    color: theme.colorScheme.onSurface,
   );
-
-  final regex = RegExp(r'\*\*(.*?)\*\*');
-  final matches = regex.allMatches(content);
-
-  if (matches.isEmpty) {
-    return Text(content, style: style);
-  }
-
   final spans = <InlineSpan>[];
-  int lastMatchEnd = 0;
-
-  for (final match in matches) {
-    if (match.start > lastMatchEnd) {
-      spans.add(
-        TextSpan(
-          text: content.substring(lastMatchEnd, match.start),
-          style: style,
-        ),
-      );
+  var lastEnd = 0;
+  for (final match in _boldPattern.allMatches(content)) {
+    if (match.start > lastEnd) {
+      spans.add(TextSpan(text: content.substring(lastEnd, match.start)));
     }
-    final boldText = match.group(1);
-    if (boldText != null && boldText.isNotEmpty) {
-      spans.add(TextSpan(text: boldText, style: boldStyle));
-    }
-    lastMatchEnd = match.end;
+    spans.add(TextSpan(text: match.group(1), style: boldStyle));
+    lastEnd = match.end;
   }
-
-  if (lastMatchEnd < content.length) {
-    spans.add(TextSpan(text: content.substring(lastMatchEnd), style: style));
+  if (spans.isEmpty) return Text(content, style: style);
+  if (lastEnd < content.length) {
+    spans.add(TextSpan(text: content.substring(lastEnd)));
   }
-
   return Text.rich(TextSpan(children: spans), style: style);
 }

@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'package:baka/api/bgm.dart';
 import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/utils/format_utils.dart';
-import 'package:baka/widgets/common/skeletonizer.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -79,9 +78,9 @@ class _NetImage extends StatelessWidget {
 }
 
 /// 角色卡片（用于角色 Tab 的网格展示）
-class CharacterCard extends StatelessWidget {
+class _CharacterCard extends StatelessWidget {
   final Map<String, dynamic> character;
-  const CharacterCard({required this.character, super.key});
+  const _CharacterCard({required this.character});
 
   @override
   Widget build(BuildContext context) {
@@ -90,7 +89,7 @@ class CharacterCard extends StatelessWidget {
     final name = character['name'] as String;
     final role = character['relation'] as String;
     final voiceActor = _voiceActorNames(character);
-    final images = character['images'];
+    final images = character['images'] as Map<String, dynamic>?;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -109,10 +108,7 @@ class CharacterCard extends StatelessWidget {
               ],
             ),
             child: _NetImage(
-              url:
-                  images?['large']?.toString() ??
-                  images?['grid']?.toString() ??
-                  '',
+              url: images == null ? '' : images['large'] as String,
               borderRadius: 12,
               proxyWidth: 240,
             ),
@@ -237,9 +233,19 @@ class _CharactersSectionState extends State<CharactersSection>
               itemBuilder: (context, index) {
                 final character = characters[index];
                 return GestureDetector(
-                  onTap: () => showCharacterDetailSheet(context, character),
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      barrierColor: Colors.black.withValues(alpha: 0.8),
+                      builder: (_) =>
+                          CharacterDetailSheet(character: character),
+                    );
+                  },
                   behavior: HitTestBehavior.opaque,
-                  child: CharacterCard(character: character),
+                  child: _CharacterCard(character: character),
                 );
               },
             );
@@ -250,79 +256,35 @@ class _CharactersSectionState extends State<CharactersSection>
   }
 }
 
-/// 显示角色详情弹窗的便捷方法
-void showCharacterDetailSheet(
-  BuildContext context,
-  Map<String, dynamic> character,
-) {
-  final characterId = character['id'] as int;
-  HapticFeedback.selectionClick();
-  showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    barrierColor: Colors.black.withValues(alpha: 0.8),
-    builder: (_) =>
-        CharacterDetailSheet(characterId: characterId, initialData: character),
-  );
-}
-
 /// 角色详情 + 评论底部弹窗
 class CharacterDetailSheet extends StatefulWidget {
-  final int characterId;
-  final Map<String, dynamic>? initialData;
+  final Map<String, dynamic> character;
 
-  const CharacterDetailSheet({
-    required this.characterId,
-    this.initialData,
-    super.key,
-  });
+  const CharacterDetailSheet({required this.character, super.key});
 
   @override
   State<CharacterDetailSheet> createState() => _CharacterDetailSheetState();
 }
 
 class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
-  Map<String, dynamic>? _charInfo;
+  late Future<Map<String, dynamic>> _info;
   late Future<List<Map<String, dynamic>>> _comments;
-  bool _isLoading = true;
-  int _infoGeneration = 0;
 
   @override
   void initState() {
     super.initState();
-    // 秒开预览：优先保留外部传入的角色基础信息
-    _charInfo = widget.initialData;
-    _loadInfo();
-    _comments = getBgmCharacterComments(widget.characterId);
+    final id = widget.character['id'] as int;
+    _info = getBgmCharacterInfo(id);
+    _comments = getBgmCharacterComments(id);
   }
 
   @override
   void didUpdateWidget(covariant CharacterDetailSheet oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.characterId != widget.characterId) {
-      _charInfo = widget.initialData;
-      _isLoading = true;
-      _loadInfo();
-      _comments = getBgmCharacterComments(widget.characterId);
-    }
-  }
-
-  Future<void> _loadInfo() async {
-    final generation = ++_infoGeneration;
-    try {
-      final infoData = await getBgmCharacterInfo(widget.characterId);
-      if (!mounted || generation != _infoGeneration) return;
-
-      setState(() {
-        _charInfo = infoData;
-        _isLoading = false;
-      });
-    } catch (e) {
-      debugPrint('获取角色详情失败: $e');
-      if (mounted && generation == _infoGeneration) {
-        setState(() => _isLoading = false);
-      }
+    final id = widget.character['id'] as int;
+    if (oldWidget.character['id'] != id) {
+      _info = getBgmCharacterInfo(id);
+      _comments = getBgmCharacterComments(id);
     }
   }
 
@@ -331,8 +293,6 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final fgColor = isDark ? Colors.white : Colors.black;
     final textColor = isDark ? Colors.white : Colors.black87;
-    final summary = _charInfo?['summary']?.toString().trim() ?? '';
-    final hasBasicData = _charInfo != null && _charInfo!.isNotEmpty;
 
     return DraggableScrollableSheet(
       initialChildSize: 0.85,
@@ -362,33 +322,49 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
                   ),
                 ),
               ),
-              SliverToBoxAdapter(
-                child: AppSkeletonizer(
-                  enabled: _isLoading && !hasBasicData,
-                  child: _CharHeader(
-                    relation: widget.initialData,
-                    info:
-                        _charInfo ??
-                        (_isLoading
-                            ? const {'name': '角色名称占位'}
-                            : const {'name': '暂无角色信息'}),
-                  ),
-                ),
-              ),
-              if (summary.isNotEmpty)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-                    child: Text(
-                      summary,
-                      style: TextStyle(
-                        color: textColor.withValues(alpha: 0.8),
-                        fontSize: 14,
-                        height: 1.7,
+              FutureBuilder<Map<String, dynamic>>(
+                key: ValueKey(widget.character['id']),
+                future: _info,
+                builder: (context, snapshot) {
+                  final info = snapshot.data;
+                  final summary =
+                      (info == null
+                              ? widget.character['summary'] as String? ?? ''
+                              : info['summary'] as String)
+                          .trim();
+                  return SliverMainAxisGroup(
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: _CharHeader(
+                          relation: widget.character,
+                          info: info,
+                        ),
                       ),
-                    ),
-                  ),
-                ),
+                      if (summary.isNotEmpty)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                            child: Text(
+                              summary,
+                              style: TextStyle(
+                                color: textColor.withValues(alpha: 0.8),
+                                fontSize: 14,
+                                height: 1.7,
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (snapshot.hasError)
+                        const SliverToBoxAdapter(
+                          child: Padding(
+                            padding: EdgeInsets.fromLTRB(24, 16, 24, 0),
+                            child: Text('角色详情加载失败'),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 24),
@@ -461,25 +437,24 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
 
 /// 角色头部信息
 class _CharHeader extends StatelessWidget {
-  final Map<String, dynamic> info;
-  final Map<String, dynamic>? relation;
-  const _CharHeader({required this.info, this.relation});
+  final Map<String, dynamic>? info;
+  final Map<String, dynamic> relation;
+  const _CharHeader({required this.info, required this.relation});
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.white : Colors.black87;
-    final name = info['name'] as String;
-    final nameCN = info['nameCN'] as String? ?? '';
-    final role = relation?['relation'] as String?;
-    final voiceActor = relation == null ? '' : _voiceActorNames(relation!);
-    final collects = info['collects'] as int? ?? 0;
-    final commentCount = info['comment'] as int? ?? 0;
-    final infoStr =
-        info['info']?.toString().replaceAll('\r\n', '\n').trim() ?? '';
-    final images = info['images'] as Map?;
-    final imageUrl =
-        images?['large']?.toString() ?? images?['grid']?.toString() ?? '';
+    final detail = info;
+    final name = (detail ?? relation)['name'] as String;
+    final nameCN = detail == null ? '' : detail['nameCN'] as String;
+    final role = relation['relation'] as String;
+    final voiceActor = _voiceActorNames(relation);
+    final collects = detail == null ? 0 : detail['collects'] as int;
+    final commentCount = detail == null ? 0 : detail['comment'] as int;
+    final infoStr = detail == null ? '' : (detail['info'] as String).trim();
+    final images = (detail ?? relation)['images'] as Map<String, dynamic>?;
+    final imageUrl = images == null ? '' : images['large'] as String;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -529,7 +504,7 @@ class _CharHeader extends StatelessWidget {
                     ),
                   ),
                 ],
-                if (role != null && role.isNotEmpty) ...[
+                if (role.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Text(
                     '定位：$role',
@@ -629,8 +604,8 @@ class _CharCommentItem extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final fgColor = isDark ? Colors.white : Colors.black;
     final textColor = isDark ? Colors.white : Colors.black87;
-    final user = comment['user'] as Map<String, dynamic>? ?? const {};
-    final nickname = user['nickname']?.toString() ?? '匿名';
+    final user = comment['user'] as Map<String, dynamic>?;
+    final nickname = user == null ? '匿名' : user['nickname'] as String;
     final content = comment['content'] as String;
     final createdAt = comment['createdAt'] as int;
     final replies = comment['replies'] as List<dynamic>;
@@ -647,7 +622,10 @@ class _CharCommentItem extends StatelessWidget {
           Row(
             children: [
               _NetImage(
-                url: (user['avatar'] as Map?)?['medium']?.toString() ?? '',
+                url: user == null
+                    ? ''
+                    : (user['avatar'] as Map<String, dynamic>)['medium']
+                          as String,
                 width: 32,
                 height: 32,
                 borderRadius: 16,
@@ -732,8 +710,9 @@ class _CharCommentItem extends StatelessWidget {
   }
 
   Widget _replyRichText(Map reply, Color textColor) {
-    final rNick = (reply['user'] as Map?)?['nickname']?.toString() ?? '匿名';
-    final rContent = reply['content']?.toString() ?? '';
+    final user = reply['user'] as Map<String, dynamic>?;
+    final rNick = user == null ? '匿名' : user['nickname'] as String;
+    final rContent = reply['content'] as String;
     return RichText(
       text: TextSpan(
         children: [

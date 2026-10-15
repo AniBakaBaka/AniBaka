@@ -44,7 +44,6 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
   static const _cardExtent = 110.0 * 16 / 9 + 14;
   int _tabIndex = 0; // 0: 选集, 1: 线路
   final _focusedEpisode = ValueNotifier(0);
-  final _stillsRevision = ValueNotifier(0);
   int get _focusedIndex => _focusedEpisode.value;
   set _focusedIndex(int value) => _focusedEpisode.value = value;
   late final ScrollController _horizontalScrollController;
@@ -53,16 +52,12 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
   // 共享请求结果；完成时只更新使用它的预览和卡片。
   final _stillsCache = <int, Future<Map<String, dynamic>?>>{};
 
-  int get _lineCount {
-    final index = widget.currentIndex;
-    return index >= 0 && index < widget.videoList.length
-        ? widget.videoList[index].availableLineIndexes.length
-        : 0;
-  }
+  late List<int> _lineIndexes;
 
   @override
   void initState() {
     super.initState();
+    _updateLineIndexes();
     _focusedIndex = widget.currentIndex.clamp(
       0,
       widget.videoList.isEmpty ? 0 : widget.videoList.length - 1,
@@ -83,6 +78,10 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
   @override
   void didUpdateWidget(covariant TvEpisodeSelector oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.videoList != widget.videoList ||
+        oldWidget.currentIndex != widget.currentIndex) {
+      _updateLineIndexes();
+    }
     final catalogChanged =
         oldWidget.videoList != widget.videoList ||
         oldWidget.bgmId != widget.bgmId ||
@@ -94,7 +93,7 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
         0,
         widget.videoList.isEmpty ? 0 : widget.videoList.length - 1,
       );
-      if (_lineCount <= 1) _tabIndex = 0;
+      if (_lineIndexes.length <= 1) _tabIndex = 0;
       _fetchEpisodeDetails(_focusedIndex);
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _scrollToCurrentEpisode(),
@@ -106,9 +105,15 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
   void dispose() {
     _horizontalScrollController.dispose();
     _focusedEpisode.dispose();
-    _stillsRevision.dispose();
     _stillsCache.clear();
     super.dispose();
+  }
+
+  void _updateLineIndexes() {
+    final index = widget.currentIndex;
+    _lineIndexes = index >= 0 && index < widget.videoList.length
+        ? widget.videoList[index].availableLineIndexes.toList(growable: false)
+        : const [];
   }
 
   void _toggleSortOrder() {
@@ -140,38 +145,33 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
 
   /// 只保留当前集及相邻集；相邻预取不能递归扩散到整季。
   void _fetchEpisodeDetails(int episodeIndex) {
-    _loadEpisodeDetails(episodeIndex);
-    _loadEpisodeDetails(episodeIndex - 1);
-    _loadEpisodeDetails(episodeIndex + 1);
-    _stillsRevision.value++;
-  }
-
-  void _loadEpisodeDetails(int episodeIndex) {
-    if (episodeIndex < 0 || episodeIndex >= widget.videoList.length) return;
     if ((widget.bgmId ?? 0) <= 0 &&
         (widget.tmdbId ?? 0) <= 0 &&
         (widget.tvdbId == null || widget.tvdbId!.isEmpty)) {
       return;
     }
-    final cached = _stillsCache.remove(episodeIndex);
-    if (cached != null) {
-      _stillsCache[episodeIndex] = cached;
-      return;
+    for (var index = episodeIndex - 1; index <= episodeIndex + 1; index++) {
+      if (index < 0 || index >= widget.videoList.length) continue;
+      final cached = _stillsCache.remove(index);
+      if (cached != null) {
+        _stillsCache[index] = cached;
+        continue;
+      }
+      if (_stillsCache.length == _stillsCacheLimit) {
+        _stillsCache.remove(_stillsCache.keys.first);
+      }
+      _stillsCache[index] =
+          AniBakaApi.getEpisodeStills(
+            bgmId: widget.bgmId,
+            tmdbId: widget.tmdbId,
+            tvdbId: widget.tvdbId,
+            season: 1,
+            episode: index + 1,
+          ).catchError((Object error) {
+            debugPrint('获取 TV 剧集剧照失败: $error');
+            return null;
+          });
     }
-    if (_stillsCache.length == _stillsCacheLimit) {
-      _stillsCache.remove(_stillsCache.keys.first);
-    }
-    _stillsCache[episodeIndex] =
-        AniBakaApi.getEpisodeStills(
-          bgmId: widget.bgmId,
-          tmdbId: widget.tmdbId,
-          tvdbId: widget.tvdbId,
-          season: 1,
-          episode: episodeIndex + 1,
-        ).catchError((Object error) {
-          debugPrint('获取 TV 剧集剧照失败: $error');
-          return null;
-        });
   }
 
   static String _stillUrl(Map<String, dynamic>? data) =>
@@ -207,7 +207,7 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final primaryColor = theme.colorScheme.primary;
-    final showLineTab = _lineCount > 1;
+    final showLineTab = _lineIndexes.length > 1;
 
     return Align(
       alignment: Alignment.bottomCenter,
@@ -521,13 +521,16 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
         final isPlaying = episodeIndex == widget.currentIndex;
         return ValueSelector<int, Future<Map<String, dynamic>?>?>(
           key: ValueKey(episodeIndex),
-          valueListenable: _stillsRevision,
+          valueListenable: _focusedEpisode,
           select: (_) => _stillsCache[episodeIndex],
           builder: (_, future) => FutureBuilder<Map<String, dynamic>?>(
             future: future,
             builder: (context, snapshot) {
-              final stillUrl = _stillUrl(snapshot.data);
-              final epName = trimmed(snapshot.data?['name']) ?? item.title;
+              final data = snapshot.connectionState == ConnectionState.done
+                  ? snapshot.data
+                  : null;
+              final stillUrl = _stillUrl(data);
+              final epName = trimmed(data?['name']) ?? item.title;
               return Padding(
                 padding: const EdgeInsets.only(right: 14),
                 child: Center(
@@ -657,33 +660,12 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
   }
 
   Widget _buildLineList(Color primaryColor) {
-    if (_lineCount <= 1) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.info_outline, color: context.tvTextHintColor, size: 40),
-            const SizedBox(height: 8),
-            Text(
-              '此剧集暂无其他线路',
-              style: TextStyle(
-                color: context.tvTextSecondaryColor,
-                fontSize: 15,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final indexes = widget.videoList[widget.currentIndex].availableLineIndexes
-        .toList(growable: false);
     return ListView.builder(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 28),
-      itemCount: indexes.length,
+      itemCount: _lineIndexes.length,
       itemBuilder: (context, index) {
-        final lineIndex = indexes[index];
+        final lineIndex = _lineIndexes[index];
         final isSelected = lineIndex == widget.currUrl;
         final lineName =
             (widget.sourceNames != null &&

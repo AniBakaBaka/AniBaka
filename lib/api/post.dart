@@ -50,23 +50,25 @@ Future<List<Map<String, dynamic>>> getSearch(String? key) async =>
       ).replace(queryParameters: {'key': ?key}).toString(),
     )).cast<Map<String, dynamic>>();
 
-Future<List<dynamic>> getComments(
+Future<List<Map>> getComments(
   int? pid,
-  int pageSize,
-  String? runame, {
+  int pageSize, {
   int page = 1,
-}) => apiTransport.getData<List<dynamic>>(
+  Future<void>? abortTrigger,
+  bool notifyOnError = true,
+}) async => (await apiTransport.getData<List<dynamic>>(
   Uri.parse('$host/comments')
       .replace(
         queryParameters: {
           if (pid != null) 'pid': '$pid',
-          'runame': ?runame,
           'page': '$page',
           'pageSize': '$pageSize',
         },
       )
       .toString(),
-);
+  abortTrigger: abortTrigger,
+  notifyOnError: notifyOnError,
+)).cast<Map>();
 
 Future<bool> addComment(Map<String, Object?> data) async =>
     ApiTransport.accepted(

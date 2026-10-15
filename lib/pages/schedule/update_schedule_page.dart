@@ -1,3 +1,4 @@
+import 'package:baka/core/content_filter.dart';
 import 'dart:async';
 
 import 'package:baka/app/navigation.dart';
@@ -129,7 +130,9 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
 
   Future<void> _loadDayDetails() async {
     final generation = ++_detailGeneration;
-    final entries = _week?.days[_selectedDay] ?? const <ScheduleEntry>[];
+    final entries = (_week?.days[_selectedDay] ?? const <ScheduleEntry>[])
+        .where((entry) => contentFilter.allows(entry.post))
+        .toList(growable: false);
     var next = 0;
     // Bound requests when switching days; only the selected day gets enrichment.
     Future<void> worker() async {
@@ -167,7 +170,10 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
 
   void _indexGroups(ScheduleWeek week) {
     _groupSizes.clear();
-    for (final entries in week.days) {
+    for (final day in week.days) {
+      final entries = day
+          .where((entry) => contentFilter.allows(entry.post))
+          .toList(growable: false);
       for (var start = 0; start < entries.length;) {
         var end = start + 1;
         while (end < entries.length &&
@@ -190,10 +196,18 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: contentFilter,
+    builder: (context, _) => _buildContent(context),
+  );
+
+  Widget _buildContent(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final entries = _week?.days[_selectedDay] ?? const <ScheduleEntry>[];
+    final entries = (_week?.days[_selectedDay] ?? const <ScheduleEntry>[])
+        .where((entry) => contentFilter.allows(entry.post))
+        .toList(growable: false);
+    if (_week != null) _indexGroups(_week!);
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,

@@ -17,8 +17,11 @@ class PlaybackRequest {
     Map<String, dynamic> metadata = const {},
   }) : metadata = Map.unmodifiable(metadata);
 
-  PlaybackRequest.fromMap(Map data)
-    : source = data['source'] as String? ?? '',
+  PlaybackRequest.fromMap(
+    Map data, {
+    String? source,
+    Map<String, dynamic>? metadataUpdates,
+  }) : source = source ?? data['source'] as String? ?? '',
       episodes = PlaybackEpisodeCatalog.episodesOf(
         data,
         mergeDuplicateTitles: true,
@@ -31,6 +34,7 @@ class PlaybackRequest {
       metadata = UnmodifiableMapView({
         for (final key in data.keys.cast<String>())
           if (!_typedKeys.contains(key)) key: data[key],
+        ...?metadataUpdates,
       });
 
   /// Older cloud history stored a Bangumi ID in `id` without a source marker.
@@ -40,12 +44,9 @@ class PlaybackRequest {
     final bgmId = int.tryParse('${data['bgmId']}') ?? 0;
     final legacyCloud =
         source.isEmpty && bgmId > 0 && int.tryParse('${data['id']}') == bgmId;
-    return PlaybackRequest.fromMap({
-      ...data,
-      'source': legacyCloud ? 'bgm' : source,
-      'currPlayIndex': data['index'],
-      'currUrl': data['url'],
-    });
+    return PlaybackRequest.fromMap(data, source: legacyCloud ? 'bgm' : source)
+      ..episodeIndex = data['index'] as int?
+      ..lineIndex = data['url'] as int?;
   }
 
   static const _typedKeys = {
@@ -70,12 +71,13 @@ class PlaybackRequest {
   Object? get contentId => metadata['seriesId'] ?? metadata['id'];
   String get title => metadata['title'] as String? ?? '';
 
+  /// Metadata updates merge once; a selection-only copy shares its metadata.
   PlaybackRequest copyWith({
     List<PlaybackEpisode>? episodes,
     List<String>? sourceNames,
     int? episodeIndex,
     int? lineIndex,
-    Map<String, dynamic>? metadata,
+    Map<String, dynamic>? metadataUpdates,
   }) => PlaybackRequest._(
     source,
     episodes ?? this.episodes,
@@ -84,7 +86,9 @@ class PlaybackRequest {
     lineIndex ?? this.lineIndex,
     prefetched,
     httpHeaders,
-    metadata == null ? this.metadata : Map.unmodifiable(metadata),
+    metadataUpdates == null || metadataUpdates.isEmpty
+        ? metadata
+        : UnmodifiableMapView({...metadata, ...metadataUpdates}),
   );
 
   PlaybackRequest._(

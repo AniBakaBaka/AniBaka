@@ -126,35 +126,6 @@ class ApiTransport {
     }
   }
 
-  static String _body(String body) {
-    if (body.isEmpty) throw const FormatException('空响应');
-    return body;
-  }
-
-  Future<String> get(
-    String url, {
-    Duration? timeout,
-    bool notifyOnError = true,
-  }) => _request(
-    'GET',
-    url,
-    _body,
-    timeout: timeout,
-    notifyOnError: notifyOnError,
-  );
-  Future<String> post(
-    String url,
-    Object? data, {
-    Duration? timeout,
-    bool notifyOnError = true,
-  }) => _request(
-    'POST',
-    url,
-    _body,
-    data: data,
-    timeout: timeout,
-    notifyOnError: notifyOnError,
-  );
   Future<T> getJson<T>(
     String url, {
     Duration? timeout,

@@ -47,12 +47,11 @@ class PlaybackController {
   int _selectionGeneration = 0;
   final skipService = SkipSegmentsService();
   final _skipSession = SkipSession();
-  SkipContext? _skipContext;
   SkipSegment? _activeSkipSegment;
   Duration? _skipReturnPosition;
   int _skipGeneration = 0;
   int _skipDuration = 0;
-  SkipContext? get skipContext => _skipContext;
+  SkipContext? get skipContext => skipData.value.context;
   bool get canControlPlayback => !_roomConnected || _roomCanControl;
 
   final core = ValueNotifier<PlaybackCoreState>(const PlaybackCoreState());
@@ -60,7 +59,6 @@ class PlaybackController {
     const PlaybackTimelineState(),
   );
   final overlay = ValueNotifier<PlayerOverlayState>(const PlayerOverlayState());
-  final toastRevision = ValueNotifier<int>(0);
   final preferences = ValueNotifier<PlaybackPreferences>(
     const PlaybackPreferences(),
   );
@@ -77,7 +75,6 @@ class PlaybackController {
 
   Timer? _hideControlsTimer;
   Timer? _skipCancelHideTimer;
-  Timer? _jumpPromptTimer;
   Timer? _reversePlaybackTimer;
 
   Future<void>? _initializeFuture;
@@ -88,17 +85,13 @@ class PlaybackController {
 
   double _lastPlaybackRate = 1.0;
   double _longPressStartRate = 1.0;
-  double _reversePlaybackRate = 0.0;
   bool _playingBeforeLongPress = false;
   bool _reverseSeekInFlight = false;
   int _lastTimelineBucket = -1;
   bool _disposed = false;
   bool _roomConnected = false;
   bool _roomCanControl = true;
-  bool _roomRateLocked = false;
   bool _eofReached = false;
-  String? _lastOpenUri;
-  Map<String, String>? _lastOpenHeaders;
 
   String? get currentMediaUri =>
       _player?.state.playlist.medias.firstOrNull?.uri;
@@ -175,21 +168,15 @@ class PlaybackController {
     Duration? start,
   }) async {
     if (_disposed) return;
-    _lastOpenUri = uri;
-    _lastOpenHeaders = httpHeaders;
     try {
       _resetPlaybackState();
       await initialize();
       final player = _player;
       if (_disposed || player == null) return;
       if (currentMediaUri != null) await player.stop();
-      await _configurePlayer(preferences.value.defaultPlaybackSpeed);
+      await _configurePlayer(uri, preferences.value.defaultPlaybackSpeed);
       await player.open(
-        Media(
-          uri,
-          httpHeaders: httpHeaders ?? const <String, String>{},
-          start: start,
-        ),
+        Media(uri, httpHeaders: httpHeaders, start: start),
         play: autoplay,
       );
       await _reapplyHwdec();
@@ -388,15 +375,11 @@ class PlaybackController {
     }
   }
 
-  Future<void> seek(
-    Duration target, {
-    bool fromSlider = false,
-    bool remote = false,
-  }) => _seek(target, fromSlider: fromSlider, remote: remote);
+  Future<void> seek(Duration target, {bool remote = false}) =>
+      _seek(target, remote: remote);
 
   Future<void> _seek(
     Duration target, {
-    bool fromSlider = false,
     bool remote = false,
     bool fromSkip = false,
   }) async {
@@ -414,35 +397,31 @@ class PlaybackController {
       _setSkipState(SkipState.idle);
     }
     final resumeAfterSeek = _eofReached;
-    await _performSeek(target, updatePreview: !fromSlider);
+    final position = await _performSeek(target);
     if (resumeAfterSeek && !previewingSelection) {
       _eofReached = false;
       await play();
     }
-    if (!previewingSelection && !_seekEvents.isClosed) _seekEvents.add(target);
+    if (!previewingSelection && !_seekEvents.isClosed) {
+      _seekEvents.add(position);
+    }
   }
 
-  Future<void> _performSeek(
-    Duration target, {
-    bool updatePreview = true,
-  }) async {
+  Future<Duration> _performSeek(Duration target) async {
     final clamped = target.clamp(Duration.zero, timeline.value.duration);
     final current = timeline.value;
     timeline.value = current.copyWith(
       position: clamped,
-      previewPosition: updatePreview ? clamped : current.previewPosition,
+      previewPosition: current.seeking ? current.previewPosition : clamped,
     );
     _lastTimelineBucket = clamped.inMilliseconds ~/ _timelineIntervalMs;
-    try {
-      await _player?.seek(clamped);
-      _danmakuController?.syncTime(clamped);
-    } catch (error) {
-      debugPrint('播放跳转失败: $error');
-    }
+    await _player?.seek(clamped);
+    _danmakuController?.syncTime(clamped);
+    return clamped;
   }
 
   Future<void> setRate(double rate, {bool roomCorrection = false}) async {
-    if (_disposed || (_roomRateLocked && !roomCorrection)) return;
+    if (_disposed || (_roomConnected && !roomCorrection)) return;
     final normalized = rate > 0 ? rate : 1.0;
     if (core.value.playbackRate == normalized &&
         (_player == null || _player!.state.rate == normalized)) {
@@ -455,7 +434,7 @@ class PlaybackController {
 
   void setDoubleSpeed(bool enabled) {
     if (_disposed ||
-        _roomRateLocked ||
+        _roomConnected ||
         overlay.value.controlsLocked ||
         overlay.value.doubleSpeed == enabled) {
       return;
@@ -471,19 +450,17 @@ class PlaybackController {
         doubleSpeed: true,
         longPressRate: _longPressStartRate,
       );
-      _notifyToastChanged();
       _applyLongPressRate(_longPressStartRate);
       return;
     }
 
     _stopReversePlayback();
     overlay.value = overlay.value.copyWith(doubleSpeed: false);
-    _notifyToastChanged();
     _restorePlaybackAfterLongPress();
   }
 
   void updateDoubleSpeedOffset(double horizontalOffset) {
-    if (_disposed || _roomRateLocked || !overlay.value.doubleSpeed) return;
+    if (_disposed || _roomConnected || !overlay.value.doubleSpeed) return;
     final rate =
         (_longPressStartRate + horizontalOffset / _longPressPixelsPerRate)
             .clamp(-_maxLongPressRate, _maxLongPressRate)
@@ -491,7 +468,6 @@ class PlaybackController {
     final steppedRate = (rate * 10).round() / 10;
     if (overlay.value.longPressRate == steppedRate) return;
     overlay.value = overlay.value.copyWith(longPressRate: steppedRate);
-    _notifyToastChanged();
     _applyLongPressRate(steppedRate);
   }
 
@@ -501,12 +477,10 @@ class PlaybackController {
   }) async {
     _roomConnected = connected;
     _roomCanControl = canControl;
-    _roomRateLocked = connected;
     _updateSkipSuggestion();
     if (!canControlPlayback) {
       cancelSkipSelection(restorePlayback: false);
       userActionCancelSkip();
-      hideJumpPrompt();
     }
     if (connected && core.value.playbackRate != 1.0) {
       await setRate(1.0, roomCorrection: true);
@@ -520,17 +494,20 @@ class PlaybackController {
       await setRate(rate);
       if (_playingBeforeLongPress &&
           overlay.value.doubleSpeed &&
+          overlay.value.longPressRate == rate &&
           !core.value.playing) {
         await play();
       }
       return;
     }
 
-    _stopReversePlayback();
+    if (rate == 0) _stopReversePlayback();
     if (core.value.playing) await pause();
-    if (rate < 0 && !_disposed && overlay.value.doubleSpeed) {
-      _reversePlaybackRate = rate.abs();
-      _reversePlaybackTimer = Timer.periodic(
+    if (rate < 0 &&
+        !_disposed &&
+        overlay.value.doubleSpeed &&
+        overlay.value.longPressRate == rate) {
+      _reversePlaybackTimer ??= Timer.periodic(
         _reverseTickInterval,
         (_) => unawaited(_reversePlaybackTick()),
       );
@@ -548,7 +525,8 @@ class PlaybackController {
     try {
       final rewind = Duration(
         milliseconds:
-            (_reverseTickInterval.inMilliseconds * _reversePlaybackRate)
+            (_reverseTickInterval.inMilliseconds *
+                    overlay.value.longPressRate.abs())
                 .round(),
       );
       await _performSeek(timeline.value.position - rewind);
@@ -560,7 +538,6 @@ class PlaybackController {
   void _stopReversePlayback() {
     _reversePlaybackTimer?.cancel();
     _reversePlaybackTimer = null;
-    _reversePlaybackRate = 0.0;
   }
 
   Future<void> _restorePlaybackAfterLongPress() async {
@@ -574,25 +551,21 @@ class PlaybackController {
 
   void beginSeekPreview() {
     if (timeline.value.seeking) return;
-    timeline.value = timeline.value.copyWith(seeking: true);
-    _notifyToastChanged();
+    timeline.value = timeline.value.copyWith(
+      seeking: true,
+      previewPosition: timeline.value.position,
+    );
   }
 
   void updateSeekPreview(Duration value) {
     if (timeline.value.previewPosition == value) return;
     timeline.value = timeline.value.copyWith(previewPosition: value);
-    _notifyToastChanged();
   }
 
   void endSeekPreview() {
     if (!timeline.value.seeking) return;
     timeline.value = timeline.value.copyWith(seeking: false);
-    _notifyToastChanged();
     setControlsVisible(true);
-  }
-
-  void _notifyToastChanged() {
-    toastRevision.value = toastRevision.value + 1;
   }
 
   void setControlsVisible(bool visible) {
@@ -650,35 +623,6 @@ class PlaybackController {
     if (visible) setControlsVisible(false);
   }
 
-  void showJumpToPositionPrompt(Duration position) {
-    if (!preferences.value.rememberLastPosition || position.inSeconds <= 0) {
-      return;
-    }
-    overlay.value = overlay.value.copyWith(
-      showJumpPrompt: true,
-      jumpPosition: position,
-      jumpPromptText: '上次看到 ${position.toTimeString(includeDays: true)}',
-    );
-    _jumpPromptTimer?.cancel();
-    _jumpPromptTimer = Timer(const Duration(seconds: 15), hideJumpPrompt);
-  }
-
-  void hideJumpPrompt() {
-    if (!overlay.value.showJumpPrompt) return;
-    overlay.value = overlay.value.copyWith(
-      showJumpPrompt: false,
-      jumpPosition: Duration.zero,
-      jumpPromptText: '',
-    );
-    _jumpPromptTimer?.cancel();
-  }
-
-  void performJumpToPosition() {
-    final target = overlay.value.jumpPosition;
-    if (target > Duration.zero) unawaited(seek(target));
-    hideJumpPrompt();
-  }
-
   void setSkipContext(SkipContext? context) {
     cancelSkipSelection(restorePlayback: false);
     _skipGeneration++;
@@ -688,14 +632,15 @@ class PlaybackController {
     _skipReturnPosition = null;
     _skipCancelHideTimer?.cancel();
     _setSkipState(SkipState.idle);
-    _skipContext = context == null ? null : skipService.restoreBinding(context);
-    skipData.value = SkipData(context: _skipContext);
+    skipData.value = SkipData(
+      context: context == null ? null : skipService.restoreBinding(context),
+    );
     _updateSkipSuggestion();
     if (context != null) unawaited(refreshSkipSegments());
   }
 
   void _updateSkipSuggestion() {
-    final context = _skipContext;
+    final context = skipContext;
     final key = context?.suggestionKey;
     final visible =
         context?.episodeNumber == 2 &&
@@ -709,7 +654,7 @@ class PlaybackController {
   }
 
   Future<void> answerSkipSuggestion(bool enable) async {
-    final key = _skipContext?.suggestionKey;
+    final key = skipContext?.suggestionKey;
     if (_disposed || !canControlPlayback || key == null) return;
     overlay.value = overlay.value.copyWith(showSkipSuggestion: false);
     await skipService.rememberSuggestion(key);
@@ -720,7 +665,7 @@ class PlaybackController {
   }
 
   Future<void> refreshSkipSegments({bool force = false}) async {
-    final context = _skipContext;
+    final context = skipContext;
     final duration = timeline.value.duration.inMilliseconds;
     if (_disposed || context == null || duration <= 0) return;
     if (!force && _skipDuration == duration) return;
@@ -730,24 +675,14 @@ class PlaybackController {
     final local = skipService.mergeLocal(
       context,
       duration,
-      skipData.value.editableSegments
-          .where((s) => s.origin != 'local')
-          .toList(),
-    );
-    skipData.value = SkipData(
-      context: context,
-      segments: local,
-      availableSegments: skipService.mergeLocal(
-        context,
-        duration,
-        skipData.value.editableSegments
-            .where((s) => s.origin != 'local')
-            .toList(),
-        includeDisabled: true,
-      ),
+      skipData.value.editableSegments.where((s) => s.origin != 'local'),
       message: skipData.value.message,
     );
-    _skipSession.install(local, timeline.value.position.inMilliseconds);
+    skipData.value = local;
+    _skipSession.install(
+      local.segments,
+      timeline.value.position.inMilliseconds,
+    );
     // Markers and manual ending actions also need data with auto-skip off.
     final data = await skipService.load(context, duration);
     if (_disposed || generation != _skipGeneration) return;
@@ -757,7 +692,8 @@ class PlaybackController {
 
   void _updateSkipState(Duration position) {
     if (skipSelection.value != null) return;
-    if (_skipContext == null || _skipContext!.isFirstEpisode) {
+    final context = skipContext;
+    if (context == null || context.isFirstEpisode) {
       if (overlay.value.skipState == SkipState.waiting) {
         _setSkipState(SkipState.idle);
       }
@@ -766,14 +702,13 @@ class PlaybackController {
     final result = _skipSession.observe(
       position.inMilliseconds,
       duration: timeline.value.duration.inMilliseconds,
-      episodeNumber: _skipContext!.episodeNumber,
+      episodeNumber: context.episodeNumber,
       canAuto:
           preferences.value.enableSkipOpEd &&
           core.value.playing &&
           !core.value.loading &&
           !core.value.buffering &&
           !timeline.value.seeking &&
-          !overlay.value.showJumpPrompt &&
           !overlay.value.showSkipSuggestion &&
           canControlPlayback,
     );
@@ -782,7 +717,6 @@ class PlaybackController {
       return;
     }
     if (result == null ||
-        overlay.value.showJumpPrompt ||
         overlay.value.showSkipSuggestion ||
         !canControlPlayback) {
       _setSkipState(SkipState.idle);
@@ -813,7 +747,7 @@ class PlaybackController {
   void userActionSkip() => _skipCurrentSegment(automatic: false);
 
   bool beginSkipSelection(String type) {
-    final context = _skipContext;
+    final context = skipContext;
     final duration = timeline.value.duration.inMilliseconds;
     if (_disposed ||
         !canControlPlayback ||
@@ -827,7 +761,7 @@ class PlaybackController {
     var range = type == 'op' ? previous?.ranges.op : previous?.ranges.ed;
     if (range == null) {
       final segment = skipData.value.editableSegments
-          .where((s) => s.type == type && s.fits(duration))
+          .where((s) => s.type == type && s.canPreview(duration))
           .firstOrNull;
       if (segment != null) {
         range = (startMs: segment.startMs, endMs: segment.endMs);
@@ -849,7 +783,6 @@ class PlaybackController {
     if (previous == null) {
       _selectionGeneration++;
       _playingBeforeSkipSelection = core.value.playing;
-      hideJumpPrompt();
       _skipCancelHideTimer?.cancel();
       _setSkipState(SkipState.idle);
       overlay.value = overlay.value.copyWith(
@@ -923,12 +856,12 @@ class PlaybackController {
       await pause();
       while (!_disposed &&
           generation == _selectionGeneration &&
-          identical(_skipContext, context) &&
+          identical(skipContext, context) &&
           skipSelection.value != null &&
           _pendingSelectionSeek != null) {
         final target = _pendingSelectionSeek!;
         _pendingSelectionSeek = null;
-        await seek(Duration(milliseconds: target), fromSlider: true);
+        await seek(Duration(milliseconds: target));
       }
     } finally {
       _selectionSeeking = false;
@@ -940,7 +873,7 @@ class PlaybackController {
     }
   }
 
-  Future<bool> finishSkipSelection() async {
+  Future<bool> finishSkipSelection({bool allEpisodes = false}) async {
     final selection = skipSelection.value;
     if (_disposed ||
         selection == null ||
@@ -958,10 +891,14 @@ class PlaybackController {
         }
         if (_disposed ||
             !identical(skipSelection.value, saving) ||
-            !identical(_skipContext, selection.context)) {
+            !identical(skipContext, selection.context)) {
           return false;
         }
-        await skipService.saveLocal(selection.context, selection.segment(type));
+        await skipService.saveLocal(
+          selection.context,
+          selection.segment(type),
+          allEpisodes: allEpisodes && type == selection.type,
+        );
       }
       if (_disposed || !identical(skipSelection.value, saving)) return false;
       // Refresh installs local markers synchronously before the network lookup.
@@ -988,7 +925,7 @@ class PlaybackController {
 
   void previewSkipSegment(SkipSegment segment) {
     if (!canControlPlayback ||
-        !segment.fits(timeline.value.duration.inMilliseconds)) {
+        !segment.canPreview(timeline.value.duration.inMilliseconds)) {
       return;
     }
     _activeSkipSegment = segment;
@@ -998,9 +935,11 @@ class PlaybackController {
   void _skipCurrentSegment({required bool automatic}) {
     final segment = _activeSkipSegment;
     if (segment == null ||
-        _skipContext?.isFirstEpisode == true ||
+        skipContext?.isFirstEpisode == true ||
         !canControlPlayback ||
-        !segment.fits(timeline.value.duration.inMilliseconds)) {
+        !(automatic
+            ? segment.fits(timeline.value.duration.inMilliseconds)
+            : segment.canPreview(timeline.value.duration.inMilliseconds))) {
       return;
     }
     _skipSession.suppress(segment);
@@ -1076,9 +1015,6 @@ class PlaybackController {
         userActionCancelSkip();
       }
     }
-    if (previous.longPressSpeed != next.longPressSpeed) {
-      _notifyToastChanged();
-    }
 
     if (previous.videoEnhancementMode != next.videoEnhancementMode) {
       await _syncVideoEnhancement();
@@ -1102,12 +1038,7 @@ class PlaybackController {
       if (Platform.isAndroid) {
         await _rebuildForRenderer(next.videoRenderer);
       } else {
-        await _syncProperties(
-          buildRendererSwitchProperties(
-            renderer: next.videoRenderer,
-            hwdecMode: next.hwdecMode,
-          ),
-        );
+        await _syncProperties(buildVideoRendererProperties(next.videoRenderer));
       }
     }
     if (persist) {
@@ -1178,75 +1109,30 @@ class PlaybackController {
   }
 
   Future<PlaybackTechnicalInfo> loadTechnicalInfo() async {
-    try {
-      await initialize();
-    } catch (_) {}
     final player = _player;
-    final state = player?.state;
-    final properties =
-        (player != null && state != null && state.duration > Duration.zero)
-        ? await _readNativeProperties(player)
-        : const <String, String>{};
-    final video = state != null ? _activeVideoTrack(state) : null;
-    final audio = state != null ? _activeAudioTrack(state) : null;
-    final params = state?.videoParams;
-    final audioParams = state?.audioParams;
-    final outputRect = videoController.value?.rect.value;
-    final settings = preferences.value;
-    final actual = enhancement.value;
-
+    if (player == null || _disposed) return const PlaybackTechnicalInfo();
+    final properties = await _readNativeProperties(player);
+    if (_disposed || !identical(player, _player)) {
+      return const PlaybackTechnicalInfo();
+    }
+    final state = player.state;
     return PlaybackTechnicalInfo(
-      width: params?.w ?? state?.width ?? video?.w,
-      height: params?.h ?? state?.height ?? video?.h,
-      framesPerSecond:
-          _parseDouble(properties['estimated-vf-fps']) ??
-          _parseDouble(properties['container-fps']) ??
-          video?.fps,
-      videoBitrate: _parseInt(properties['video-bitrate']) ?? video?.bitrate,
-      videoCodec: _firstValue([
-        properties['video-codec-name'],
-        video?.codec,
-        properties['video-codec'],
-      ]),
-      videoDecoder: _firstValue([video?.decoder, properties['video-codec']]),
+      width: state.videoParams.w,
+      height: state.videoParams.h,
+      framesPerSecond: double.tryParse(properties['estimated-vf-fps'] ?? ''),
+      videoBitrate: double.tryParse(properties['video-bitrate'] ?? '')?.round(),
+      videoCodec: properties['video-codec-name'],
       hardwareDecoder: properties['hwdec-current'],
       videoOutput: properties['current-vo'],
-      graphicsApi: properties['gpu-api'],
-      graphicsContext: properties['current-gpu-context'],
-      pixelFormat: _firstValue([params?.pixelformat, params?.hwPixelformat]),
-      colorSpace: _joinedValues([
-        params?.primaries,
-        params?.gamma,
-        params?.colormatrix,
-      ]),
-      containerFormat: properties['file-format'],
-      audioBitrate:
-          _parseInt(properties['audio-bitrate']) ??
-          state?.audioBitrate?.round() ??
-          audio?.bitrate,
-      audioSampleRate: audioParams?.sampleRate ?? audio?.samplerate,
-      audioChannels: audioParams?.channelCount ?? audio?.channelscount,
-      audioCodec: _firstValue([
-        properties['audio-codec-name'],
-        audio?.codec,
-        properties['audio-codec'],
-      ]),
-      audioDecoder: _firstValue([audio?.decoder, properties['audio-codec']]),
-      audioFormat: audioParams?.format,
-      audioChannelLayout: _firstValue([
-        audioParams?.hrChannels,
-        audioParams?.channels,
-        audio?.channels,
-      ]),
-      outputWidth: outputRect?.width.round(),
-      outputHeight: outputRect?.height.round(),
-      frameDropCount: _parseInt(properties['frame-drop-count']) ?? 0,
-      delayedFrameCount: _parseInt(properties['vo-delayed-frame-count']) ?? 0,
-      rendererProfile: settings.videoRenderer,
-      hardwareDecodeMode: settings.hwdecMode,
-      requestedEnhancementMode: actual.requestedMode,
-      appliedEnhancementPipeline: actual.appliedPipeline,
-      enhancementFallbackReason: actual.fallbackReason,
+      audioBitrate: double.tryParse(properties['audio-bitrate'] ?? '')?.round(),
+      audioChannels: state.audioParams.channelCount,
+      audioCodec: properties['audio-codec-name'],
+      frameDropCount: int.tryParse(properties['frame-drop-count'] ?? ''),
+      delayedFrameCount: int.tryParse(
+        properties['vo-delayed-frame-count'] ?? '',
+      ),
+      rendererProfile: preferences.value.videoRenderer,
+      appliedEnhancementPipeline: enhancement.value.appliedPipeline,
     );
   }
 
@@ -1256,7 +1142,7 @@ class PlaybackController {
     return updatePreferences(defaults);
   }
 
-  Future<void> _configurePlayer(double rate) async {
+  Future<void> _configurePlayer(String? mediaUri, double rate) async {
     await _syncProperties(
       buildPlayerProperties(
         hwdecMode: preferences.value.hwdecMode,
@@ -1264,7 +1150,7 @@ class PlaybackController {
         videoEnhancementEnabled:
             preferences.value.videoEnhancementMode != VideoEnhancementMode.off,
         lowMemoryMode: PlaybackSettingsService.getLowMemoryMode(),
-        mediaUri: _lastOpenUri,
+        mediaUri: mediaUri,
       ),
     );
     await _syncVideoEnhancement();
@@ -1287,10 +1173,10 @@ class PlaybackController {
     if (player == null) return;
     final wasPlaying = player.state.playing;
     final position = player.state.position;
-    final mediaUri = currentMediaUri;
+    final media = player.state.playlist.medias.firstOrNull;
     final subtitleTrack = currentSubtitleTrack;
     final rate = core.value.playbackRate;
-    final skipContext = _skipContext;
+    final context = skipContext;
 
     for (final sub in _subscriptions) {
       await sub.cancel();
@@ -1304,17 +1190,16 @@ class PlaybackController {
     _createPlayer(renderer);
     final newPlayer = _player!;
     _resetPlaybackState();
-    await _configurePlayer(rate);
+    await _configurePlayer(media?.uri, rate);
 
-    if (mediaUri != null) {
+    if (media != null) {
       await newPlayer.open(
-        Media(mediaUri, httpHeaders: _lastOpenHeaders ?? const {}),
+        Media(media.uri, httpHeaders: media.httpHeaders, start: position),
         play: wasPlaying,
       );
       if (_disposed) return;
       await _reapplyHwdec();
-      if (position > Duration.zero) await newPlayer.seek(position);
-      setSkipContext(skipContext);
+      setSkipContext(context);
       if (subtitleTrack.id != 'auto' && subtitleTrack.id != 'no') {
         try {
           await newPlayer.setSubtitleTrack(subtitleTrack);
@@ -1363,7 +1248,6 @@ class PlaybackController {
     setSkipContext(null);
     _stopReversePlayback();
     _skipCancelHideTimer?.cancel();
-    _jumpPromptTimer?.cancel();
     enhancement.value = VideoEnhancementState(
       requestedMode: preferences.value.videoEnhancementMode,
     );
@@ -1377,11 +1261,7 @@ class PlaybackController {
     overlay.value = overlay.value.copyWith(
       doubleSpeed: false,
       skipState: SkipState.idle,
-      showJumpPrompt: false,
-      jumpPosition: Duration.zero,
-      jumpPromptText: '',
     );
-    _notifyToastChanged();
     _lastTimelineBucket = -1;
     _eofReached = false;
   }
@@ -1393,7 +1273,6 @@ class PlaybackController {
     _disposed = true;
     _hideControlsTimer?.cancel();
     _skipCancelHideTimer?.cancel();
-    _jumpPromptTimer?.cancel();
     _reversePlaybackTimer?.cancel();
     for (final subscription in _subscriptions) {
       await subscription.cancel();
@@ -1416,7 +1295,6 @@ class PlaybackController {
     core.dispose();
     timeline.dispose();
     overlay.dispose();
-    toastRevision.dispose();
     skipData.dispose();
     skipSelection.dispose();
     preferences.dispose();
@@ -1495,16 +1373,6 @@ bool isFatalPlaybackError(String error) {
   final message = error.toLowerCase();
   return message.contains('could not open codec') ||
       message.contains('failed to open codec');
-}
-
-Map<String, String> buildRendererSwitchProperties({
-  required String renderer,
-  required String hwdecMode,
-  bool? android,
-}) {
-  final isAndroid = android ?? Platform.isAndroid;
-  if (isAndroid) return const <String, String>{};
-  return buildVideoRendererProperties(renderer, android: false);
 }
 
 Map<String, String> buildVideoRendererProperties(
@@ -1620,16 +1488,10 @@ String colorToMpv(Color color) {
 
 const _technicalPropertyNames = <String>[
   'current-vo',
-  'gpu-api',
-  'current-gpu-context',
   'hwdec-current',
-  'video-codec',
   'video-codec-name',
-  'file-format',
   'estimated-vf-fps',
-  'container-fps',
   'video-bitrate',
-  'audio-codec',
   'audio-codec-name',
   'audio-bitrate',
   'frame-drop-count',
@@ -1642,71 +1504,8 @@ Future<Map<String, String>> _readNativeProperties(Player player) async {
 
   final result = <String, String>{};
   for (final name in _technicalPropertyNames) {
-    try {
-      final value = (await platform.getProperty(name)).trim();
-      if (value.isNotEmpty && value.toLowerCase() != 'n/a') {
-        result[name] = value;
-      }
-    } catch (_) {}
+    final value = await platform.getProperty(name);
+    if (value.isNotEmpty) result[name] = value;
   }
   return result;
 }
-
-VideoTrack? _activeVideoTrack(PlayerState state) {
-  final selected = state.track.video;
-  if (selected.id != 'auto' && selected.id != 'no') {
-    for (final track in state.tracks.video) {
-      if (track.id == selected.id) return track;
-    }
-    return selected;
-  }
-  VideoTrack? fallback;
-  for (final track in state.tracks.video) {
-    if (track.id == 'auto' || track.id == 'no') continue;
-    if (track.isDefault == true) return track;
-    fallback ??= track;
-  }
-  return fallback;
-}
-
-AudioTrack? _activeAudioTrack(PlayerState state) {
-  final selected = state.track.audio;
-  if (selected.id != 'auto' && selected.id != 'no') {
-    for (final track in state.tracks.audio) {
-      if (track.id == selected.id) return track;
-    }
-    return selected;
-  }
-  AudioTrack? fallback;
-  for (final track in state.tracks.audio) {
-    if (track.id == 'auto' || track.id == 'no') continue;
-    if (track.isDefault == true) return track;
-    fallback ??= track;
-  }
-  return fallback;
-}
-
-String? _firstValue(Iterable<String?> values) {
-  for (final value in values) {
-    if (value != null && value.trim().isNotEmpty) return value.trim();
-  }
-  return null;
-}
-
-String? _joinedValues(Iterable<String?> values) {
-  final result = <String>[];
-  for (final value in values) {
-    final normalized = value?.trim();
-    if (normalized != null &&
-        normalized.isNotEmpty &&
-        !result.contains(normalized)) {
-      result.add(normalized);
-    }
-  }
-  return result.isEmpty ? null : result.join(' / ');
-}
-
-double? _parseDouble(String? value) =>
-    value == null ? null : double.tryParse(value);
-
-int? _parseInt(String? value) => _parseDouble(value)?.round();

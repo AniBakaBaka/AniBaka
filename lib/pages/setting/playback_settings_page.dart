@@ -168,9 +168,6 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                     SettingsTile(
                       title: '硬件解码',
                       value:
-                          PlaybackSettingsService
-                              .hwdecModeLabelsForPlatform[_preferences
-                              .hwdecMode] ??
                           PlaybackSettingsService.hwdecModeLabels[_preferences
                               .hwdecMode] ??
                           '自动',
@@ -182,8 +179,7 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                         options:
                             PlaybackSettingsService.hwdecModeOptionsForPlatform,
                         labelOf: (mode) =>
-                            PlaybackSettingsService
-                                .hwdecModeLabelsForPlatform[mode] ??
+                            PlaybackSettingsService.hwdecModeLabels[mode] ??
                             mode,
                         descriptionOf: (mode) => _hwdecDescriptions[mode] ?? '',
                         onSelected: (mode) {

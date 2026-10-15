@@ -245,26 +245,25 @@ class HtmlParser {
 
   static List<Episode> _extractEpisodes(Element container, String baseUrl) {
     final links = container.querySelectorAll('a');
-    if (links.isEmpty) return [];
-
-    final validLinks = <Element>[];
     final hrefs = <String>[];
+    var count = 0;
     for (final link in links) {
       final href = (link.attributes['href'] ?? '').trim();
-      if (href.isEmpty || href.contains('javascript') || href.startsWith('#')) {
-        continue;
+      if (href.isNotEmpty &&
+          !href.contains('javascript') &&
+          !href.startsWith('#')) {
+        links[count++] = link;
+        hrefs.add(href);
       }
-      validLinks.add(link);
-      hrefs.add(href);
     }
-
-    if (validLinks.isEmpty) return [];
-
+    links.length = count;
+    if (links.isEmpty) return [];
     final episodeNumbers = _resolveEpisodeNumbers(hrefs);
 
     final episodes = <Episode>[];
     final seen = <String>{};
-    for (var i = 0; i < validLinks.length; i++) {
+    for (var i = 0; i < links.length; i++) {
+      final link = links[i];
       final episodeId = VideoUrlExtractor.toAbsolute(hrefs[i], baseUrl);
       if (!seen.add(episodeId)) continue;
 
@@ -272,7 +271,7 @@ class HtmlParser {
       final index = (number != null && number > 0)
           ? number - 1
           : episodes.length;
-      final name = validLinks[i].text.trim().replaceAll(_wsRegex, ' ');
+      final name = link.text.trim().replaceAll(_wsRegex, ' ');
       episodes.add(
         Episode(episodeId, index, name.isEmpty ? 'Episode ${index + 1}' : name),
       );
@@ -333,17 +332,13 @@ class HtmlParser {
 
   static List<String> _findTabLabels(Document doc, List<String> selectors) {
     for (final selector in selectors) {
-      try {
-        final elements = doc.querySelectorAll(selector);
-        if (elements.isNotEmpty) {
-          final labels = <String>[];
-          for (final element in elements) {
-            final label = element.text.trim();
-            if (label.isNotEmpty) labels.add(label);
-          }
-          if (labels.isNotEmpty) return labels;
-        }
-      } catch (_) {}
+      final elements = doc.querySelectorAll(selector);
+      final labels = <String>[];
+      for (final element in elements) {
+        final label = element.text.trim();
+        if (label.isNotEmpty) labels.add(label);
+      }
+      if (labels.isNotEmpty) return labels;
     }
     return [];
   }

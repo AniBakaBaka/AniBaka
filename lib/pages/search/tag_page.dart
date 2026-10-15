@@ -1,3 +1,4 @@
+import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/models/playback_request.dart';
 import 'package:baka/api/bgm.dart';
@@ -29,8 +30,8 @@ class _TagPageState extends State<TagPage> {
       List<Map> posts = const [];
       var received = 0;
       if (widget.tag.isNotEmpty) {
-        final subjects = await searchBgmByTag(
-          [widget.tag],
+        final subjects = await searchBgm(
+          tags: [widget.tag],
           limit: pageSize,
           offset: (page - 1) * pageSize,
         );
@@ -101,26 +102,31 @@ class _TagPageState extends State<TagPage> {
       body: RefreshWrapper(
         onRefresh: _refresh,
         onLoadMore: _loadMore,
-        child: ValueListenableBuilder<int>(
-          valueListenable: _itemsRevision,
-          builder: (context, _, _) => GridView.builder(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(10),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              mainAxisSpacing: 10,
-              crossAxisSpacing: 10,
-              childAspectRatio: 0.58,
-            ),
-            itemCount: _items.length,
-            itemBuilder: (_, index) {
-              final data = _items[index];
-              return PostCard(
-                data,
-                onTap: widget.tag.isEmpty ? null : () => _openBgmSubject(data),
-              );
-            },
-          ),
+        child: ListenableBuilder(
+          listenable: Listenable.merge([_itemsRevision, contentFilter]),
+          builder: (context, _) {
+            final items = contentFilter.visibleItems(_items);
+            return GridView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(10),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                childAspectRatio: 0.58,
+              ),
+              itemCount: items.length,
+              itemBuilder: (_, index) {
+                final data = items[index];
+                return PostCard(
+                  data,
+                  onTap: widget.tag.isEmpty
+                      ? null
+                      : () => _openBgmSubject(data),
+                );
+              },
+            );
+          },
         ),
       ),
     );

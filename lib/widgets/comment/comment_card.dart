@@ -224,7 +224,7 @@ class CommentList extends StatefulWidget {
   });
 
   final int pid;
-  final List? comments;
+  final List<Map>? comments;
   final int? size;
   final Function(String, String?, String)? onTapLink;
   final bool autoLoad;
@@ -246,12 +246,12 @@ class CommentListState extends State<CommentList> {
     r'|\b(\d{1,2}:\d{2}(?::\d{2})?)\b',
   );
 
-  List? _internalComments;
+  List<Map>? _internalComments;
   int _requestSerial = 0;
   late MarkdownStyleSheet _markdownStyle;
   ThemeData? _markdownTheme;
 
-  List? get _effectiveComments => widget.comments ?? _internalComments;
+  List<Map>? get _effectiveComments => widget.comments ?? _internalComments;
 
   @override
   void initState() {
@@ -307,10 +307,10 @@ class CommentListState extends State<CommentList> {
 
   Future<void> _loadComments() async {
     final requestSerial = ++_requestSerial;
-    List result;
+    List<Map> result;
 
     try {
-      result = await getComments(widget.pid, widget.size ?? 80, '');
+      result = await getComments(widget.pid, widget.size ?? 80);
     } catch (error) {
       debugPrint('获取评论失败: $error');
       result = [];
@@ -393,8 +393,8 @@ class CommentListState extends State<CommentList> {
     }
 
     Widget buildComment(int index) => _CommentCard(
-      key: ValueKey(comments[index]['id'] ?? index),
-      comment: comments[index] as Map,
+      key: ValueKey(comments[index]['id']),
+      comment: comments[index],
       markdownStyle: _markdownStyle,
       onTapLink: widget.onTapLink,
       onReply: sendComment,

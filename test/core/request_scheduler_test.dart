@@ -26,6 +26,19 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('scheduling', () {
+    test('available host bypasses requests blocked by another host', () async {
+      final scheduler = RequestScheduler(maxConcurrent: 2, maxPerHost: 1);
+      await scheduler.acquire('a');
+      var started = false;
+      final blocked = scheduler.run(() async => started = true, host: 'a');
+      await scheduler.acquire('b');
+      expect(started, isFalse);
+      scheduler.release('b');
+      scheduler.release('a');
+      await blocked;
+      expect(started, isTrue);
+    });
+
     test(
       'eligible hosts preserve priority and FIFO across saturated hosts',
       () async {
@@ -103,6 +116,28 @@ void main() {
       expect(await scheduler.run(() async => 42, host: 'b'), 42);
     });
   });
+
+  test(
+    'cancellation allows listeners to detach or register during dispatch',
+    () {
+      final token = RequestCancelToken();
+      final called = <String>[];
+      late void Function() detachSecond;
+      token.onCancel(() {
+        called.add('first');
+        detachSecond();
+        token.onCancel(() => called.add('late'));
+        token.cancel();
+      });
+      detachSecond = token.onCancel(() => called.add('second'));
+      final detachUnused = token.onCancel(() => called.add('detached'));
+      detachUnused();
+      token.cancel();
+      detachSecond();
+      token.cancel();
+      expect(called, ['first', 'late', 'second']);
+    },
+  );
 
   group('Dio cancellation', () {
     test(

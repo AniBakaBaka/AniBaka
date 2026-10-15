@@ -7,6 +7,7 @@ import 'package:get/get.dart' hide ContextExtensionss;
 import 'package:baka/instance.dart';
 import 'package:baka/pages/mine/mine_profile.dart';
 import 'package:baka/core/app_storage.dart';
+import 'package:baka/core/content_filter.dart';
 import 'package:baka/app/navigation.dart';
 import 'package:baka/app/update_presenter.dart';
 import 'package:baka/widgets/platform/tv/tv_focusable.dart';
@@ -14,6 +15,7 @@ import 'package:baka/widgets/platform/tv/tv_theme_util.dart';
 import 'package:baka/widgets/platform/tv/tv_log_export_dialog.dart';
 import 'package:baka/widgets/dialog/update_dialog.dart';
 import 'package:baka/utils/toast_utils.dart';
+import 'package:baka/utils/format_utils.dart';
 
 class TvSettingsPage extends StatefulWidget {
   const TvSettingsPage({super.key});
@@ -40,7 +42,7 @@ class _TvSettingsPageState extends State<TvSettingsPage> {
     final size = await AppStorage.getCacheSize();
     if (mounted) {
       setState(() {
-        _cacheSize = AppStorage.formatSize(size);
+        _cacheSize = formatBytes(size);
       });
     }
   }
@@ -211,6 +213,18 @@ class _TvSettingsPageState extends State<TvSettingsPage> {
     return ListView(
       physics: const BouncingScrollPhysics(),
       children: [
+        ValueListenableBuilder<bool>(
+          valueListenable: contentFilter,
+          builder: (context, enabled, _) => _buildSettingCard(
+            icon: enabled
+                ? Icons.visibility_off_outlined
+                : Icons.visibility_outlined,
+            title: '隐藏 NSFW 内容',
+            subtitle: enabled ? '已开启 · 隐藏被数据源标记为 NSFW 的内容' : '已关闭 · 点击开启',
+            onPressed: () => contentFilter.setEnabled(!enabled, Instances.sp),
+          ),
+        ),
+        const SizedBox(height: 16),
         ListenableBuilder(
           listenable: ruleRepository,
           builder: (context, _) => _buildSettingCard(

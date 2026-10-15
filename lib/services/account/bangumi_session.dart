@@ -115,6 +115,7 @@ class BangumiSession {
       final user = await api.getMe(
         token.accessToken,
         abortTrigger: abort.future,
+        retryForOAuth: true,
       );
       ensureCurrent(revision);
       if (user.username.isEmpty) {
@@ -122,6 +123,9 @@ class BangumiSession {
       }
       await _saveOAuthToken(token);
       await preferences.setString(accountKey, jsonEncode(user.toJson()));
+      // Binding is already saved. A lost acknowledgement (or an older server
+      // without this endpoint) must not undo it; the server also expires state.
+      unawaited(oauth.acknowledge(state).catchError((Object _) {}));
       return user;
     } finally {
       if (identical(_oauthAbort, abort)) {

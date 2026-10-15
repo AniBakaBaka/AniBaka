@@ -3,11 +3,10 @@ import 'package:baka/instance.dart';
 
 import 'package:baka/app/navigation.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:baka/widgets/anime/post_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderSliver;
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher_string.dart';
 
 /// 首页横幅的隐藏偏好。隐藏 14 天后自动恢复，移动端与桌面端共用。
 abstract final class BannerVisibility {
@@ -18,7 +17,8 @@ abstract final class BannerVisibility {
 
   static bool get isHidden {
     final hiddenUntil = _hiddenUntil;
-    if (hiddenUntil != null && hiddenUntil.isAfter(DateTime.now())) {
+    if (hiddenUntil == null) return false;
+    if (hiddenUntil.isAfter(DateTime.now())) {
       return true;
     }
     Instances.sp.remove(_hiddenUntilKey);
@@ -53,14 +53,9 @@ abstract final class BannerVisibility {
   }
 }
 
-/// 打开横幅条目：外部链接交给系统浏览器，其余进入番剧详情。
+/// 首页控制器提供的 Bangumi 条目，移动端与桌面端共用。
 void openBannerItem(BuildContext context, Map data) {
   HapticFeedback.lightImpact();
-  final link = data['videos']?.toString() ?? '';
-  if (link.isNotEmpty && !link.contains(r'$')) {
-    unawaited(launchUrlString(link, mode: LaunchMode.externalApplication));
-    return;
-  }
   NavigationService.toDetail(context, data);
 }
 
@@ -74,19 +69,13 @@ class SwiperBanner extends StatefulWidget {
 }
 
 class _SwiperBannerState extends State<SwiperBanner> {
-  late final CarouselController _carouselController = CarouselController();
+  CarouselController _carouselController = CarouselController();
   final ValueNotifier<int> _currentIndexNotifier = ValueNotifier<int>(0);
   Timer? _timer;
   bool _showSwiper = !BannerVisibility.isHidden;
   bool _isInteracting = false;
   bool _reduceVisualEffects = false;
   bool _tickerEnabled = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _restartAutoPlay();
-  }
 
   @override
   void didUpdateWidget(covariant SwiperBanner oldWidget) {
@@ -96,30 +85,15 @@ class _SwiperBannerState extends State<SwiperBanner> {
     final index = widget.swiperData.isEmpty
         ? 0
         : _currentIndexNotifier.value.clamp(0, widget.swiperData.length - 1);
-    _currentIndexNotifier.value = index;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted &&
-          _carouselController.hasClients &&
-          widget.swiperData.isNotEmpty) {
-        unawaited(
-          _carouselController.animateToItem(index, duration: Duration.zero),
-        );
-      }
-    });
+    _resetCarousel(index);
     _restartAutoPlay();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final reduceVisualEffects = context.reduceMotion;
-    final tickerEnabled = TickerMode.valuesOf(context).enabled;
-    if (_reduceVisualEffects == reduceVisualEffects &&
-        _tickerEnabled == tickerEnabled) {
-      return;
-    }
-    _reduceVisualEffects = reduceVisualEffects;
-    _tickerEnabled = tickerEnabled;
+    _reduceVisualEffects = context.reduceMotion;
+    _tickerEnabled = TickerMode.valuesOf(context).enabled;
     _restartAutoPlay();
   }
 
@@ -141,7 +115,11 @@ class _SwiperBannerState extends State<SwiperBanner> {
     }
 
     _timer = Timer.periodic(const Duration(seconds: 6), (_) {
-      if (_isInteracting || !_carouselController.hasClients) return;
+      if (_isInteracting ||
+          !_carouselController.hasClients ||
+          _carouselController.position.isScrollingNotifier.value) {
+        return;
+      }
       // 外层首页滚动或横幅离屏时，不再发起轮播布局和图片切换。
       // 只在定时器触发时读取现有状态，避免为每一帧增加滚动监听。
       final pageScroll = Scrollable.maybeOf(context, axis: Axis.vertical);
@@ -158,10 +136,11 @@ class _SwiperBannerState extends State<SwiperBanner> {
     });
   }
 
-  void _toggleSwiper() {
-    setState(() => _showSwiper = !_showSwiper);
-    BannerVisibility.setHidden(!_showSwiper);
-    _restartAutoPlay();
+  void _resetCarousel(int index) {
+    _carouselController.dispose();
+    _carouselController = CarouselController(initialItem: index);
+    _currentIndexNotifier.value = index;
+    _isInteracting = false;
   }
 
   Future<void> _showSettingsDialog() async {
@@ -169,11 +148,14 @@ class _SwiperBannerState extends State<SwiperBanner> {
       context,
       hidden: !_showSwiper,
     );
-    if (confirmed && mounted) _toggleSwiper();
+    if (!confirmed || !mounted) return;
+    setState(() {
+      _showSwiper = !_showSwiper;
+      _resetCarousel(_currentIndexNotifier.value);
+    });
+    BannerVisibility.setHidden(!_showSwiper);
+    _restartAutoPlay();
   }
-
-  void _openItem(int index) =>
-      openBannerItem(context, widget.swiperData[index]);
 
   @override
   Widget build(BuildContext context) {
@@ -229,6 +211,7 @@ class _SwiperBannerState extends State<SwiperBanner> {
             onPointerUp: (_) => _isInteracting = false,
             onPointerCancel: (_) => _isInteracting = false,
             child: CarouselView.builder(
+              key: ObjectKey(_carouselController),
               controller: _carouselController,
               itemExtent: double.infinity,
               itemSnapping: true,
@@ -238,26 +221,12 @@ class _SwiperBannerState extends State<SwiperBanner> {
                 _currentIndexNotifier.value = index;
               },
               itemBuilder: (_, index) => GestureDetector(
-                onTap: () => _openItem(index),
-                child: CachedNetworkImage(
-                  imageUrl:
-                      widget.swiperData[index]['bannerImageUrl'] as String,
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                  height: double.infinity,
-                  memCacheWidth: 1080,
-                  useOldImageOnUrlChange: true,
-                  fadeInDuration: Duration.zero,
-                  fadeOutDuration: Duration.zero,
-                  placeholder: (_, _) =>
-                      const ColoredBox(color: Color(0xFF121212)),
-                  errorWidget: (_, _, _) => const ColoredBox(
-                    color: Color(0xFF121212),
-                    child: Icon(
-                      Icons.broken_image_outlined,
-                      color: Colors.white24,
-                    ),
-                  ),
+                onTap: () => openBannerItem(context, widget.swiperData[index]),
+                child: buildNetworkImage(
+                  widget.swiperData[index]['bannerImageUrl'] as String,
+                  double.infinity,
+                  double.infinity,
+                  cacheWidth: 1080,
                 ),
               ),
             ),
@@ -313,17 +282,16 @@ class _SwiperBannerState extends State<SwiperBanner> {
                             );
                           },
                           child: Text(
-                            _titleAt(currentIndex),
+                            widget.swiperData[currentIndex]['title'] as String,
                             key: ValueKey<int>(currentIndex),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 22, // 增大字号，更具视觉冲击力
+                              fontSize: 22,
                               height: 1.2,
                               fontWeight: FontWeight.w900,
-                              fontStyle:
-                                  FontStyle.italic, // 倾斜字体带来强烈的动感（符合动漫应用调性）
+                              fontStyle: FontStyle.italic,
                               letterSpacing: 0.5,
                               shadows: [
                                 Shadow(
@@ -380,10 +348,5 @@ class _SwiperBannerState extends State<SwiperBanner> {
         ],
       ),
     );
-  }
-
-  String _titleAt(int index) {
-    if (index < 0 || index >= widget.swiperData.length) return '';
-    return widget.swiperData[index]['title'] as String;
   }
 }

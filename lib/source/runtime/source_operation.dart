@@ -28,7 +28,9 @@ class SourceOperation {
   void cancel() => token.cancel();
   void close() {
     _timer?.cancel();
+    _timer = null;
     _detachParent?.call();
+    _detachParent = null;
   }
 
   Future<T> run<T>(Future<T> Function() action) async {

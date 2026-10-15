@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
 
-const double kCardRadius = 10.0;
-const double kTagRadius = 4.0;
-
-Widget buildTag(String text, {Color? backgroundColor}) {
+Widget _buildTag(String text, {Color? backgroundColor}) {
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2.5),
     decoration: BoxDecoration(
       color: backgroundColor ?? Colors.black54,
-      borderRadius: BorderRadius.circular(kTagRadius),
+      borderRadius: BorderRadius.circular(4),
     ),
     child: Text(
       text,
@@ -45,14 +42,11 @@ class WindowsCard extends StatelessWidget {
     return AspectRatio(
       aspectRatio: 2 / 3,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(kCardRadius),
+        borderRadius: BorderRadius.circular(10),
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Hero(
-              tag: heroTag,
-              child: image,
-            ),
+            Hero(tag: heroTag, child: image),
             Positioned(
               left: 0,
               right: 0,
@@ -102,17 +96,15 @@ class WindowsCard extends StatelessWidget {
               Positioned(
                 right: 6,
                 top: 6,
-                child: buildTag(
+                child: _buildTag(
                   scoreText!,
-                  backgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.9),
+                  backgroundColor: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.9),
                 ),
               ),
             if (tagText.isNotEmpty)
-              Positioned(
-                left: 6,
-                top: 6,
-                child: buildTag(tagText),
-              ),
+              Positioned(left: 6, top: 6, child: _buildTag(tagText)),
           ],
         ),
       ),

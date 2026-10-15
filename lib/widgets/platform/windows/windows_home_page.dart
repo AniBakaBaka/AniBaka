@@ -1,13 +1,12 @@
-import 'package:baka/core/account_session.dart';
+import 'package:baka/core/content_filter.dart';
+import 'package:baka/models/anime_filter.dart';
 import 'package:baka/pages/home/home_controller.dart';
-import 'package:baka/pages/mine/mine_profile.dart';
 import 'package:baka/widgets/anime/post_card.dart';
 import 'package:baka/widgets/common/refresh.dart';
 import 'package:baka/widgets/platform/windows/windows_home_widgets.dart';
 import 'package:baka/widgets/search/tag_filter_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:get/get.dart' hide ContextExtensionss;
 
 const _weekLabels = <String>['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 const _rankLabels = <String>['总榜', '季榜', '月榜', '日榜'];
@@ -35,7 +34,12 @@ class WindowsHomePage extends StatelessWidget {
   final Future<void> Function() onRefresh;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: contentFilter,
+    builder: (context, _) => _buildContent(context),
+  );
+
+  Widget _buildContent(BuildContext context) {
     final textHeight = windowsTileTextHeight(context);
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -43,7 +47,7 @@ class WindowsHomePage extends StatelessWidget {
         builder: (context, constraints) => RefreshWrapper(
           onLoadMore: svc.loadMore,
           onRefresh: onRefresh,
-          loadMoreResetListenable: svc.tag,
+          loadMoreResetListenable: svc.filter,
           showInitialIndicator: false,
           child: CustomScrollView(
             scrollCacheExtent: const ScrollCacheExtent.pixels(800),
@@ -64,7 +68,8 @@ class WindowsHomePage extends StatelessWidget {
   Widget _buildBanner() {
     return ValueListenableBuilder<HomeItems>(
       valueListenable: svc.swipers,
-      builder: (context, swipers, _) {
+      builder: (context, rawSwipers, _) {
+        final swipers = contentFilter.visibleItems(rawSwipers);
         if (swipers.isEmpty) {
           return const SliverToBoxAdapter(child: SizedBox.shrink());
         }
@@ -94,7 +99,7 @@ class WindowsHomePage extends StatelessWidget {
             child: ValueListenableBuilder<int>(
               valueListenable: svc.week,
               builder: (context, week, _) {
-                final items = schedule[week];
+                final items = contentFilter.visibleItems(schedule[week]);
                 final today = DateTime.now().weekday - 1;
                 final dayName = week == today ? '今天' : _weekLabels[week];
                 return WindowsShelf(
@@ -147,7 +152,7 @@ class WindowsHomePage extends StatelessWidget {
               ValueListenableBuilder<List<HomeItems>>(
                 valueListenable: svc.ranks,
                 builder: (context, ranks, _) {
-                  final items = ranks[index];
+                  final items = contentFilter.visibleItems(ranks[index]);
                   return WindowsShelf(
                     title: '热门排行',
                     subtitle: _rankHints[index],
@@ -161,9 +166,8 @@ class WindowsHomePage extends StatelessWidget {
                         onChanged: svc.selectRank,
                       ),
                     ],
-                    placeholder: WindowsRankSkeleton(
+                    placeholder: const WindowsRankSkeleton(
                       posterWidth: _rankPosterWidth,
-                      textHeight: textHeight,
                     ),
                     itemCount: items.length,
                     itemBuilder: (context, rankIndex) {
@@ -188,8 +192,8 @@ class WindowsHomePage extends StatelessWidget {
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(_gutter, _sectionGap + 4, _gutter, 18),
       sliver: SliverToBoxAdapter(
-        child: ValueListenableBuilder<String>(
-          valueListenable: svc.tag,
+        child: ValueListenableBuilder<AnimeFilter>(
+          valueListenable: svc.filter,
           builder: (context, selected, _) => Row(
             children: [
               Text(
@@ -201,16 +205,16 @@ class WindowsHomePage extends StatelessWidget {
               const SizedBox(width: 20),
               Expanded(
                 child: _TagChips(
-                  tags: svc.displayTags,
+                  filters: svc.displayFilters,
                   selected: selected,
-                  onSelected: svc.selectTag,
+                  onSelected: svc.selectFilter,
                 ),
               ),
               const SizedBox(width: 12),
               _MoreTagsButton(
                 onPressed: () async {
-                  final tag = await TagFilterSheet.show(context, selected);
-                  if (tag != null && tag.isNotEmpty) await svc.selectTag(tag);
+                  final filter = await TagFilterSheet.show(context, selected);
+                  if (filter != null) await svc.selectFilter(filter);
                 },
               ),
             ],
@@ -233,141 +237,32 @@ class WindowsHomePage extends StatelessWidget {
     final tileWidth = (available - _feedColumnGap * (columns - 1)) / columns;
     return ValueListenableBuilder<HomeItems>(
       valueListenable: svc.feed,
-      builder: (context, items, _) => SliverPadding(
-        padding: const EdgeInsets.symmetric(horizontal: _gutter),
-        sliver: SliverGrid(
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: columns,
-            crossAxisSpacing: _feedColumnGap,
-            mainAxisSpacing: _feedRowGap,
-            mainAxisExtent: tileWidth * 1.5 + textHeight,
-          ),
-          delegate: SliverChildBuilderDelegate(
-            (context, index) {
-              final item = items[index];
-              return WindowsPosterTile(
-                key: ValueKey('feed_${item['bgmId'] ?? item['id'] ?? index}'),
-                data: item,
-                heroTag: coverHeroTag(item),
-              );
-            },
-            childCount: items.length,
-            addAutomaticKeepAlives: false,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 页面顶部的问候语、日期与今日更新数量，右侧提供刷新入口。
-class _Greeting extends StatefulWidget {
-  final HomeController svc;
-
-  const _Greeting({required this.svc});
-
-  @override
-  State<_Greeting> createState() => _GreetingState();
-}
-
-class _GreetingState extends State<_Greeting> {
-  bool _refreshing = false;
-
-  static String _salutation(int hour) {
-    if (hour < 5) return '夜深了';
-    if (hour < 11) return '早上好';
-    if (hour < 13) return '中午好';
-    if (hour < 18) return '下午好';
-    return '晚上好';
-  }
-
-  /// 通过外层 RefreshIndicator 触发刷新，保持与下拉刷新相同的分页重置逻辑。
-  Future<void> _refresh() async {
-    final indicator = context.findAncestorStateOfType<RefreshIndicatorState>();
-    if (indicator == null || _refreshing) return;
-    setState(() => _refreshing = true);
-    try {
-      await indicator.show();
-    } finally {
-      if (mounted) setState(() => _refreshing = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final now = DateTime.now();
-    final date = '${now.month}月${now.day}日 · 星期${'一二三四五六日'[now.weekday - 1]}';
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(_gutter, 16, _gutter, 20),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Obx(() {
-                  final session = Get.find<AccountSession>();
-                  session.user.value;
-                  final salutation = _salutation(now.hour);
-                  return Text(
-                    session.hasIdentity
-                        ? '$salutation，${session.displayName}'
-                        : salutation,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 26,
-                      height: 1.25,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.3,
-                      color: colors.onSurface,
-                    ),
-                  );
-                }),
-                const SizedBox(height: 4),
-                ValueListenableBuilder<List<HomeItems>>(
-                  valueListenable: widget.svc.schedule,
-                  builder: (context, schedule, _) {
-                    final count = schedule[now.weekday - 1].length;
-                    return Text(
-                      count > 0 ? '$date · 今天有 $count 部番剧更新' : date,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: colors.onSurfaceVariant,
-                      ),
-                    );
-                  },
-                ),
-              ],
+      builder: (context, rawItems, _) {
+        final items = contentFilter.visibleItems(rawItems);
+        return SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: _gutter),
+          sliver: SliverGrid(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              crossAxisSpacing: _feedColumnGap,
+              mainAxisSpacing: _feedRowGap,
+              mainAxisExtent: tileWidth * 1.5 + textHeight,
+            ),
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                final item = items[index];
+                return WindowsPosterTile(
+                  key: ValueKey('feed_${item['bgmId'] ?? item['id'] ?? index}'),
+                  data: item,
+                  heroTag: coverHeroTag(item),
+                );
+              },
+              childCount: items.length,
+              addAutomaticKeepAlives: false,
             ),
           ),
-          const SizedBox(width: 16),
-          OutlinedButton.icon(
-            onPressed: _refreshing ? null : _refresh,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: colors.onSurface,
-              side: BorderSide(
-                color: colors.outlineVariant.withValues(alpha: 0.8),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-            icon: _refreshing
-                ? const SizedBox.square(
-                    dimension: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.refresh_rounded, size: 18),
-            label: const Text('刷新'),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -407,12 +302,12 @@ class _EmptyShelf extends StatelessWidget {
 }
 
 class _TagChips extends StatelessWidget {
-  final List<String> tags;
-  final String selected;
-  final ValueChanged<String> onSelected;
+  final Iterable<AnimeFilter> filters;
+  final AnimeFilter selected;
+  final ValueChanged<AnimeFilter> onSelected;
 
   const _TagChips({
-    required this.tags,
+    required this.filters,
     required this.selected,
     required this.onSelected,
   });
@@ -428,11 +323,11 @@ class _TagChips extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            for (final tag in tags)
+            for (final filter in filters)
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: Material(
-                  color: tag == selected
+                  color: filter == selected
                       ? colors.primary
                       : colors.onSurface.withValues(
                           alpha: isDark ? 0.08 : 0.05,
@@ -440,7 +335,7 @@ class _TagChips extends StatelessWidget {
                   borderRadius: BorderRadius.circular(20),
                   clipBehavior: Clip.antiAlias,
                   child: InkWell(
-                    onTap: () => onSelected(tag),
+                    onTap: () => onSelected(filter),
                     splashFactory: NoSplash.splashFactory,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
@@ -448,14 +343,14 @@ class _TagChips extends StatelessWidget {
                         vertical: 7,
                       ),
                       child: Text(
-                        tag,
+                        filter.label,
                         style: TextStyle(
                           fontSize: 13,
                           height: 1.3,
-                          fontWeight: tag == selected
+                          fontWeight: filter == selected
                               ? FontWeight.w700
                               : FontWeight.w500,
-                          color: tag == selected
+                          color: filter == selected
                               ? colors.onPrimary
                               : colors.onSurface.withValues(alpha: 0.8),
                         ),

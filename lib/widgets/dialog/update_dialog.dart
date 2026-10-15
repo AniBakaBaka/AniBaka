@@ -12,33 +12,27 @@ import 'package:url_launcher/url_launcher_string.dart';
 
 import 'package:baka/models/update_info.dart';
 
-Widget _buildRichText(BuildContext context, String text) {
-  if (text.isEmpty) return const SizedBox.shrink();
+final _imagePattern = RegExp(r'!\[.*?\]\((.*?)\)');
 
-  final RegExp exp = RegExp(r'!\[.*?\]\((.*?)\)');
-  final matches = exp.allMatches(text);
+Widget _buildRichText(BuildContext context, String text) {
   final textStyle = TextStyle(
     fontSize: 14,
     height: 1.6,
     color: Theme.of(context).colorScheme.onSurfaceVariant,
   );
 
-  if (matches.isEmpty) {
-    return Text(text, style: textStyle);
-  }
-
   final List<Widget> children = [];
   int lastEnd = 0;
 
-  for (final match in matches) {
+  for (final match in _imagePattern.allMatches(text)) {
     if (match.start > lastEnd) {
       children.add(
         Text(text.substring(lastEnd, match.start), style: textStyle),
       );
     }
 
-    final url = match.group(1);
-    if (url != null && url.isNotEmpty) {
+    final url = match.group(1)!;
+    if (url.isNotEmpty) {
       children.add(
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -62,6 +56,7 @@ Widget _buildRichText(BuildContext context, String text) {
     lastEnd = match.end;
   }
 
+  if (lastEnd == 0) return Text(text, style: textStyle);
   if (lastEnd < text.length) {
     children.add(Text(text.substring(lastEnd), style: textStyle));
   }
@@ -86,7 +81,7 @@ Future<void> _downloadAndInstall(
   }
   if (!context.mounted) return;
 
-  showDialog(
+  await showDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (_) => _DownloadDialog(downloadUrl),
@@ -102,9 +97,11 @@ class _DownloadDialog extends StatefulWidget {
 }
 
 class _DownloadDialogState extends State<_DownloadDialog> {
-  double _progress = 0.0;
-  String _status = '准备下载...';
-  bool _failed = false;
+  final _client = Dio();
+  final _cancelToken = CancelToken();
+  int? _percent;
+  String _status = '正在下载...';
+  String? _error;
 
   @override
   void initState() {
@@ -112,99 +109,99 @@ class _DownloadDialogState extends State<_DownloadDialog> {
     _startDownload();
   }
 
+  @override
+  void dispose() {
+    _cancelToken.cancel();
+    super.dispose();
+  }
+
   Future<void> _startDownload() async {
     try {
       final dir = Platform.isAndroid
           ? await getTemporaryDirectory()
-          : Instances.isDesktopPlatform
-          ? await Instances.desktopDataDirectory('updates')
-          : await getDownloadsDirectory() ?? await getTemporaryDirectory();
-
-      final fileName = Platform.isAndroid
-          ? 'app_update.apk'
-          : Platform.isWindows
-          ? 'anibaka-setup.exe'
-          : 'anibaka-setup.dmg';
+          : await Instances.desktopDataDirectory('updates');
+      if (!mounted) return;
+      final fileName = switch (Platform.operatingSystem) {
+        'android' => 'app_update.apk',
+        'windows' => 'anibaka-setup.exe',
+        'macos' => 'anibaka-setup.dmg',
+        _ => throw UnsupportedError('当前平台不支持应用内更新'),
+      };
       final filePath = '${dir.path}/$fileName';
 
-      final file = File(filePath);
-      if (await file.exists()) await file.delete();
-
-      if (mounted) setState(() => _status = '正在下载...');
-
-      await Dio().download(
+      await _client.download(
         widget.downloadUrl,
         filePath,
+        cancelToken: _cancelToken,
         onReceiveProgress: (received, total) {
-          if (total != -1 && mounted) {
-            setState(() {
-              _progress = received / total;
-              final receivedMB = (received / 1048576).toStringAsFixed(2);
-              final totalMB = (total / 1048576).toStringAsFixed(2);
-              _status = '已下载 $receivedMB MB / $totalMB MB';
-            });
-          }
+          if (!mounted || total <= 0) return;
+          final percent = received * 100 ~/ total;
+          if (percent == _percent) return;
+          setState(() {
+            _percent = percent;
+            final receivedMB = (received / 1048576).toStringAsFixed(2);
+            final totalMB = (total / 1048576).toStringAsFixed(2);
+            _status = '已下载 $receivedMB MB / $totalMB MB';
+          });
         },
       );
 
-      if (mounted) Navigator.of(context).pop();
-      await OpenFilex.open(filePath);
-    } catch (e) {
-      debugPrint('下载错误: $e');
-      if (mounted) {
-        setState(() {
-          _failed = true;
-          _status = '下载失败: $e';
-        });
+      if (!mounted) return;
+      final result = await OpenFilex.open(filePath);
+      if (!mounted) return;
+      if (result.type == ResultType.done) {
+        Navigator.pop(context);
+      } else {
+        setState(() => _error = '无法打开安装包: ${result.message}');
       }
+    } catch (e) {
+      if (mounted && !_cancelToken.isCancelled) {
+        setState(() => _error = '更新失败: $e');
+      }
+    } finally {
+      _client.close(force: true);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _failed,
-      child: Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                '下载更新',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 24),
+      canPop: _error != null,
+      child: AppDialog(
+        title: '下载更新',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_error == null) ...[
               LinearProgressIndicator(
-                value: _progress,
+                value: _percent == null ? null : _percent! / 100,
                 minHeight: 8,
                 borderRadius: BorderRadius.circular(4),
               ),
               const SizedBox(height: 12),
-              Text(
-                '${(_progress * 100).toStringAsFixed(1)}%',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
+              if (_percent != null)
+                Text(
+                  '$_percent%',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-              ),
               const SizedBox(height: 16),
-              Text(
-                _status,
-                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                textAlign: TextAlign.center,
-              ),
-              if (_failed) ...[
-                const SizedBox(height: 20),
-                FilledButton.tonal(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('关闭'),
-                ),
-              ],
             ],
-          ),
+            Text(
+              _error ?? _status,
+              style: Theme.of(context).textTheme.bodyMedium,
+              textAlign: TextAlign.center,
+            ),
+          ],
         ),
+        actions: _error == null
+            ? null
+            : AppDialogActions(
+                confirmText: '关闭',
+                onConfirm: () => Navigator.pop(context),
+              ),
       ),
     );
   }
@@ -218,6 +215,7 @@ void showAnnouncementDialog({
   if (context == null) return;
   final hasUpdate = updateInfo.hasUpdate;
   final forceUpdate = updateInfo.forceUpdate;
+  var installing = false;
 
   showDialog(
     barrierDismissible: !forceUpdate,
@@ -228,7 +226,7 @@ void showAnnouncementDialog({
         canPop: !forceUpdate,
         child: AppDialog(
           title: forceUpdate ? '强制更新' : (hasUpdate ? '版本更新' : '公告'),
-          contentWidget: hasUpdate
+          content: hasUpdate
               ? Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -287,58 +285,25 @@ void showAnnouncementDialog({
               : (content.isNotEmpty
                     ? _buildRichText(dialogContext, content)
                     : null),
-          actions: [
-            if (hasUpdate)
-              Row(
-                children: [
-                  if (!forceUpdate)
-                    Expanded(
-                      child: FilledButton.tonal(
-                        onPressed: () => Navigator.pop(dialogContext),
-                        style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text('知道了'),
-                      ),
-                    ),
-                  if (!forceUpdate) const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: () {
-                        if (!forceUpdate) Navigator.pop(dialogContext);
-                        _downloadAndInstall(context, updateInfo.downloadUrl);
-                      },
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        backgroundColor: forceUpdate ? colorScheme.error : null,
-                        foregroundColor: forceUpdate
-                            ? colorScheme.onError
-                            : null,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Text(forceUpdate ? '立即更新' : '有新版本'),
-                    ),
-                  ),
-                ],
-              )
-            else
-              FilledButton.tonal(
-                onPressed: () => Navigator.pop(dialogContext),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  minimumSize: const Size(double.infinity, 0),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Text('知道了'),
-              ),
-          ],
+          actions: AppDialogActions(
+            confirmText: hasUpdate ? (forceUpdate ? '立即更新' : '有新版本') : '知道了',
+            cancelText: hasUpdate && !forceUpdate ? '知道了' : null,
+            isDestructive: forceUpdate,
+            onConfirm: () async {
+              if (!hasUpdate) {
+                Navigator.pop(dialogContext);
+                return;
+              }
+              if (installing) return;
+              installing = true;
+              try {
+                if (!forceUpdate) Navigator.pop(dialogContext);
+                await _downloadAndInstall(context, updateInfo.downloadUrl);
+              } finally {
+                installing = false;
+              }
+            },
+          ),
         ),
       );
     },

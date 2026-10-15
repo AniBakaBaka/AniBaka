@@ -23,16 +23,13 @@ class SiteProbeRequest {
 
   factory SiteProbeRequest.fromJson(Map<String, dynamic> json) {
     return SiteProbeRequest(
-      method: (json['method'] as String?)?.toUpperCase() ?? 'GET',
-      url: (json['url'] as String?)?.trim() ?? '',
-      headers: json['headers'] is Map
-          ? {
-              for (final entry in (json['headers'] as Map).entries)
-                entry.key.toString(): entry.value.toString(),
-            }
-          : const {},
-      body: json['body']?.toString(),
-      render: json['render'] == true || json['mode'] == 'webview',
+      method: json['method'] as String,
+      url: json['url'] as String,
+      headers:
+          (json['headers'] as Map<String, dynamic>?)?.cast<String, String>() ??
+          const {},
+      body: json['body'] as String?,
+      render: json['render'] as bool? ?? false,
     );
   }
 }
@@ -44,7 +41,7 @@ class SiteProbeService {
       ..idleTimeout = const Duration(seconds: 8);
   }
 
-  static const int maxResponseBytes = 48 * 1024;
+  static const int maxResponseBytes = 16 * 1024;
   static const int maxRequestBodyBytes = 32 * 1024;
 
   static final RegExp _sensitivePattern = RegExp(
@@ -84,14 +81,19 @@ class SiteProbeService {
   }
 
   Future<Map<String, dynamic>> execute(SiteProbeRequest request) async {
-    if (_cancelled) throw StateError('AI 规则任务已取消');
+    _throwIfCancelled();
     final method = request.method;
     if (method != 'GET' && method != 'HEAD' && method != 'POST') {
       throw FormatException('不允许的探测方法：$method');
     }
-    final parsedUri = Uri.tryParse(request.url);
-    if (parsedUri == null) throw const FormatException('探测 URL 无效');
-    var uri = parsedUri;
+    final originalUri = Uri.parse(request.url);
+    var uri = originalUri;
+    final body = method == 'POST' && request.body != null
+        ? utf8.encode(request.body!)
+        : null;
+    if (body != null && body.length > maxRequestBodyBytes) {
+      throw const FormatException('探测请求体过大');
+    }
 
     if (request.render) {
       if (method != 'GET') throw const FormatException('WebView 探测只允许 GET');
@@ -100,25 +102,35 @@ class SiteProbeService {
       final (html, _) = await WebViewAdapter.getPageContentWithCookies(
         uri.toString(),
         timeout: const Duration(seconds: 30),
-        settleDelay: const Duration(seconds: 2),
         userAgent:
             request.headers['User-Agent'] ?? WebViewAdapter.desktopUserAgent,
         taskScope: _webViewScope,
       );
       _throwIfCancelled();
-      final truncated = html.length > maxResponseBytes;
+      final bytes = utf8.encoder.convert(
+        html,
+        0,
+        html.length > maxResponseBytes ? maxResponseBytes : html.length,
+      );
+      final truncated =
+          html.length > maxResponseBytes || bytes.length > maxResponseBytes;
       return {
         'request': {'method': method, 'url': safeUrl(uri), 'render': true},
         'status': html.isEmpty ? 0 : 200,
         'finalUrl': safeUrl(uri),
         'contentType': 'text/html; rendered=webview',
         'headers': <String, String>{},
-        'body': truncated ? '${html.substring(0, maxResponseBytes)}…' : html,
+        'body': truncated
+            ? utf8.decode(
+                Uint8List.sublistView(bytes, 0, maxResponseBytes),
+                allowMalformed: true,
+              )
+            : html,
         'truncated': truncated,
       };
     }
 
-    for (var redirect = 0; redirect <= 3; redirect++) {
+    for (var redirect = 0; ; redirect++) {
       await validatePublicUri(uri);
       _throwIfCancelled();
       final req = await _client.openUrl(method, uri);
@@ -139,42 +151,43 @@ class SiteProbeService {
         }
         final cookies = _cookies[uri.host];
         if (cookies != null && cookies.isNotEmpty) req.cookies.addAll(cookies);
-        if (method == 'POST' && request.body != null) {
-          final bytes = utf8.encode(request.body!);
-          if (bytes.length > maxRequestBodyBytes) {
-            throw const FormatException('探测请求体过大');
-          }
-          req.add(bytes);
-        }
+        if (body != null) req.add(body);
 
         final response = await req.close();
         if (response.cookies.isNotEmpty) {
           _cookies[uri.host] = response.cookies;
         }
-        if (response.isRedirect && response.headers.value('location') != null) {
+        final location = response.headers.value(HttpHeaders.locationHeader);
+        if (response.isRedirect && location != null) {
           if (redirect == 3) throw StateError('探测重定向次数过多');
-          uri = uri.resolve(response.headers.value('location')!);
-          await response.drain<void>();
+          uri = uri.resolve(location);
+          await response.listen(null).cancel();
           continue;
         }
 
-        final builder = BytesBuilder(copy: false);
-        var currentLen = 0;
+        final bytes = BytesBuilder(copy: false);
         var truncated = false;
         await for (final chunk in response) {
-          if (currentLen + chunk.length <= maxResponseBytes) {
-            builder.add(chunk);
-            currentLen += chunk.length;
-          } else {
-            final remaining = maxResponseBytes - currentLen;
-            if (remaining > 0) builder.add(chunk.sublist(0, remaining));
-            truncated = true;
-            break;
+          final remaining = maxResponseBytes - bytes.length;
+          if (chunk.length < remaining) {
+            bytes.add(chunk);
+            continue;
           }
+          bytes.add(
+            chunk is Uint8List
+                ? Uint8List.sublistView(chunk, 0, remaining)
+                : chunk.sublist(0, remaining),
+          );
+          truncated =
+              chunk.length > remaining ||
+              response.contentLength != maxResponseBytes ||
+              response.compressionState ==
+                  HttpClientResponseCompressionState.decompressed;
+          break;
         }
 
         return {
-          'request': {'method': method, 'url': safeUrl(uri)},
+          'request': {'method': method, 'url': safeUrl(originalUri)},
           'status': response.statusCode,
           'finalUrl': safeUrl(uri),
           'contentType': response.headers.contentType?.toString() ?? '',
@@ -183,7 +196,7 @@ class SiteProbeService {
               if (response.headers.value(name) != null)
                 name: response.headers.value(name),
           },
-          'body': utf8.decode(builder.takeBytes(), allowMalformed: true),
+          'body': utf8.decode(bytes.takeBytes(), allowMalformed: true),
           'truncated': truncated,
         };
       } finally {
@@ -192,7 +205,6 @@ class SiteProbeService {
         req.abort();
       }
     }
-    throw StateError('探测失败');
   }
 
   static Future<void> validatePublicUri(Uri uri) async {
@@ -261,17 +273,19 @@ class SiteProbeService {
       a >= 224;
 
   static String safeUrl(Uri uri) {
-    if (uri.queryParameters.isEmpty) {
-      return uri.replace(userInfo: '', fragment: '').toString();
-    }
-    final query = <String, String>{};
-    for (final entry in uri.queryParameters.entries) {
-      query[entry.key] = _sensitivePattern.hasMatch(entry.key)
-          ? '<redacted>'
-          : entry.value;
-    }
     return uri
-        .replace(userInfo: '', fragment: '', queryParameters: query)
+        .replace(
+          userInfo: '',
+          queryParameters: uri.hasQuery
+              ? {
+                  for (final entry in uri.queryParameters.entries)
+                    entry.key: _sensitivePattern.hasMatch(entry.key)
+                        ? '<redacted>'
+                        : entry.value,
+                }
+              : null,
+        )
+        .removeFragment()
         .toString();
   }
 

@@ -6,6 +6,7 @@ import 'package:baka/source/models/source.dart';
 import 'package:baka/source/models/source_rule.dart';
 import 'package:baka/source/pipeline_source_adapter.dart';
 import 'package:baka/source/video_url_extractor.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _MediaAdapter extends AdapterBase {
@@ -35,6 +36,26 @@ class _MediaAdapter extends AdapterBase {
   }) async => const [];
 }
 
+PipelineSourceAdapter _pipelineAdapter(Map<String, String> headers) {
+  final adapter = PipelineSourceAdapter(
+    SourceRule(
+      id: 'media-headers',
+      name: 'Media headers',
+      baseUrl: 'https://fixture.invalid',
+      directConnection: true,
+      headers: headers,
+      play: const [
+        PipelineStep('template', {
+          'value': '{episodeId:raw}',
+          'materializeHls': true,
+        }),
+      ],
+    ),
+  );
+  addTearDown(adapter.dispose);
+  return adapter;
+}
+
 void main() {
   test('episode invalidation forces one fresh parse, then caches it', () async {
     final adapter = _MediaAdapter('https://fixture.invalid/old.mp4');
@@ -51,6 +72,90 @@ void main() {
     );
     expect(adapter.calls, 2);
   });
+
+  test('rule headers override defaults regardless of letter case', () async {
+    final adapter = _pipelineAdapter({
+      'user-agent': 'Fixture player',
+      'ACCEPT': 'video/*',
+      'Referer': '',
+    });
+    final media = await adapter.resolvePlaybackMedia(
+      'https://fixture.invalid/1.mp4',
+      skipValidation: true,
+    );
+    expect(adapter.dio.options.headers['User-Agent'], 'Fixture player');
+    expect(adapter.dio.options.headers['accept'], 'video/*');
+    expect(media.httpHeaders, {
+      'user-agent': 'Fixture player',
+      'ACCEPT': 'video/*',
+    });
+    expect(adapter.rule.headers['Referer'], '');
+  });
+
+  test(
+    'signed playback removes Referer without changing later playback',
+    () async {
+      final adapter = _pipelineAdapter({
+        'rEfErEr': 'https://fixture.invalid/player',
+        'X-Session': 'session',
+      });
+      final signed = await adapter.resolvePlaybackMedia(
+        'https://cdn.invalid/1.mp4?x-amz-signature=test',
+        skipValidation: true,
+      );
+      expect(signed.httpHeaders, {'X-Session': 'session'});
+      final unsigned = await adapter.resolvePlaybackMedia(
+        'https://cdn.invalid/2.mp4',
+        skipValidation: true,
+      );
+      expect(unsigned.httpHeaders, {
+        'rEfErEr': 'https://fixture.invalid/player',
+        'X-Session': 'session',
+      });
+    },
+  );
+
+  test(
+    'HLS materialization preserves blank lines, keys and duplicate targets',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final base = 'http://127.0.0.1:${server.port}';
+      server.listen((request) async {
+        if (request.uri.path == '/vod/master.m3u8') {
+          request.response.write(
+            '#EXTM3U\r\n\r\n#EXT-X-TARGETDURATION:4\r\n'
+            '#EXT-X-KEY:METHOD=AES-128,URI="../key.bin"\r\n'
+            '#EXTINF:4,\r\n segment.ts \r\n'
+            '#EXTINF:4,\r\n segment.ts \r\n#EXT-X-ENDLIST\r\n',
+          );
+        } else {
+          request.response.write(request.uri.path);
+        }
+        await request.response.close();
+      });
+      final adapter = _pipelineAdapter(const {});
+      final dio = Dio();
+      addTearDown(() => dio.close(force: true));
+      final media = await adapter.preparePlaybackMedia((
+        url: '$base/vod/master.m3u8',
+        httpHeaders: const <String, String>{},
+      ), filterHlsAds: false);
+      final manifest = (await dio.get<String>(media.url)).data!;
+      expect(manifest, startsWith('#EXTM3U\n\n#EXT-X-TARGETDURATION:4\n'));
+      expect(manifest, endsWith('#EXT-X-ENDLIST\n'));
+      expect(manifest, isNot(contains('\r')));
+      final segments = manifest
+          .split('\n')
+          .where((line) => line.startsWith('http'))
+          .toList();
+      expect(segments, hasLength(2));
+      expect(segments[1], segments[0]);
+      expect((await dio.get<String>(segments[0])).data, '/vod/segment.ts');
+      final key = RegExp(r'URI="([^"]+)"').firstMatch(manifest)!.group(1)!;
+      expect((await dio.get<String>(key)).data, '/key.bin');
+    },
+  );
 
   group('validation', () {
     test('fast playback resolution skips media probing', () async {

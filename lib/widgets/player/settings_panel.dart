@@ -84,25 +84,18 @@ Future<void> showPlayerSettingsPanel(BuildContext context, Widget child) {
     barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
     barrierColor: Colors.transparent,
     transitionDuration: const Duration(milliseconds: 280),
-    transitionBuilder: (context, animation, secondaryAnimation, child) =>
-        FadeTransition(
-          opacity: animation,
-          child: SlideTransition(
-            position:
-                Tween<Offset>(
-                  begin: isBottomPlayerPanel(context)
-                      ? const Offset(0, 0.25)
-                      : const Offset(0.15, 0),
-                  end: Offset.zero,
-                ).animate(
-                  CurvedAnimation(
-                    parent: animation,
-                    curve: Curves.easeOutCubic,
-                  ),
-                ),
-            child: child,
-          ),
+    transitionBuilder: (context, animation, secondaryAnimation, child) {
+      final remaining = 1 - Curves.easeOutCubic.transform(animation.value);
+      return FadeTransition(
+        opacity: animation,
+        child: FractionalTranslation(
+          translation: isBottomPlayerPanel(context)
+              ? Offset(0, 0.25 * remaining)
+              : Offset(0.15 * remaining, 0),
+          child: child,
         ),
+      );
+    },
     pageBuilder: (context, animation, secondaryAnimation) {
       final media = MediaQuery.of(context);
       final screenWidth = media.size.width;
@@ -198,31 +191,40 @@ class _PlayerSettingsPanel extends StatefulWidget {
   State<_PlayerSettingsPanel> createState() => _PlayerSettingsPanelState();
 }
 
-class _PlayerSettingsPanelState extends State<_PlayerSettingsPanel> {
+class _PlayerSettingsPanelState extends State<_PlayerSettingsPanel>
+    with SingleTickerProviderStateMixin {
   late NavigatorState _navigator;
-  double _dragOffset = 0;
-  bool _dragging = false;
+  late final _dragOffset = AnimationController(vsync: this, upperBound: 240);
+
+  @override
+  void dispose() {
+    _dragOffset.dispose();
+    super.dispose();
+  }
 
   void close() => Navigator.of(context).pop();
 
-  void startDrag(DragStartDetails details) => setState(() => _dragging = true);
+  void startDrag(DragStartDetails details) => _dragOffset.stop();
 
-  void updateDrag(DragUpdateDetails details) => setState(() {
-    _dragOffset = (_dragOffset + details.delta.dy).clamp(0, 240);
-  });
+  void updateDrag(DragUpdateDetails details) {
+    _dragOffset.value = (_dragOffset.value + details.delta.dy).clamp(0, 240);
+  }
 
   void endDrag(DragEndDetails details) {
-    if (_dragOffset > 80 || details.velocity.pixelsPerSecond.dy > 700) {
+    if (_dragOffset.value > 80 || details.velocity.pixelsPerSecond.dy > 700) {
       close();
     } else {
       cancelDrag();
     }
   }
 
-  void cancelDrag() => setState(() {
-    _dragOffset = 0;
-    _dragging = false;
-  });
+  void cancelDrag() {
+    _dragOffset.animateTo(
+      0,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOutCubic,
+    );
+  }
 
   @override
   Widget build(BuildContext context) => CallbackShortcuts(
@@ -237,13 +239,14 @@ class _PlayerSettingsPanelState extends State<_PlayerSettingsPanel> {
     },
     child: NavigatorPopHandler<void>(
       onPopWithResult: (_) => _navigator.pop(),
-      child: AnimatedContainer(
-        duration: _dragging ? Duration.zero : const Duration(milliseconds: 200),
-        curve: Curves.easeOutCubic,
-        transform: Matrix4.translationValues(
-          0,
-          isBottomPlayerPanel(context) ? _dragOffset : 0,
-          0,
+      child: AnimatedBuilder(
+        animation: _dragOffset,
+        builder: (context, child) => Transform.translate(
+          offset: Offset(
+            0,
+            isBottomPlayerPanel(context) ? _dragOffset.value : 0,
+          ),
+          child: child,
         ),
         child: Navigator(
           onGenerateInitialRoutes: (navigator, _) {
@@ -281,8 +284,47 @@ class PanelContainer extends StatelessWidget {
     final panel = context.findAncestorStateOfType<_PlayerSettingsPanelState>();
     final canGoBack = panel != null && (ModalRoute.canPopOf(context) ?? false);
     final bottom = isBottomPlayerPanel(context);
+    final compact = isCompactPlayerPanel(context);
+    final theme = Theme.of(context);
+    final header = Row(
+      children: [
+        if (canGoBack) ...[
+          IconButton(
+            tooltip: '返回上一级',
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.arrow_back_rounded),
+          ),
+          const SizedBox(width: 8),
+        ],
+        Expanded(
+          child: Text(
+            title,
+            style: bottom
+                ? theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  )
+                : TextStyle(
+                    fontSize: compact ? 18 : 22,
+                    fontWeight: FontWeight.w700,
+                  ),
+          ),
+        ),
+        ...actions,
+        IconButton.filledTonal(
+          tooltip: '关闭设置',
+          style: bottom
+              ? null
+              : IconButton.styleFrom(
+                  backgroundColor: theme.colorScheme.secondaryContainer
+                      .withValues(alpha: 0.66),
+                ),
+          onPressed: panel?.close ?? () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.close_rounded),
+        ),
+      ],
+    );
     if (bottom) {
-      final colors = Theme.of(context).colorScheme;
+      final colors = theme.colorScheme;
       return Material(
         color: colors.surfaceContainerLow,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
@@ -315,33 +357,7 @@ class PanelContainer extends StatelessWidget {
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 0, 12, 4),
-                      child: Row(
-                        children: [
-                          if (canGoBack) ...[
-                            IconButton(
-                              tooltip: '返回上一级',
-                              onPressed: () => Navigator.of(context).pop(),
-                              icon: const Icon(Icons.arrow_back_rounded),
-                            ),
-                            const SizedBox(width: 8),
-                          ],
-                          Expanded(
-                            child: Text(
-                              title,
-                              style: Theme.of(context).textTheme.headlineSmall
-                                  ?.copyWith(fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                          ...actions,
-                          IconButton.filledTonal(
-                            tooltip: '关闭设置',
-                            onPressed:
-                                panel?.close ??
-                                () => Navigator.of(context).pop(),
-                            icon: const Icon(Icons.close_rounded),
-                          ),
-                        ],
-                      ),
+                      child: header,
                     ),
                   ],
                 ),
@@ -356,7 +372,6 @@ class PanelContainer extends StatelessWidget {
       builder: (context, constraints) {
         // Compact panels use the route-wide scrim behind the navigator.
         // Desktop panels keep their fade in the empty leading space.
-        final compact = isCompactPlayerPanel(context);
         final leading = compact
             ? 12.0
             : (constraints.maxWidth < 400 ? 20.0 : 64.0);
@@ -391,41 +406,7 @@ class PanelContainer extends StatelessWidget {
                         padding: compact
                             ? const EdgeInsets.fromLTRB(8, 2, 4, 2)
                             : const EdgeInsets.fromLTRB(16, 12, 8, 8),
-                        child: Row(
-                          children: [
-                            if (canGoBack) ...[
-                              IconButton(
-                                tooltip: '返回上一级',
-                                onPressed: () => Navigator.of(context).pop(),
-                                icon: const Icon(Icons.arrow_back_rounded),
-                              ),
-                              const SizedBox(width: 8),
-                            ],
-                            Expanded(
-                              child: Text(
-                                title,
-                                style: TextStyle(
-                                  fontSize: compact ? 18 : 22,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                            ...actions,
-                            IconButton.filledTonal(
-                              tooltip: '关闭设置',
-                              style: IconButton.styleFrom(
-                                backgroundColor: Theme.of(context)
-                                    .colorScheme
-                                    .secondaryContainer
-                                    .withValues(alpha: 0.66),
-                              ),
-                              onPressed:
-                                  panel?.close ??
-                                  () => Navigator.of(context).pop(),
-                              icon: const Icon(Icons.close_rounded),
-                            ),
-                          ],
-                        ),
+                        child: header,
                       ),
                       Expanded(child: child),
                     ],

@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:baka/models/skip_selection.dart';
+import 'package:baka/models/playback_state.dart';
 import 'package:baka/utils/format_utils.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
+import 'package:baka/widgets/common/value_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -21,23 +23,29 @@ class SkipSelectionControls extends StatelessWidget {
   final VoidCallback? onFullscreen;
   final bool isFullScreen;
 
-  Future<void> _save() async {
+  Future<void> _save({bool allEpisodes = false}) async {
     try {
-      if (await controller.finishSkipSelection()) showSnackBar('区间已保存到本机');
+      if (await controller.finishSkipSelection(allEpisodes: allEpisodes)) {
+        showSnackBar(allEpisodes ? '区间已应用到同片源线路的全集' : '区间已保存到本机');
+      }
     } catch (error) {
       showSnackBar('保存失败：$error', isError: true);
     }
   }
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: Listenable.merge([
-      controller.skipSelection,
-      controller.timeline,
-      controller.core,
-    ]),
-    builder: (context, _) {
-      final selection = controller.skipSelection.value;
+  Widget build(
+    BuildContext context,
+  ) => ValueSelector<SkipSelection?, ({String type, bool saving, int durationMs})?>(
+    valueListenable: controller.skipSelection,
+    select: (selection) => selection == null
+        ? null
+        : (
+            type: selection.type,
+            saving: selection.saving,
+            durationMs: selection.durationMs,
+          ),
+    builder: (context, selection) {
       if (selection == null) return const SizedBox.shrink();
       final color = SkipSegmentColors.forType(selection.type);
       final colors = Theme.of(context).colorScheme;
@@ -134,8 +142,26 @@ class SkipSelectionControls extends StatelessWidget {
                           backgroundColor: colors.primary,
                           foregroundColor: colors.onPrimary,
                         ),
-                        onPressed: selection.saving ? null : _save,
+                        onPressed: selection.saving ? null : () => _save(),
                         child: Text(selection.saving ? '保存中' : '完成'),
+                      ),
+                      PopupMenuButton<bool>(
+                        key: const ValueKey('save-skip-selection-scope'),
+                        tooltip: '保存范围',
+                        enabled:
+                            !selection.saving &&
+                            controller.skipContext?.seriesLocalKey != null,
+                        iconColor: Colors.white,
+                        onSelected: (allEpisodes) =>
+                            _save(allEpisodes: allEpisodes),
+                        itemBuilder: (_) => [
+                          PopupMenuItem(
+                            value: true,
+                            child: Text(
+                              '${selection.type == 'op' ? '片头' : '片尾'}应用到全集',
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   );
@@ -159,7 +185,7 @@ class SkipSelectionControls extends StatelessWidget {
                             const SizedBox(width: 16),
                             Expanded(
                               child: Text(
-                                '拖动两端选择${selection.label}',
+                                '拖动两端选择${selection.type == 'op' ? '片头' : '片尾'}',
                                 style: const TextStyle(
                                   color: Colors.white70,
                                   fontSize: 13,
@@ -171,34 +197,40 @@ class SkipSelectionControls extends StatelessWidget {
                         ),
                       Row(
                         children: [
-                          IconButton(
-                            tooltip: controller.core.value.playing
-                                ? '暂停'
-                                : '播放',
-                            onPressed: selection.saving
-                                ? null
-                                : controller.togglePlayback,
-                            color: Colors.white,
-                            icon: Icon(
-                              controller.core.value.playing
-                                  ? Icons.pause_rounded
-                                  : Icons.play_arrow_rounded,
+                          ValueSelector<PlaybackCoreState, bool>(
+                            valueListenable: controller.core,
+                            select: (state) => state.playing,
+                            builder: (context, playing) => IconButton(
+                              tooltip: playing ? '暂停' : '播放',
+                              onPressed: selection.saving
+                                  ? null
+                                  : controller.togglePlayback,
+                              color: Colors.white,
+                              icon: Icon(
+                                playing
+                                    ? Icons.pause_rounded
+                                    : Icons.play_arrow_rounded,
+                              ),
                             ),
                           ),
                           if (!narrow)
                             Padding(
                               padding: const EdgeInsets.only(right: 12),
-                              child: Text(
-                                '${controller.timeline.value.position.toTimeString()} / ${Duration(milliseconds: selection.durationMs).toTimeString()}',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontFeatures: [FontFeature.tabularFigures()],
+                              child: ValueSelector<PlaybackTimelineState, int>(
+                                valueListenable: controller.timeline,
+                                select: (state) => state.position.inSeconds,
+                                builder: (context, seconds) => Text(
+                                  '${Duration(seconds: seconds).toTimeString()} / ${Duration(milliseconds: selection.durationMs).toTimeString()}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontFeatures: [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
-                          Expanded(
-                            child: _rangeSlider(context, selection, color),
-                          ),
+                          Expanded(child: _rangeSlider(color)),
                           if (onFullscreen != null)
                             IconButton(
                               tooltip: isFullScreen ? '退出全屏' : '全屏',
@@ -223,62 +255,62 @@ class SkipSelectionControls extends StatelessWidget {
     },
   );
 
-  Widget _rangeSlider(
-    BuildContext context,
-    SkipSelection selection,
-    Color color,
-  ) {
-    final range = selection.range;
-    final start = Duration(milliseconds: range.startMs).toTimeString();
-    final end = Duration(milliseconds: range.endMs).toTimeString();
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SliderTheme(
-          data: SliderTheme.of(context).copyWith(
-            trackHeight: 6,
-            activeTrackColor: color,
-            inactiveTrackColor: Colors.white24,
-            thumbColor: color,
-            overlayColor: color.withValues(alpha: 0.16),
-            minThumbSeparation: 0,
-            showValueIndicator: ShowValueIndicator.onDrag,
-            rangeThumbShape: const _RangeHandle(),
-          ),
-          child: RangeSlider(
-            key: ValueKey('skip-range-${selection.type}'),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            min: 0,
-            max: selection.durationMs.toDouble(),
-            divisions: (selection.durationMs / 1000).ceil(),
-            values: RangeValues(
-              range.startMs.toDouble(),
-              range.endMs.toDouble(),
+  Widget _rangeSlider(Color color) => ValueListenableBuilder<SkipSelection?>(
+    valueListenable: controller.skipSelection,
+    builder: (context, selection, _) {
+      if (selection == null) return const SizedBox.shrink();
+      final range = selection.range;
+      final start = Duration(milliseconds: range.startMs).toTimeString();
+      final end = Duration(milliseconds: range.endMs).toTimeString();
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 6,
+              activeTrackColor: color,
+              inactiveTrackColor: Colors.white24,
+              thumbColor: color,
+              overlayColor: color.withValues(alpha: 0.16),
+              minThumbSeparation: 0,
+              showValueIndicator: ShowValueIndicator.onDrag,
+              rangeThumbShape: const _RangeHandle(),
             ),
-            labels: RangeLabels('起点 $start', '终点 $end'),
-            semanticFormatterCallback: (value) =>
-                Duration(milliseconds: value.round()).toTimeString(),
-            onChanged: selection.saving
-                ? null
-                : (values) => controller.updateSkipSelection(
-                    values.start.round(),
-                    values.end.round(),
-                  ),
-            onChangeStart: (_) => unawaited(controller.pause()),
+            child: RangeSlider(
+              key: ValueKey('skip-range-${selection.type}'),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              min: 0,
+              max: selection.durationMs.toDouble(),
+              divisions: (selection.durationMs / 1000).ceil(),
+              values: RangeValues(
+                range.startMs.toDouble(),
+                range.endMs.toDouble(),
+              ),
+              labels: RangeLabels('起点 $start', '终点 $end'),
+              semanticFormatterCallback: (value) =>
+                  Duration(milliseconds: value.round()).toTimeString(),
+              onChanged: selection.saving
+                  ? null
+                  : (values) => controller.updateSkipSelection(
+                      values.start.round(),
+                      values.end.round(),
+                    ),
+              onChangeStart: (_) => unawaited(controller.pause()),
+            ),
           ),
-        ),
-        // A single readout stays legible even when two endpoints are close together.
-        Text(
-          '$start – $end',
-          style: TextStyle(
-            color: color,
-            fontSize: 12,
-            fontFeatures: const [FontFeature.tabularFigures()],
+          // A single readout stays legible even when two endpoints are close together.
+          Text(
+            '$start – $end',
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
           ),
-        ),
-      ],
-    );
-  }
+        ],
+      );
+    },
+  );
 }
 
 class _RangeHandle extends RoundRangeSliderThumbShape {

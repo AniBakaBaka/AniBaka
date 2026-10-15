@@ -137,7 +137,25 @@ class _ActiveDownloadIndicatorState extends State<ActiveDownloadIndicator> {
             const SizedBox(height: 8),
             ValueListenableBuilder<double>(
               valueListenable: current.progressNotifier,
-              builder: (context, progress, _) {
+              child: ValueListenableBuilder<DownloadStatus>(
+                valueListenable: current.statusNotifier,
+                builder: (context, status, _) => Text(
+                  switch (status) {
+                    DownloadStatus.downloading => '下载中',
+                    DownloadStatus.waiting => '等待中',
+                    DownloadStatus.paused => '已暂停',
+                    DownloadStatus.failed => '失败',
+                    DownloadStatus.completed => '',
+                  },
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: theme.textTheme.bodyMedium?.color?.withValues(
+                      alpha: 0.5,
+                    ),
+                  ),
+                ),
+              ),
+              builder: (context, progress, status) {
                 return Column(
                   children: [
                     ClipRRect(
@@ -157,32 +175,7 @@ class _ActiveDownloadIndicatorState extends State<ActiveDownloadIndicator> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        ValueListenableBuilder<DownloadStatus>(
-                          valueListenable: current.statusNotifier,
-                          builder: (context, status, _) {
-                            String label;
-                            switch (status) {
-                              case DownloadStatus.downloading:
-                                label = '下载中';
-                              case DownloadStatus.waiting:
-                                label = '等待中';
-                              case DownloadStatus.paused:
-                                label = '已暂停';
-                              case DownloadStatus.failed:
-                                label = '失败';
-                              default:
-                                label = '';
-                            }
-                            return Text(
-                              label,
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: theme.textTheme.bodyMedium?.color
-                                    ?.withValues(alpha: 0.5),
-                              ),
-                            );
-                          },
-                        ),
+                        status!,
                         Text(
                           '${(progress * 100).toStringAsFixed(0)}%',
                           style: TextStyle(

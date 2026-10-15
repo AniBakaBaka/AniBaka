@@ -22,6 +22,7 @@ class BgmFollowPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final score = bgmInfo.score;
+    final subjectId = bgmInfo.subjectId;
     final followColor = isFollowed
         ? const Color(0xFF34C759)
         : theme.colorScheme.primary;
@@ -39,17 +40,15 @@ class BgmFollowPill extends StatelessWidget {
         children: [
           if (score != null) ...[
             PlatformTooltip(
-              message: bgmInfo.subjectId == null
-                  ? 'Bangumi 评分'
-                  : '查看 Bangumi 详情',
+              message: subjectId == null ? 'Bangumi 评分' : '查看 Bangumi 详情',
               child: InkWell(
-                onTap: bgmInfo.subjectId == null
+                onTap: subjectId == null
                     ? null
                     : () => BgmDetailPage.show(
                         context,
-                        subjectId: bgmInfo.subjectId!,
+                        subjectId: subjectId,
                         title: title,
-                        imageUrl: bgmInfo.imageUrl ?? '',
+                        imageUrl: bgmInfo.imageUrl,
                         initialScore: score,
                       ),
                 borderRadius: BorderRadius.circular(6),

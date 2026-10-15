@@ -35,7 +35,7 @@ class AnimeDetailBackground extends StatelessWidget {
         alignment: Alignment.topCenter,
         filterQuality: FilterQuality.low,
         errorBuilder: (context, error, stack) =>
-            loadBackground && coverUrl.isNotEmpty
+            loadBackground && url != coverUrl && coverUrl.isNotEmpty
             ? AnimeDetailBackground(
                 coverUrl: coverUrl,
                 backgroundUrl: '',

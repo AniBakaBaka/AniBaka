@@ -1,4 +1,5 @@
 import 'package:baka/models/bgm.dart';
+import 'package:baka/models/anime_filter.dart';
 import 'package:baka/models/anime_detail_view_data.dart';
 import 'package:flutter/foundation.dart';
 
@@ -21,13 +22,7 @@ class HomeController {
     ttl: const Duration(hours: 24),
   );
 
-  static const String recommendTag = '推荐';
-  static const String latestTag = '最新';
-  static const String pureTag = '纯净';
-  static const List<String> baseTags = [recommendTag, latestTag, pureTag];
-
-  static final RequestDeduplicator<String, Object> _requests =
-      RequestDeduplicator<String, Object>();
+  static final _requests = RequestCache<String, Object>(limit: 0);
 
   final DateTime Function() _now;
   late String _swipersKey;
@@ -42,28 +37,26 @@ class HomeController {
   );
   final ValueNotifier<int> week = ValueNotifier(DateTime.now().weekday - 1);
   final ValueNotifier<int> rankIndex = ValueNotifier(0);
-  final ValueNotifier<String> tag = ValueNotifier(recommendTag);
+  final filter = ValueNotifier(AnimeFilter.presets.first);
 
   int _nextPage = 2;
   int _feedRequest = 0;
   bool _loadingFeed = false;
   Future<void>? _firstPageTask;
-  ({String tag, bool force})? _firstPageKey;
+  ({AnimeFilter filter, bool force})? _firstPageKey;
+  bool _disposed = false;
 
   ValueNotifier<HomeItems> get feed => _feed;
   ValueNotifier<List<HomeItems>> get ranks => _ranks;
 
   HomeController({DateTime Function()? now}) : _now = now ?? DateTime.now {
-    final cachedFeed = _readCache(
-      'home_feed_$recommendTag',
-      allowExpired: true,
-    );
+    final cachedFeed = _readCache('home_feed_bgm_v4_推荐', allowExpired: true);
     _swipersKey = _swiperCacheKey(_seasonStart(_now()));
     final cachedSwipers = _readCache(_swipersKey, allowExpired: true);
-    final cachedRank = _readCache('home_rank_bgm_0', allowExpired: true);
-    final cachedSchedule = _readCache('home_xinfan_bgm_v2', allowExpired: true);
+    final cachedRank = _readCache('home_rank_bgm_v2_0', allowExpired: true);
+    final cachedSchedule = _readCache('home_xinfan_bgm_v3', allowExpired: true);
 
-    if (cachedFeed is List) _feed.value = cachedFeed.cast<Map>();
+    if (cachedFeed is List) _feed.value = List<Map>.of(cachedFeed.cast<Map>());
     if (cachedSwipers is List) swipers.value = cachedSwipers.cast<Map>();
     if (cachedRank is List) {
       _ranks.value = [
@@ -83,10 +76,14 @@ class HomeController {
   static List<HomeItems> _emptyGroups(int count) =>
       List.generate(count, (_) => <Map>[]);
 
-  List<String> get displayTags =>
-      baseTags.contains(tag.value) ? baseTags : [...baseTags, tag.value];
+  Iterable<AnimeFilter> get displayFilters sync* {
+    yield* AnimeFilter.presets;
+    if (filter.value.feed == null) yield filter.value;
+  }
 
   void dispose() {
+    _disposed = true;
+    ++_feedRequest;
     ++_swipersRequest;
     _feed.dispose();
     swipers.dispose();
@@ -94,16 +91,17 @@ class HomeController {
     _ranks.dispose();
     week.dispose();
     rankIndex.dispose();
-    tag.dispose();
+    filter.dispose();
   }
 
   Future<void> loadFeed({bool force = false}) {
-    final key = (tag: tag.value, force: force);
+    if (_disposed) return Future.value();
+    final key = (filter: filter.value, force: force);
     final running = _firstPageTask;
     if (running != null && _firstPageKey == key) return running;
 
     late final Future<void> task;
-    task = _loadFirstPage(selectedTag: key.tag, force: force).whenComplete(() {
+    task = _loadFirstPage(selected: key.filter, force: force).whenComplete(() {
       if (identical(_firstPageTask, task)) {
         _firstPageTask = null;
         _firstPageKey = null;
@@ -115,16 +113,17 @@ class HomeController {
   }
 
   Future<void> _loadFirstPage({
-    required String selectedTag,
+    required AnimeFilter selected,
     required bool force,
   }) async {
     final request = ++_feedRequest;
     _loadingFeed = true;
 
     try {
-      final items = await _fetchFeed(selectedTag, 1, force: force);
+      final items = await _fetchFeed(selected, 1, force: force);
       if (request != _feedRequest) return;
-      _feed.value = items;
+      // 缓存及并发请求共享首屏；只在取得可变分页列表时复制一次引用。
+      _feed.value = List<Map>.of(items);
       _nextPage = 2;
     } catch (error) {
       debugPrint('home feed: $error');
@@ -142,15 +141,16 @@ class HomeController {
       if (identical(_firstPageTask, task)) _firstPageTask = null;
       task = _firstPageTask;
     }
+    if (_disposed) return false;
     if (_loadingFeed) return true;
 
     final request = _feedRequest;
     final page = _nextPage;
-    final selectedTag = tag.value;
+    final selected = filter.value;
     _loadingFeed = true;
 
     try {
-      final items = await _fetchFeed(selectedTag, page);
+      final items = await _fetchFeed(selected, page);
       if (request != _feedRequest) return true;
       if (items.isEmpty) return false;
 
@@ -166,14 +166,16 @@ class HomeController {
     }
   }
 
-  Future<void> selectTag(String value) async {
-    if (tag.value == value) return;
-    tag.value = value;
+  Future<void> selectFilter(AnimeFilter value) async {
+    if (_disposed || filter.value == value) return;
+    filter.value = value;
+    _nextPage = 1;
+    _feed.value = <Map>[];
     await loadFeed();
   }
 
   Future<HomeItems> _fetchFeed(
-    String selectedTag,
+    AnimeFilter selected,
     int page, {
     bool force = false,
   }) async {
@@ -181,77 +183,37 @@ class HomeController {
 
     Future<HomeItems> fetch() async {
       final offset = (page - 1) * pageSize;
-      switch (selectedTag) {
-        case pureTag:
-          return getPost('', recommendTag, page, 50);
-        case recommendTag:
+      switch (selected.feed) {
+        case AnimeFeed.pure:
+          return getPost('', '推荐', page, 50);
+        case AnimeFeed.recommended:
           final subjects = await getTrendingSubjects(
             type: 2,
             limit: pageSize,
             offset: offset,
           );
           return convertBgmSubjectsToAppFormat(subjects, trending: true);
-        case latestTag:
-          final subjects = await searchBgmByTag(
-            const [],
+        case AnimeFeed.latest:
+        case null:
+          final latest = selected.feed == AnimeFeed.latest;
+          final subjects = await searchBgm(
+            tags: selected.tags,
             limit: pageSize,
             offset: offset,
-            sort: 'heat',
-            airDate: ['>=${DateTime.now().year}-01-01'],
-          );
-          return convertBgmSubjectsToAppFormat(subjects);
-        default:
-          final (tags, airDate) = _parseTag(selectedTag);
-          final subjects = await searchBgmByTag(
-            tags,
-            limit: pageSize,
-            offset: offset,
-            sort: 'rank',
-            airDate: airDate,
+            sort: latest ? 'heat' : 'rank',
+            airDate: latest
+                ? AnimeFilter(year: _now().year).airDate
+                : selected.airDate,
           );
           return convertBgmSubjectsToAppFormat(subjects);
       }
     }
 
-    if (page > 1 || selectedTag == pureTag) return fetch();
-    final cacheKey = selectedTag == recommendTag
-        ? 'home_feed_$selectedTag'
-        : 'home_feed_filter_v2_$selectedTag';
+    if (page > 1 || selected.feed == AnimeFeed.pure) return fetch();
+    final cacheKey = selected.feed == AnimeFeed.recommended
+        ? 'home_feed_bgm_v4_推荐'
+        : 'home_feed_filter_v4_${selected.feed == AnimeFeed.latest ? _now().year : ''}_${selected.cacheKey}';
     return _itemList(await _cached(cacheKey, fetch, force: force));
-  }
-
-  /// 年份和年代从标签中转为 Bangumi 的放送日期范围。
-  static (List<String>, List<String>?) _parseTag(String raw) {
-    final tags = <String>[];
-    List<String>? airDate;
-
-    for (final part in raw.split(',')) {
-      final value = part.trim();
-      if (value.isEmpty) continue;
-
-      final year = value.length == 4 ? int.tryParse(value) : null;
-      if (year != null) {
-        airDate = ['>=$year-01-01', '<${year + 1}-01-01'];
-        continue;
-      }
-
-      if (value.endsWith('年代')) {
-        final text = value.substring(0, value.length - 2);
-        final parsed = int.tryParse(text);
-        final decade = text.length == 2 && parsed != null
-            ? 1900 + parsed
-            : text.length == 4
-            ? parsed
-            : null;
-        if (decade != null) {
-          airDate = ['>=$decade-01-01', '<${decade + 10}-01-01'];
-          continue;
-        }
-      }
-
-      tags.add(value);
-    }
-    return (tags, airDate);
   }
 
   Future<void> loadSwipers({bool force = false}) async {
@@ -285,8 +247,7 @@ class HomeController {
   /// 当季首播的 TV / WEB 动画按 Bangumi 收藏热度选取，名单不依赖站内帖子。
   static Future<HomeItems> _fetchSwipers(DateTime season) async {
     final end = DateTime(season.year, season.month + 3);
-    final subjects = await searchBgmByTag(
-      const [],
+    final subjects = await searchBgm(
       limit: 24,
       sort: 'heat',
       airDate: [
@@ -340,9 +301,8 @@ class HomeController {
     final index = rankIndex.value;
     try {
       final items = _itemList(
-        await _cached('home_rank_bgm_$index', () async {
-          final subjects = await searchBgmByTag(
-            const [],
+        await _cached('home_rank_bgm_v2_$index', () async {
+          final subjects = await searchBgm(
             limit: 21,
             sort: 'rank',
             airDate: _rankAirDateFilter(rankDays[index]),
@@ -382,7 +342,7 @@ class HomeController {
   /// 新番更新表与更新时间表页面共用同一份缓存。
   /// 数据源为 BGM 每日放送（p1/calendar），key 1=周一 … 7=周日。
   static Future<List<HomeItems>> loadSharedXinfan({bool force = false}) async {
-    final raw = await _cached('home_xinfan_bgm_v2', () async {
+    final raw = await _cached('home_xinfan_bgm_v3', () async {
       final groups = _emptyGroups(7);
       final days = await getBgmCalendar();
 
@@ -413,7 +373,7 @@ class HomeController {
       if (cached != null) return Future.value(cached);
     }
 
-    return _requests.run(key, () async {
+    return _requests.get(key, () async {
       final data = await loader();
       // 先完成缓存写入再发布结果，关闭“请求已结束但缓存尚不可见”的
       // 重复请求窗口。

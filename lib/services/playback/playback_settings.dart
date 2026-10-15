@@ -2,7 +2,6 @@ import 'dart:io';
 import 'dart:convert';
 
 import 'package:flutter/painting.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:baka/instance.dart';
 import 'package:baka/models/playback_state.dart';
@@ -13,13 +12,6 @@ class PlaybackSettingsService {
   PlaybackSettingsService._();
 
   static const _subtitleSettingsKey = 'subtitle_settings';
-
-  static SubtitleConfig _loadSubtitles(SharedPreferences sp) {
-    final raw = sp.getString(_subtitleSettingsKey);
-    return raw == null
-        ? const SubtitleConfig()
-        : SubtitleConfig.fromJson(jsonDecode(raw) as Map<String, dynamic>);
-  }
 
   static const _defaultDanmakuOffKey = 'player_defaultDanmakuOff';
   static const _defaultPlaybackSpeedKey = 'player_defaultPlaybackSpeed';
@@ -41,14 +33,15 @@ class PlaybackSettingsService {
   static const _videoRendererKey = 'player_videoRenderer';
   static const _filterHlsAdsKey = 'player_filterHlsAds';
 
-  static const hwdecModeLabels = <String, String>{
-    'auto': '自动',
+  static const _tvHwdecModeLabels = <String, String>{
     'auto-safe': '安全模式',
     'mediacodec-copy': '硬解复制',
     'no': '软件解码',
   };
 
-  static const videoRendererLabels = <String, String>{
+  static const hwdecModeLabels = {'auto': '自动', ..._tvHwdecModeLabels};
+
+  static const videoRendererLabels = {
     'gpu': 'gpu',
     'gpu-next': 'gpu-next',
     'mediacodec_embed': 'mediacodec_embed',
@@ -59,40 +52,26 @@ class PlaybackSettingsService {
     'play_pause': '播放暂停',
   };
 
-  static final hwdecModeOptions = hwdecModeLabels.keys.toList(growable: false);
-  static final videoRendererOptions = videoRendererLabels.keys.toList(
-    growable: false,
-  );
+  static final _hwdecModes = hwdecModeLabels.keys.toList(growable: false);
+  static final _tvHwdecModes = _tvHwdecModeLabels.keys.toList(growable: false);
 
-  static List<String> get hwdecModeOptionsForPlatform {
-    return Instances.isTV
-        ? const ['auto-safe', 'mediacodec-copy', 'no']
-        : hwdecModeOptions;
-  }
+  static List<String> get hwdecModeOptionsForPlatform =>
+      Instances.isTV ? _tvHwdecModes : _hwdecModes;
 
-  static Map<String, String> get hwdecModeLabelsForPlatform {
-    return Instances.isTV
-        ? const {
-            'auto-safe': '安全模式',
-            'mediacodec-copy': '硬解复制',
-            'no': '软件解码',
-          }
-        : hwdecModeLabels;
-  }
+  static Map<String, String> get hwdecModeLabelsForPlatform =>
+      Instances.isTV ? _tvHwdecModeLabels : hwdecModeLabels;
 
-  static List<String> get videoRendererOptionsForPlatform {
-    return Platform.isAndroid
-        ? const ['gpu', 'mediacodec_embed']
-        : const ['gpu', 'gpu-next'];
-  }
+  static final videoRendererLabelsForPlatform = {
+    for (final entry in videoRendererLabels.entries)
+      if (entry.key != (Platform.isAndroid ? 'gpu-next' : 'mediacodec_embed'))
+        entry.key: entry.value,
+  };
 
-  static Map<String, String> get videoRendererLabelsForPlatform {
-    return Platform.isAndroid
-        ? const {'gpu': 'gpu', 'mediacodec_embed': 'mediacodec_embed'}
-        : const {'gpu': 'gpu', 'gpu-next': 'gpu-next'};
-  }
+  static final videoRendererOptionsForPlatform = videoRendererLabelsForPlatform
+      .keys
+      .toList(growable: false);
 
-  static const defaultPlaybackSpeed = 1.0;
+  static const _defaults = PlaybackPreferences();
   static const playbackSpeedOptions = <double>[
     0.5,
     0.75,
@@ -117,48 +96,33 @@ class PlaybackSettingsService {
 
   static String normalizeVideoRenderer(String? renderer, {bool? android}) {
     final isAndroid = android ?? Platform.isAndroid;
-    if (renderer == null || renderer == 'auto' || renderer == 'compatibility') {
-      return 'gpu';
-    }
-    if (renderer == 'quality') {
-      return isAndroid ? 'gpu' : 'gpu-next';
-    }
-    if (isAndroid && renderer == 'gpu-next') return 'gpu';
-    return videoRendererLabels.containsKey(renderer) ? renderer : 'gpu';
+    return switch (renderer) {
+      'quality' || 'gpu-next' => isAndroid ? 'gpu' : 'gpu-next',
+      'mediacodec_embed' => 'mediacodec_embed',
+      _ => 'gpu',
+    };
   }
 
   static double normalizePlaybackSpeed(double? speed) =>
       (speed != null && playbackSpeedOptions.contains(speed))
-          ? speed
-          : defaultPlaybackSpeed;
+      ? speed
+      : _defaults.defaultPlaybackSpeed;
 
   static String formatPlaybackSpeed(double speed) =>
       '${speed.toStringAsFixed(2).replaceFirst(_speedLabelTrim, '')}x';
 
-  static SharedPreferences get _prefs => Instances.sp;
-  static SharedPreferences? get _tryPrefs {
-    try {
-      return Instances.sp;
-    } catch (_) {
-      return null;
-    }
-  }
-
   static bool getClearCacheOnExit() =>
-      _tryPrefs?.getBool(_clearCacheOnExitKey) ?? false;
+      Instances.sp.getBool(_clearCacheOnExitKey) ?? false;
 
   static Future<void> setClearCacheOnExit(bool value) =>
-      _prefs.setBool(_clearCacheOnExitKey, value);
+      Instances.sp.setBool(_clearCacheOnExitKey, value);
 
-  static bool getLowMemoryMode() => _tryPrefs?.getBool(_lowMemoryModeKey) ?? false;
-
-  static bool getFilterHlsAds() => _tryPrefs?.getBool(_filterHlsAdsKey) ?? false;
+  static bool getLowMemoryMode() =>
+      Instances.sp.getBool(_lowMemoryModeKey) ?? false;
 
   /// 未设置时遵循视频源默认值；用户明确关闭时覆盖规则的自动开启。
-  static bool? getFilterHlsAdsOverride() => _tryPrefs?.getBool(_filterHlsAdsKey);
-
-  static Future<void> setFilterHlsAds(bool value) =>
-      _prefs.setBool(_filterHlsAdsKey, value);
+  static bool? getFilterHlsAdsOverride() =>
+      Instances.sp.getBool(_filterHlsAdsKey);
 
   static const lowMemoryImageCount = 80;
   static const lowMemoryImageBytes = 32 * 1024 * 1024;
@@ -175,61 +139,69 @@ class PlaybackSettingsService {
   }
 
   static Future<void> setLowMemoryMode(bool value) async {
-    await _prefs.setBool(_lowMemoryModeKey, value);
+    await Instances.sp.setBool(_lowMemoryModeKey, value);
     applyLowMemoryMode(value);
   }
 
   static PlaybackPreferences loadAll() {
-    final sp = _prefs;
-    VideoEnhancementMode enhancementMode;
-    VideoEnhancementMode lastEnhancementMode;
-
-    if (sp.containsKey(_videoEnhancementModeKey)) {
-      enhancementMode = VideoEnhancementMode.fromStorage(
-        sp.getString(_videoEnhancementModeKey),
-      );
-      final storedLastMode = VideoEnhancementMode.fromStorage(
-        sp.getString(_lastVideoEnhancementModeKey),
-      );
-      lastEnhancementMode = storedLastMode != VideoEnhancementMode.off
-          ? storedLastMode
-          : (enhancementMode != VideoEnhancementMode.off
-              ? enhancementMode
-              : VideoEnhancementMode.medium);
-    } else {
-      final legacyLevel = VideoEnhancementMode.fromStorage(
-        sp.getString('player_anime4KLevel'),
-      );
-      final effectiveLegacyLevel = legacyLevel != VideoEnhancementMode.off
-          ? legacyLevel
-          : VideoEnhancementMode.medium;
-      final legacyEnabled = sp.getBool('player_enableAnime4K') ?? false;
-      enhancementMode =
-          legacyEnabled ? effectiveLegacyLevel : VideoEnhancementMode.off;
-      lastEnhancementMode = effectiveLegacyLevel;
+    final sp = Instances.sp;
+    final subtitles = sp.getString(_subtitleSettingsKey);
+    final storedMode = sp.getString(_videoEnhancementModeKey);
+    var enhancementMode = VideoEnhancementMode.fromStorage(storedMode);
+    var lastEnhancementMode = VideoEnhancementMode.fromStorage(
+      sp.getString(
+        storedMode == null
+            ? 'player_anime4KLevel'
+            : _lastVideoEnhancementModeKey,
+      ),
+    );
+    if (lastEnhancementMode == VideoEnhancementMode.off) {
+      lastEnhancementMode = enhancementMode == VideoEnhancementMode.off
+          ? _defaults.lastVideoEnhancementMode
+          : enhancementMode;
+    }
+    if (storedMode == null && sp.getBool('player_enableAnime4K') == true) {
+      enhancementMode = lastEnhancementMode;
     }
 
     return PlaybackPreferences(
-      rememberLastPosition: sp.getBool(_rememberLastPositionKey) ?? true,
-      autoFullscreen: sp.getBool(_autoFullscreenKey) ?? false,
-      enableSkipOpEd: sp.getBool(_enableSkipOpEdKey) ?? false,
-      defaultDanmakuOff: sp.getBool(_defaultDanmakuOffKey) ?? false,
+      rememberLastPosition:
+          sp.getBool(_rememberLastPositionKey) ??
+          _defaults.rememberLastPosition,
+      autoFullscreen:
+          sp.getBool(_autoFullscreenKey) ?? _defaults.autoFullscreen,
+      enableSkipOpEd:
+          sp.getBool(_enableSkipOpEdKey) ?? _defaults.enableSkipOpEd,
+      defaultDanmakuOff:
+          sp.getBool(_defaultDanmakuOffKey) ?? _defaults.defaultDanmakuOff,
       defaultPlaybackSpeed: normalizePlaybackSpeed(
         sp.getDouble(_defaultPlaybackSpeedKey),
       ),
-      longPressSpeed: sp.getDouble(_longPressSpeedKey) ?? 2.0,
-      showNextEpisodeButton: sp.getBool(_showNextEpisodeButtonKey) ?? true,
-      enableDoubleTap: sp.getBool(_enableDoubleTapKey) ?? true,
-      doubleTapAction: sp.getString(_doubleTapActionKey) ?? 'play_pause',
-      doubleTapSeekDuration: sp.getInt(_doubleTapSeekDurationKey) ?? 10,
-      showSystemTime: sp.getBool(_showSystemTimeKey) ?? false,
+      longPressSpeed:
+          sp.getDouble(_longPressSpeedKey) ?? _defaults.longPressSpeed,
+      showNextEpisodeButton:
+          sp.getBool(_showNextEpisodeButtonKey) ??
+          _defaults.showNextEpisodeButton,
+      enableDoubleTap:
+          sp.getBool(_enableDoubleTapKey) ?? _defaults.enableDoubleTap,
+      doubleTapAction:
+          sp.getString(_doubleTapActionKey) ?? _defaults.doubleTapAction,
+      doubleTapSeekDuration:
+          sp.getInt(_doubleTapSeekDurationKey) ??
+          _defaults.doubleTapSeekDuration,
+      showSystemTime:
+          sp.getBool(_showSystemTimeKey) ?? _defaults.showSystemTime,
       videoEnhancementMode: enhancementMode,
       lastVideoEnhancementMode: lastEnhancementMode,
-      showSubtitle: sp.getBool(_showSubtitleKey) ?? true,
-      subtitleConfig: _loadSubtitles(sp),
+      showSubtitle: sp.getBool(_showSubtitleKey) ?? _defaults.showSubtitle,
+      subtitleConfig: subtitles == null
+          ? _defaults.subtitleConfig
+          : SubtitleConfig.fromJson(
+              jsonDecode(subtitles) as Map<String, dynamic>,
+            ),
       hwdecMode: normalizeHwdecMode(sp.getString(_hwdecModeKey)),
       videoRenderer: normalizeVideoRenderer(sp.getString(_videoRendererKey)),
-      filterHlsAds: sp.getBool(_filterHlsAdsKey) ?? false,
+      filterHlsAds: sp.getBool(_filterHlsAdsKey) ?? _defaults.filterHlsAds,
     );
   }
 
@@ -237,50 +209,82 @@ class PlaybackSettingsService {
     PlaybackPreferences previous,
     PlaybackPreferences next,
   ) {
-    if (identical(previous, next) || previous == next) {
+    if (identical(previous, next)) {
       return Future.value();
     }
 
-    final sp = _prefs;
-    final writes = <Future<void>>[];
+    final sp = Instances.sp;
+    List<Future<bool>>? writes;
 
     void write(String key, Object before, Object after) {
       if (before == after) return;
+      final pending = writes ??= [];
       if (after is bool) {
-        writes.add(sp.setBool(key, after));
+        pending.add(sp.setBool(key, after));
       } else if (after is int) {
-        writes.add(sp.setInt(key, after));
+        pending.add(sp.setInt(key, after));
       } else if (after is double) {
-        writes.add(sp.setDouble(key, after));
+        pending.add(sp.setDouble(key, after));
       } else if (after is String) {
-        writes.add(sp.setString(key, after));
+        pending.add(sp.setString(key, after));
       }
     }
 
-    write(_rememberLastPositionKey, previous.rememberLastPosition, next.rememberLastPosition);
+    write(
+      _rememberLastPositionKey,
+      previous.rememberLastPosition,
+      next.rememberLastPosition,
+    );
     write(_autoFullscreenKey, previous.autoFullscreen, next.autoFullscreen);
     write(_enableSkipOpEdKey, previous.enableSkipOpEd, next.enableSkipOpEd);
-    write(_defaultDanmakuOffKey, previous.defaultDanmakuOff, next.defaultDanmakuOff);
-    write(_defaultPlaybackSpeedKey, previous.defaultPlaybackSpeed, next.defaultPlaybackSpeed);
+    write(
+      _defaultDanmakuOffKey,
+      previous.defaultDanmakuOff,
+      next.defaultDanmakuOff,
+    );
+    write(
+      _defaultPlaybackSpeedKey,
+      previous.defaultPlaybackSpeed,
+      next.defaultPlaybackSpeed,
+    );
     write(_longPressSpeedKey, previous.longPressSpeed, next.longPressSpeed);
-    write(_showNextEpisodeButtonKey, previous.showNextEpisodeButton, next.showNextEpisodeButton);
+    write(
+      _showNextEpisodeButtonKey,
+      previous.showNextEpisodeButton,
+      next.showNextEpisodeButton,
+    );
     write(_enableDoubleTapKey, previous.enableDoubleTap, next.enableDoubleTap);
     write(_doubleTapActionKey, previous.doubleTapAction, next.doubleTapAction);
-    write(_doubleTapSeekDurationKey, previous.doubleTapSeekDuration, next.doubleTapSeekDuration);
+    write(
+      _doubleTapSeekDurationKey,
+      previous.doubleTapSeekDuration,
+      next.doubleTapSeekDuration,
+    );
     write(_showSystemTimeKey, previous.showSystemTime, next.showSystemTime);
-    write(_videoEnhancementModeKey, previous.videoEnhancementMode.storageValue, next.videoEnhancementMode.storageValue);
-    write(_lastVideoEnhancementModeKey, previous.lastVideoEnhancementMode.storageValue, next.lastVideoEnhancementMode.storageValue);
+    write(
+      _videoEnhancementModeKey,
+      previous.videoEnhancementMode.storageValue,
+      next.videoEnhancementMode.storageValue,
+    );
+    write(
+      _lastVideoEnhancementModeKey,
+      previous.lastVideoEnhancementMode.storageValue,
+      next.lastVideoEnhancementMode.storageValue,
+    );
     write(_showSubtitleKey, previous.showSubtitle, next.showSubtitle);
     write(_hwdecModeKey, previous.hwdecMode, next.hwdecMode);
     write(_videoRendererKey, previous.videoRenderer, next.videoRenderer);
     write(_filterHlsAdsKey, previous.filterHlsAds, next.filterHlsAds);
 
     if (previous.subtitleConfig != next.subtitleConfig) {
-      writes.add(sp.setString(
-        _subtitleSettingsKey, jsonEncode(next.subtitleConfig.toJson()),
-      ));
+      (writes ??= []).add(
+        sp.setString(
+          _subtitleSettingsKey,
+          jsonEncode(next.subtitleConfig.toJson()),
+        ),
+      );
     }
 
-    return writes.isEmpty ? Future.value() : Future.wait(writes);
+    return writes == null ? Future.value() : Future.wait(writes!);
   }
 }

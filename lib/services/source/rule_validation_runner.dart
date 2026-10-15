@@ -1,36 +1,20 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
-import 'package:baka/core/system_proxy.dart';
 import 'package:baka/models/ai_rule_authoring.dart';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/services/source/site_probe_service.dart';
+import 'package:baka/source/adapter_base.dart';
 import 'package:baka/source/engine/rule_validator.dart';
 import 'package:baka/source/pipeline_source_adapter.dart';
 import 'package:dio/dio.dart';
-import 'package:dio/io.dart';
 
 class RuleValidationRunner {
-  RuleValidationRunner({Dio? mediaClient})
-    : _mediaClient =
-          mediaClient ??
-          (Dio(
-              BaseOptions(
-                connectTimeout: const Duration(seconds: 8),
-                receiveTimeout: const Duration(seconds: 12),
-                sendTimeout: const Duration(seconds: 8),
-                followRedirects: true,
-                maxRedirects: 4,
-                validateStatus: (_) => true,
-              ),
-            )
-            ..httpClientAdapter = IOHttpClientAdapter(
-              createHttpClient: SystemProxyService.createHttpClient,
-            ));
-
-  final Dio _mediaClient;
-
   bool _disposed = false;
   final Set<PipelineSourceAdapter> _activeAdapters = {};
+
   void dispose() {
     if (_disposed) return;
     _disposed = true;
@@ -38,7 +22,6 @@ class RuleValidationRunner {
       adapter.dispose();
     }
     _activeAdapters.clear();
-    _mediaClient.close(force: true);
   }
 
   Future<RuleValidationReport> validate(
@@ -48,119 +31,75 @@ class RuleValidationRunner {
     String? preferredEpisodeId,
   }) async {
     if (_disposed) throw StateError('RuleValidationRunner is disposed');
-    if (!config.hasPipeline) {
-      return const RuleValidationReport(
-        success: false,
-        stage: 'static',
-        message: '缺少 anx-rule/2 pipeline',
-      );
-    }
-
-    late final PipelineSourceAdapter adapter;
-    try {
-      final rule = config.rule;
-      final staticValidation = RuleValidator.validate(rule);
-      if (!staticValidation.isValid) {
-        return RuleValidationReport(
-          success: false,
-          stage: 'static',
-          message: staticValidation.errors.join('；'),
-        );
-      }
-      adapter = PipelineSourceAdapter(rule);
-      _activeAdapters.add(adapter);
-    } catch (error) {
-      return RuleValidationReport(
-        success: false,
-        stage: 'static',
-        message: SiteProbeService.safeError(error),
-      );
-    }
-
+    PipelineSourceAdapter? adapter;
+    var stage = 'static';
     var seriesCount = 0;
     var lineCount = 0;
     var episodeCount = 0;
     try {
+      if (!config.hasPipeline) throw StateError('缺少 anx-rule/2 pipeline');
+      final rule = config.rule;
+      final validation = RuleValidator.validate(rule);
+      if (!validation.isValid) {
+        throw FormatException(validation.errors.join('；'));
+      }
+      adapter = PipelineSourceAdapter(rule);
+      _activeAdapters.add(adapter);
+
+      stage = 'search';
       final results = await adapter.search(keyword, enhanceWithBgm: false);
       seriesCount = results.length;
-      if (results.isEmpty) {
-        return const RuleValidationReport(
-          success: false,
-          stage: 'search',
-          message: '搜索没有返回任何结果',
-        );
-      }
-
+      if (results.isEmpty) throw StateError('搜索没有返回任何结果');
       final series = preferredSeriesId == null
           ? results.first
           : results.firstWhere(
               (item) => item.seriesId == preferredSeriesId,
-              orElse: () => results.first,
+              orElse: () => throw StateError('搜索结果不包含指定剧集'),
             );
+
+      stage = 'detail';
       final catalog = await adapter.getPlaybackCatalog(series.seriesId);
       lineCount = catalog.sourceNames.length;
       episodeCount = catalog.episodes.length;
-      if (catalog.isEmpty) {
-        return RuleValidationReport(
-          success: false,
-          stage: 'detail',
-          message: '详情页没有提取到剧集或播放线路',
-          seriesCount: seriesCount,
-        );
-      }
-
+      if (catalog.isEmpty) throw StateError('详情页没有提取到剧集或播放线路');
       String? episodeToken;
-      if (preferredEpisodeId != null && preferredEpisodeId.isNotEmpty) {
-        for (final ep in catalog.episodes) {
-          if (ep.lines.contains(preferredEpisodeId)) {
-            episodeToken = preferredEpisodeId;
-            break;
+      outer:
+      for (final episode in catalog.episodes) {
+        for (final token in episode.lines) {
+          if (preferredEpisodeId == null
+              ? token.isNotEmpty
+              : token == preferredEpisodeId) {
+            episodeToken = token;
+            break outer;
           }
         }
       }
       if (episodeToken == null) {
-        outer:
-        for (final ep in catalog.episodes) {
-          for (final line in ep.lines) {
-            if (line.trim().isNotEmpty) {
-              episodeToken = line;
-              break outer;
-            }
-          }
-        }
-      }
-      if (episodeToken == null) {
-        return RuleValidationReport(
-          success: false,
-          stage: 'detail',
-          message: '剧集列表中没有可解析的线路 token',
-          seriesCount: seriesCount,
-          lineCount: lineCount,
-          episodeCount: episodeCount,
+        throw StateError(
+          preferredEpisodeId == null
+              ? '剧集列表中没有可解析的线路 token'
+              : '剧集列表不包含指定线路 token',
         );
       }
 
+      stage = 'play';
       final resolved = await adapter.resolvePlaybackMedia(
         episodeToken,
+        skipValidation: true,
         maxAttempts: 1,
-        reachTimeout: const Duration(seconds: 8),
       );
-      if (resolved.url.isEmpty) {
-        return RuleValidationReport(
-          success: false,
-          stage: 'play',
-          message: '播放管线没有得到可达媒体地址',
-          seriesCount: seriesCount,
-          lineCount: lineCount,
-          episodeCount: episodeCount,
-        );
-      }
-
+      if (resolved.url.isEmpty) throw StateError('播放管线没有得到媒体地址');
       final prepared = await adapter.preparePlaybackMedia(resolved);
-      final mediaKind = await _verifyMedia(prepared.url, prepared.httpHeaders);
+
+      stage = 'media';
+      // Reuse the source's cookies, proxy policy and cancellation lifetime.
+      final source = adapter;
+      final mediaKind = await source.runOperation(
+        () => _verifyMedia(source.dio, prepared.url, prepared.httpHeaders),
+      );
       return RuleValidationReport(
         success: true,
-        stage: 'media',
+        stage: stage,
         message: '搜索、详情、播放解析和实际媒体读取均通过',
         seriesCount: seriesCount,
         lineCount: lineCount,
@@ -170,7 +109,7 @@ class RuleValidationRunner {
     } catch (error) {
       return RuleValidationReport(
         success: false,
-        stage: _stageFor(seriesCount, episodeCount),
+        stage: stage,
         message: SiteProbeService.safeError(error),
         seriesCount: seriesCount,
         lineCount: lineCount,
@@ -178,107 +117,110 @@ class RuleValidationRunner {
       );
     } finally {
       _activeAdapters.remove(adapter);
-      adapter.dispose();
+      adapter?.dispose();
     }
   }
 
-  Future<String> _verifyMedia(String url, Map<String, String> headers) async {
-    final uri = Uri.parse(url);
-    final looksHls = uri.path.toLowerCase().endsWith('.m3u8');
-    if (!looksHls) {
-      final response = await _mediaClient.get<List<int>>(
-        url,
-        options: Options(
-          headers: {...headers, 'Range': 'bytes=0-1023'},
-          responseType: ResponseType.bytes,
-        ),
-      );
-      if (!_ok(response.statusCode) || (response.data?.isEmpty ?? true)) {
-        throw StateError('媒体 Range 请求失败（HTTP ${response.statusCode ?? 0}）');
-      }
-      final contentType = response.headers.value('content-type')?.toLowerCase();
-      final prefix = utf8
-          .decode(response.data!, allowMalformed: true)
-          .trimLeft();
-      if (contentType?.contains('mpegurl') == true ||
-          prefix.startsWith('#EXTM3U')) {
-        return _verifyHls(uri, headers, prefix);
-      }
-      return 'file';
-    }
-
-    return _verifyHls(uri, headers, await _fetchText(uri, headers));
-  }
-
-  Future<String> _verifyHls(
-    Uri initialUri,
+  static Future<String> _verifyMedia(
+    Dio client,
+    String url,
     Map<String, String> headers,
-    String initialManifest,
   ) async {
-    var manifestUri = initialUri;
-    var manifest = initialManifest;
-    if (manifest.contains('#EXT-X-STREAM-INF')) {
-      final variant = _firstMediaLine(manifest);
-      if (variant == null) throw StateError('HLS 主清单没有可用变体');
-      manifestUri = manifestUri.resolve(variant);
-      manifest = await _fetchText(manifestUri, headers);
-    }
-    if (!manifest.trimLeft().startsWith('#EXTM3U')) {
-      throw StateError('HLS 响应不是有效清单');
-    }
-    final segment = _firstMediaLine(manifest);
-    if (segment == null) throw StateError('HLS 媒体清单没有实际分片');
-    final response = await _mediaClient.get<List<int>>(
-      manifestUri.resolve(segment).toString(),
-      options: Options(
-        headers: {...headers, 'Range': 'bytes=0-1023'},
-        responseType: ResponseType.bytes,
-      ),
-    );
-    if (!_ok(response.statusCode) || (response.data?.isEmpty ?? true)) {
-      throw StateError('HLS 分片请求失败（HTTP ${response.statusCode ?? 0}）');
-    }
-    return 'hls-segment';
-  }
+    var uri = Uri.parse(url);
+    var segment = false;
+    // RFC 8216: optional master playlist -> media playlist -> media segment.
+    for (var depth = 0; ; depth++) {
+      final cancel = CancelToken();
+      StreamIterator<Uint8List>? chunks;
+      try {
+        final response = await client.getUri<ResponseBody>(
+          uri,
+          cancelToken: cancel,
+          options: Options(
+            headers: segment
+                ? {...headers, HttpHeaders.rangeHeader: 'bytes=0-1023'}
+                : headers,
+            responseType: ResponseType.stream,
+            receiveTimeout: const Duration(seconds: 12),
+            extra: const {RetryInterceptor.skipRetryKey: true},
+          ),
+        );
+        chunks = StreamIterator(response.data!.stream);
+        for (final redirect in response.redirects) {
+          uri = uri.resolveUri(redirect.location);
+        }
+        if (response.statusCode != HttpStatus.ok &&
+            response.statusCode != HttpStatus.partialContent) {
+          throw StateError('媒体请求失败（HTTP ${response.statusCode}）');
+        }
+        final contentType = response.headers
+            .value(HttpHeaders.contentTypeHeader)
+            ?.split(';')
+            .first
+            .toLowerCase();
+        if (contentType == 'text/html' || contentType == 'application/json') {
+          throw StateError('媒体请求返回了 $contentType');
+        }
 
-  Future<String> _fetchText(Uri uri, Map<String, String> headers) async {
-    final response = await _mediaClient.get<String>(
-      uri.toString(),
-      options: Options(headers: headers, responseType: ResponseType.plain),
-    );
-    if (!_ok(response.statusCode)) {
-      throw StateError('HLS 清单请求失败（HTTP ${response.statusCode ?? 0}）');
-    }
-    return response.data ?? '';
-  }
+        // Only sniff the signature; never buffer a video when Range is ignored.
+        final prefix = BytesBuilder(copy: false);
+        while (prefix.length < 7 && await chunks.moveNext()) {
+          prefix.add(chunks.current);
+        }
+        if (prefix.isEmpty) throw StateError('媒体响应为空');
+        if (segment) return 'hls-segment';
+        final bytes = prefix.takeBytes();
+        final signature = ascii.decode(
+          Uint8List.sublistView(bytes, 0, bytes.length < 7 ? bytes.length : 7),
+          allowInvalid: true,
+        );
+        if (depth == 0 &&
+            signature != '#EXTM3U' &&
+            !uri.path.toLowerCase().endsWith('.m3u8') &&
+            !(contentType?.contains('mpegurl') ?? false)) {
+          return 'file';
+        }
 
-  static String? _firstMediaLine(String manifest) {
-    final len = manifest.length;
-    var lineStart = 0;
-    while (lineStart < len) {
-      var lineEnd = manifest.indexOf('\n', lineStart);
-      if (lineEnd < 0) lineEnd = len;
-      var start = lineStart;
-      while (start < lineEnd && manifest.codeUnitAt(start) <= 32) {
-        start++;
+        // Bound even a malformed, newline-free manifest. The parser stops at
+        // the first URI, so long playlists don't become retained strings/lists.
+        final iterator = chunks;
+        Stream<List<int>> manifestBytes() async* {
+          var length = 0;
+          var chunk = bytes;
+          do {
+            length += chunk.length;
+            if (length > 1024 * 1024) throw StateError('HLS 清单前缀超过 1 MiB');
+            yield chunk;
+            if (!await iterator.moveNext()) break;
+            chunk = iterator.current;
+          } while (true);
+        }
+
+        var firstLine = true;
+        var master = false;
+        Uri? next;
+        await for (final line
+            in manifestBytes()
+                .transform(utf8.decoder)
+                .transform(const LineSplitter())) {
+          if (firstLine) {
+            firstLine = false;
+            if (line != '#EXTM3U') throw StateError('HLS 响应不是有效清单');
+          } else if (line.startsWith('#EXT-X-STREAM-INF:')) {
+            master = true;
+          } else if (line.isNotEmpty && !line.startsWith('#')) {
+            next = uri.resolve(line);
+            break;
+          }
+        }
+        if (next == null) throw StateError('HLS 清单没有可读取的变体或分片');
+        if (master && depth != 0) throw StateError('HLS 变体必须是媒体清单');
+        uri = next;
+        segment = !master;
+      } finally {
+        cancel.cancel();
+        await chunks?.cancel();
       }
-      var end = lineEnd;
-      while (end > start && manifest.codeUnitAt(end - 1) <= 32) {
-        end--;
-      }
-      if (start < end && manifest.codeUnitAt(start) != 0x23) {
-        return manifest.substring(start, end);
-      }
-      lineStart = lineEnd + 1;
     }
-    return null;
-  }
-
-  static bool _ok(int? code) => code == 200 || code == 206;
-
-  static String _stageFor(int seriesCount, int episodeCount) {
-    if (seriesCount == 0) return 'search';
-    if (episodeCount == 0) return 'detail';
-    return 'play/media';
   }
 }

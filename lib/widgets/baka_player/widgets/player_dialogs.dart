@@ -71,10 +71,9 @@ Future<void> showSpeedDialog(
   final result = await showAppSelectionDialog<double>(
     context,
     title: '播放倍速',
-    options: speeds
-        .map((speed) => SelectionOption(value: speed, label: '${speed}x'))
-        .toList(),
-    currentValue: current,
+    options: speeds,
+    label: (speed) => '${speed}x',
+    isSelected: (speed) => speed == current,
   );
   if (result != null) {
     controller.setRate(result);
@@ -90,15 +89,9 @@ Future<void> showVideoFitDialog(
       await showAppSelectionDialog<({BoxFit fit, String description})>(
         context,
         title: '画面比例',
-        options: PlaybackController.videoFitTypes
-            .map(
-              (type) => SelectionOption(value: type, label: type.description),
-            )
-            .toList(),
-        currentValue: PlaybackController.videoFitTypes.firstWhere(
-          (type) => type.fit == currentFit,
-          orElse: () => PlaybackController.videoFitTypes.first,
-        ),
+        options: PlaybackController.videoFitTypes,
+        label: (type) => type.description,
+        isSelected: (type) => type.fit == currentFit,
       );
   if (result != null) {
     controller.setVideoFit(result.fit, result.description);
@@ -109,33 +102,26 @@ Future<void> showVideoEnhancementModeDialog(
   BuildContext context,
   PlaybackController controller,
 ) async {
-  const options = <SelectionOption<VideoEnhancementMode>>[
-    SelectionOption(
-      value: VideoEnhancementMode.low,
-      label: '低',
-      subtitle: '轻度锐化，画面更通透，性能开销小',
-    ),
-    SelectionOption(
-      value: VideoEnhancementMode.medium,
-      label: '中',
-      subtitle: '线条更锐利，画面更干净，效果明显',
-    ),
-    SelectionOption(
-      value: VideoEnhancementMode.high,
-      label: '高',
-      subtitle: '大幅提升清晰度，改善显著',
-    ),
-    SelectionOption(
-      value: VideoEnhancementMode.ultra,
-      label: '超高',
-      subtitle: '负载高，线条与细节还原最佳',
-    ),
+  const options = [
+    VideoEnhancementMode.low,
+    VideoEnhancementMode.medium,
+    VideoEnhancementMode.high,
+    VideoEnhancementMode.ultra,
   ];
   final result = await showAppSelectionDialog<VideoEnhancementMode>(
     context,
     title: 'Anime4K 增强档位',
     options: options,
-    currentValue: controller.preferences.value.videoEnhancementMode,
+    label: (mode) => mode.label,
+    isSelected: (mode) =>
+        mode == controller.preferences.value.videoEnhancementMode,
+    subtitle: (mode) => switch (mode) {
+      VideoEnhancementMode.off => null,
+      VideoEnhancementMode.low => '轻度锐化，画面更通透，性能开销小',
+      VideoEnhancementMode.medium => '线条更锐利，画面更干净，效果明显',
+      VideoEnhancementMode.high => '大幅提升清晰度，改善显著',
+      VideoEnhancementMode.ultra => '负载高，线条与细节还原最佳',
+    },
   );
   if (result != null) {
     try {

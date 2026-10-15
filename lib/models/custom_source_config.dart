@@ -51,18 +51,11 @@ class CustomSourceConfig {
        updatedAt = updatedAt ?? DateTime.now();
 
   factory CustomSourceConfig.fromJson(Map<String, dynamic> json) {
-    final pipelineBody = _extractPipelineBody(json);
-    return CustomSourceConfig(
-      id: (json['id'] as String?) ?? '',
-      name: (json['name'] as String?) ?? '未命名源',
-      baseUrl: (json['baseUrl'] as String?) ?? '',
-      iconUrl:
-          (json['iconUrl'] ?? json['icon'] ?? json['favicon'] ?? json['badge'])
-              ?.toString() ??
-          '',
-      description: json['description'] as String?,
-      pipeline: pipelineBody,
-      enabled: json['enabled'] as bool?,
+    final pipeline = (json['pipeline'] as Map?)?.cast<String, dynamic>();
+    return CustomSourceConfig.fromRule(
+      SourceRule.fromJson(pipeline == null ? json : {...json, ...pipeline}),
+      hasPipeline: pipeline != null || SourceRule.isV2Json(json),
+      enabled: json['enabled'] as bool? ?? true,
       createdAt: json['createdAt'] != null
           ? DateTime.tryParse(json['createdAt'] as String)
           : null,
@@ -70,30 +63,6 @@ class CustomSourceConfig {
           ? DateTime.tryParse(json['updatedAt'] as String)
           : null,
     );
-  }
-
-  static Map<String, dynamic>? _extractPipelineBody(Map<String, dynamic> json) {
-    if (json['pipeline'] is Map) {
-      final pipeline = (json['pipeline'] as Map).cast<String, dynamic>();
-      if (!pipeline.containsKey('directConnection') &&
-          json['directConnection'] != null) {
-        return {...pipeline, 'directConnection': json['directConnection']};
-      }
-      return pipeline;
-    }
-    if (!SourceRule.isV2Json(json)) return null;
-    return <String, dynamic>{
-      if (json['recipes'] != null) 'recipes': json['recipes'],
-      if (json['headers'] != null) 'headers': json['headers'],
-      if (json['search'] != null) 'search': json['search'],
-      if (json['detail'] != null) 'detail': json['detail'],
-      if (json['play'] != null) 'play': json['play'],
-      if (json['useWebview'] != null) 'useWebview': json['useWebview'],
-      if (json['directConnection'] != null)
-        'directConnection': json['directConnection'],
-      if (json['mediaValidationTimeoutMs'] != null)
-        'mediaValidationTimeoutMs': json['mediaValidationTimeoutMs'],
-    };
   }
 
   Map<String, dynamic> toJson() => {

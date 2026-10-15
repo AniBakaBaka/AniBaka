@@ -1,3 +1,5 @@
+import 'package:baka/core/content_filter.dart';
+import 'package:baka/models/anime_filter.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/utils/json_values.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -30,7 +32,7 @@ class _TvHomePageState extends State<TvHomePage> {
   final _focusedItem = ValueNotifier<Map?>(null);
   final ScrollController _scrollController = ScrollController();
   final _loadingMore = ValueNotifier(false);
-  String? _exhaustedTag;
+  AnimeFilter? _exhaustedFilter;
 
   @override
   void initState() {
@@ -48,7 +50,7 @@ class _TvHomePageState extends State<TvHomePage> {
 
   void _onScroll() {
     if (_loadingMore.value) return;
-    if (_exhaustedTag == widget.svc.tag.value) return;
+    if (_exhaustedFilter == widget.svc.filter.value) return;
     if (!_scrollController.hasClients) return;
     final pos = _scrollController.position;
     if (pos.pixels >= pos.maxScrollExtent - 500) {
@@ -57,13 +59,15 @@ class _TvHomePageState extends State<TvHomePage> {
   }
 
   Future<void> _loadMore() async {
-    if (_loadingMore.value || _exhaustedTag == widget.svc.tag.value) return;
+    if (_loadingMore.value || _exhaustedFilter == widget.svc.filter.value) {
+      return;
+    }
     _loadingMore.value = true;
-    final tag = widget.svc.tag.value;
+    final filter = widget.svc.filter.value;
     try {
       final hasMore = await widget.svc.loadMore();
-      if (!hasMore && widget.svc.tag.value == tag) {
-        _exhaustedTag = tag;
+      if (!hasMore && widget.svc.filter.value == filter) {
+        _exhaustedFilter = filter;
       }
     } finally {
       if (mounted) {
@@ -73,7 +77,12 @@ class _TvHomePageState extends State<TvHomePage> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: contentFilter,
+    builder: (context, _) => _buildContent(context),
+  );
+
+  Widget _buildContent(BuildContext context) {
     return Scaffold(
       backgroundColor: context.tvBgColor,
       body: SafeArea(
@@ -167,14 +176,17 @@ class _TvHomePageState extends State<TvHomePage> {
   Widget _buildFixedHeaderWaterfallView() {
     return ValueListenableBuilder<HomeItems>(
       valueListenable: widget.svc.feed,
-      builder: (context, items, _) {
+      builder: (context, rawItems, _) {
+        final items = contentFilter.visibleItems(rawItems);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ValueListenableBuilder<Map?>(
               valueListenable: _focusedItem,
               builder: (context, focused, _) {
-                final item = focused ?? (items.isEmpty ? null : items.first);
+                final item = focused != null && contentFilter.allows(focused)
+                    ? focused
+                    : (items.isEmpty ? null : items.first);
                 return item == null
                     ? const SizedBox.shrink()
                     : _TvHomeHero(key: ObjectKey(item), item: item);

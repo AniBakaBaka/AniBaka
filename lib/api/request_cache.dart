@@ -7,8 +7,9 @@ import 'dart:collection';
 /// request and one parse. Failed requests are removed immediately.
 final class RequestCache<K, V> {
   RequestCache({required this.limit, this.ttl, this.shouldCache})
-    : assert(limit > 0);
+    : assert(limit >= 0);
 
+  /// Zero shares pending requests without retaining completed values.
   final int limit;
   final Duration? ttl;
   final bool Function(V value)? shouldCache;
@@ -20,7 +21,7 @@ final class RequestCache<K, V> {
   Future<V> get(K key, Future<V> Function() load, {bool refresh = false}) {
     final active = _pending[key];
     if (active != null) return active;
-    final cached = _entries.remove(key);
+    final cached = limit == 0 ? null : _entries.remove(key);
     if (!refresh &&
         cached != null &&
         (cached.expiresAt == null ||
@@ -33,28 +34,35 @@ final class RequestCache<K, V> {
     // Normalize SynchronousFuture before callbacks touch the pending table.
     // The async loader also captures synchronous throws without a Completer.
     Future<V> invoke() async => load();
-    request = invoke().then(
-      (value) {
-        if (identical(_pending[key], request)) {
-          _pending.remove(key);
-          if (shouldCache?.call(value) != false) {
-            _evictForRoom();
-            _entries[key] = _RequestEntry(
-              request,
-              value,
-              ttl == null
-                  ? null
-                  : DateTime.now().millisecondsSinceEpoch + ttl!.inMilliseconds,
-            );
-          }
-        }
-        return value;
-      },
-      onError: (Object error, StackTrace stack) {
-        if (identical(_pending[key], request)) _pending.remove(key);
-        Error.throwWithStackTrace(error, stack);
-      },
-    );
+    void release() {
+      if (identical(_pending[key], request)) _pending.remove(key);
+    }
+
+    request = limit == 0
+        ? invoke().whenComplete(release)
+        : invoke().then(
+            (value) {
+              if (identical(_pending[key], request)) {
+                _pending.remove(key);
+                if (shouldCache?.call(value) != false) {
+                  _evictForRoom();
+                  _entries[key] = _RequestEntry(
+                    request,
+                    value,
+                    ttl == null
+                        ? null
+                        : DateTime.now().millisecondsSinceEpoch +
+                              ttl!.inMilliseconds,
+                  );
+                }
+              }
+              return value;
+            },
+            onError: (Object error, StackTrace stack) {
+              release();
+              Error.throwWithStackTrace(error, stack);
+            },
+          );
     return _pending[key] = request;
   }
 
@@ -82,7 +90,7 @@ final class RequestCache<K, V> {
   void put(K key, V value) {
     _pending.remove(key);
     _entries.remove(key);
-    if (shouldCache?.call(value) == false) return;
+    if (limit == 0 || shouldCache?.call(value) == false) return;
     _evictForRoom();
     _entries[key] = _RequestEntry(
       Future<V>.value(value),
@@ -104,26 +112,6 @@ final class RequestCache<K, V> {
       _entries.remove(_entries.keys.first);
     }
   }
-}
-
-/// Shares only an in-flight request; completed values are never retained.
-final class RequestDeduplicator<K, V> {
-  final Map<K, Future<V>> _requests = {};
-
-  Future<V> run(K key, Future<V> Function() load) {
-    final active = _requests[key];
-    if (active != null) return active;
-
-    late final Future<V> request;
-    Future<V> invoke() async => load();
-    request = invoke().whenComplete(() {
-      if (identical(_requests[key], request)) _requests.remove(key);
-    });
-    return _requests[key] = request;
-  }
-
-  /// Forgets pending requests; callers and the underlying I/O keep running.
-  void clear() => _requests.clear();
 }
 
 final class _RequestEntry<V> {

@@ -5,6 +5,7 @@ import 'package:app_links/app_links.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/app/navigation.dart';
 import 'package:baka/core/app_logger.dart';
+import 'package:baka/models/playback_request.dart';
 import 'package:baka/widgets/watch_party/watch_party_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:win32_registry/win32_registry.dart';
@@ -14,10 +15,8 @@ import 'package:baka/services/playback/watch_party.dart';
 class WatchPartyLinks {
   WatchPartyLinks(this.party, {this.incoming});
   final Stream<Uri>? incoming;
-  // --- 深度链接与协议关联处理 ---
-
-  final AppLinks _links = AppLinks();
   final WatchPartyService party;
+  static final _inviteCodePattern = RegExp(r'^[A-Za-z0-9_-]{6,128}$');
   final _ready = Completer<void>();
   bool _closed = false;
 
@@ -35,11 +34,14 @@ class WatchPartyLinks {
   StreamSubscription<Uri>? _linkSubscription;
   bool _handlingLink = false;
 
-  /// 初始化 AppLinks 监听和 Windows 协议注册
+  /// 初始化 AppLinks 监听。
   void initializeLinks() {
-    if (_linkSubscription != null) return;
-    _linkSubscription = (incoming ?? _links.uriLinkStream).listen(
-      _handleLinkUri,
+    if (_closed || _linkSubscription != null) return;
+    _linkSubscription = (incoming ?? AppLinks().uriLinkStream).listen(
+      (uri) {
+        final code = _inviteCodeFromUri(uri);
+        if (code != null) unawaited(joinInviteLink(code));
+      },
       onError: (Object error, StackTrace stackTrace) {
         AppLogger.instance.warning(
           'Unable to process app link',
@@ -51,21 +53,13 @@ class WatchPartyLinks {
     );
   }
 
-  Future<void> _handleLinkUri(Uri uri) async {
-    final code = _inviteCodeFromUri(uri);
-    if (code != null) await joinInviteLink(code);
-  }
-
   /// 从字符串解析邀请码（支持 URL、URI 或纯邀请码）
   static String? inviteCodeFromValue(String value) {
     final normalized = value.trim();
     if (normalized.isEmpty) return null;
     final uri = Uri.tryParse(normalized);
     final fromUri = uri == null ? null : _inviteCodeFromUri(uri);
-    if (fromUri != null) return fromUri;
-    return RegExp(r'^[A-Za-z0-9_-]{6,128}$').hasMatch(normalized)
-        ? normalized
-        : null;
+    return fromUri ?? _validInviteCode(normalized);
   }
 
   /// 通过邀请码加入房间并自动引导播放器与弹窗
@@ -77,16 +71,43 @@ class WatchPartyLinks {
     _handlingLink = true;
     try {
       await party.joinInvite(normalized);
-      await _openMatchingPlayerWhenNeeded();
-      _showRoomWhenReady();
+      if (_closed) return;
+      final context = Instances.navigatorKey.currentContext;
+      if (context == null || !context.mounted) return;
+      final media = party.state.value.snapshot?.media;
+      if (media != null &&
+          media.bgmSubjectId != null &&
+          !party.matchesAttachedMedia(media)) {
+        NavigationService.toPlayback(
+          context,
+          PlaybackRequest(
+            source: 'bgm',
+            episodeIndex: media.episodeIndex,
+            metadata: {
+              'id': media.bgmSubjectId,
+              'bgmId': media.bgmSubjectId,
+              'title': media.title,
+            },
+          ),
+        );
+      }
+      WatchPartySheet.show(context, party);
     } catch (error, stackTrace) {
+      if (_closed) return;
       AppLogger.instance.warning(
         'Unable to join watch party',
         tag: 'WatchParty',
         error: error,
         stackTrace: stackTrace,
       );
-      _showErrorWhenReady(error.toString().replaceFirst('Bad state: ', ''));
+      final context = Instances.navigatorKey.currentContext;
+      if (context != null && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error.toString().replaceFirst('Bad state: ', '')),
+          ),
+        );
+      }
     } finally {
       _handlingLink = false;
     }
@@ -109,47 +130,7 @@ class WatchPartyLinks {
   }
 
   static String? _validInviteCode(String value) =>
-      RegExp(r'^[A-Za-z0-9_-]{6,128}$').hasMatch(value) ? value : null;
-
-  Future<void> _openMatchingPlayerWhenNeeded() async {
-    final service = party;
-    final media = service.state.value.snapshot?.media;
-    if (media == null ||
-        media.bgmSubjectId == null ||
-        service.matchesAttachedMedia(media)) {
-      return;
-    }
-    final context = Instances.navigatorKey.currentContext;
-    if (context == null || !context.mounted) return;
-    NavigationService.toPlayer(
-      context,
-      <String, dynamic>{
-        'id': media.bgmSubjectId,
-        'bgmId': media.bgmSubjectId,
-        'title': media.title,
-        'source': 'bgm',
-        'currPlayIndex': media.episodeIndex,
-      },
-      posIndex: media.episodeIndex,
-      autoMatch: true,
-    );
-  }
-
-  void _showRoomWhenReady() {
-    final context = Instances.navigatorKey.currentContext;
-    if (context != null && context.mounted) {
-      WatchPartySheet.show(context, party);
-    }
-  }
-
-  void _showErrorWhenReady(String message) {
-    final context = Instances.navigatorKey.currentContext;
-    if (context != null && context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
-    }
-  }
+      _inviteCodePattern.hasMatch(value) ? value : null;
 
   static void registerWindowsScheme() {
     RegistryKey? root;

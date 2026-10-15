@@ -1,14 +1,12 @@
-import 'package:baka/models/bgm.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:baka/widgets/common/platform_tooltip.dart';
 
-import 'package:baka/instance.dart';
-import 'package:baka/models/playback_episode.dart';
+import 'package:baka/services/playback/playback_content.dart';
 import 'package:baka/pages/setting/player_settings_page.dart';
 import 'package:baka/services/torrent/torrent_engine.dart';
-import 'package:baka/services/torrent/torrent_service.dart';
 import 'package:baka/utils/format_utils.dart';
+import 'package:baka/utils/json_values.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:baka/widgets/baka_player/view.dart';
 import 'package:baka/widgets/comment/comment_widget.dart';
@@ -18,16 +16,10 @@ import 'package:baka/widgets/platform/windows/windows_title_bar.dart';
 import 'package:baka/widgets/player/player_tab.dart';
 
 class WindowsPlayerLayout extends StatefulWidget {
-  final TorrentService torrent;
-  final Map data;
-  final List<PlaybackEpisode> videoList;
-  final int currPlayIndex;
-  final int currUrl;
-  final List<String>? sourceNames;
+  final PlaybackContent content;
   final bool inited;
   final PlaybackController controller;
   final DanmakuController danmakuController;
-  final BgmInfo bgmInfo;
   final ValueNotifier<bool> followNotifier;
   final String sourceName;
   final String? lineName;
@@ -47,11 +39,7 @@ class WindowsPlayerLayout extends StatefulWidget {
   final VoidCallback onAiRepair;
 
   const WindowsPlayerLayout({
-    required this.data,
-    required this.torrent,
-    required this.videoList,
-    required this.currPlayIndex,
-    required this.currUrl,
+    required this.content,
     required this.inited,
     required this.controller,
     required this.danmakuController,
@@ -72,8 +60,6 @@ class WindowsPlayerLayout extends StatefulWidget {
     required this.onAiRepair,
     this.isSearching = false,
     this.terminalPlaybackFailure = false,
-    this.sourceNames,
-    this.bgmInfo = const BgmInfo(),
     super.key,
   });
 
@@ -100,8 +86,7 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout>
   @override
   Widget build(BuildContext context) {
     final shouldShowSidebar = _showSidebar && !_isFullScreen;
-    final showTitleBar =
-        Platform.isWindows && Instances.isDesktopPlatform && !_isFullScreen;
+    final showTitleBar = Platform.isWindows && !_isFullScreen;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -145,6 +130,9 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout>
   }
 
   Widget _buildPlayerArea(BuildContext context) {
+    final content = widget.content;
+    final nextIndex = content.currPlayIndex + 1;
+    final hasNextEpisode = nextIndex < content.videoList.length;
     return Container(
       color: Colors.black,
       child: Stack(
@@ -158,10 +146,9 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout>
               headerControl: _buildHeaderControls(context),
               full: false,
               onPickEpisode: widget.onPickEpisode,
-              hasNextEpisode:
-                  widget.currPlayIndex + 1 < widget.videoList.length,
-              onNextEpisode: widget.currPlayIndex + 1 < widget.videoList.length
-                  ? () => widget.onEpisodeChanged(widget.currPlayIndex + 1)
+              hasNextEpisode: hasNextEpisode,
+              onNextEpisode: hasNextEpisode
+                  ? () => widget.onEpisodeChanged(nextIndex)
                   : null,
               onFullScreenChanged: (full) {
                 setState(() => _isFullScreen = full);
@@ -177,7 +164,7 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout>
   }
 
   Widget _buildTopHeaderBar(BuildContext context) {
-    final title = widget.data['title']?.toString() ?? '';
+    final title = widget.content.title;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -256,7 +243,7 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout>
   }
 
   Widget _buildNetworkSpeedBadge() {
-    final torrent = widget.torrent;
+    final torrent = widget.content.torrent;
     final primaryColor = Theme.of(context).colorScheme.primary;
 
     return ValueListenableBuilder<TorrentStats?>(
@@ -506,31 +493,24 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout>
   }
 
   Widget _buildPlaylistTab() {
-    final rawEpisodes = widget.data['bgmDetailData']?['episodes'];
-    final bgmEpisodes = (rawEpisodes is List)
-        ? rawEpisodes.cast<Map<String, dynamic>>()
-        : null;
+    final content = widget.content;
 
     return Padding(
       key: const ValueKey('intro_tab'),
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: WindowsEpisodeList(
-        torrent: widget.torrent,
-        videoList: widget.videoList,
-        currentIndex: widget.currPlayIndex,
+        torrent: content.torrent,
+        videoList: content.videoList,
+        currentIndex: content.currPlayIndex,
         onEpisodeSelected: widget.onEpisodeChanged,
         onDownloadPressed: widget.onDownloadPressed,
-        onUrlSelected: (_, urlIndex) => widget.onUrlChanged(urlIndex),
-        currUrl: widget.currUrl,
-        sourceNames: widget.sourceNames,
-        bgmId: widget.bgmInfo.subjectId,
-        bgmEpisodes: bgmEpisodes,
-        fallbackCoverUrl: resolveCoverImage(
-          widget.data,
-          bgmInfo: widget.bgmInfo,
-        ),
-        title: widget.data['title']?.toString() ?? '',
-        bgmInfo: widget.bgmInfo,
+        onUrlChanged: widget.onUrlChanged,
+        currUrl: content.currUrl,
+        sourceNames: content.sourceNames,
+        bgmEpisodes: content.bgmEpisodes,
+        fallbackCoverUrl: content.coverImageUrl,
+        title: content.title,
+        bgmInfo: content.bgmInfo,
         followNotifier: widget.followNotifier,
         onFollowPressed: widget.onFollowPressed,
         sourceName: widget.sourceName,
@@ -543,10 +523,15 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout>
   }
 
   Widget _buildCommentTab() {
-    final isAdapter = widget.data['sourceUrl'] != null;
-    final pid = (isAdapter && widget.bgmInfo.subjectId != null)
-        ? widget.bgmInfo.subjectId!
-        : (int.tryParse(widget.data['id']?.toString() ?? '') ?? 11);
+    final content = widget.content;
+    final pid = (content.isAdapter && content.bgmInfo.subjectId != null)
+        ? content.bgmInfo.subjectId
+        : toInt(content.data['id']);
+    if (pid == null || pid <= 0) {
+      return const Center(
+        child: Text('此视频没有关联评论', style: TextStyle(color: Colors.white54)),
+      );
+    }
     final primaryColor = Theme.of(context).colorScheme.primary;
 
     return Theme(
@@ -563,8 +548,8 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout>
         child: CIslandCommentWidget(
           key: widget.commentKey,
           postId: pid,
-          bgmSubjectId: widget.bgmInfo.subjectId,
-          episodeIndex: widget.currPlayIndex,
+          bgmSubjectId: content.bgmInfo.subjectId,
+          episodeIndex: content.currPlayIndex,
           onCommentLinkTap: widget.onCommentLinkTap,
         ),
       ),

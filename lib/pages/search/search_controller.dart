@@ -22,8 +22,8 @@ class AnimeSearchController {
 
   static const String _isVerticalLayoutKey = 'search_is_vertical_layout';
 
-  final ValueNotifier<List<Map<String, dynamic>>> resultsNotifier =
-      ValueNotifier<List<Map<String, dynamic>>>(const []);
+  final _results = _SearchResults();
+  ValueListenable<List<Map<String, dynamic>>> get resultsNotifier => _results;
   final ValueNotifier<int> selectedSourceIndexNotifier = ValueNotifier<int>(0);
   final ValueNotifier<String> keywordNotifier = ValueNotifier<String>('');
   final ValueNotifier<List<String>> searchHistoryNotifier =
@@ -42,7 +42,6 @@ class AnimeSearchController {
     Instances.sp.setBool(_isVerticalLayoutKey, v);
   }
 
-  int activeSearchId = 0;
   bool _disposed = false;
   _SearchTask? _running;
   _SearchTask? _pending;
@@ -97,19 +96,16 @@ class AnimeSearchController {
     invalidateSearch();
     keywordNotifier.value = '';
     showResultsNotifier.value = false;
-    resultsNotifier.value = const [];
+    _results.value = const [];
     isLoadingNotifier.value = false;
   }
-
-  bool isActiveSearch(int searchId) => !_disposed && searchId == activeSearchId;
 
   // Input changes invalidate queued work immediately, before the debounce fires.
   // Cancel source work too, so the newest queued keyword can start immediately.
   void invalidateSearch() {
-    activeSearchId++;
     _running?.wanted = false;
     _running?.operation.cancel();
-    _pending?.completion.complete(const []);
+    _pending?.completion.complete();
     _pending = null;
   }
 
@@ -126,25 +122,28 @@ class AnimeSearchController {
         : '';
   }
 
-  Future<List<Map<String, dynamic>>> executeSearch(String searchKey) {
-    if (_disposed) return SynchronousFuture(const []);
+  Future<void> search(String searchKey) {
+    if (_disposed) return SynchronousFuture(null);
     final query = searchKey.trim();
     if (query.isEmpty) {
-      invalidateSearch();
-      return SynchronousFuture(const []);
+      resetSearch();
+      return SynchronousFuture(null);
     }
 
     keywordNotifier.value = query;
     final source = _sourceKey(selectedSourceIndexNotifier.value);
     final key = (source: source, query: query, revision: _sourceRevision);
     if (_pending?.key == key) return _pending!.completion.future;
-    _pending?.completion.complete(const []);
+    _pending?.completion.complete();
     _pending = null;
     if (_running?.key == key && !_running!.operation.isCancelled) {
       _running!.wanted = true;
       return _running!.completion.future;
     }
     final task = _SearchTask(key);
+    isLoadingNotifier.value = true;
+    _results.value = const [];
+    showResultsNotifier.value = true;
     if (_running == null) {
       _running = task;
       unawaited(_drainSearches(task));
@@ -161,23 +160,33 @@ class AnimeSearchController {
       try {
         final query = task.key.query;
         final List<Map<String, dynamic>> results;
-        if (_isGvKey(query)) {
+        results = await task.operation.run(() async {
+          if (!_isGvKey(query)) return _searchSelectedSource(task);
           final gv = int.tryParse(query.substring(2));
-          results = gv == null ? const [] : [await getPostDetail(gv)];
-        } else {
-          results = await task.operation.run(() => _searchSelectedSource(task));
-        }
+          if (gv == null) return const <Map<String, dynamic>>[];
+          final abort = Completer<void>();
+          final detach = task.operation.token.onCancel(abort.complete);
+          try {
+            return [await getPostDetail(gv, abortTrigger: abort.future)];
+          } finally {
+            detach();
+          }
+        });
         final accepted = !_disposed && task.wanted;
-        if (accepted && !_isGvKey(query)) addSearchHistory(query);
-        task.completion.complete(accepted ? results : const []);
-      } catch (error, stack) {
-        if (!_disposed && task.wanted) {
-          task.completion.completeError(error, stack);
-        } else {
-          task.completion.complete(const []);
+        if (accepted) {
+          if (!_isGvKey(query)) addSearchHistory(query);
+          _results.value = results;
         }
+      } catch (error) {
+        if (!_disposed && task.wanted) {
+          debugPrint('Search failed for ${task.key.query}: $error');
+          _results.value = const [];
+        }
+      } finally {
+        if (!_disposed && task.wanted) isLoadingNotifier.value = false;
+        task.completion.complete();
+        task.operation.close();
       }
-      task.operation.close();
       final next = _pending;
       _pending = null;
       _running = next;
@@ -194,46 +203,42 @@ class AnimeSearchController {
   ) async {
     final searchKey = task.key.query;
     final source = task.key.source;
-    try {
-      if (source == 'all') return await _searchAllSources(task);
-      if (source == 'bgm') {
-        final subjects = await searchBgmSubjects(searchKey);
-        if (_disposed || !task.wanted) return const [];
-        return List.generate(subjects.length, (index) {
-          final subject = subjects[index];
-          final cover = BgmUtils.bgmCoverProxyUrl(subject.subjectId);
-          return <String, dynamic>{
-            'source': 'bgm',
-            'title': subject.nameCn?.isNotEmpty == true
-                ? subject.nameCn
-                : subject.name ?? '未知标题',
-            'subtitle':
-                subject.nameCn?.isNotEmpty == true &&
-                    subject.name?.isNotEmpty == true &&
-                    subject.name != subject.nameCn
-                ? subject.name
-                : subject.summary ?? noDescriptionText,
-            'content': cover,
-            'bgmImageUrl': cover,
-            'bgmId': subject.subjectId,
-            '_heroTag': 'bgm_cover_${subject.subjectId}',
-            if (subject.score != null) 'score': subject.score,
-          };
-        });
-      }
-
-      if (source.isEmpty) return const [];
-      final results = await _sourceAdapterService.search(
-        source,
-        searchKey,
-        fallbackDescription: noDescriptionText,
-        skipBgmEnhancement: AdapterRegistry.isCustomSource(source),
-      );
-      return [for (final result in results) result.toLegacyMap()];
-    } catch (error) {
-      debugPrint('Search failed for $selectedSourceLabel: $error');
-      return const [];
+    if (source == 'all') return _searchAllSources(task);
+    if (source == 'bgm') {
+      final subjects = await searchBgmSubjects(searchKey);
+      if (_disposed || !task.wanted) return const [];
+      return List.generate(subjects.length, (index) {
+        final subject = subjects[index];
+        final cover = BgmUtils.bgmCoverProxyUrl(subject.subjectId);
+        return <String, dynamic>{
+          'source': 'bgm',
+          'title': subject.nameCn?.isNotEmpty == true
+              ? subject.nameCn
+              : subject.name ?? '未知标题',
+          'subtitle':
+              subject.nameCn?.isNotEmpty == true &&
+                  subject.name?.isNotEmpty == true &&
+                  subject.name != subject.nameCn
+              ? subject.name
+              : subject.summary ?? noDescriptionText,
+          'content': cover,
+          'bgmImageUrl': cover,
+          'bgmId': subject.subjectId,
+          'nsfw': subject.nsfw,
+          '_heroTag': 'bgm_cover_${subject.subjectId}',
+          if (subject.score != null) 'score': subject.score,
+        };
+      });
     }
+
+    if (source.isEmpty) return const [];
+    final results = await _sourceAdapterService.search(
+      source,
+      searchKey,
+      fallbackDescription: noDescriptionText,
+      skipBgmEnhancement: AdapterRegistry.isCustomSource(source),
+    );
+    return [for (final result in results) result.toLegacyMap()];
   }
 
   Future<List<Map<String, dynamic>>> _searchAllSources(_SearchTask task) async {
@@ -265,7 +270,7 @@ class AnimeSearchController {
           if (!isActive()) return;
           if (items.isNotEmpty) {
             results.addAll(items.map((result) => result.toLegacyMap()));
-            resultsNotifier.value = List.unmodifiable(results);
+            _results.publish(results);
           }
         } catch (error) {
           if (isActive()) debugPrint('Search failed for $source: $error');
@@ -346,11 +351,11 @@ class AnimeSearchController {
     if (_disposed) return;
     _disposed = true;
     invalidateSearch();
-    resultsNotifier.value = const [];
+    _results.value = const [];
     searchHistoryNotifier.value = const [];
     customSources = const [];
     builtinAdapterSources = const [];
-    resultsNotifier.dispose();
+    _results.dispose();
     selectedSourceIndexNotifier.dispose();
     keywordNotifier.dispose();
     searchHistoryNotifier.dispose();
@@ -364,7 +369,20 @@ class AnimeSearchController {
 final class _SearchTask {
   _SearchTask(this.key);
   final ({String source, String query, int revision}) key;
-  final completion = Completer<List<Map<String, dynamic>>>();
+  final completion = Completer<void>();
   final SourceOperation operation = SourceOperation();
   bool wanted = true;
+}
+
+class _SearchResults extends ValueNotifier<List<Map<String, dynamic>>> {
+  _SearchResults() : super(const []);
+
+  // One append-only list per query; listeners read it but never mutate it.
+  void publish(List<Map<String, dynamic>> results) {
+    if (identical(value, results)) {
+      notifyListeners();
+    } else {
+      value = results;
+    }
+  }
 }

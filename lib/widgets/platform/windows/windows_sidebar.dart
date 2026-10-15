@@ -115,7 +115,11 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
               children: _buildNavigation(showLabels),
             ),
           ),
-          _AccountCard(showLabels: showLabels),
+          Obx(() {
+            // Bangumi 登录也通过同一个账号通知刷新，无需另存一份展示状态。
+            Get.find<AccountSession>().user.value;
+            return _AccountCard(showLabels: showLabels);
+          }),
           const SizedBox(height: 12),
         ],
       ),
@@ -384,10 +388,7 @@ class _NavItem extends StatelessWidget {
         : const Duration(milliseconds: 180);
 
     final item = Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: _itemMargin,
-        vertical: 2,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: _itemMargin, vertical: 2),
       child: Material(
         color: selected
             ? colors.primary.withValues(alpha: isDark ? 0.18 : 0.1)
@@ -468,10 +469,6 @@ class _AccountCard extends StatelessWidget {
 
   const _AccountCard({required this.showLabels});
 
-  void _openLogin(BuildContext context) {
-    Navigator.pushNamed(context, 'Baka://login');
-  }
-
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -489,7 +486,7 @@ class _AccountCard extends StatelessWidget {
         child: PlatformTooltip(
           message: session.isLoggedIn ? '账号与 Bangumi' : '登录',
           child: InkResponse(
-            onTap: () => _openLogin(context),
+            onTap: () => Navigator.pushNamed(context, 'Baka://login'),
             radius: 22,
             child: avatar,
           ),
@@ -507,7 +504,7 @@ class _AccountCard extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: () => _openLogin(context),
+          onTap: () => Navigator.pushNamed(context, 'Baka://login'),
           splashFactory: NoSplash.splashFactory,
           overlayColor: _itemOverlay(colors),
           child: Padding(

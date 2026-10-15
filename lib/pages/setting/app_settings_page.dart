@@ -12,6 +12,7 @@ import 'package:baka/app_state.dart';
 import 'package:baka/core/account_session.dart';
 import 'package:baka/core/api_transport.dart';
 import 'package:baka/core/app_storage.dart';
+import 'package:baka/core/content_filter.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/pages/mine/mine_profile.dart';
 import 'package:baka/pages/setting/ai_rule_settings_page.dart';
@@ -26,6 +27,7 @@ import 'package:baka/services/account/login_service.dart';
 import 'package:baka/theme.dart';
 import 'package:baka/core/app_logger.dart';
 import 'package:baka/utils/toast_utils.dart';
+import 'package:baka/utils/format_utils.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
 import 'package:baka/widgets/platform/tv/tv_log_export_dialog.dart';
 import 'package:baka/widgets/settings/settings_widgets.dart';
@@ -59,7 +61,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
 
   Future<void> _loadCacheSize() async {
     final size = await AppStorage.getCacheSize();
-    if (mounted) setState(() => _cacheSize = AppStorage.formatSize(size));
+    if (mounted) setState(() => _cacheSize = formatBytes(size));
   }
 
   Future<void> _clearCache() async {
@@ -514,6 +516,24 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                 const SizedBox(height: 20),
                 _buildAccountSection(),
                 _buildPlaybackSection(),
+                const SettingsSectionHeader('内容偏好'),
+                SettingsGroup(
+                  children: [
+                    ValueListenableBuilder<bool>(
+                      valueListenable: contentFilter,
+                      builder: (context, enabled, _) => SettingsSwitchTile(
+                        title: '隐藏 NSFW 内容',
+                        subtitle: '开启后隐藏被数据源标记为 NSFW 的内容',
+                        icon: Icons.visibility_off_outlined,
+                        value: enabled,
+                        onChanged: (value) =>
+                            contentFilter.setEnabled(value, Instances.sp),
+                        showDivider: false,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
                 _buildAppearanceSection(),
                 _buildStorageSection(),
                 _buildAboutSection(),

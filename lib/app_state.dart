@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart' hide ContextExtensionss;
 import 'package:baka/instance.dart';
 import 'package:baka/theme.dart';
+import 'package:baka/core/content_filter.dart';
 
 /// 应用级共享状态：主界面壳和主题。
 class AppState extends GetxService with WidgetsBindingObserver {
@@ -46,6 +47,7 @@ class AppState extends GetxService with WidgetsBindingObserver {
   @override
   void onInit() {
     super.onInit();
+    contentFilter.load(Instances.sp);
     isHideBottomNavOnScroll.value =
         Instances.sp.getBool('hide_bottom_nav_on_scroll') ?? true;
     _themeMode.value = Instances.sp.getInt(_themeModeKey) ?? 1;

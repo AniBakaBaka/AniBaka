@@ -28,14 +28,13 @@ class TvMyPage extends StatefulWidget {
 }
 
 class _TvMyPageState extends State<TvMyPage> {
-  final QrLoginServer _qrServer = QrLoginServer();
+  QrLoginServer? _qrServer;
+  late final _account = Get.find<AccountSession>();
   late final Worker _loginWorker;
 
   bool _isQrLoading = true;
   String? _qrContent;
   String? _qrError;
-  Timer? _qrTimeoutTimer;
-  Future<void>? _qrTask;
   int _userGeneration = -1;
 
   CollectionStats? _stats;
@@ -44,7 +43,7 @@ class _TvMyPageState extends State<TvMyPage> {
   @override
   void initState() {
     super.initState();
-    _loginWorker = ever(Get.find<AccountSession>().user, (_) {
+    _loginWorker = ever(_account.user, (_) {
       if (mounted) {
         setState(() {});
         _loadUserData();
@@ -54,7 +53,7 @@ class _TvMyPageState extends State<TvMyPage> {
   }
 
   void _loadUserData() {
-    final session = Get.find<AccountSession>();
+    final session = _account;
     if (_userGeneration == session.generation) return;
     _userGeneration = session.generation;
     if (!session.isLoggedIn) {
@@ -62,18 +61,18 @@ class _TvMyPageState extends State<TvMyPage> {
       _historyCount = 0;
       _startQrServer();
     } else {
-      _qrServer.stop();
-      _qrTimeoutTimer?.cancel();
+      _qrServer?.stop();
+      _qrServer = null;
       _loadStats();
     }
   }
 
   Future<void> _loadStats() async {
-    final generation = Get.find<AccountSession>().generation;
+    final generation = _account.generation;
     try {
       final stats = await collections.getStats();
       final history = historyRepository.getHistoryList();
-      if (mounted && generation == Get.find<AccountSession>().generation) {
+      if (mounted && generation == _account.generation) {
         setState(() {
           _stats = stats;
           _historyCount = history.length;
@@ -84,57 +83,32 @@ class _TvMyPageState extends State<TvMyPage> {
     }
   }
 
-  Future<void> _startQrServer() {
-    if (_qrTask != null) return _qrTask!;
-    late final Future<void> task;
-    task = _runQrServer().whenComplete(() {
-      if (identical(_qrTask, task)) _qrTask = null;
+  Future<void> _startQrServer() async {
+    final previous = _qrServer;
+    final server = QrLoginServer();
+    _qrServer = server;
+    setState(() {
+      _isQrLoading = true;
+      _qrContent = null;
+      _qrError = null;
     });
-    return _qrTask = task;
-  }
-
-  Future<void> _runQrServer() async {
-    _qrTimeoutTimer?.cancel();
-    if (mounted) {
-      setState(() {
-        _isQrLoading = true;
-        _qrError = null;
-      });
-    }
     try {
-      await _qrServer.start();
-      if (!mounted || Get.find<AccountSession>().isLoggedIn) return;
-      if (_qrServer.localIp == null) {
-        if (mounted) {
-          setState(() {
-            _isQrLoading = false;
-            _qrError = '无法获取本机 IP，请检查网络';
-          });
-        }
-        return;
+      await previous?.stop();
+      if (!mounted || _qrServer != server) return;
+      await server.start();
+      if (!mounted || _qrServer != server) return;
+      if (server.localIp == null) {
+        throw StateError('无法获取本机 IP，请检查网络');
       }
-      if (mounted) {
-        setState(() {
-          _qrContent = _qrServer.qrContent;
-          _isQrLoading = false;
-        });
-      }
-
-      _qrTimeoutTimer = Timer(const Duration(minutes: 5), () {
-        if (mounted && !Get.find<AccountSession>().isLoggedIn) {
-          _qrServer.stop();
-          setState(() {
-            _qrError = '二维码已过期，请点击刷新';
-          });
-        }
+      setState(() {
+        _qrContent = server.qrContent;
+        _isQrLoading = false;
       });
-
-      final result = await _qrServer.loginResult;
-      _qrTimeoutTimer?.cancel();
-
-      if (!mounted || result == null) return;
-
-      await Get.find<AccountSession>().saveLoginInfo(
+      final result = await server.loginResult.timeout(
+        const Duration(minutes: 5),
+      );
+      if (!mounted || _qrServer != server || result == null) return;
+      await _account.saveLoginInfo(
         result['token'] as String,
         AppUser.fromJson(result['user'] as Map<String, dynamic>),
         refreshToken: result['refresh_token'] as String?,
@@ -143,12 +117,15 @@ class _TvMyPageState extends State<TvMyPage> {
 
       if (mounted) showSnackBar('登录成功');
     } catch (e) {
-      if (mounted) {
+      if (mounted && _qrServer == server) {
         setState(() {
           _isQrLoading = false;
-          _qrError = '登录服务器启动失败';
+          _qrError = e is TimeoutException ? '二维码已过期，请点击刷新' : '登录失败: $e';
         });
       }
+    } finally {
+      if (_qrServer == server) _qrServer = null;
+      await server.stop();
     }
   }
 
@@ -199,7 +176,7 @@ class _TvMyPageState extends State<TvMyPage> {
     );
 
     if (confirm == true) {
-      Get.find<AccountSession>().logout();
+      _account.logout();
       showSnackBar('已退出登录');
     }
   }
@@ -207,14 +184,14 @@ class _TvMyPageState extends State<TvMyPage> {
   @override
   void dispose() {
     _loginWorker.dispose();
-    _qrTimeoutTimer?.cancel();
-    _qrServer.stop();
+    _qrServer?.stop();
+    _qrServer = null;
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final isLogin = Get.find<AccountSession>().isLoggedIn;
+    final isLogin = _account.isLoggedIn;
 
     return Focus(
       canRequestFocus: false,
@@ -299,9 +276,9 @@ class _TvMyPageState extends State<TvMyPage> {
             ],
           ),
           child: ClipOval(
-            child: Get.find<AccountSession>().avatarUrl.isNotEmpty
+            child: _account.avatarUrl.isNotEmpty
                 ? CachedNetworkImage(
-                    imageUrl: Get.find<AccountSession>().avatarUrl,
+                    imageUrl: _account.avatarUrl,
                     memCacheWidth: 240,
                     fit: BoxFit.cover,
                   )
@@ -317,7 +294,7 @@ class _TvMyPageState extends State<TvMyPage> {
         ),
         const SizedBox(height: 20),
         Text(
-          Get.find<AccountSession>().displayName,
+          _account.displayName,
           style: TextStyle(
             fontSize: 24,
             fontWeight: FontWeight.w900,
@@ -329,7 +306,7 @@ class _TvMyPageState extends State<TvMyPage> {
         ),
         const SizedBox(height: 8),
         Text(
-          Get.find<AccountSession>().displaySubtitle,
+          _account.displaySubtitle,
           style: TextStyle(fontSize: 13, color: context.tvTextSecondaryColor),
           textAlign: TextAlign.center,
           maxLines: 2,
@@ -540,12 +517,12 @@ class _TvMyPageState extends State<TvMyPage> {
           icon: Icons.alt_route_rounded,
           title: '应用线路',
           value: '切换',
-          subtitle: '当前: ${Get.find<AccountSession>().currentHost}',
+          subtitle: '当前: ${_account.currentHost}',
           color: Colors.tealAccent,
           onPressed: () {
-            Get.find<AccountSession>().switchHost();
+            _account.switchHost();
             setState(() {});
-            showSnackBar('线路已切换至 ${Get.find<AccountSession>().currentHost}');
+            showSnackBar('线路已切换至 ${_account.currentHost}');
           },
         ),
         _buildStatsCard(

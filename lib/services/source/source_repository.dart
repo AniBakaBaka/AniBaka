@@ -169,7 +169,8 @@ class SourceAdapterService {
             sourceKey.substring(AdapterRegistry.customSourcePrefix.length),
           )
         : null;
-    final displayName = descriptor?.displayName ?? custom!.name;
+    final displayName = item.displayName;
+    final cover = item.cover;
     return PlaybackRequest(
       source: sourceKey,
       episodes: catalog.episodes,
@@ -189,7 +190,7 @@ class SourceAdapterService {
         'content': custom == null || custom.description.isEmpty
             ? '来源: $displayName'
             : custom.description,
-        if (item.cover.isNotEmpty) 'image': item.cover,
+        if (cover.isNotEmpty) 'image': cover,
         if (item.series?.bgmId != null) 'bgmId': item.series!.bgmId,
         if (item.series?.score != null) 'score': item.series!.score,
       },

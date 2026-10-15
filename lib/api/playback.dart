@@ -30,13 +30,10 @@ Future<List<dynamic>> getDanmu(
     if (title != null && title.isNotEmpty) 'title': title,
     if (season != null) 'season': '$season',
   });
-  final response = await apiTransport.getJson<Object>(
+  final response = await apiTransport.getJson<Map<String, dynamic>>(
     uri.toString(),
     abortTrigger: abortTrigger,
+    notifyOnError: false,
   );
-  return switch (response) {
-    List<dynamic>() => response,
-    Map<String, dynamic>() => response['data'] as List<dynamic>,
-    _ => throw const FormatException('弹幕响应格式错误'),
-  };
+  return response['data'] as List<dynamic>;
 }

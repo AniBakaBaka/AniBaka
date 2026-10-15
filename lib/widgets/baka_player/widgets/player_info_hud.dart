@@ -5,7 +5,6 @@ import 'package:baka/services/playback/playback_settings.dart';
 import '../controller.dart';
 import 'package:flutter/material.dart';
 
-/// 播放器极简重要数据悬浮窗 (Player Info HUD)
 class PlayerInfoHud extends StatefulWidget {
   const PlayerInfoHud({
     required this.controller,
@@ -95,7 +94,6 @@ class _PlayerInfoHudState extends State<PlayerInfoHud> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // 极简顶部标题与关闭按钮
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -200,11 +198,12 @@ class _PlayerInfoHudState extends State<PlayerInfoHud> {
 
   String _formatVideoCodec(PlaybackTechnicalInfo info) {
     final codec = (info.videoCodec ?? '').toUpperCase();
-    final hw = info.hardwareDecoder?.trim();
-    if (hw != null && hw.isNotEmpty && hw != 'no') {
-      return codec.isNotEmpty ? '$codec · 硬解' : '硬解 ($hw)';
-    }
-    return codec.isNotEmpty ? '$codec · 软解' : '软解';
+    final decoder = switch (info.hardwareDecoder) {
+      null => '暂不可用',
+      'no' => '软解',
+      _ => '硬解',
+    };
+    return codec.isEmpty ? decoder : '$codec · $decoder';
   }
 
   String _formatRenderer(PlaybackTechnicalInfo info) {
@@ -218,10 +217,9 @@ class _PlayerInfoHudState extends State<PlayerInfoHud> {
   }
 
   String _formatFrameDrops(PlaybackTechnicalInfo info) {
-    if (info.frameDropCount == 0 && info.delayedFrameCount == 0) {
-      return '0';
-    }
-    return '${info.frameDropCount} (延迟 ${info.delayedFrameCount})';
+    final drops = info.frameDropCount?.toString() ?? '暂不可用';
+    final delayed = info.delayedFrameCount;
+    return delayed == null || delayed == 0 ? drops : '$drops (延迟 $delayed)';
   }
 
   String _formatEnhancement(PlaybackTechnicalInfo info) {
@@ -255,7 +253,6 @@ class _PlayerInfoHudState extends State<PlayerInfoHud> {
   }
 }
 
-/// 以独立 Dialog 形式弹出极简 HUD（方便 TV 等特定场景使用）
 Future<void> showPlayerInfoDialog(
   BuildContext context,
   PlaybackController controller,

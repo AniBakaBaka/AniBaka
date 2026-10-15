@@ -159,8 +159,8 @@ class BangumiSyncService {
           final collection = remoteItem;
           if (collections.isLocalMode) {
             imports.add(collection);
-          } else if (await AniBakaApi.saveCollection(collection) == null) {
-            throw const BangumiSyncException('AniBaka 保存追番记录失败');
+          } else {
+            await AniBakaApi.saveCollection(collection);
           }
           snapshots['$id'] = remoteFingerprint!;
           pendingPush.remove(id);

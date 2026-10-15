@@ -73,15 +73,10 @@ class DirectSourceGroup {
 /// 视频源搜索与切换逻辑控制器
 class VideoSourceSearchController extends ChangeNotifier {
   static VideoSourceSearchController? globalCached;
-  static String? globalCachedTitle;
 
-  static void cacheGlobal(
-    String title,
-    VideoSourceSearchController controller,
-  ) {
+  static void cacheGlobal(VideoSourceSearchController controller) {
     if (!identical(globalCached, controller)) globalCached?.dispose();
     globalCached = controller;
-    globalCachedTitle = title;
   }
 
   static bool isGlobalCached(VideoSourceSearchController controller) =>
@@ -94,26 +89,19 @@ class VideoSourceSearchController extends ChangeNotifier {
     String? title,
   }) {
     return takeCachedFor(seedData: seedData, title: title) ??
-        VideoSourceSearchController(
-          seedData: seedData,
-          title: resolveTitle(title: title, seedData: seedData),
-        );
+        VideoSourceSearchController(seedData: seedData, title: title);
   }
 
   static VideoSourceSearchController? takeCachedFor({
     Map<String, dynamic>? seedData,
     String? title,
   }) {
-    final resolved = resolveTitle(title: title, seedData: seedData);
     final cached = globalCached;
-    if (cached != null && globalCachedTitle == resolved) {
-      globalCached = null;
-      globalCachedTitle = null;
+    globalCached = null;
+    if (cached?.title == resolveTitle(title: title, seedData: seedData)) {
       return cached;
     }
     cached?.dispose();
-    globalCached = null;
-    globalCachedTitle = null;
     return null;
   }
 
@@ -125,6 +113,16 @@ class VideoSourceSearchController extends ChangeNotifier {
 
   final String title;
   final Map<String, dynamic>? seedData;
+  late final Map<String, dynamic> _seedMetadata = {
+    for (final key in const [
+      'bgmId',
+      'score',
+      'bgmDetailData',
+      'bgmImageUrl',
+      'logoUrl',
+    ])
+      if (seedData?[key] case final value?) key: value,
+  };
   final bool autoMatchMode;
   final int targetEpisodeIndex;
   final ValueChanged<PlaybackRequest>? onMatchFound;
@@ -157,12 +155,13 @@ class VideoSourceSearchController extends ChangeNotifier {
   SourceMatchContext? _matchContext;
   (SourceMatchContext, int, int, int, String?)? _switchKey;
   List<SourceProbeState> _switchCandidates = const [];
+  List<DirectSourceGroup>? _switchGroups;
   final _autoProbesBySource = <String, int>{};
   int _autoProbesTotal = 0;
   Timer? _deadlineTimer;
   ProbeScheduler<SourceSearchResult>? _probeScheduler;
   DateTime? _autoMatchStartedAt;
-  Completer<bool>? _autoMatchGate;
+  Completer<void>? _autoMatchGate;
 
   /// 最近一次自动匹配耗时（认领或失败），供调试/对比。
   Duration? lastAutoMatchDuration;
@@ -206,14 +205,13 @@ class VideoSourceSearchController extends ChangeNotifier {
     _disposed = true;
     if (identical(globalCached, this)) {
       globalCached = null;
-      globalCachedTitle = null;
     }
     _sourceOperation.cancel();
     _sourceOperation.close();
     _runId++;
-    _cancelAutoTimers();
+    _cancelAutoDeadline();
     _probeScheduler?.close();
-    _completeAutoMatchGate(false);
+    _completeAutoMatch();
     // 释放已解析的候选 / 播放数据；控制器在播放器侧仍被引用，但不再需要它们。
     _releaseRetainedData();
     super.dispose();
@@ -223,6 +221,7 @@ class VideoSourceSearchController extends ChangeNotifier {
   void _releaseRetainedData() {
     _switchKey = null;
     _switchCandidates = const [];
+    _switchGroups = null;
     _results.clear();
     _sourceCounts.clear();
     _errors.clear();
@@ -328,8 +327,8 @@ class VideoSourceSearchController extends ChangeNotifier {
 
   Future<void> startSearch() async {
     if (_disposed) return;
-    _cancelAutoTimers();
-    _completeAutoMatchGate(false);
+    _cancelAutoDeadline();
+    _completeAutoMatch();
     _sourceOperation.cancel();
     _sourceOperation.close();
     _sourceOperation = SourceOperation();
@@ -338,15 +337,17 @@ class VideoSourceSearchController extends ChangeNotifier {
     _autoMatched = false;
     lastAutoMatchDuration = null;
     _autoMatchStartedAt = autoMatchMode ? DateTime.now() : null;
-    final gate = autoMatchMode ? Completer<bool>() : null;
+    final gate = autoMatchMode ? Completer<void>() : null;
     _autoMatchGate = gate;
     _releaseRetainedData();
     _probeScheduler?.close();
-    final scheduler = _probeScheduler = ProbeScheduler<SourceSearchResult>(
-      concurrency: SourceMatchEngine.raceConcurrency,
-      keyOf: (item) => item.key,
-      run: (item) => _runAutoProbe(runId, item),
-    );
+    final scheduler = _probeScheduler = autoMatchMode
+        ? ProbeScheduler<SourceSearchResult>(
+            concurrency: SourceMatchEngine.raceConcurrency,
+            keyOf: (item) => item.key,
+            run: (item) => _runAutoProbe(runId, item),
+          )
+        : null;
     isSearching = true;
     _emitProgress();
 
@@ -356,7 +357,7 @@ class VideoSourceSearchController extends ChangeNotifier {
       if (!_alive(runId) || operation.isCancelled) return;
       _errors.add('搜索初始化失败');
       _stopBackgroundWork();
-      _completeAutoMatchGate(false);
+      _completeAutoMatch();
       isSearching = false;
       _emitProgress();
       if (_alive(runId) && autoMatchMode && !_userSelected) {
@@ -391,26 +392,23 @@ class VideoSourceSearchController extends ChangeNotifier {
 
     _progressing.addAll(sources.map((source) => source.key));
 
-    final tasks = [
-      for (final source in sources)
-        () => _searchSource(
-          runId: runId,
-          operation: operation,
-          keywords: keywords,
-          sourceKey: source.key,
-          errorMsg: source.error,
-        ),
-    ];
-
-    // 自动匹配更高搜索并发，尽快产出首条高置信结果。
-    final searchFuture = _runPool(
-      tasks,
-      autoMatchMode ? SourceMatchEngine.autoSearchConcurrency : 8,
-      shouldStop: () =>
-          operation.isCancelled ||
-          _autoMatched ||
-          !_alive(runId) ||
-          _autoMatchSettled,
+    var nextSource = 0;
+    final concurrency = autoMatchMode
+        ? SourceMatchEngine.autoSearchConcurrency
+        : 8;
+    final searchFuture = Future.wait(
+      List.generate(sources.length.clamp(0, concurrency), (_) async {
+        while (nextSource < sources.length && !operation.isCancelled) {
+          final source = sources[nextSource++];
+          await _searchSource(
+            runId: runId,
+            operation: operation,
+            keywords: keywords,
+            sourceKey: source.key,
+            errorMsg: source.error,
+          );
+        }
+      }),
     );
 
     if (!autoMatchMode) {
@@ -421,24 +419,25 @@ class VideoSourceSearchController extends ChangeNotifier {
       return;
     }
 
-    _startAutoTimers(runId);
+    _startAutoDeadline(runId);
     unawaited(
       _driveAutoMatch(
         runId,
         operation,
-        gate!,
         searchFuture,
         memoryFuture,
-        scheduler,
+        scheduler!,
       ).catchError((Object error, StackTrace _) {
         if (kDebugMode) debugPrint('[AutoMatch] aborted: $error');
-        if (_alive(runId)) _stopBackgroundWork();
-        _completeGate(gate, false);
+        if (_alive(runId)) {
+          _stopBackgroundWork();
+          _completeAutoMatch();
+        }
       }),
     );
 
     // gate 必在「认领 / 全源结束 / 硬截止」三者之一完成，不再傻等慢源。
-    await gate.future;
+    await gate!.future;
     if (!_alive(runId)) return;
     isSearching = false;
     _emitProgress();
@@ -448,14 +447,14 @@ class VideoSourceSearchController extends ChangeNotifier {
     }
   }
 
-  void _startAutoTimers(int runId) {
-    _cancelAutoTimers();
+  void _startAutoDeadline(int runId) {
+    _cancelAutoDeadline();
     // 硬截止：停止后续探针并给出结论。这是自动匹配唯一的兜底计时器，
     // 结果一到就探（first-ready）之外不再有任何补探轮次。
     _deadlineTimer = Timer(SourceMatchEngine.hardDeadline, () {
       if (!_alive(runId)) return;
       _stopBackgroundWork();
-      _completeAutoMatchGate(_autoMatched);
+      _completeAutoMatch();
     });
   }
 
@@ -464,7 +463,7 @@ class VideoSourceSearchController extends ChangeNotifier {
     return gate != null && gate.isCompleted;
   }
 
-  void _cancelAutoTimers() {
+  void _cancelAutoDeadline() {
     _deadlineTimer?.cancel();
     _deadlineTimer = null;
   }
@@ -472,41 +471,33 @@ class VideoSourceSearchController extends ChangeNotifier {
   Future<void> _driveAutoMatch(
     int runId,
     SourceOperation operation,
-    Completer<bool> gate,
     Future<void> searchFuture,
-    Future<bool>? memoryFuture,
+    Future<void>? memoryFuture,
     ProbeScheduler<SourceSearchResult> scheduler,
   ) async {
-    if (memoryFuture != null && await memoryFuture) {
-      // 记忆命中：_tryMemory 已认领并关闭探针调度。
-      unawaited(searchFuture);
-      _completeGate(gate, true);
-      return;
-    }
+    if (memoryFuture != null) await memoryFuture;
     if (!_alive(runId)) return;
     if (_autoMatched || _userSelected) {
-      _completeGate(gate, _autoMatched);
+      _completeAutoMatch();
       return;
     }
 
     try {
       await operation.wait(searchFuture);
       await operation.wait(scheduler.drained);
-      if (_alive(runId) && !gate.isCompleted) {
+      if (_alive(runId) && !_autoMatchSettled) {
         _stopBackgroundWork();
-        _completeGate(gate, _autoMatched);
+        _completeAutoMatch();
       }
     } catch (_) {
       if (!operation.isCancelled) rethrow;
     }
   }
 
-  void _completeGate(Completer<bool>? gate, bool matched) {
-    if (gate != null && !gate.isCompleted) gate.complete(matched);
+  void _completeAutoMatch() {
+    final gate = _autoMatchGate;
+    if (gate != null && !gate.isCompleted) gate.complete();
   }
-
-  void _completeAutoMatchGate(bool matched) =>
-      _completeGate(_autoMatchGate, matched);
 
   void _recordAutoMatchDuration() {
     final started = _autoMatchStartedAt;
@@ -520,10 +511,10 @@ class VideoSourceSearchController extends ChangeNotifier {
     }
   }
 
-  Future<bool> _tryMemory(int runId) async {
+  Future<void> _tryMemory(int runId) async {
     final bgmId = toInt(seedData?['bgmId']);
     final memory = MatchMemoryService.read(bgmId: bgmId, title: title);
-    if (memory == null) return false;
+    if (memory == null) return;
 
     final item = SourceSearchResult(
       Series(
@@ -542,43 +533,42 @@ class VideoSourceSearchController extends ChangeNotifier {
         preferredLine: 1,
         raceMode: true,
       );
-      if (!_alive(runId) || _autoMatched || _userSelected) return true;
+      if (!_alive(runId) || _autoMatched || _userSelected) return;
       if (probe.isInstantPlayable && probe.data != null) {
-        return _claimAutoMatch(runId, item, probe.data!);
+        _claimAutoMatch(runId, item, probe.data!);
+        return;
       }
     } catch (_) {}
 
     if (!_alive(runId) || _autoMatched || _userSelected || _autoMatchSettled) {
-      return false;
+      return;
     }
     try {
       await MatchMemoryService.remove(bgmId: bgmId, title: title);
     } catch (_) {}
-    return false;
   }
 
   /// 原子认领自动匹配结果；成功后停止后续搜索/探针。
-  bool _claimAutoMatch(
+  void _claimAutoMatch(
     int runId,
     SourceSearchResult item,
     PlaybackRequest data,
   ) {
-    if (!_alive(runId) || _autoMatched || _userSelected) return false;
-    if (_autoMatchSettled) return false;
-    final gate = _autoMatchGate;
+    if (!_alive(runId) || _autoMatched || _userSelected || _autoMatchSettled) {
+      return;
+    }
     _autoMatched = true;
     _stopBackgroundWork();
     _recordAutoMatchDuration();
-    _completeGate(gate, true);
+    _completeAutoMatch();
     onMatchFound?.call(data.copyWith());
     unawaited(persistMatchMemory(item, data));
-    return true;
   }
 
   void cancelSearch() {
     _runId++;
     _stopBackgroundWork();
-    _completeAutoMatchGate(false);
+    _completeAutoMatch();
     if (!_disposed) {
       isSearching = false;
       _progressing.clear();
@@ -590,7 +580,7 @@ class VideoSourceSearchController extends ChangeNotifier {
     _sourceOperation.cancel();
     _sourceOperation.close();
     _sourceOperation = SourceOperation();
-    _cancelAutoTimers();
+    _cancelAutoDeadline();
     _probeScheduler?.close();
     _progressing.clear();
     for (final probe in _probes.values) {
@@ -601,26 +591,7 @@ class VideoSourceSearchController extends ChangeNotifier {
       if (probe.isInstantPlayable) continue;
       if (probe.data == null) _resolved.remove(probe.item.key);
       probe.status = SourceProbeStatus.pending;
-    }
-  }
-
-  Future<void> _runPool(
-    List<Future<void> Function()> tasks,
-    int concurrency, {
-    bool Function()? shouldStop,
-  }) async {
-    var next = 0;
-    Future<void> worker() async {
-      while (next < tasks.length) {
-        if (shouldStop?.call() ?? false) return;
-        final i = next++;
-        await tasks[i]();
-      }
-    }
-
-    final n = tasks.length < concurrency ? tasks.length : concurrency;
-    if (n > 0) {
-      await Future.wait(List.generate(n, (_) => worker()));
+      _switchGroups = null;
     }
   }
 
@@ -656,20 +627,24 @@ class VideoSourceSearchController extends ChangeNotifier {
     }
 
     try {
-      final firstCount = keywords.length < 2 ? keywords.length : 2;
-      final done = Completer<List<SourceSearchResult>>();
-      var remaining = firstCount;
-      for (var i = 0; i < firstCount; i++) {
-        unawaited(
-          load(keywords[i]).then((rows) {
-            if ((rows.isNotEmpty || --remaining == 0) && !done.isCompleted) {
-              done.complete(rows);
-            }
-          }),
-        );
+      List<SourceSearchResult> rows;
+      if (keywords.length == 1) {
+        rows = await load(keywords.first);
+      } else {
+        final done = Completer<List<SourceSearchResult>>();
+        var remaining = 2;
+        for (var i = 0; i < 2; i++) {
+          unawaited(
+            load(keywords[i]).then((rows) {
+              if ((rows.isNotEmpty || --remaining == 0) && !done.isCompleted) {
+                done.complete(rows);
+              }
+            }),
+          );
+        }
+        rows = await done.future;
       }
-      var rows = await done.future;
-      for (var i = firstCount; rows.isEmpty && i < keywords.length; i++) {
+      for (var i = 2; rows.isEmpty && i < keywords.length; i++) {
         if (!_alive(runId) || operation.isCancelled || _autoMatchSettled) {
           return;
         }
@@ -707,21 +682,19 @@ class VideoSourceSearchController extends ChangeNotifier {
   ) {
     if (!_alive(runId)) return;
     final context = _syncContext();
-    var accepted = 0;
+    final previousCount = _sourceCounts[source] ?? 0;
+    var count = previousCount;
     final seen = <String>{};
     SourceMatchScore? first;
     SourceMatchScore? second;
 
     for (final data in rows) {
       if (_results.length >= 100) break;
-      final count = _sourceCounts[source] ?? 0;
       if (count >= 20) break;
       final key = data.key;
       if (_results.containsKey(key) || !seen.add(key)) continue;
-      final item = data;
-
-      if (item.source != 'internal') {
-        final score = _engine.score(item, context);
+      if (data.source != 'internal') {
+        final score = _engine.score(data, context);
         if (score.confidence < SourceMatchEngine.admissionConfidence) {
           continue;
         }
@@ -737,11 +710,12 @@ class VideoSourceSearchController extends ChangeNotifier {
         }
       }
 
-      _results[item.key] = item;
-      _sourceCounts[item.source] = count + 1;
-      accepted++;
+      _results[key] = data;
+      count++;
     }
-    if (accepted == 0) return;
+    if (count == previousCount) return;
+    _sourceCounts[source] = count;
+    _switchGroups = null;
 
     if (!_disposed) notifyListeners();
 
@@ -868,6 +842,7 @@ class VideoSourceSearchController extends ChangeNotifier {
       currentSource,
     );
     if (_switchKey != key) {
+      _switchGroups = null;
       _switchCandidates =
           [
             for (final item in _results.values)
@@ -882,6 +857,8 @@ class VideoSourceSearchController extends ChangeNotifier {
           });
     }
     _switchKey = key;
+    final cached = _switchGroups;
+    if (cached != null) return cached;
     // 匹配分只在候选/上下文变化时排序；探针更新按五种状态线性分桶。
     final buckets = List.generate(5, (_) => <SourceProbeState>[]);
     for (final candidate in _switchCandidates) {
@@ -892,7 +869,7 @@ class VideoSourceSearchController extends ChangeNotifier {
       final key = c.routeKey ?? 'candidate:${c.item.key}';
       (grouped[key] ??= []).add(c);
     }
-    return [
+    return _switchGroups = [
       for (final e in grouped.entries)
         DirectSourceGroup(key: e.key, origins: e.value),
     ];
@@ -952,6 +929,7 @@ class VideoSourceSearchController extends ChangeNotifier {
       _probeSelection = selection;
       _switchKey = null;
       _switchCandidates = const [];
+      _switchGroups = null;
     }
     return _probes.putIfAbsent(
       item.key,
@@ -980,6 +958,7 @@ class VideoSourceSearchController extends ChangeNotifier {
     );
     probe.status = SourceProbeStatus.resolving;
     probe.error = null;
+    _switchGroups = null;
     _emitProgress();
     try {
       await operation.run(() async {
@@ -1098,13 +1077,18 @@ class VideoSourceSearchController extends ChangeNotifier {
       }
       probe.status = SourceProbeStatus.failed;
       probe.error = operation.timedOut ? '解析超时' : error.toString();
+      // Failed candidates must not retain catalogs beyond the bounded cache.
+      probe.data = null;
     } finally {
       operation.cancel();
       operation.close();
       if (identical(probe.operation, operation)) {
         probe.operation = null;
         probe.future = null;
-        _emitProgress();
+        if (identical(_probes[probe.item.key], probe)) {
+          _switchGroups = null;
+          _emitProgress();
+        }
       }
     }
     return probe;
@@ -1125,11 +1109,17 @@ class VideoSourceSearchController extends ChangeNotifier {
       if (!await adapter.isPlaybackUrlReachable(lineToken)) {
         throw StateError('媒体地址不可访问');
       }
-      final headers = Map<String, String>.of(adapter.mediaValidationHeaders);
-      if (VideoUrlExtractor.isSignedCdnUrl(lineToken)) {
-        headers.removeWhere((key, _) => key.toLowerCase() == 'referer');
-      }
-      return (url: lineToken, httpHeaders: headers);
+      final headers = adapter.mediaValidationHeaders;
+      return (
+        url: lineToken,
+        httpHeaders: VideoUrlExtractor.isSignedCdnUrl(lineToken)
+            ? {
+                for (final entry in headers.entries)
+                  if (entry.key.toLowerCase() != 'referer')
+                    entry.key: entry.value,
+              }
+            : headers,
+      );
     }
     return adapter.resolvePlaybackMedia(lineToken, maxAttempts: 1);
   }
@@ -1149,40 +1139,26 @@ class VideoSourceSearchController extends ChangeNotifier {
     );
     try {
       return await operation.run(() async {
-        final request = item.source == 'internal'
-            ? PlaybackRequest.fromMap({
-                ...item.internalData!,
-                'source': 'internal',
-              })
-            : await _adapter.buildPlaybackRequest(item);
+        if (item.internalData case final data?) {
+          return PlaybackRequest.fromMap(
+            data,
+            source: item.source,
+            metadataUpdates: _seedMetadata,
+          );
+        }
+        final request = await _adapter.buildPlaybackRequest(item);
         if (request == null) {
           throw StateError(
             'Source returned no playback catalog: ${item.source}',
           );
         }
-        return _mergeSeed(request);
+        return _seedMetadata.isEmpty
+            ? request
+            : request.copyWith(metadataUpdates: _seedMetadata);
       });
     } finally {
       operation.close();
     }
   }
 
-  PlaybackRequest _mergeSeed(PlaybackRequest request) {
-    final seed = seedData;
-    if (seed == null) return request;
-    Map<String, dynamic>? metadata;
-    for (final key in const [
-      'bgmId',
-      'score',
-      'bgmDetailData',
-      'bgmImageUrl',
-      'logoUrl',
-    ]) {
-      final value = seed[key];
-      if (value != null) {
-        (metadata ??= Map.of(request.metadata))[key] = value;
-      }
-    }
-    return metadata == null ? request : request.copyWith(metadata: metadata);
-  }
 }

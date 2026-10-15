@@ -85,7 +85,32 @@ class PlaybackEpisodeCatalog {
 
     final raw = data['videos'];
     if (raw is String && raw.isNotEmpty) {
-      return raw.split('\n').where((l) => l.trim().isNotEmpty).length;
+      var count = 0;
+      var start = 0;
+      while (start < raw.length) {
+        // Match String.trim's Unicode whitespace without allocating each line.
+        switch (raw.codeUnitAt(start)) {
+          case >= 0x09 && <= 0x0d ||
+              0x20 ||
+              0x85 ||
+              0xa0 ||
+              0x1680 ||
+              >= 0x2000 && <= 0x200a ||
+              0x2028 ||
+              0x2029 ||
+              0x202f ||
+              0x205f ||
+              0x3000 ||
+              0xfeff:
+            start++;
+            continue;
+        }
+        count++;
+        final end = raw.indexOf('\n', start);
+        if (end < 0) break;
+        start = end + 1;
+      }
+      return count;
     }
     return 0;
   }
@@ -97,7 +122,7 @@ class PlaybackEpisodeCatalog {
   }) {
     final slotOf = mergeDuplicateTitles ? <String, int>{} : null;
     final episodes = <PlaybackEpisode>[];
-    final mergedLines = <int, List<String>>{};
+    Map<int, List<String>>? mergedLines;
 
     for (final value in values) {
       final episode = switch (value) {
@@ -118,13 +143,14 @@ class PlaybackEpisodeCatalog {
         episodes.add(episode);
       } else {
         final existing = episodes[slot];
-        (mergedLines[slot] ??= List<String>.of(
+        ((mergedLines ??= {})[slot] ??= List<String>.of(
           existing.lines,
         )).addAll(episode.lines);
       }
     }
 
-    for (final entry in mergedLines.entries) {
+    for (final entry
+        in mergedLines?.entries ?? const <MapEntry<int, List<String>>>[]) {
       episodes[entry.key] = PlaybackEpisode(
         title: episodes[entry.key].title,
         lines: entry.value,

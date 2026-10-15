@@ -86,7 +86,9 @@ class _TvFocusableState extends State<TvFocusable> {
           duration: _focusAnimDuration,
           curve: Curves.easeOutCubic,
           padding: widget.focusPadding,
-          transform: Matrix4.diagonal3Values(scale, scale, 1),
+          transform: widget.enableScale
+              ? Matrix4.diagonal3Values(scale, scale, 1)
+              : null,
           transformAlignment: Alignment.center,
           decoration: BoxDecoration(
             borderRadius: widget.borderRadius,

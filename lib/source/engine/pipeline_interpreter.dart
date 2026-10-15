@@ -1019,6 +1019,12 @@ class PipelineInterpreter {
     final template = step.str('detailUrlTemplate');
     final descKey = step.str('descKey');
     final baseUrl = ctx.baseUrl;
+    final alphabet = step.str('idAlphabet') ?? step.str('alphabet') ?? '';
+    final encodeId =
+        (step.str('idTransform') ?? '').toLowerCase() == 'basen' &&
+        alphabet.length >= 2;
+    final prefix = step.str('idPrefix') ?? '';
+    final suffix = step.str('idSuffix') ?? '';
 
     final keyword = step.flag('keywordMatch')
         ? (ctx.vars['keyword']?.toString() ?? '').toLowerCase().trim()
@@ -1035,7 +1041,12 @@ class PipelineInterpreter {
         }
       }
       final rawId = item[idKey]?.toString().trim() ?? '';
-      final id = _transformJsonSeriesId(rawId, step);
+      var id = rawId;
+      if (encodeId && id.isNotEmpty) {
+        final numeric = int.tryParse(id);
+        if (numeric != null) id = _encodeLittleEndianBaseN(numeric, alphabet);
+        id = '$prefix$id$suffix';
+      }
       final rawUrl = urlKey == null
           ? ''
           : item[urlKey]?.toString().trim() ?? '';
@@ -1065,20 +1076,6 @@ class PipelineInterpreter {
         ),
       );
     }
-  }
-
-  String _transformJsonSeriesId(String id, PipelineStep step) {
-    if (id.isEmpty) return id;
-    final transform = (step.str('idTransform') ?? '').toLowerCase();
-    if (transform != 'basen') return id;
-
-    final alphabet = step.str('idAlphabet') ?? step.str('alphabet') ?? '';
-    if (alphabet.length < 2) return id;
-    final numeric = int.tryParse(id);
-    final encoded = numeric == null
-        ? id
-        : _encodeLittleEndianBaseN(numeric, alphabet);
-    return '${step.str('idPrefix') ?? ''}$encoded${step.str('idSuffix') ?? ''}';
   }
 
   /// `episodes`：CSS/XPath 解析播放线路，追加到 sourcesOut。
@@ -1194,9 +1191,12 @@ class PipelineInterpreter {
     if (rawGroups == null) return;
 
     final directOnly = step.flag('directOnly');
-    final sources = <Source>[];
+    final preferHls = step.flag('preferHls');
+    final others = preferHls ? <Source>[] : null;
+    final pageUrl = ctx.pageUrl.isEmpty ? ctx.baseUrl : ctx.pageUrl;
     for (var sourceIndex = 0; sourceIndex < rawGroups.length; sourceIndex++) {
       final episodes = <Episode>[];
+      var isHls = false;
       for (final rawEntry in rawGroups[sourceIndex].split('#')) {
         final separator = rawEntry.indexOf(r'$');
         if (separator <= 0 || separator >= rawEntry.length - 1) continue;
@@ -1211,10 +1211,13 @@ class PipelineInterpreter {
         final episodeId = isDirect
             ? VideoUrlExtractor.normalizeResolvedUrl(
                 rawId,
-                ctx.pageUrl.isEmpty ? ctx.baseUrl : ctx.pageUrl,
+                pageUrl,
                 preserveMagnet: true,
               )
             : rawId;
+        if (preferHls && !isHls) {
+          isHls = episodeId.toLowerCase().contains('.m3u8');
+        }
         episodes.add(
           Episode(
             episodeId,
@@ -1227,26 +1230,11 @@ class PipelineInterpreter {
       final rawName = sourceIndex < sourceNames.length
           ? sourceNames[sourceIndex].trim()
           : '';
-      sources.add(
+      (others != null && !isHls ? others : ctx._sources).add(
         Source(episodes, rawName.isEmpty ? '线路${sourceIndex + 1}' : rawName),
       );
     }
-    if (step.flag('preferHls')) {
-      // 单遍分桶，保持与原 where 过滤一致的相对顺序：HLS 线路整体前置。
-      final hls = <Source>[];
-      final others = <Source>[];
-      for (final source in sources) {
-        final isHls = source.episodes.any(
-          (episode) => episode.episodeId.toLowerCase().contains('.m3u8'),
-        );
-        (isHls ? hls : others).add(source);
-      }
-      ctx._sources
-        ..addAll(hls)
-        ..addAll(others);
-      return;
-    }
-    ctx._sources.addAll(sources);
+    if (others != null) ctx._sources.addAll(others);
   }
 
   List<Episode> _buildJsonEpisodes(
@@ -1270,23 +1258,33 @@ class PipelineInterpreter {
     for (var i = 0; i < epList.length; i++) {
       final item = epList[i];
       if (item is! Map) continue;
-      final hasDirectId = item.containsKey('id');
-      final epId = plainIdTemplate && hasDirectId
-          ? Uri.encodeComponent(item['id']?.toString() ?? '')
-          : rawIdTemplate && hasDirectId
-          ? item['id']?.toString() ?? ''
-          : renderTemplate(
-              idTemplate,
-              (name) => switch (name) {
-                'source_id' => sourceIdText,
-                'source_index' => sourceIndexText,
-                'index' => (i + 1).toString(),
-                _ when item.containsKey(name) => item[name]?.toString(),
-                'url' => ctx.currentString,
-                _ => ctx.vars[name]?.toString(),
-              },
-            );
-      if (_blankEpisodeId(epId)) continue;
+      final String epId;
+      if (plainIdTemplate || rawIdTemplate) {
+        final id =
+            (item.containsKey('id') ? item['id'] : ctx.vars['id'])
+                ?.toString() ??
+            '';
+        if (plainIdTemplate) {
+          if (id.trim().isEmpty) continue;
+          epId = Uri.encodeComponent(id);
+        } else {
+          if (_blankEpisodeId(id)) continue;
+          epId = id;
+        }
+      } else {
+        epId = renderTemplate(
+          idTemplate,
+          (name) => switch (name) {
+            'source_id' => sourceIdText,
+            'source_index' => sourceIndexText,
+            'index' => (i + 1).toString(),
+            _ when item.containsKey(name) => item[name]?.toString(),
+            'url' => ctx.currentString,
+            _ => ctx.vars[name]?.toString(),
+          },
+        );
+        if (_blankEpisodeId(epId)) continue;
+      }
       final title = item[epNameKey]?.toString().trim() ?? '';
       episodes.add(
         Episode(epId, i, title.isEmpty ? 'Episode ${i + 1}' : title),
@@ -1297,6 +1295,7 @@ class PipelineInterpreter {
 
   static bool _blankEpisodeId(String id) {
     if (id.trim().isEmpty) return true;
+    if (!id.contains('%')) return false;
     try {
       return Uri.decodeComponent(id).trim().isEmpty;
     } on FormatException {

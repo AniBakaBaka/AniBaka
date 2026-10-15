@@ -59,24 +59,23 @@ class AppStorage {
 
   static Future<void> open(String name, {List<HiveBoxRecovery>? recoveries}) {
     if (Hive.isBoxOpen(name)) return Future.value();
-    return _opening.putIfAbsent(
-      name,
-      () => Future<void>(() async {
-        final recovered = recoveries ?? <HiveBoxRecovery>[];
-        try {
-          if (_listBoxes.contains(name)) {
-            await _openBox<List>(name, _directory, recovered);
-          } else {
-            await _openBox<Map>(name, _directory, recovered);
-          }
-          for (final item in recovered) {
-            debugPrint('Recovered Hive box ${item.boxName}: ${item.reason}');
-          }
-        } finally {
-          _opening.remove(name);
-        }
-      }),
-    );
+    return _opening.putIfAbsent(name, () {
+      final opening = _listBoxes.contains(name)
+          ? _openBox<List>(name)
+          : _openBox<Map>(name);
+      return opening
+          .then((recovery) {
+            if (recovery != null) {
+              recoveries?.add(recovery);
+              debugPrint(
+                'Recovered Hive box ${recovery.boxName}: ${recovery.reason}',
+              );
+            }
+          })
+          .whenComplete(() {
+            _opening.remove(name);
+          });
+    });
   }
 
   static Box<Map> get videoProgressBox => Hive.box<Map>(videoProgressBoxName);
@@ -87,20 +86,17 @@ class AppStorage {
   static Box<Map> get bgmCacheBox => Hive.box<Map>(bgmCacheBoxName);
   static Box<Map> get homeCacheBox => Hive.box<Map>(homeCacheBoxName);
 
-  static Future<void> _openBox<T>(
-    String name,
-    Directory? hiveDirectory,
-    List<HiveBoxRecovery> recoveries,
-  ) async {
+  static Future<HiveBoxRecovery?> _openBox<T>(String name) async {
     try {
       await _openHiveBox<T>(name);
+      return null;
     } on HiveError catch (error) {
       if (!error.message.contains('Cannot read, unknown typeId:')) rethrow;
 
-      final backupPath = await _backupBox(name, hiveDirectory);
+      final backupPath = await _backupBox(name, _directory);
       await Hive.deleteBoxFromDisk(name);
       await _openHiveBox<T>(name);
-      recoveries.add(HiveBoxRecovery(name, backupPath, error.message));
+      return HiveBoxRecovery(name, backupPath, error.message);
     }
   }
 
@@ -253,19 +249,6 @@ class AppStorage {
       }
     } catch (e) {
       debugPrint('清理目录失败: $e');
-    }
-  }
-
-  /// 格式化文件大小
-  static String formatSize(int bytes) {
-    if (bytes < 1024) {
-      return '$bytes B';
-    } else if (bytes < 1024 * 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    } else if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    } else {
-      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
     }
   }
 }

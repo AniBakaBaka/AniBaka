@@ -47,8 +47,9 @@ final _searchCache = RequestCache<String, List<BgmSubjectInfo>>(
   limit: 64,
   ttl: _bgmCacheTtl,
 );
-final _characterRequests =
-    RequestDeduplicator<int, List<Map<String, dynamic>>>();
+final _characterRequests = RequestCache<int, List<Map<String, dynamic>>>(
+  limit: 0,
+);
 
 /// v0 条目原始响应（含 infobox / tags / rating.count / collection）。
 Map<String, dynamic>? peekBgmSubject(int subjectId) =>
@@ -77,16 +78,19 @@ Future<Map<String, dynamic>> getBgmEpisodePage(
 Future<Map<String, dynamic>> getBgmEpisode(int episodeId) => apiTransport
     .getJson<Map<String, dynamic>>('$_bgmApiBase/v0/episodes/$episodeId');
 
-Future<BgmSubjectInfo> _subjectInfo(int subjectId) async =>
-    BgmSubjectInfo.fromJson(await getBgmSubject(subjectId));
-
 Future<List<Map<String, dynamic>>> getBgmEpisodes(int subjectId) {
   return _episodeCache.get(subjectId, () async {
-    final response = await apiTransport.getJson<Map<String, dynamic>>(
-      '$_bgmApiBase/v0/episodes?subject_id=$subjectId&type=0&limit=200',
-    );
-    final episodes = (response['data'] as List<dynamic>)
-        .cast<Map<String, dynamic>>();
+    final episodes = <Map<String, dynamic>>[];
+    while (true) {
+      final response = await getBgmEpisodePage(
+        subjectId,
+        offset: episodes.length,
+      );
+      final page = (response['data'] as List<dynamic>)
+          .cast<Map<String, dynamic>>();
+      episodes.addAll(page);
+      if (page.isEmpty || episodes.length >= (response['total'] as num)) break;
+    }
     episodes.sort(
       (left, right) => (left['sort'] as num).compareTo(right['sort'] as num),
     );
@@ -96,7 +100,7 @@ Future<List<Map<String, dynamic>>> getBgmEpisodes(int subjectId) {
 
 /// 角色响应通常远大于条目本身，只由角色页按需读取，不驻留全局缓存。
 Future<List<Map<String, dynamic>>> getBgmCharacters(int subjectId) =>
-    _characterRequests.run(
+    _characterRequests.get(
       subjectId,
       () async => (await apiTransport.getJson<List<dynamic>>(
         '$_bgmApiBase/v0/subjects/$subjectId/characters',
@@ -177,13 +181,10 @@ Future<List<Map<String, dynamic>>> getBgmCharacterComments(int characterId) =>
       )).cast<Map<String, dynamic>>(),
     );
 
-/// 通过标签搜索 BGM 动画
-///
-/// 使用 BGM v0 搜索 API (POST /v0/search/subjects)
-/// [tags] BGM 标签列表（AND 关系）
-/// [sort] 排序：rank(排名) / heat(热度) / score(评分) / match(相关)
-Future<List<Map<String, dynamic>>> searchBgmByTag(
-  List<String> tags, {
+/// Bangumi v0 动画搜索。标签、日期条件均为 AND；分页放在 query 中。
+Future<List<Map<String, dynamic>>> searchBgm({
+  String keyword = '*',
+  List<String> tags = const [],
   int limit = 25,
   int offset = 0,
   String sort = 'rank',
@@ -199,7 +200,7 @@ Future<List<Map<String, dynamic>>> searchBgmByTag(
     '$_bgmApiBase/v0/search/subjects?limit=$limit&offset=$offset',
     {
       // Bangumi rejects an empty keyword. `*` keeps this a filter-only search.
-      'keyword': '*',
+      'keyword': keyword,
       'sort': sort,
       'filter': filter,
     },
@@ -219,10 +220,37 @@ Future<BgmInfo> resolveBgmFromData(Map data) async {
   final existing = BgmInfo.fromData(data);
   if (existing.subjectId != null) return existing;
 
-  return _fetchScore(
-    data['bgmId']?.toString() ?? '',
-    data['title']?.toString() ?? '',
+  final title = (data['title'] as String? ?? '')
+      .replaceAll(_spaces, ' ')
+      .trim();
+  final normalized = keepTitleUnits(extractBaseTitle(title));
+  if (normalized.isEmpty) return const BgmInfo();
+  final season = extractSeason(title);
+  final cacheKey = season == null
+      ? 'bgm_score_$normalized'
+      : 'bgm_score_$normalized#season:$season';
+  final cached = _scoreCache.read(cacheKey) as Map?;
+  if (cached != null) {
+    return BgmInfo(
+      score: toDouble(cached['score']),
+      subjectId: toInt(cached['subjectId']),
+      imageUrl: cached['imageUrl'] as String?,
+    );
+  }
+
+  final subject = await resolveBgmSubject(title: title);
+  if (subject == null) return const BgmInfo();
+  final info = BgmInfo(
+    score: subject.score,
+    subjectId: subject.subjectId,
+    imageUrl: subject.imageUrl,
   );
+  await _scoreCache.write(cacheKey, {
+    'score': info.score,
+    'subjectId': info.subjectId,
+    'imageUrl': info.imageUrl,
+  });
+  return info;
 }
 
 Future<List<BgmSubjectInfo>> searchBgmSubjects(String keyword) {
@@ -230,7 +258,14 @@ Future<List<BgmSubjectInfo>> searchBgmSubjects(String keyword) {
   if (keepTitleUnits(clean).isEmpty) {
     return SynchronousFuture(const []);
   }
-  return _search(clean);
+  return _searchCache.get(clean, () async {
+    final items = await searchBgm(keyword: clean, limit: 10, sort: 'match');
+    return List<BgmSubjectInfo>.generate(
+      items.length,
+      (index) => BgmSubjectInfo.fromJson(items[index]),
+      growable: false,
+    );
+  });
 }
 
 /// 按主线剧集顺序查找评论接口所需的 BGM episode id。
@@ -250,31 +285,25 @@ Future<({int? episodeId, String name})?> resolveBgmEpisodeByIndex(
   );
 }
 
-/// 解析条目标识：已知 bgmId 直接取条目，否则按标题搜索取最匹配的一条。
+/// 按标题搜索条目标识；已知 ID 的调用方直接读取 getBgmSubject。
 ///
 /// 搜索结果本身已含 `score / id / images`，无需再回源拉取整个条目。
-Future<BgmSubjectInfo?> resolveBgmSubject({
-  String bgmId = '',
-  String title = '',
-}) async {
-  final subjectId = int.tryParse(bgmId);
-  if (subjectId != null && subjectId > 0) return _subjectInfo(subjectId);
-
+Future<BgmSubjectInfo?> resolveBgmSubject({required String title}) async {
   final clean = title.replaceAll(_spaces, ' ').trim();
   if (clean.isEmpty) return null;
 
   // 标题变体彼此独立，并发发出后再统一打分，省掉串行往返。
-  final batches = await Future.wait(buildSearchTitles([clean]).map(_search));
+  final batches = await Future.wait(
+    buildSearchTitles([clean]).map(searchBgmSubjects),
+  );
 
   final query = TitleFingerprint(clean);
   final querySeason = extractSeason(clean);
   BgmSubjectInfo? best;
-  BgmSubjectInfo? fallback;
   var bestScore = 0.0;
 
   for (final subjects in batches) {
     for (final subject in subjects) {
-      fallback ??= subject;
       var score = 0.0;
       for (final candidate in subject.searchTitles) {
         final similarity = TitleFingerprint(candidate).similarityTo(query);
@@ -291,75 +320,5 @@ Future<BgmSubjectInfo?> resolveBgmSubject({
       }
     }
   }
-  return best ?? fallback;
-}
-
-Future<BgmInfo> _fetchScore(String bgmId, String title) async {
-  final cacheKey = _scoreCacheKey(bgmId, title);
-  if (cacheKey == null) return const BgmInfo();
-
-  final cached = _readCachedScore(cacheKey);
-  if (cached != null) return cached;
-
-  final subject = await resolveBgmSubject(bgmId: bgmId, title: title);
-  if (subject == null) return const BgmInfo();
-
-  final info = BgmInfo(
-    score: subject.score,
-    subjectId: subject.subjectId,
-    imageUrl: subject.imageUrl,
-  );
-  await _scoreCache.write(cacheKey, {
-    'score': info.score,
-    'subjectId': info.subjectId,
-    'imageUrl': info.imageUrl,
-  });
-  return info;
-}
-
-Future<List<BgmSubjectInfo>> _search(String keyword) async {
-  final query = keyword.trim();
-  if (query.isEmpty) return const [];
-
-  return _searchCache.get(query, () async {
-    final response = await apiTransport.postJson<Map<String, dynamic>>(
-      '$_bgmApiBase/v0/search/subjects?limit=10&offset=0',
-      {
-        'keyword': query,
-        'sort': 'match',
-        'filter': {
-          'type': [2],
-        },
-      },
-    );
-    final items = response['data'] as List<dynamic>;
-    return List<BgmSubjectInfo>.generate(
-      items.length,
-      (index) => BgmSubjectInfo.fromJson(items[index] as Map<String, dynamic>),
-      growable: false,
-    );
-  });
-}
-
-BgmInfo? _readCachedScore(String cacheKey) {
-  final data = _scoreCache.read(cacheKey);
-  if (data is! Map) return null;
-  return BgmInfo(
-    score: toDouble(data['score']),
-    subjectId: toInt(data['subjectId']),
-    imageUrl: data['imageUrl']?.toString(),
-  );
-}
-
-String? _scoreCacheKey(String bgmId, String title) {
-  final subjectId = int.tryParse(bgmId);
-  if (subjectId != null && subjectId > 0) return 'bgm_score_$subjectId';
-
-  final clean = title.replaceAll(_spaces, ' ').trim();
-  final normalized = keepTitleUnits(extractBaseTitle(clean));
-  if (normalized.isEmpty) return null;
-  final season = extractSeason(clean);
-  return season == null
-      ? 'bgm_score_$normalized'
-      : 'bgm_score_$normalized#season:$season';
+  return best;
 }

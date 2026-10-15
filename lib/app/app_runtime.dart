@@ -3,6 +3,7 @@ import 'package:baka/services/playback/danmaku_controller.dart';
 import 'package:baka/services/source/rule_repository_service.dart';
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:baka/api/api_config.dart';
 import 'package:baka/api/auth_api.dart';
 import 'package:baka/api/bangumi_account_api.dart';
@@ -29,6 +30,9 @@ import 'package:baka/services/source/source_repository.dart';
 import 'package:baka/core/app_logger.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:file/file.dart' as cached_file;
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart' hide ContextExtensionss;
 import 'package:hive_flutter/hive_flutter.dart';
@@ -69,6 +73,32 @@ class AppRuntime {
       PlaybackSettingsService.getLowMemoryMode(),
     );
     await AppLogger.instance.init();
+    final networkNotices = NetworkNotices(
+      onNetworkError: () {
+        if (_ready) showSnackBar('网络连接失败，请检查网络和线路＞︿＜', isError: true);
+      },
+      onImageFailures: () {
+        if (_ready) {
+          showSnackBar(
+            '大量图片加载失败，你可能处于网络限制区域，请尝试切换网络或检查代理设置',
+            isError: true,
+            duration: const Duration(seconds: 5),
+          );
+        }
+      },
+    );
+    final previousImageCache = CachedNetworkImageProvider.defaultCacheManager;
+    final imageCache = MonitoredImageCache(previousImageCache, networkNotices);
+    CachedNetworkImageProvider.defaultCacheManager = imageCache;
+    _cleanup.add(() {
+      networkNotices.dispose();
+      if (identical(
+        CachedNetworkImageProvider.defaultCacheManager,
+        imageCache,
+      )) {
+        CachedNetworkImageProvider.defaultCacheManager = previousImageCache;
+      }
+    });
     final client = IOClient(SystemProxyService.createHttpClient());
     _cleanup.add(client.close);
     final auth = AuthApi(client, () => ApiConfig.host);
@@ -78,8 +108,8 @@ class AppRuntime {
       client: client,
       version: Instances.appVersion,
       credentialOrigin: () => Uri.parse(ApiConfig.host),
-      onError: (_) {
-        if (_ready) showSnackBar('网络连接失败，请检查网络和线路＞︿＜', isError: true);
+      onError: (error) {
+        if (_ready) networkNotices.reportNetworkError(error);
       },
     );
     bangumiSession = BangumiSession(
@@ -233,4 +263,174 @@ class AppRuntime {
     }
     await Hive.close();
   }
+}
+
+/// Observes the shared image cache, preserving its storage and resize behavior.
+class MonitoredImageCache extends BaseCacheManager with ImageCacheManager {
+  MonitoredImageCache(this.delegate, this.notices);
+
+  final BaseCacheManager delegate;
+  final NetworkNotices notices;
+
+  Stream<FileResponse> _observe(
+    String url,
+    Stream<FileResponse> responses,
+  ) async* {
+    notices.reportImageStarted(url);
+    var hasImage = false;
+    try {
+      await for (final response in responses) {
+        if (response is FileInfo && !hasImage) {
+          hasImage = true;
+          notices.reportImageResult(url, succeeded: true);
+        }
+        yield response;
+      }
+    } catch (error) {
+      // A failed refresh must not flag an image already displayed from cache.
+      // Local storage errors are also unrelated to regional connectivity.
+      if (!hasImage &&
+          (error is HttpException || NetworkNotices.isNetworkError(error))) {
+        notices.reportImageResult(url, succeeded: false);
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Stream<FileResponse> getFileStream(
+    String url, {
+    String? key,
+    Map<String, String>? headers,
+    bool withProgress = false,
+  }) => _observe(
+    url,
+    delegate.getFileStream(
+      url,
+      key: key,
+      headers: headers,
+      withProgress: withProgress,
+    ),
+  );
+
+  @override
+  Stream<FileResponse> getImageFile(
+    String url, {
+    String? key,
+    Map<String, String>? headers,
+    bool withProgress = false,
+    int? maxHeight,
+    int? maxWidth,
+  }) {
+    final cache = delegate;
+    if (cache is ImageCacheManager) {
+      return _observe(
+        url,
+        cache.getImageFile(
+          url,
+          key: key,
+          headers: headers,
+          withProgress: withProgress,
+          maxHeight: maxHeight,
+          maxWidth: maxWidth,
+        ),
+      );
+    }
+    return super.getImageFile(
+      url,
+      key: key,
+      headers: headers,
+      withProgress: withProgress,
+      maxHeight: maxHeight,
+      maxWidth: maxWidth,
+    );
+  }
+
+  @override
+  Future<cached_file.File> getSingleFile(
+    String url, {
+    String? key,
+    Map<String, String>? headers,
+  }) => delegate.getSingleFile(
+    url,
+    key: key ?? url,
+    headers: headers ?? const {},
+  );
+
+  @override
+  Stream<FileInfo> getFile(
+    String url, {
+    String? key,
+    Map<String, String>? headers,
+  }) => getFileStream(
+    url,
+    key: key,
+    headers: headers,
+  ).where((r) => r is FileInfo).cast<FileInfo>();
+
+  @override
+  Future<FileInfo> downloadFile(
+    String url, {
+    String? key,
+    Map<String, String>? authHeaders,
+    bool force = false,
+  }) => delegate.downloadFile(
+    url,
+    key: key,
+    authHeaders: authHeaders,
+    force: force,
+  );
+
+  @override
+  Future<FileInfo?> getFileFromCache(
+    String key, {
+    bool ignoreMemCache = false,
+  }) => delegate.getFileFromCache(key, ignoreMemCache: ignoreMemCache);
+
+  @override
+  Future<FileInfo?> getFileFromMemory(String key) =>
+      delegate.getFileFromMemory(key);
+
+  @override
+  Future<cached_file.File> putFile(
+    String url,
+    Uint8List fileBytes, {
+    String? key,
+    String? eTag,
+    Duration maxAge = const Duration(days: 30),
+    String fileExtension = 'file',
+  }) => delegate.putFile(
+    url,
+    fileBytes,
+    key: key,
+    eTag: eTag,
+    maxAge: maxAge,
+    fileExtension: fileExtension,
+  );
+
+  @override
+  Future<cached_file.File> putFileStream(
+    String url,
+    Stream<List<int>> source, {
+    String? key,
+    String? eTag,
+    Duration maxAge = const Duration(days: 30),
+    String fileExtension = 'file',
+  }) => delegate.putFileStream(
+    url,
+    source,
+    key: key,
+    eTag: eTag,
+    maxAge: maxAge,
+    fileExtension: fileExtension,
+  );
+
+  @override
+  Future<void> removeFile(String key) => delegate.removeFile(key);
+
+  @override
+  Future<void> emptyCache() => delegate.emptyCache();
+
+  @override
+  Future<void> dispose() => delegate.dispose();
 }

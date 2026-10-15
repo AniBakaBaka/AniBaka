@@ -1,3 +1,4 @@
+import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/utils/json_values.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -9,6 +10,7 @@ import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/models/anime_detail_view_data.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/models/playback_episode.dart';
+import 'package:baka/models/playback_request.dart';
 import 'package:baka/services/collection/collection_repository.dart';
 import 'package:baka/app/navigation.dart';
 import 'package:baka/utils/toast_utils.dart';
@@ -33,7 +35,6 @@ class TvAnimeDetailPlaceholder extends StatefulWidget {
 }
 
 class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
-  late final Map<String, dynamic> _data;
   late BgmInfo _bgmInfo;
   late AnimeDetailViewData _detail;
   late List<PlaybackEpisode> _videoList;
@@ -44,41 +45,43 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
 
   int? get _subjectId => _bgmInfo.subjectId;
 
-  int? get _validPostId {
-    final postId = toInt(_data['id']);
-    return (postId != null && postId > 0) ? postId : null;
-  }
+  // Enrich only at the navigation boundary; rendering shares the input data.
+  PlaybackRequest get _playbackRequest => PlaybackRequest.fromMap(
+    widget.data,
+    metadataUpdates: {
+      'nsfw': _detail.nsfw,
+      if (_subjectId != null) 'bgmId': _subjectId,
+      if (_bgmInfo.score != null) 'score': _bgmInfo.score,
+      if (_bgmInfo.imageUrl != null) 'bgmImageUrl': _bgmInfo.imageUrl,
+      if (_detail.logoUrl.isNotEmpty) 'logoUrl': _detail.logoUrl,
+    },
+  );
 
-  void _initializeDetail() {
-    _bgmInfo = BgmInfo.fromData(_data);
-    final bgm = (_data['bgmDetailData'] as Map?)?.cast<String, dynamic>();
-    _detail = AnimeDetailViewData.from(
-      source: _data,
-      bgmInfo: _bgmInfo,
-      bgm: bgm,
-    );
-    _videoList = widget.episodes ?? PlaybackEpisodeCatalog.episodesOf(_data);
-  }
+  int? get _validPostId => AnimeCollection.postIdFrom(widget.data);
 
   @override
   void initState() {
     super.initState();
-    _data = Map<String, dynamic>.from(widget.data);
-    _initializeDetail();
+    _bgmInfo = BgmInfo.fromData(widget.data);
+    final bgm = (widget.data['bgmDetailData'] as Map?)?.cast<String, dynamic>();
+    _detail = AnimeDetailViewData.from(
+      source: widget.data,
+      bgmInfo: _bgmInfo,
+      bgm: bgm,
+    );
+    _videoList =
+        widget.episodes ?? PlaybackEpisodeCatalog.episodesOf(widget.data);
     _fetchBgmData();
-    _fetchCollectionStatus();
   }
 
   Future<void> _fetchBgmData() async {
     try {
       if (_bgmInfo.subjectId == null) {
-        _bgmInfo = await resolveBgmFromData(_data);
+        _bgmInfo = await resolveBgmFromData(widget.data);
         if (!mounted) return;
-        if (_bgmInfo.subjectId != null) _data['bgmId'] = _bgmInfo.subjectId;
-        if (_bgmInfo.score != null) _data['score'] = _bgmInfo.score;
-        if (_bgmInfo.imageUrl != null) _data['bgmImageUrl'] = _bgmInfo.imageUrl;
       }
 
+      _fetchCollectionStatus();
       final subjectId = _subjectId;
       if (subjectId == null) return;
 
@@ -88,32 +91,29 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
           debugPrint('获取 AniBaka 详情失败: $error');
           return null;
         }),
-        getBgmEpisodes(subjectId),
+        _videoList.isEmpty
+            ? getBgmEpisodes(subjectId)
+            : Future.value(const <Map<String, dynamic>>[]),
       ).wait;
       if (!mounted) return;
 
       final detail = AnimeDetailViewData.from(
-        source: _data,
+        source: widget.data,
         bgmInfo: _bgmInfo,
         anibaka: anibaka,
         bgm: bgm,
       );
-      final videoList = <PlaybackEpisode>[];
-      for (final episode in episodes) {
-        final nameCn = episode['name_cn'] as String;
-        final name = nameCn.isEmpty ? episode['name'] as String : nameCn;
-        videoList.add(
-          PlaybackEpisode(
-            title: '${episode['sort'] as num}. $name',
-            lines: const [],
-          ),
-        );
+      if (episodes.isNotEmpty) {
+        _videoList = [
+          for (final episode in episodes)
+            PlaybackEpisode(
+              title:
+                  '${episode['sort'] as num}. ${(episode['name_cn'] as String).isEmpty ? episode['name'] as String : episode['name_cn'] as String}',
+              lines: const [],
+            ),
+        ];
       }
-      if (detail.logoUrl.isNotEmpty) _data['logoUrl'] = detail.logoUrl;
-      setState(() {
-        _detail = detail;
-        if (videoList.isNotEmpty) _videoList = videoList;
-      });
+      setState(() => _detail = detail);
     } catch (e) {
       debugPrint('获取番剧数据失败: $e');
     }
@@ -155,13 +155,14 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
         postId: _validPostId,
         bgmId: _subjectId,
         status: status.value,
+        nsfw: _detail.nsfw,
         postTitle: _detail.title,
         postCover: _detail.coverUrl,
         bgmImage: _bgmInfo.imageUrl,
         bgmTitle: _detail.title,
       );
       final result = await collections.addOrUpdate(col);
-      if (result != null && mounted) {
+      if (mounted) {
         setState(() => _collection = result);
         showSnackBar('已标记为「${status.label}」');
       }
@@ -194,7 +195,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   }
 
   void _startWatching() {
-    NavigationService.toPlayer(context, _data, autoMatch: true);
+    NavigationService.toPlayback(context, _playbackRequest);
   }
 
   String _formatNumber(int number) {
@@ -234,7 +235,18 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: contentFilter,
+    builder: (context, _) => _buildPage(context),
+  );
+
+  Widget _buildPage(BuildContext context) {
+    if (contentFilter.value && _detail.nsfw) {
+      return Scaffold(
+        appBar: AppBar(),
+        body: const Center(child: Text('已隐藏 NSFW 内容')),
+      );
+    }
     final title = _detail.title;
     final alias = _detail.alias;
     final bgUrl = _detail.backgroundUrl;
@@ -439,7 +451,8 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                                           onPressed: () {
                                             VideoSourceSearchSheet.show(
                                               context,
-                                              seedData: _data,
+                                              seedData:
+                                                  _playbackRequest.metadata,
                                             );
                                           },
                                         ),
@@ -478,9 +491,9 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                       setState(() {
                         _showEpisodeSelector = false;
                       });
-                      NavigationService.toPlayer(
+                      NavigationService.toPlayback(
                         context,
-                        _data,
+                        _playbackRequest,
                         posIndex: index,
                         autoMatch: true,
                       );

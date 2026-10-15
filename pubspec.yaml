@@ -97,6 +97,7 @@ dependencies:
 
   http_parser: ^4.1.2
   flutter_cache_manager: ^3.4.5
+  file: ^7.0.1
   xml: ^6.6.1
   share_plus: ^12.0.2
   archive: ^4.3.0

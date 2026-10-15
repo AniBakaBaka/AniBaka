@@ -42,20 +42,17 @@ class _WindowsHeroBannerState extends State<WindowsHeroBanner>
   )..addStatusListener(_onProgressStatus);
 
   int _index = 0;
-  bool _hovered = false;
+  final _hovered = ValueNotifier(false);
   bool _hidden = BannerVisibility.isHidden;
   bool _reduceMotion = false;
+  bool _tickerEnabled = true;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final reduceMotion = context.reduceMotion;
-    if (_reduceMotion != reduceMotion) {
-      _reduceMotion = reduceMotion;
-      _syncAutoplay(restart: true);
-    } else if (!_progress.isAnimating) {
-      _syncAutoplay();
-    }
+    _reduceMotion = context.reduceMotion;
+    _tickerEnabled = TickerMode.valuesOf(context).enabled;
+    _syncAutoplay();
     _precache(_index + 1);
   }
 
@@ -66,11 +63,13 @@ class _WindowsHeroBannerState extends State<WindowsHeroBanner>
     final count = widget.items.length;
     _index = count == 0 ? 0 : _index.clamp(0, count - 1);
     _syncAutoplay(restart: true);
+    _precache(_index + 1);
   }
 
   @override
   void dispose() {
     _progress.dispose();
+    _hovered.dispose();
     super.dispose();
   }
 
@@ -80,8 +79,9 @@ class _WindowsHeroBannerState extends State<WindowsHeroBanner>
 
   void _syncAutoplay({bool restart = false}) {
     if (restart) _progress.value = 0;
-    final canPlay = !_reduceMotion && !_hidden && widget.items.length > 1;
-    if (!canPlay || _hovered) {
+    final canPlay =
+        _tickerEnabled && !_reduceMotion && !_hidden && widget.items.length > 1;
+    if (!canPlay || _hovered.value) {
       _progress.stop();
       return;
     }
@@ -99,15 +99,15 @@ class _WindowsHeroBannerState extends State<WindowsHeroBanner>
   /// 提前解码下一张横幅，避免交叉淡入时出现空白底色。
   void _precache(int index) {
     final count = widget.items.length;
-    if (count < 2) return;
+    if (count < 2 || _hidden || !_tickerEnabled || _reduceMotion) return;
     final url = _imageUrl(widget.items[index % count]);
     if (url.isEmpty) return;
     precacheImage(_bannerImage(url), context, onError: (_, _) {});
   }
 
   void _setHovered(bool hovered) {
-    if (_hovered == hovered) return;
-    setState(() => _hovered = hovered);
+    if (_hovered.value == hovered) return;
+    _hovered.value = hovered;
     _syncAutoplay();
   }
 
@@ -190,26 +190,27 @@ class _WindowsHeroBannerState extends State<WindowsHeroBanner>
             onTap: () => _goTo(i),
           ),
         const SizedBox(width: 10),
-        AnimatedOpacity(
-          opacity: _hovered ? 1 : 0,
-          duration: _motion(context, 180),
-          child: IgnorePointer(
-            ignoring: !_hovered,
-            child: Row(
-              children: [
-                _GlassButton(
-                  icon: Icons.chevron_left_rounded,
-                  tooltip: '上一个',
-                  onTap: () => _goTo(_index - 1 + count),
-                ),
-                const SizedBox(width: 8),
-                _GlassButton(
-                  icon: Icons.chevron_right_rounded,
-                  tooltip: '下一个',
-                  onTap: () => _goTo(_index + 1),
-                ),
-              ],
-            ),
+        ValueListenableBuilder<bool>(
+          valueListenable: _hovered,
+          builder: (context, hovered, child) => AnimatedOpacity(
+            opacity: hovered ? 1 : 0,
+            duration: _motion(context, 180),
+            child: IgnorePointer(ignoring: !hovered, child: child),
+          ),
+          child: Row(
+            children: [
+              _GlassButton(
+                icon: Icons.chevron_left_rounded,
+                tooltip: '上一个',
+                onTap: () => _goTo(_index - 1 + count),
+              ),
+              const SizedBox(width: 8),
+              _GlassButton(
+                icon: Icons.chevron_right_rounded,
+                tooltip: '下一个',
+                onTap: () => _goTo(_index + 1),
+              ),
+            ],
           ),
         ),
       ],
@@ -970,13 +971,8 @@ class _RankNumeralPainter extends CustomPainter {
 /// 排行加载中的占位条目。
 class WindowsRankSkeleton extends StatelessWidget {
   final double posterWidth;
-  final double textHeight;
 
-  const WindowsRankSkeleton({
-    required this.posterWidth,
-    required this.textHeight,
-    super.key,
-  });
+  const WindowsRankSkeleton({required this.posterWidth, super.key});
 
   @override
   Widget build(BuildContext context) {

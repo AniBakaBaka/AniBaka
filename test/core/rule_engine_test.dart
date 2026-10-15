@@ -1,3 +1,6 @@
+import 'package:baka/source/engine/torrent_records.dart';
+import 'package:baka/source/html_parser.dart';
+import 'package:html/parser.dart' as html;
 import 'package:baka/source/runtime/source_operation.dart';
 import 'dart:convert';
 import 'package:baka/models/custom_source_config.dart';
@@ -132,7 +135,434 @@ SourceRule _pipelineRule({
   play: play,
 );
 
+const _baseUrl = 'https://example.com';
+
+Map<String, dynamic> _torrentParams([
+  Map<String, dynamic> overrides = const {},
+]) => {
+  'rowSelector': 'li',
+  'titleSelector': 'a',
+  'idSelector': 'a',
+  'sourceNameSelector': 'b',
+  'sizeSelector': 'small',
+  'imageSelector': 'img',
+  'fansubPattern': r'^\[([^\]]+)\]',
+  'animeNamePatterns': [r'\]\s*(.+?)\s*\['],
+  'episodePatterns': [r'\[(\d+(?:\.\d+)?)\]'],
+  'excludePatterns': ['Batch'],
+  ...overrides,
+};
+
+String _release(
+  String id,
+  String title, {
+  String group = '',
+  String image = '',
+}) =>
+    '<li><a href="$id">$title</a><b>$group</b><small>500 MB</small>'
+    '${image.isEmpty ? '' : '<img src="$image">'}</li>';
+
 void main() {
+  group('JSON and MacCMS output', () {
+    const interpreter = PipelineInterpreter();
+    final host = FakeHost(const {});
+
+    for (final raw in [false, true]) {
+      test(
+        'JSON IDs preserve encoding, nulls, indexes and variables: raw=$raw',
+        () async {
+          final rule = _rule(const []).copyWith(
+            detail: [
+              const PipelineStep('setVar', {
+                'name': 'id',
+                'value': 'fallback /',
+              }),
+              PipelineStep('template', {
+                'value': jsonEncode({
+                  'episodes': [
+                    {'id': null},
+                    {'id': '\t\u00a0 '},
+                    {'id': 17, 'name': 'Number'},
+                    {'id': '剧 1/?#'},
+                    {'id': '%20'},
+                    {'id': '%2F'},
+                    {'name': 'Inherited'},
+                  ],
+                }),
+              }),
+              PipelineStep('jsonEpisodes', {
+                'episodesPath': 'episodes',
+                'episodeIdTemplate': raw ? '{id:raw}' : '{id}',
+              }),
+            ],
+          );
+          final episodes = (await interpreter.runDetail(
+            rule,
+            host,
+            '42',
+          )).single.episodes;
+          expect(
+            episodes.map((episode) => episode.episodeId),
+            raw
+                ? ['17', '剧 1/?#', '%2F', 'fallback /']
+                : [
+                    '17',
+                    '%E5%89%A7%201%2F%3F%23',
+                    '%2520',
+                    '%252F',
+                    'fallback%20%2F',
+                  ],
+          );
+          expect(
+            episodes.map((episode) => episode.episode),
+            raw ? [2, 3, 5, 6] : [2, 3, 4, 5, 6],
+          );
+          expect(episodes.first.name, 'Number');
+          expect(episodes.last.name, 'Inherited');
+        },
+      );
+    }
+
+    for (final preferHls in [false, true]) {
+      test(
+        'MacCMS appends stable source groups and filters before numbering: HLS=$preferHls',
+        () async {
+          final rule = _rule(const []).copyWith(
+            detail: [
+              const PipelineStep('template', {
+                'value': '{"episodes":[{"id":"prior"}]}',
+              }),
+              const PipelineStep('jsonEpisodes', {
+                'episodesPath': 'episodes',
+                'sourceName': 'Prior',
+              }),
+              PipelineStep('template', {
+                'value': jsonEncode({
+                  'list': [
+                    {
+                      'vod_play_from':
+                          r'MP4 A$$$Mixed$$$Filtered$$$HLS B$$$MP4 B',
+                      'vod_play_url': [
+                        r'One$https://cdn.test/1.mp4',
+                        r'Invalid$token#First$https://cdn.test/2.mp4#Second$https://cdn.test/2.M3U8?sign=A%2FB',
+                        r'No direct$token',
+                        r'Next$https://cdn.test/3.m3u8',
+                        r'Last$https://cdn.test/4.mp4',
+                      ].join(r'$$$'),
+                    },
+                  ],
+                }),
+              }),
+              PipelineStep('maccmsApiEpisodes', {
+                'directOnly': true,
+                'preferHls': preferHls,
+              }),
+            ],
+          );
+          final sources = await interpreter.runDetail(rule, host, '42');
+          expect(
+            sources.map((source) => source.sourceName),
+            preferHls
+                ? ['Prior', 'Mixed', 'HLS B', 'MP4 A', 'MP4 B']
+                : ['Prior', 'MP4 A', 'Mixed', 'HLS B', 'MP4 B'],
+          );
+          final mixed = sources.singleWhere(
+            (source) => source.sourceName == 'Mixed',
+          );
+          expect(mixed.episodes.map((episode) => episode.episode), [0, 1]);
+          expect(mixed.episodes.map((episode) => episode.name), [
+            'First',
+            'Second',
+          ]);
+          expect(
+            mixed.episodes.last.episodeId,
+            'https://cdn.test/2.M3U8?sign=A%2FB',
+          );
+        },
+      );
+    }
+
+    test(
+      'JSON series transforms IDs and preserves string IDs and deduplication',
+      () async {
+        final rule = _rule(const []).copyWith(
+          search: [
+            PipelineStep('template', {
+              'value': jsonEncode([
+                {'id': 12, 'name': 'Numeric'},
+                {'id': 12, 'name': 'Duplicate'},
+                {'id': 'word', 'name': 'Text'},
+                {'id': -1, 'name': 'Negative'},
+                {'id': '', 'name': 'Empty'},
+              ]),
+            }),
+            const PipelineStep('jsonSeries', {
+              'idTransform': 'baseN',
+              'idAlphabet': '0123456789',
+              'idPrefix': 'p',
+              'idSuffix': 's',
+              'detailUrlTemplate': '/detail/{id}',
+            }),
+          ],
+        );
+        final series = await interpreter.runSearch(rule, host, '');
+        expect(series.map((item) => item.seriesId), [
+          'https://example.com/detail/p21s',
+          'https://example.com/detail/pwords',
+          'https://example.com/detail/p-1s',
+        ]);
+        expect(series.map((item) => item.name), [
+          'Numeric',
+          'Text',
+          'Negative',
+        ]);
+      },
+    );
+  });
+
+  group('HTML episode parsing', () {
+    test(
+      'keeps sparse explicit indexes and removes only unusable or duplicate links',
+      () {
+        final doc = html.parse('''
+        <nav><b>Main</b><b>Duplicate</b><b>Second</b></nav>
+        <section>
+          <a>No link</a><a href="#top">Top</a><a href="javascript:void(0)">JS</a>
+          <a href=" /watch?ep=2 "> Two   words </a>
+          <a href="/watch?ep=2">Duplicate</a>
+          <a href="/watch?ep=5">Five</a>
+        </section>
+        <section><a href="/watch?ep=2">Two</a><a href="/watch?ep=5">Five</a></section>
+        <section><a href="/other/sid/1/nid/5">Five</a></section>
+      ''');
+        final sources = HtmlParser.parseSources(
+          doc,
+          baseUrl: _baseUrl,
+          listSelectors: ['.absent', 'section'],
+          tabSelectors: ['nav b'],
+        );
+        expect(sources.map((source) => source.sourceName), ['Main', 'Second']);
+        expect(sources.first.episodes.map((episode) => episode.episode), [
+          1,
+          4,
+        ]);
+        expect(sources.first.episodes.first.name, 'Two words');
+        expect(sources.last.episodes.single.episode, 4);
+        expect(doc.querySelectorAll('a'), hasLength(9));
+      },
+    );
+
+    test('infers only the varying tuple column', () {
+      final sources = HtmlParser.parseSources(
+        html.parse('''
+        <section><a href="/play/show-3-2">Two</a><a href="/play/show-3-5">Five</a></section>
+        <section><a href="/play/show_2_3">Two</a><a href="/play/show_5_3">Five</a></section>
+        <section><a href="/play/show-2-3">A</a><a href="/play/show-5-6">B</a></section>
+      '''),
+        baseUrl: _baseUrl,
+        listSelectors: ['section'],
+        tabSelectors: [],
+      );
+      expect(sources.map((s) => s.episodes.map((e) => e.episode).toList()), [
+        [1, 4],
+        [1, 4],
+        [0, 1],
+      ]);
+    });
+
+    test('distinguishes missing selectors from invalid selectors', () {
+      final doc = html.parse('<section><a href="/a">A</a></section>');
+      expect(
+        HtmlParser.parseSources(
+          doc,
+          baseUrl: _baseUrl,
+          listSelectors: ['.missing'],
+          tabSelectors: [],
+        ),
+        isEmpty,
+      );
+      expect(
+        () => HtmlParser.parseSources(
+          doc,
+          baseUrl: _baseUrl,
+          listSelectors: ['section'],
+          tabSelectors: ['['],
+        ),
+        throwsFormatException,
+      );
+    });
+  });
+
+  group('torrent record parsing', () {
+    test(
+      'filters releases and preserves numbered selection and sparse indexes',
+      () {
+        final sources = TorrentRecordParser.parseSources(
+          html:
+              '<ul>${[_release('/low', '[A] Anime [02] 720'), _release('/high', '[A] Anime [02] 1080'), _release('/tie', '[A] Anime [02] 1080'), _release('/five', '[A] Anime [05] 720'), _release('/zero', '[A] Anime [00]'), _release('/fraction', '[A] Anime [02.5]'), _release('/batch', '[A] Anime [03] Batch'), _release('/other', '[A] Other [03]'), _release('/missing', '[A] Anime [Special]'), _release('', '[A] Anime [04]'), _release('/b-five', '[B] Anime [05]')].join()}</ul>',
+          params: _torrentParams({
+            'episodeIndexMode': 'number',
+            'expectedAnimeNameQuery': 'keyword',
+            'scoreRules': [
+              {'pattern': '1080', 'score': 40},
+            ],
+            'episodeNameTemplate': '第{episode:raw}话{sizeSuffix:raw}',
+          }),
+          baseUrl: _baseUrl,
+          contextUrl: '$_baseUrl/?keyword=Anime',
+        );
+        expect(sources.map((s) => s.sourceName), ['A', 'B']);
+        expect(sources.first.episodes.map((e) => e.episode), [1, 4]);
+        expect(sources.first.episodes.map((e) => e.episodeId), [
+          '$_baseUrl/high',
+          '$_baseUrl/five',
+        ]);
+        expect(sources.first.episodes.first.name, '第2话 [500 MB]');
+        expect(sources.last.episodes.single.episode, 4);
+      },
+    );
+
+    test('sequence sorting retains tie order and supports descending order', () {
+      final content =
+          '<ul>${[_release('/three', '[A] Anime [03]'), _release('/one', '[A] Anime [01]'), _release('/one-again', '[A] Anime [01]'), _release('/special', '[A] Anime [Special]')].join()}</ul>';
+      for (final descending in [false, true]) {
+        final episodes = TorrentRecordParser.parseSources(
+          html: content,
+          params: _torrentParams({'sortDescending': descending}),
+          baseUrl: _baseUrl,
+        ).single.episodes;
+        expect(
+          episodes.map((e) => e.episodeId),
+          (descending
+                  ? ['/special', '/three', '/one-again', '/one']
+                  : ['/one', '/one-again', '/three', '/special'])
+              .map((id) => '$_baseUrl$id'),
+        );
+        expect(episodes.map((e) => e.episode), [0, 1, 2, 3]);
+      }
+    });
+
+    test(
+      'fractional numbers and descending tie selection keep their rule semantics',
+      () {
+        final content =
+            '<ul>${[_release('/two', '[A] Anime [02]'), _release('/fraction', '[A] Anime [02.5]')].join()}</ul>';
+        for (final descending in [false, true]) {
+          final source = TorrentRecordParser.parseSources(
+            html: content,
+            params: _torrentParams({
+              'episodeIndexMode': 'number',
+              'allowFractionalEpisode': true,
+              'sortDescending': descending,
+            }),
+            baseUrl: _baseUrl,
+          ).single;
+          expect(source.episodes.single.episode, 1);
+          expect(
+            source.episodes.single.episodeId,
+            '$_baseUrl/${descending ? 'fraction' : 'two'}',
+          );
+        }
+      },
+    );
+
+    test(
+      'container labels and declared resource alternatives retain exact-source magnets',
+      () {
+        final sources = TorrentRecordParser.parseSources(
+          html: '''<nav><b>Group A</b><b>Group B</b></nav>
+          <section><ul><li><span>[A] Anime [02]</span>
+            <input data-magnet="magnet:?xt=urn:btih:a">
+            <a href="/a.torrent">torrent</a></li></ul></section>
+          <section><ul><li><span>[B] Anime [05]</span>
+            <a href="magnet:?xt=urn:btih:b&amp;xs=https%3A%2F%2Fexample.com%2Fb.torrent">magnet</a>
+            <a href="/b.torrent">torrent</a></li></ul></section>''',
+          params: _torrentParams({
+            'sourceContainerSelectors': ['.missing', 'section'],
+            'sourceLabelSelector': 'nav b',
+            'titleSelector': 'span',
+            'idSelectors': [
+              'input[data-magnet]',
+              'a[href^="magnet:"]',
+              r'a[href$=".torrent"]',
+            ],
+            'idAttrs': ['data-magnet', 'href'],
+            'exactSourceSelector': r'a[href^="/"][href$=".torrent"]',
+            'episodeIndexMode': 'number',
+          }),
+          baseUrl: _baseUrl,
+        );
+        expect(sources.map((s) => s.sourceName), ['Group A', 'Group B']);
+        expect(sources.map((s) => s.episodes.single.episode), [1, 4]);
+        for (final source in sources) {
+          final uri = Uri.parse(source.episodes.single.episodeId);
+          expect(uri.queryParametersAll['xs'], hasLength(1));
+          expect(uri.queryParameters['xs'], startsWith('$_baseUrl/'));
+        }
+      },
+    );
+
+    test('source order follows the first accepted release', () {
+      final sources = TorrentRecordParser.parseSources(
+        html:
+            '<ul>${[_release('/excluded', '[A] Anime [01] Batch'), _release('/b', '[B] Anime [01]'), _release('/a', '[A] Anime [02]')].join()}</ul>',
+        params: _torrentParams(),
+        baseUrl: _baseUrl,
+      );
+      expect(sources.map((source) => source.sourceName), ['B', 'A']);
+    });
+
+    test(
+      'missing selectors are empty while invalid selectors and patterns fail',
+      () {
+        final content = '<ul>${_release('/one', '[A] Anime [01]')}</ul>';
+        expect(
+          TorrentRecordParser.parseSeries(
+            html: content,
+            params: _torrentParams({'rowSelector': '.missing'}),
+            baseUrl: _baseUrl,
+          ),
+          isEmpty,
+        );
+        for (final params in [
+          {
+            'rowSelectors': ['[', 'li'],
+          },
+          {
+            'titleSelectors': ['[', 'a'],
+          },
+          {
+            'episodePatterns': ['['],
+          },
+          {
+            'titleStripPatterns': ['['],
+          },
+        ]) {
+          expect(
+            () => TorrentRecordParser.parseSeries(
+              html: content,
+              params: _torrentParams(params),
+              baseUrl: _baseUrl,
+            ),
+            throwsFormatException,
+          );
+        }
+        expect(
+          () => TorrentRecordParser.parseSeries(
+            html: content,
+            params: _torrentParams({
+              'episodePatterns': [
+                {'pattern': r'\[(\d+)\]', 'group': 2},
+              ],
+            }),
+            baseUrl: _baseUrl,
+          ),
+          throwsRangeError,
+        );
+      },
+    );
+  });
+
   test('rule edits isolate mutable input and survive persistence', () {
     final config = CustomSourceConfig.fromJson({
       'id': 'shared',
@@ -562,29 +992,6 @@ void main() {
         ]);
       },
     );
-
-    test('jsonEpisodes 的 id 快路径保留变量回退语义', () async {
-      final host = FakeHost({
-        'https://example.com/detail/1':
-            '{"playlist":[{"name":"A","episodes":[{"name":"E"}]}]}',
-      });
-      final rule = SourceRule.fromJson({
-        'format': kSourceRuleFormatV2,
-        'id': 's',
-        'name': 'S',
-        'baseUrl': 'https://example.com',
-        'search': [],
-        'detail': [
-          {'op': 'follow'},
-          {'op': 'setVar', 'name': 'id', 'value': 'fallback/id'},
-          {'op': 'jsonEpisodes', 'sourcesPath': 'playlist'},
-        ],
-        'play': [],
-      });
-
-      final sources = await interp.runDetail(rule, host, '/detail/1');
-      expect(sources.single.episodes.single.episodeId, 'fallback%2Fid');
-    });
 
     test('jsonEpisodes：支持单线路扁平剧集数组', () async {
       final host = FakeHost({

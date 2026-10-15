@@ -18,9 +18,9 @@ class CollectionRepository {
 
   static const _localKey = 'local_anime_collections_v1';
   final _bangumiCollectionRequests =
-      RequestDeduplicator<(int, int), List<AnimeCollection>>();
+      RequestCache<(int, int), List<AnimeCollection>>(limit: 0);
   final _listRequests =
-      RequestDeduplicator<
+      RequestCache<
         ({
           int account,
           int bangumi,
@@ -29,20 +29,18 @@ class CollectionRepository {
           int? status,
           int? bgmId,
         }),
-        PageData<AnimeCollection>?
-      >();
+        PageData<AnimeCollection>
+      >(limit: 0);
   final _statsRequests =
-      RequestDeduplicator<(int account, int bangumi), CollectionStats?>();
+      RequestCache<(int account, int bangumi), CollectionStats>(limit: 0);
   final _byBgmIdRequests =
-      RequestDeduplicator<
-        (int account, int bangumi, int bgmId),
-        AnimeCollection?
-      >();
+      RequestCache<(int account, int bangumi, int bgmId), AnimeCollection?>(
+        limit: 0,
+      );
   final _byPostIdRequests =
-      RequestDeduplicator<
-        (int account, int bangumi, int postId),
-        AnimeCollection?
-      >();
+      RequestCache<(int account, int bangumi, int postId), AnimeCollection?>(
+        limit: 0,
+      );
   List<AnimeCollection>? _localCache;
   Map<int, int> _localByBgmId = const {};
   Map<int, int> _localByPostId = const {};
@@ -51,10 +49,10 @@ class CollectionRepository {
   bool get isLocalMode => session.token.isEmpty;
   bool get isBangumiMode => isLocalMode && bangumi.isConnected;
 
-  Future<AnimeCollection?> addOrUpdate(AnimeCollection collection) async {
+  Future<AnimeCollection> addOrUpdate(AnimeCollection collection) async {
     if (!isLocalMode) {
       final saved = await AniBakaApi.saveCollection(collection);
-      if (saved != null && bangumi.isConnected) {
+      if (bangumi.isConnected) {
         await bangumi.updateCollection(saved);
       }
       return saved;
@@ -66,12 +64,12 @@ class CollectionRepository {
     return collection;
   }
 
-  Future<PageData<AnimeCollection>?> getList({
+  Future<PageData<AnimeCollection>> getList({
     int page = 1,
     int pageSize = 20,
     int? status,
     int? bgmId,
-  }) => _listRequests.run(
+  }) => _listRequests.get(
     (
       account: session.generation,
       bangumi: bangumi.generation,
@@ -84,7 +82,7 @@ class CollectionRepository {
         _getList(page: page, pageSize: pageSize, status: status, bgmId: bgmId),
   );
 
-  Future<PageData<AnimeCollection>?> _getList({
+  Future<PageData<AnimeCollection>> _getList({
     required int page,
     required int pageSize,
     required int? status,
@@ -129,7 +127,6 @@ class CollectionRepository {
         page: page,
         pageSize: pageSize,
       );
-      if (response == null) return result;
       total = response.total;
       result.addAll(response.list);
       if (response.list.isEmpty) break;
@@ -138,9 +135,9 @@ class CollectionRepository {
     return result;
   }
 
-  Future<CollectionStats?> getStats() async {
+  Future<CollectionStats> getStats() async {
     if (!isLocalMode) {
-      return _statsRequests.run((
+      return _statsRequests.get((
         session.generation,
         bangumi.generation,
       ), AniBakaApi.getCollectionStats);
@@ -152,7 +149,7 @@ class CollectionRepository {
 
   Future<AnimeCollection?> getByPostId(int postId) {
     if (!isLocalMode) {
-      return _byPostIdRequests.run((
+      return _byPostIdRequests.get((
         session.generation,
         bangumi.generation,
         postId,
@@ -164,12 +161,13 @@ class CollectionRepository {
   }
 
   Future<AnimeCollection?> getByBgmId(int bgmId, {bool refreshBangumi = true}) {
-    if (!isLocalMode) {
-      return _byBgmIdRequests.run((
-        session.generation,
-        bangumi.generation,
-        bgmId,
-      ), () => AniBakaApi.getCollectionByBgmId(bgmId));
+    if (!isLocalMode || (isBangumiMode && refreshBangumi)) {
+      return _byBgmIdRequests.get(
+        (session.generation, bangumi.generation, bgmId),
+        () => isLocalMode
+            ? _getLocalByBgmId(bgmId, refreshBangumi: true)
+            : AniBakaApi.getCollectionByBgmId(bgmId),
+      );
     }
     return _getLocalByBgmId(bgmId, refreshBangumi: refreshBangumi);
   }
@@ -214,7 +212,7 @@ class CollectionRepository {
   }
 
   Future<List<AnimeCollection>> _refreshBangumiCollections() {
-    return _bangumiCollectionRequests.run((
+    return _bangumiCollectionRequests.get((
       session.generation,
       bangumi.generation,
     ), _fetchAndStoreBangumiCollections);
@@ -274,6 +272,7 @@ class CollectionRepository {
       epWatched: remote.epWatched,
       tags: remote.tags,
       isPrivate: remote.isPrivate,
+      nsfw: remote.nsfw || local.nsfw,
       postTitle: local.postTitle,
       postCover: local.postCover,
       bgmRating: remote.bgmRating ?? local.bgmRating,

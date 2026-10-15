@@ -70,10 +70,9 @@ void main() {
       expect(SourceCodec.decode(encoded), config);
     });
 
-    test('bakax format round-trips encrypted JSON', () {
-      final encrypted = SourceCodec.encrypt(config);
-
-      expect(encrypted, startsWith(SourceCodec.encryptedScheme));
+    test('decoder imports existing bakax links', () {
+      const encrypted =
+          'bakax://aGVhmIB10XI5jabJQuHb7rKI47U8gj7PJVc3wQOUl1ZaZbMdwNyueMcbM1YbTAD1zkeSqp9G20Z4FWo4YxNaKmN-NwC5h7YCx19yyLrr9t-9hyZcowGkhqmOoRM4LRQnFyBH2iKZt3RgD-2YKyl4cg';
       expect(SourceCodec.decode(encrypted), config);
     });
 

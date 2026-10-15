@@ -69,29 +69,27 @@ class AccountSession {
 
   Future<bool> refresh() {
     final revision = generation;
-    return _refresh ??= Future(() => _refreshCredentials(revision));
+    return _refresh ??= _refreshCredentials(revision).whenComplete(() {
+      if (revision == generation) _refresh = null;
+    });
   }
 
   Future<bool> _refreshCredentials(int revision) async {
-    try {
-      if (closed || revision != generation) return false;
-      final refreshToken = _refreshToken;
-      if (refreshToken == null || refreshToken.isEmpty) return false;
-      final next = await refreshTokens(refreshToken);
-      if (closed ||
-          revision != generation ||
-          next == null ||
-          next.token.isEmpty) {
-        return false;
-      }
-      token = next.token;
-      _refreshToken = next.refreshToken ?? _refreshToken;
-      _expiresAt = next.expiresAt;
-      await _persist();
-      return revision == generation;
-    } finally {
-      if (revision == generation) _refresh = null;
+    if (closed) return false;
+    final refreshToken = _refreshToken;
+    if (refreshToken == null || refreshToken.isEmpty) return false;
+    final next = await refreshTokens(refreshToken);
+    if (closed ||
+        revision != generation ||
+        next == null ||
+        next.token.isEmpty) {
+      return false;
     }
+    token = next.token;
+    _refreshToken = next.refreshToken ?? _refreshToken;
+    _expiresAt = next.expiresAt;
+    await _persist();
+    return revision == generation;
   }
 
   Future<void> _persist() {

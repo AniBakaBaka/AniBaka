@@ -102,9 +102,9 @@ void main() {
   });
 
   test(
-    'deduplicator collapses concurrent calls without retaining data',
+    'zero capacity shares pending requests without retaining data',
     () async {
-      final requests = RequestDeduplicator<String, int>();
+      final requests = RequestCache<String, int>(limit: 0);
       var loads = 0;
 
       Future<int> load() async {
@@ -114,24 +114,45 @@ void main() {
       }
 
       final first = await Future.wait([
-        for (var i = 0; i < 20; i++) requests.run('collection:1', load),
+        for (var i = 0; i < 20; i++) requests.get('collection:1', load),
       ]);
       expect(loads, 1);
       expect(first, everyElement(1));
 
-      expect(await requests.run('collection:1', load), 2);
+      expect(await requests.get('collection:1', load), 2);
       expect(loads, 2);
+      expect(requests.peek('collection:1'), isNull);
+      requests.put('collection:1', 99);
+      expect(requests.peek('collection:1'), isNull);
     },
   );
 
-  test('deduplicator releases synchronous results and failed loads', () async {
-    final requests = RequestDeduplicator<int, int>();
-    expect(await requests.run(1, () => SynchronousFuture(1)), 1);
-    expect(await requests.run(1, () => SynchronousFuture(2)), 2);
+  test('zero capacity releases synchronous results and failed loads', () async {
+    final requests = RequestCache<int, int>(limit: 0);
+    expect(await requests.get(1, () => SynchronousFuture(1)), 1);
+    expect(await requests.get(1, () => SynchronousFuture(2)), 2);
     await expectLater(
-      requests.run(2, () => throw StateError('sync')),
+      requests.get(2, () => throw StateError('sync')),
       throwsStateError,
     );
-    expect(await requests.run(2, () async => 3), 3);
+    expect(await requests.get(2, () async => 3), 3);
   });
+
+  test(
+    'invalidated zero-capacity work cannot release its replacement',
+    () async {
+      final requests = RequestCache<int, int>(limit: 0);
+      final old = Completer<int>();
+      final next = Completer<int>();
+      final first = requests.get(1, () => old.future);
+      requests.clear();
+      final second = requests.get(1, () => next.future);
+      old.complete(1);
+      expect(await first, 1);
+      expect(requests.get(1, () async => 3), same(second));
+      next.complete(2);
+      expect(await second, 2);
+      expect(requests.peek(1), isNull);
+    },
+  );
 }

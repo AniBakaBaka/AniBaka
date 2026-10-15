@@ -1,3 +1,4 @@
+import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/playback_request.dart';
 import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/instance.dart';
@@ -86,15 +87,13 @@ class _LibraryPageState extends State<LibraryPage> {
         return;
       }
 
-      final stats = results[0] as CollectionStats?;
-      final response = results[1] as PageData<AnimeCollection>?;
+      final stats = results[0] as CollectionStats;
+      final response = results[1] as PageData<AnimeCollection>;
       setState(() {
-        if (stats != null) _stats = stats;
-        if (response != null) {
-          _collectionPage = 1;
-          _collectionList = response.list;
-          _hasMoreCollection = _collectionList.length < response.total;
-        }
+        _stats = stats;
+        _collectionPage = 1;
+        _collectionList = response.list;
+        _hasMoreCollection = _collectionList.length < response.total;
         if (results.length > 2) {
           _historyList = results[2] as List<Map<String, dynamic>>;
         }
@@ -109,7 +108,7 @@ class _LibraryPageState extends State<LibraryPage> {
   Future<void> _fetchStats() async {
     try {
       final newStats = await collections.getStats();
-      if (newStats != null && mounted) setState(() => _stats = newStats);
+      if (mounted) setState(() => _stats = newStats);
     } catch (error) {
       debugPrint('刷新收藏统计失败: $error');
     }
@@ -127,8 +126,7 @@ class _LibraryPageState extends State<LibraryPage> {
         pageSize: 20,
         status: status,
       );
-      if (response == null ||
-          !mounted ||
+      if (!mounted ||
           generation != _collectionGeneration ||
           status != _collectionStatusFilter) {
         return;
@@ -185,7 +183,12 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: contentFilter,
+    builder: (context, _) => _buildContent(context),
+  );
+
+  Widget _buildContent(BuildContext context) {
     return Scaffold(
       body: CustomScrollView(
         controller: _scrollController,
@@ -418,11 +421,12 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   Widget _buildHistoryContent() {
-    if (_historyList.isEmpty) {
+    final items = contentFilter.visibleItems(_historyList);
+    if (items.isEmpty) {
       return _buildEmptyState(Icons.history_toggle_off, '暂无历史记录');
     }
-    return _buildGrid(_historyList.length, (context, index) {
-      final item = _historyList[index];
+    return _buildGrid(items.length, (context, index) {
+      final item = items[index];
       return _HistoryCard(data: item, onTap: () => _handleHistoryCardTap(item));
     });
   }
@@ -434,6 +438,9 @@ class _LibraryPageState extends State<LibraryPage> {
   );
 
   Widget _buildCollectionContent() {
+    final items = contentFilter.value
+        ? _collectionList.where((item) => !item.nsfw).toList(growable: false)
+        : _collectionList;
     if (_isCollectionLoading && _collectionList.isEmpty) {
       return _buildGrid(
         _getGridCrossAxisCount(context) * 3,
@@ -448,7 +455,7 @@ class _LibraryPageState extends State<LibraryPage> {
       );
     }
 
-    if (_collectionList.isEmpty) {
+    if (items.isEmpty) {
       final filterLabel = _collectionStatusFilter != null
           ? CollectionStatus.fromValue(_collectionStatusFilter)?.label ?? ''
           : '';
@@ -458,8 +465,8 @@ class _LibraryPageState extends State<LibraryPage> {
       );
     }
 
-    return _buildGrid(_collectionList.length, (context, index) {
-      final item = _collectionList[index];
+    return _buildGrid(items.length, (context, index) {
+      final item = items[index];
       return _CollectionCard(
         collection: item,
         heroTag: 'collection_${_heroScope}_$index',
@@ -508,6 +515,7 @@ class _LibraryPageState extends State<LibraryPage> {
         'id': id,
         'title': title.isEmpty && !hasPostId ? '加载中...' : title,
         'content': collection.displayCover,
+        'nsfw': collection.nsfw,
         'image': collection.displayCover,
         if (collection.bgmId != null) 'bgmId': collection.bgmId,
         if (!hasPostId) 'source': 'bgm',

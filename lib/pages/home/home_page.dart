@@ -1,3 +1,5 @@
+import 'package:baka/core/content_filter.dart';
+import 'package:baka/models/anime_filter.dart';
 import 'package:baka/core/account_session.dart';
 import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
@@ -86,7 +88,12 @@ class _HomePageState extends State<HomePage>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: contentFilter,
+    builder: (context, _) => _buildContent(context),
+  );
+
+  Widget _buildContent(BuildContext context) {
     if (Instances.isTV) {
       return TvHomePage(svc: _svc);
     }
@@ -101,7 +108,7 @@ class _HomePageState extends State<HomePage>
       body: RefreshWrapper(
         onLoadMore: _svc.loadMore,
         onRefresh: _refresh,
-        loadMoreResetListenable: _svc.tag,
+        loadMoreResetListenable: _svc.filter,
         showInitialIndicator: false,
         child: CustomScrollView(
           controller: _scrollController,
@@ -352,7 +359,8 @@ class _HomePageState extends State<HomePage>
   Widget _buildBanner() {
     return ValueListenableBuilder<HomeItems>(
       valueListenable: _svc.swipers,
-      builder: (context, swipers, _) {
+      builder: (context, rawSwipers, _) {
+        final swipers = contentFilter.visibleItems(rawSwipers);
         if (swipers.isEmpty) {
           return const SliverToBoxAdapter(child: SizedBox.shrink());
         }
@@ -395,7 +403,7 @@ class _HomePageState extends State<HomePage>
                 ValueListenableBuilder<List<HomeItems>>(
                   valueListenable: _svc.ranks,
                   builder: (context, ranks, _) => RankSection(
-                    items: ranks[index],
+                    items: contentFilter.visibleItems(ranks[index]),
                     selectedIndex: index,
                     onTypeChanged: _svc.selectRank,
                   ),
@@ -410,8 +418,8 @@ class _HomePageState extends State<HomePage>
     return SliverToBoxAdapter(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
-        child: ValueListenableBuilder<String>(
-          valueListenable: _svc.tag,
+        child: ValueListenableBuilder<AnimeFilter>(
+          valueListenable: _svc.filter,
           builder: (context, selected, _) {
             final theme = Theme.of(context);
             return Row(
@@ -424,24 +432,24 @@ class _HomePageState extends State<HomePage>
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        for (final text in _svc.displayTags)
+                        for (final filter in _svc.displayFilters)
                           Padding(
                             padding: const EdgeInsets.only(right: 14),
                             child: GestureDetector(
                               onTap: () {
                                 HapticFeedback.lightImpact();
-                                _svc.selectTag(text);
+                                _svc.selectFilter(filter);
                               },
                               behavior: HitTestBehavior.opaque,
                               child: AnimatedDefaultTextStyle(
                                 duration: const Duration(milliseconds: 200),
                                 curve: Curves.easeOutCubic,
                                 style: TextStyle(
-                                  fontSize: text == selected ? 17 : 15,
-                                  fontWeight: text == selected
+                                  fontSize: filter == selected ? 17 : 15,
+                                  fontWeight: filter == selected
                                       ? FontWeight.w800
                                       : FontWeight.w600,
-                                  color: text == selected
+                                  color: filter == selected
                                       ? theme.colorScheme.primary
                                       : theme.textTheme.bodyMedium?.color
                                             ?.withValues(alpha: 0.5),
@@ -451,7 +459,7 @@ class _HomePageState extends State<HomePage>
                                   padding: const EdgeInsets.symmetric(
                                     vertical: 4,
                                   ),
-                                  child: Text(text),
+                                  child: Text(filter.label),
                                 ),
                               ),
                             ),
@@ -465,7 +473,7 @@ class _HomePageState extends State<HomePage>
                   onPressed: () async {
                     HapticFeedback.lightImpact();
                     final next = await TagFilterSheet.show(context, selected);
-                    if (next != null) await _svc.selectTag(next);
+                    if (next != null) await _svc.selectFilter(next);
                   },
                   icon: const Icon(Icons.keyboard_arrow_down),
                   color: theme.colorScheme.primary,
@@ -485,7 +493,8 @@ class _HomePageState extends State<HomePage>
   Widget _buildFeedGrid() {
     return ValueListenableBuilder<HomeItems>(
       valueListenable: _svc.feed,
-      builder: (context, items, _) {
+      builder: (context, rawItems, _) {
+        final items = contentFilter.visibleItems(rawItems);
         final width = MediaQuery.sizeOf(context).width;
         final columns = width > 1200
             ? 7

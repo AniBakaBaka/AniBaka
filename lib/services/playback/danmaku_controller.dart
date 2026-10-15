@@ -154,6 +154,10 @@ class DanmakuController extends ChangeNotifier {
         rethrow;
       } catch (e) {
         debugPrint('获取弹幕失败 ($title): $e');
+        // Another title only helps when a successful lookup has no matches.
+        // Retrying the same service after a connection/protocol failure can
+        // otherwise multiply the request timeout by the number of aliases.
+        return const [];
       }
     }
     return const [];

@@ -25,6 +25,14 @@ enum CollectionStatus {
 
 /// 追番收藏记录
 class AnimeCollection {
+  /// Only site posts use this ID namespace; Bangumi and adapter IDs are not posts.
+  static int? postIdFrom(Map data, {String? source}) {
+    final origin = source ?? data['source'] as String? ?? '';
+    if (origin.isNotEmpty && origin != 'internal') return null;
+    final id = toInt(data['id']);
+    return id != null && id > 0 ? id : null;
+  }
+
   final int? postId;
   final int? bgmId;
   final int status;
@@ -34,6 +42,7 @@ class AnimeCollection {
   final int? epWatched;
   final List<String> tags;
   final bool isPrivate;
+  final bool nsfw;
   final String? postTitle;
   final String? postCover;
   final double? bgmRating;
@@ -50,6 +59,7 @@ class AnimeCollection {
     this.epWatched,
     this.tags = const [],
     this.isPrivate = false,
+    this.nsfw = false,
     this.postTitle,
     this.postCover,
     this.bgmRating,
@@ -85,6 +95,7 @@ class AnimeCollection {
       _ => const [],
     },
     isPrivate: json['is_private'] as bool? ?? false,
+    nsfw: json['nsfw'] == true,
     postTitle: json['post_title'] as String?,
     postCover: json['post_cover'] as String?,
     bgmRating: (json['bgm_rating'] as num?)?.toDouble(),
@@ -103,6 +114,7 @@ class AnimeCollection {
       tags: (json['tags'] as List).cast<String>(),
       bgmImage: BgmUtils.bgmCoverProxyUrl(subjectId),
       isPrivate: json['private'] as bool,
+      nsfw: subject?['nsfw'] == true,
       bgmTitle: trimmed(subject?['name_cn']) ?? trimmed(subject?['name']) ?? '',
       comment: trimmed(json['comment']),
       epTotal: subject?['eps'] as int?,
@@ -122,6 +134,7 @@ class AnimeCollection {
     if (epWatched != null) 'ep_watched': epWatched,
     if (tags.isNotEmpty) 'tags': includeLocalFields ? tags : tags.join(','),
     'is_private': isPrivate,
+    if (includeLocalFields) 'nsfw': nsfw,
     if (postTitle != null && postTitle!.isNotEmpty) 'post_title': postTitle,
     if (postCover != null && postCover!.isNotEmpty) 'post_cover': postCover,
     if (bgmImage != null && bgmImage!.isNotEmpty) 'bgm_image': bgmImage,

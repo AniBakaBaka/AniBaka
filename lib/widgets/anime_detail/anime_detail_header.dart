@@ -1,4 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -16,19 +17,17 @@ class AnimeDetailHeader extends StatelessWidget {
   final String? category;
   final Object heroTag;
   final bool enableCoverEffects;
-  final AnimeCollection? collection;
+  final ValueListenable<AnimeCollection?> collection;
   final VoidCallback onCollectionTap;
-  final bool collectionEnabled;
-  final VoidCallback? onSearchTap;
+  final VoidCallback onSearchTap;
 
   const AnimeDetailHeader({
     required this.detail,
     required this.heroTag,
     required this.collection,
     required this.onCollectionTap,
-    this.collectionEnabled = true,
+    required this.onSearchTap,
     this.enableCoverEffects = true,
-    this.onSearchTap,
     this.updateTime,
     this.category,
     super.key,
@@ -68,25 +67,21 @@ class AnimeDetailHeader extends StatelessWidget {
           // 移动端最多 5 个（另含更新时间/分类 pill 时仍截断 tags 本身）
           limit: isWide ? null : 5,
         );
-        final collectionButton = collectionEnabled
-            ? _CollectionButton(collection: collection, onTap: onCollectionTap)
-            : null;
-        final searchCallback = onSearchTap;
-        final searchButton = searchCallback == null
-            ? null
-            : _SearchSourceButton(onTap: searchCallback);
+        final collectionButton = ValueListenableBuilder<AnimeCollection?>(
+          valueListenable: collection,
+          builder: (context, value, _) =>
+              _CollectionButton(collection: value, onTap: onCollectionTap),
+        );
+        final searchButton = _SearchSourceButton(onTap: onSearchTap);
         final actionsRow = Row(
           children: [
-            if (collectionButton != null)
-              isWide
-                  ? SizedBox(width: 160, child: collectionButton)
-                  : Expanded(child: collectionButton),
-            if (searchButton != null) ...[
-              if (collectionButton != null) SizedBox(width: isWide ? 16 : 12),
-              isWide
-                  ? SizedBox(width: 160, child: searchButton)
-                  : Expanded(child: searchButton),
-            ],
+            isWide
+                ? SizedBox(width: 160, child: collectionButton)
+                : Expanded(child: collectionButton),
+            SizedBox(width: isWide ? 16 : 12),
+            isWide
+                ? SizedBox(width: 160, child: searchButton)
+                : Expanded(child: searchButton),
           ],
         );
 
@@ -104,7 +99,7 @@ class AnimeDetailHeader extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildTitleOrLogo(title, detail.logoUrl, true, isDark),
-                      if (alias.isNotEmpty && alias != title) ...[
+                      if (alias.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         Text(
                           alias,
@@ -138,13 +133,7 @@ class AnimeDetailHeader extends StatelessWidget {
                         children: [
                           actionsRow,
                           const Spacer(),
-                          _DesktopScoreCorner(
-                            score: hasScore ? score : null,
-                            scoreCount: scoreCount,
-                            rank: detail.rank,
-                            distribution: detail.scoreDistribution,
-                            isDark: isDark,
-                          ),
+                          _DesktopScoreCorner(detail: detail, isDark: isDark),
                         ],
                       ),
                     ],
@@ -161,7 +150,7 @@ class AnimeDetailHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildTitleOrLogo(title, detail.logoUrl, false, isDark),
-              if (alias.isNotEmpty && alias != title) ...[
+              if (alias.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text(
                   alias,
@@ -367,29 +356,22 @@ class _ScoreRow extends StatelessWidget {
 
 /// 桌面右下角：柱形图 + 分数 / 排名（并排）。
 class _DesktopScoreCorner extends StatelessWidget {
-  const _DesktopScoreCorner({
-    required this.score,
-    required this.scoreCount,
-    required this.rank,
-    required this.distribution,
-    required this.isDark,
-  });
+  const _DesktopScoreCorner({required this.detail, required this.isDark});
 
-  final double? score;
-  final int scoreCount;
-  final int? rank;
-  final List<int> distribution;
+  final AnimeDetailViewData detail;
   final bool isDark;
 
   @override
   Widget build(BuildContext context) {
-    final hasChart =
-        distribution.length == 10 && distribution.any((c) => c > 0);
-    final hasScore = score != null && score! > 0;
+    final score = detail.score;
+    final scoreCount = detail.scoreCount;
+    final rank = detail.rank;
+    final hasChart = detail.hasScoreDistribution;
+    final hasScore = score != null && score > 0;
     if (!hasChart && !hasScore) return const SizedBox.shrink();
 
     final subColor = isDark ? Colors.white38 : const Color(0xFF8E8E93);
-    final hasRank = rank != null && rank! > 0;
+    final hasRank = rank != null && rank > 0;
     final scoreCol = hasScore
         ? Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -400,7 +382,7 @@ class _DesktopScoreCorner extends StatelessWidget {
                 textBaseline: TextBaseline.alphabetic,
                 children: [
                   Text(
-                    score!.toStringAsFixed(1),
+                    score.toStringAsFixed(1),
                     style: TextStyle(
                       fontSize: 36,
                       fontWeight: FontWeight.w900,
@@ -442,7 +424,7 @@ class _DesktopScoreCorner extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        ScoreDistributionChart(counts: distribution),
+        ScoreDistributionChart(counts: detail.scoreDistribution),
         if (scoreCol != null) ...[const SizedBox(width: 20), scoreCol],
       ],
     );

@@ -5,18 +5,20 @@ enum RequestPriority { search, play }
 
 /// 取消令牌。切页 / 换关键词时取消整棵请求树，避免慢源继续占用配额。
 class RequestCancelToken {
+  Set<void Function()>? _listeners;
   bool _cancelled = false;
-  final _listeners = <void Function()>{};
 
   bool get isCancelled => _cancelled;
 
   void cancel() {
     if (_cancelled) return;
     _cancelled = true;
-    for (final listener in List.of(_listeners)) {
+    final listeners = _listeners;
+    _listeners = null;
+    if (listeners == null) return;
+    for (final listener in listeners) {
       listener();
     }
-    _listeners.clear();
   }
 
   void Function() onCancel(void Function() listener) {
@@ -24,8 +26,8 @@ class RequestCancelToken {
       listener();
       return () {};
     }
-    _listeners.add(listener);
-    return () => _listeners.remove(listener);
+    (_listeners ??= {}).add(listener);
+    return () => _listeners?.remove(listener);
   }
 
   void throwIfCancelled() {
@@ -74,6 +76,14 @@ class RequestScheduler {
       return Future.error(const RequestCancelledException());
     }
 
+    final hostActive = _hostActive[host] ?? 0;
+    // Any existing queue is blocked: _pump fills every available slot.
+    if (_active < maxConcurrent && hostActive < maxPerHost) {
+      _active++;
+      _hostActive[host] = hostActive + 1;
+      return Future.value();
+    }
+
     final completer = Completer<void>();
     final queues = _queues.putIfAbsent(host, () => [{}, {}]);
     final queue = queues[priority.index];
@@ -84,7 +94,7 @@ class RequestScheduler {
       seq: _seq++,
       start: () {
         unregisterCancel?.call();
-        if (!completer.isCompleted) completer.complete();
+        completer.complete();
       },
     );
 
@@ -103,8 +113,8 @@ class RequestScheduler {
   /// 归还 [host] 的一个槽位，并调度下一批排队任务。
   void release(String host) {
     _active--;
-    final remaining = (_hostActive[host] ?? 1) - 1;
-    if (remaining <= 0) {
+    final remaining = _hostActive[host]! - 1;
+    if (remaining == 0) {
       _hostActive.remove(host);
     } else {
       _hostActive[host] = remaining;

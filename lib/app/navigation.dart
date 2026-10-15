@@ -28,17 +28,17 @@ class NavigationService {
     BuildContext? cardContext,
     Widget? cardPreview,
   }) {
+    if (autoMatch) {
+      final request = PlaybackRequest.fromMap(data);
+      if (posIndex != null) request.episodeIndex = posIndex;
+      toPlayback(context, request, posIndex: posIndex);
+      return;
+    }
     // Detail and later playback enrich their route data independently. Keep
     // those mutations away from the source card while retaining its episode.
     final routeData = Map<String, dynamic>.from(data);
     if (posIndex != null) routeData['currPlayIndex'] = posIndex;
-    final page = autoMatch
-        ? PlayerPage(
-            request: PlaybackRequest.fromMap(routeData),
-            posIndex: posIndex,
-            autoMatch: true,
-          )
-        : AnimeDetailPage(data: routeData);
+    final page = AnimeDetailPage(data: routeData);
     final navigator = Navigator.of(context);
     Rect? sourceRect() {
       if (cardContext == null || !cardContext.mounted) return null;
@@ -60,15 +60,12 @@ class NavigationService {
       return rect;
     }
 
-    final origin = sourceRect();
+    final origin = Instances.isDesktopPlatform ? null : sourceRect();
     final preview = cardPreview;
     final PageRoute<void> route;
     // Desktop keeps the Hero flight between the card and the detail header, so
     // the surface is only built where the cover has no flight of its own.
-    if (origin != null &&
-        preview != null &&
-        !autoMatch &&
-        !Instances.isDesktopPlatform) {
+    if (origin != null && preview != null) {
       route = CardPageRoute<void>(
         builder: (_) => page,
         sourceRect: origin,
@@ -76,7 +73,7 @@ class NavigationService {
         preview: preview,
         reduceMotion: MediaQuery.disableAnimationsOf(context),
       );
-    } else if (Instances.isDesktopPlatform && !autoMatch) {
+    } else if (Instances.isDesktopPlatform) {
       final duration = MediaQuery.disableAnimationsOf(context)
           ? Duration.zero
           : const Duration(milliseconds: 300);
@@ -123,24 +120,19 @@ class NavigationService {
   }) {
     final navigator = Navigator.of(context);
     if (popFirst) navigator.pop();
+    final page = PlayerPage(
+      request: request,
+      posIndex: posIndex,
+      autoMatch: autoMatch,
+    );
     final PageRoute<void> route = fade
         ? platformPageRoute<void>(
-            builder: (_) => PlayerPage(
-              request: request,
-              posIndex: posIndex,
-              autoMatch: autoMatch,
-            ),
+            builder: (_) => page,
             transitionsBuilder: (_, anim, _, child) =>
                 FadeTransition(opacity: anim, child: child),
             transitionDuration: const Duration(milliseconds: 300),
           )
-        : _pageRoute(
-            PlayerPage(
-              request: request,
-              posIndex: posIndex,
-              autoMatch: autoMatch,
-            ),
-          );
+        : _pageRoute(page);
     navigator.push(route);
   }
 

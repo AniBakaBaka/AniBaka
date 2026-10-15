@@ -18,6 +18,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:baka/services/playback/danmaku_controller.dart';
 import 'package:baka/widgets/danmaku/view.dart';
 import 'package:baka/widgets/common/value_selector.dart';
+import 'package:baka/widgets/player/skip_selection_controls.dart';
 import 'controller.dart';
 import 'package:baka/utils/format_utils.dart';
 import 'package:ios_orientation/ios_orientation.dart';
@@ -72,21 +73,6 @@ class BakaPlayer extends StatefulWidget {
   final bool showPrompts;
   final VoidCallback? onAiRepair;
 
-  BakaPlayer fullscreenView() => BakaPlayer(
-    controller: controller,
-    full: true,
-    headerControl: headerControl,
-    danmakuEnabled: danmakuEnabled,
-    onPickEpisode: onPickEpisode,
-    canSearchSource: canSearchSource,
-    hasNextEpisode: hasNextEpisode,
-    onNextEpisode: onNextEpisode,
-    onFullScreenChanged: onFullScreenChanged,
-    showPlaybackError: showPlaybackError,
-    showPrompts: showPrompts,
-    onAiRepair: onAiRepair,
-  );
-
   @override
   State<BakaPlayer> createState() => _BakaPlayerState();
 }
@@ -117,29 +103,45 @@ class _BakaPlayerState extends State<BakaPlayer> {
   /// 触发全屏 - UI 状态切换由 view 负责
   Future<void> _triggerFullScreen() async {
     if (!widget.full) {
-      if (Platform.isWindows) await FullScreenWindow.setFullScreen(true);
-      if (!mounted) return;
-      widget.onFullScreenChanged?.call(true);
+      if (_fullscreenRouteActive) return;
       setState(() => _fullscreenRouteActive = true);
-      Navigator.of(context)
-          .push(
-            platformPageRoute<void>(
-              transitionDuration: Duration.zero,
-              reverseTransitionDuration: Duration.zero,
-              allowSnapshotting: false,
-              builder: (_) => Scaffold(
-                backgroundColor: Colors.black,
-                body: widget.fullscreenView(),
+      try {
+        if (Platform.isWindows) await FullScreenWindow.setFullScreen(true);
+        if (!mounted) return;
+        widget.onFullScreenChanged?.call(true);
+        await Navigator.of(context).push(
+          platformPageRoute<void>(
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+            allowSnapshotting: false,
+            builder: (_) => Scaffold(
+              backgroundColor: Colors.black,
+              body: BakaPlayer(
+                controller: widget.controller,
+                full: true,
+                headerControl: widget.headerControl,
+                danmakuEnabled: widget.danmakuEnabled,
+                onPickEpisode: widget.onPickEpisode,
+                canSearchSource: widget.canSearchSource,
+                hasNextEpisode: widget.hasNextEpisode,
+                onNextEpisode: widget.onNextEpisode,
+                onFullScreenChanged: widget.onFullScreenChanged,
+                showPlaybackError: widget.showPlaybackError,
+                showPrompts: widget.showPrompts,
+                onAiRepair: widget.onAiRepair,
               ),
             ),
-          )
-          .then((_) {
-            if (mounted) setState(() => _fullscreenRouteActive = false);
-            widget.onFullScreenChanged?.call(false);
-            WidgetsBinding.instance.addPostFrameCallback(
-              (_) => _requestKeyboardFocus(),
-            );
-          });
+          ),
+        );
+      } finally {
+        if (mounted) {
+          setState(() => _fullscreenRouteActive = false);
+          widget.onFullScreenChanged?.call(false);
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _requestKeyboardFocus(),
+          );
+        }
+      }
     } else {
       Navigator.pop(context);
     }
@@ -324,6 +326,10 @@ class _BakaPlayerState extends State<BakaPlayer> {
 
   @override
   Widget build(BuildContext context) {
+    // The fullscreen route owns the video and overlays while it is open.
+    if (_fullscreenRouteActive) {
+      return const ColoredBox(color: Colors.black, child: SizedBox.expand());
+    }
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide =
@@ -460,12 +466,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
           select: (state) =>
               (state.subtitleConfig, state.showSubtitle, state.videoFit),
           builder: (context, preferences) {
-            if (!widget.full && _fullscreenRouteActive) {
-              return const ColoredBox(
-                color: Colors.black,
-                child: SizedBox.expand(),
-              );
-            }
             final cfg = preferences.$1;
             final height = MediaQuery.sizeOf(context).height * 0.5;
             return ValueSelector<VideoEnhancementState, FilterQuality>(
@@ -517,7 +517,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
 
   Widget _buildDanmaku() {
     if (!widget.danmakuEnabled ||
-        (!widget.full && _fullscreenRouteActive) ||
         (!widget.full && !Instances.isDesktopPlatform)) {
       return const SizedBox.shrink();
     }
@@ -566,7 +565,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
           onHorizontalDragEnd: (_) {
             final target = controller.timeline.value.previewPosition;
             controller.endSeekPreview();
-            controller.seek(target, fromSlider: true);
+            controller.seek(target);
           },
           onHorizontalDragCancel: controller.endSeekPreview,
           onVerticalDragStart: _handleVerticalDragStart,
@@ -754,12 +753,18 @@ class _BakaPlayerState extends State<BakaPlayer> {
       builder: (context, selecting) => selecting
           ? Align(
               alignment: Alignment.bottomCenter,
-              child: BottomControl(
-                controller: widget.controller,
-                triggerFullScreen: _triggerFullScreen,
-                isFullScreen: widget.full,
-                isWideLayout: isWide,
-                updatesEnabled: true,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  isWide ? 32 : 8,
+                  0,
+                  isWide ? 32 : 8,
+                  8,
+                ),
+                child: SkipSelectionControls(
+                  controller: widget.controller,
+                  onFullscreen: _triggerFullScreen,
+                  isFullScreen: widget.full,
+                ),
               ),
             )
           : _buildNormalControlsOverlay(isWide),
@@ -805,7 +810,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
                   if (widget.showPrompts)
                     PlayerPrompts(
                       controller: controller,
-                      isFullScreen: widget.full,
                       isWideLayout: isWide,
                       isTvLayout: Instances.isTV,
                       hasNextEpisode: widget.hasNextEpisode,
@@ -877,8 +881,8 @@ class _BakaPlayerState extends State<BakaPlayer> {
                   builder: (context, mediaInfo, _) => Align(
                     alignment: Alignment.centerLeft,
                     child: _buildPlayerTitleOrLogo(
-                      mediaInfo.title.isNotEmpty ? mediaInfo.title : '',
-                      mediaInfo.logoUrl.isNotEmpty ? mediaInfo.logoUrl : '',
+                      mediaInfo.title,
+                      mediaInfo.logoUrl,
                       isWide,
                     ),
                   ),

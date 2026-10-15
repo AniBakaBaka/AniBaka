@@ -20,6 +20,8 @@ class PlaybackProgress {
   final int? bgmId;
   final String? cover;
   Duration _pendingStart;
+  ({Duration position, Duration duration, bool rememberPosition})? _lastSave;
+  Future<void>? _saving;
 
   Future<void> save(
     PlaybackTimelineState timeline, {
@@ -37,7 +39,18 @@ class PlaybackProgress {
     if (position < Duration.zero || (!seeked && position == Duration.zero)) {
       return;
     }
-    await Future.wait([
+    final snapshot = (
+      position: position,
+      duration: timeline.duration,
+      rememberPosition: rememberPosition,
+    );
+    // Pause, lifecycle changes and disposal can all report the same progress.
+    // Share an in-flight write too, so each event does not start a cloud upload.
+    if (_lastSave == snapshot) {
+      await _saving;
+      return;
+    }
+    final saving = Future.wait([
       if (rememberPosition && videoKey.isNotEmpty)
         history.saveProgress(videoKey, position, duration: timeline.duration),
       if (request.source != '_local')
@@ -50,6 +63,17 @@ class PlaybackProgress {
           bgmId: bgmId,
           cover: cover,
         ),
-    ]);
+    ]).then<void>((_) {});
+    _lastSave = snapshot;
+    _saving = saving;
+    try {
+      await saving;
+    } catch (_) {
+      if (identical(_saving, saving)) {
+        _lastSave = null;
+        _saving = null;
+      }
+      rethrow;
+    }
   }
 }

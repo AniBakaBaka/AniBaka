@@ -129,10 +129,11 @@ class TorrentStreamServer {
     int totalBytes,
   ) async* {
     var sent = 0;
-    while (sent < totalBytes) {
+    while (sent < totalBytes && !pm.isDisposed) {
       final toSend = (totalBytes - sent).clamp(1, _chunkSize);
       var data = pm.readFileData(fileOffset + sent, toSend);
       while (data == null) {
+        if (pm.isDisposed) return;
         try {
           await pm.nextProgress.timeout(_stallTimeout);
         } on TimeoutException {

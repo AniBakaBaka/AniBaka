@@ -40,10 +40,10 @@ class CollectionsApi extends BangumiApi {
 class _LoadingCollections extends CollectionRepository {
   _LoadingCollections(super.session, super.bangumi);
 
-  final response = Completer<PageData<AnimeCollection>?>();
+  final response = Completer<PageData<AnimeCollection>>();
 
   @override
-  Future<PageData<AnimeCollection>?> getList({
+  Future<PageData<AnimeCollection>> getList({
     int page = 1,
     int pageSize = 20,
     int? status,
@@ -160,7 +160,7 @@ void main() {
         const AnimeCollection(bgmId: 3, status: 1),
       ]);
       expect((await repo.getAll()).map((x) => x.bgmId), [10, 2, 3]);
-      expect((await repo.getStats())?.collect, 2);
+      expect((await repo.getStats()).collect, 2);
       expect((await repo.getByPostId(1))?.bgmId, 10);
       final stored =
           jsonDecode(prefs.getString('local_anime_collections_v1')!) as List;
@@ -211,20 +211,20 @@ void main() {
     expect((await repo.getByBgmId(101))?.postId, 11);
     expect((await repo.getByPostId(12))?.bgmId, 102);
     var stats = await repo.getStats();
-    expect(stats?.wish, 1);
-    expect(stats?.doing, 1);
+    expect(stats.wish, 1);
+    expect(stats.doing, 1);
 
     await repo.addOrUpdate(
       const AnimeCollection(postId: 11, bgmId: 101, status: 2),
     );
     stats = await repo.getStats();
-    expect(stats?.wish, 0);
-    expect(stats?.collect, 1);
+    expect(stats.wish, 0);
+    expect(stats.collect, 1);
     expect((await repo.getByPostId(11))?.status, 2);
 
     expect(await repo.deleteByBgmId(102), isTrue);
     expect(await repo.getByBgmId(102), isNull);
-    expect((await repo.getStats())?.total, 1);
+    expect((await repo.getStats()).total, 1);
   });
 
   group('library navigation', () {

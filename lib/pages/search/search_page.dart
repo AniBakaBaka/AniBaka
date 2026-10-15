@@ -1,3 +1,4 @@
+import 'package:baka/core/content_filter.dart';
 import 'package:baka/source/models/source_search_result.dart';
 import 'package:baka/services/source/source_repository.dart';
 import 'dart:async';
@@ -31,6 +32,7 @@ class _SearchPageState extends State<SearchPage> {
   late final _resultChanges = Listenable.merge([
     _searchService.isLoadingNotifier,
     _searchService.resultsNotifier,
+    contentFilter,
   ]);
 
   bool get _isWindows => Instances.isDesktopPlatform;
@@ -77,32 +79,7 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _search(String value) async {
     _debounce?.cancel();
-    final query = value.trim();
-    if (query.isEmpty) {
-      _searchService.resetSearch();
-      return;
-    }
-
-    final searchId = ++_searchService.activeSearchId;
-    _searchService.keywordNotifier.value = query;
-    // Set loading before showing the result area so stale results never flash.
-    _searchService.isLoadingNotifier.value = true;
-    _searchService.resultsNotifier.value = const [];
-    _searchService.showResultsNotifier.value = true;
-
-    try {
-      final results = await _searchService.executeSearch(query);
-      if (!mounted || !_searchService.isActiveSearch(searchId)) return;
-      _searchService.resultsNotifier.value = results;
-    } catch (error) {
-      debugPrint('Search error for "$query": $error');
-      if (!mounted || !_searchService.isActiveSearch(searchId)) return;
-      _searchService.resultsNotifier.value = const [];
-    } finally {
-      if (mounted && _searchService.isActiveSearch(searchId)) {
-        _searchService.isLoadingNotifier.value = false;
-      }
-    }
+    await _searchService.search(value);
   }
 
   @override
@@ -185,7 +162,9 @@ class _SearchPageState extends State<SearchPage> {
       listenable: _resultChanges,
       builder: (context, _) {
         final isLoading = _searchService.isLoadingNotifier.value;
-        final items = _searchService.resultsNotifier.value;
+        final items = contentFilter.visibleItems(
+          _searchService.resultsNotifier.value,
+        );
         if (isLoading && items.isEmpty) {
           if (isVertical) {
             return const Center(child: CircularProgressIndicator());

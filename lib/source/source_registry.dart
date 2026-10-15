@@ -29,8 +29,6 @@ class AdapterDescriptor {
     this.idPattern,
   });
 
-  AdapterBase? createAdapter() => factory();
-
   int resolveNumericId(String seriesId) {
     final idStr = idPattern != null
         ? (RegExp(idPattern!).firstMatch(seriesId)?.group(1) ?? seriesId)

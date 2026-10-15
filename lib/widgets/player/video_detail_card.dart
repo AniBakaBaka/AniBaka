@@ -1,4 +1,4 @@
-import 'package:baka/models/bgm.dart';
+import 'package:baka/services/playback/playback_content.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -13,8 +13,7 @@ import 'package:baka/widgets/danmaku/danmaku_list_sheet.dart';
 
 /// 播放页视频详情卡片
 class VideoDetailCard extends StatelessWidget {
-  final Map detail;
-  final BgmInfo bgmInfo;
+  final PlaybackContent content;
   final ValueNotifier<bool> followNotifier;
   final List<String> cachedTags;
   final VoidCallback onFollowPressed;
@@ -26,8 +25,7 @@ class VideoDetailCard extends StatelessWidget {
   final bool isSearching;
 
   const VideoDetailCard({
-    required this.detail,
-    required this.bgmInfo,
+    required this.content,
     required this.followNotifier,
     required this.cachedTags,
     required this.onFollowPressed,
@@ -46,10 +44,10 @@ class VideoDetailCard extends StatelessWidget {
     final mutedColor = theme.textTheme.bodyMedium?.color?.withValues(
       alpha: 0.4,
     );
-    final airDate = (detail['bgmDetailData'] as Map?)?['date'] as String?;
+    final airDate = content.bgmDetailData?['date'] as String?;
     final time = formatDate(
       airDate == null || airDate.isEmpty
-          ? detail['time'] as String? ?? ''
+          ? content.data['time'] as String? ?? ''
           : airDate,
     );
     final mutedStyle = TextStyle(
@@ -68,7 +66,7 @@ class VideoDetailCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  detail['title'] ?? '',
+                  content.title,
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w800,
@@ -84,8 +82,8 @@ class VideoDetailCard extends StatelessWidget {
               ValueListenableBuilder<bool>(
                 valueListenable: followNotifier,
                 builder: (context, isFollowed, _) => BgmFollowPill(
-                  title: detail['title']?.toString() ?? '',
-                  bgmInfo: bgmInfo,
+                  title: content.title,
+                  bgmInfo: content.bgmInfo,
                   isFollowed: isFollowed,
                   onFollowPressed: onFollowPressed,
                 ),
@@ -99,7 +97,9 @@ class VideoDetailCard extends StatelessWidget {
               ClipOval(
                 child: CachedNetworkImage(
                   memCacheWidth: 80,
-                  imageUrl: getAvatar(avatar: detail['uqq'] ?? '3179737489'),
+                  imageUrl: getAvatar(
+                    avatar: content.data['uqq'] as String? ?? '3179737489',
+                  ),
                   width: 18,
                   height: 18,
                 ),
@@ -115,7 +115,7 @@ class VideoDetailCard extends StatelessWidget {
                       Text(time, style: mutedStyle),
                       Text('•', style: mutedStyle),
                     ],
-                    Text('gv${detail['id']}', style: mutedStyle),
+                    Text('gv${content.data['id']}', style: mutedStyle),
                   ],
                 ),
               ),
@@ -129,10 +129,8 @@ class VideoDetailCard extends StatelessWidget {
                       onTap: () => DanmakuListSheet.show(
                         context,
                         danmakuController!,
-                        defaultTitle: detail['title']?.toString(),
-                        defaultEpisode: (detail['episodeIndex'] is num)
-                            ? (detail['episodeIndex'] as num).toInt() + 1
-                            : null,
+                        defaultTitle: content.title,
+                        defaultEpisode: content.currPlayIndex + 1,
                       ),
 
                       child: Container(

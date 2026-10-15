@@ -1,15 +1,16 @@
+import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/utils/json_values.dart';
 import 'package:baka/utils/bgm_utils.dart';
 
 class AnimeDetailViewData {
-  const AnimeDetailViewData({
+  const AnimeDetailViewData._({
     required this.title,
+    required this.nsfw,
     required this.bgmTitle,
     required this.alias,
     required this.summary,
     required this.coverUrl,
-    required this.backgroundUrl,
     required this.logoUrl,
     required this.tags,
     required this.genres,
@@ -32,12 +33,12 @@ class AnimeDetailViewData {
     this.bgmId,
   });
 
+  final bool nsfw;
   final String title;
   final String bgmTitle;
   final String alias;
   final String summary;
   final String coverUrl;
-  final String backgroundUrl;
   final String logoUrl;
   final List<String> tags;
   final List<String> genres;
@@ -61,8 +62,11 @@ class AnimeDetailViewData {
   final String? tvdbId;
   final int? bgmId;
 
-  bool get hasScoreDistribution =>
-      scoreDistribution.length == 10 && scoreDistribution.any((c) => c > 0);
+  String get backgroundUrl => backdrops.isEmpty ? coverUrl : backdrops.first;
+
+  bool get hasScoreDistribution => scoreDistribution.any((count) => count > 0);
+
+  static final _tagSeparator = RegExp(r'\s+');
 
   factory AnimeDetailViewData.from({
     required Map source,
@@ -71,219 +75,158 @@ class AnimeDetailViewData {
     Map<String, dynamic>? bgm,
   }) {
     final titles = anibaka?['title'] as Map<String, dynamic>?;
-    final cnTitle = trimmed(titles?['cn']);
-    final nativeTitle = trimmed(titles?['native']);
-    final enTitle = trimmed(titles?['en']);
-    final fallbackTitle =
-        trimmed(bgm?['name_cn']) ??
-        trimmed(bgm?['name']) ??
-        trimmed(source['title']) ??
+    final cnTitle = trimmed(titles?['cn'] as String?);
+    final nativeTitle = trimmed(titles?['native'] as String?);
+    final enTitle = trimmed(titles?['en'] as String?);
+    final bgmTitle =
+        trimmed(bgm?['name_cn'] as String?) ?? trimmed(bgm?['name'] as String?);
+    final title =
+        cnTitle ??
+        nativeTitle ??
+        enTitle ??
+        bgmTitle ??
+        trimmed(source['title'] as String?) ??
         '番剧详情';
-    final title = cnTitle ?? nativeTitle ?? enTitle ?? fallbackTitle;
 
     final alias = nativeTitle != null && nativeTitle != title
         ? nativeTitle
         : (enTitle != null && enTitle != title ? enTitle : '');
 
     final images = anibaka?['images'] as Map<String, dynamic>?;
-    final posters = _imageUrls(images?['posters']);
-    final backdrops = _imageUrls(images?['backdrops']);
-    final logoUrl = resolveLogoUrl(anibaka);
+    final posters = _imageUrls(images?['posters'] as List<dynamic>?);
+    final backdrops = _imageUrls(images?['backdrops'] as List<dynamic>?);
     final cover =
         resolveCoverImage(source, bgmInfo: bgmInfo) ??
         (posters.isNotEmpty ? posters.first : '');
 
-    final rawGenres = anibaka?['genres'];
-    final genres = rawGenres is List
-        ? rawGenres.cast<String>()
-        : const <String>[];
+    final genres =
+        (anibaka?['genres'] as List<dynamic>?)?.cast<String>() ??
+        const <String>[];
 
     final rawTags = <String>{...genres};
-    if (bgm?['tags'] is List) {
-      for (final t in bgm!['tags']) {
-        if (t is Map && t['name'] != null) {
-          final name = t['name'].toString().trim();
-          if (name.isNotEmpty) rawTags.add(name);
-        }
-      }
+    for (final tag in bgm?['tags'] as List<dynamic>? ?? const []) {
+      final name = ((tag as Map<String, dynamic>)['name'] as String).trim();
+      if (name.isNotEmpty) rawTags.add(name);
     }
-    if (source['tag'] != null) {
-      for (final s in source['tag'].toString().split(RegExp(r'\s+'))) {
-        final st = s.trim();
-        if (st.isNotEmpty) rawTags.add(st);
-      }
+    for (final tag in (source['tag'] as String? ?? '').split(_tagSeparator)) {
+      if (tag.isNotEmpty) rawTags.add(tag);
     }
 
     final ratings = anibaka?['ratings'] as Map<String, dynamic>?;
     final anibakaRating = ratings?['bgm'] as Map<String, dynamic>?;
     final bgmRating = bgm?['rating'] as Map<String, dynamic>?;
     final score =
-        toDouble(anibakaRating?['score']) ??
-        BgmUtils.extractScore(bgm?['rating']) ??
+        (anibakaRating?['score'] as num?)?.toDouble() ??
+        BgmUtils.extractScore(bgmRating) ??
         bgmInfo.score;
-    final scoreCount =
-        toInt(anibakaRating?['total']) ?? toInt(bgmRating?['total']) ?? 0;
-    final rank = toInt(anibakaRating?['rank']) ?? toInt(bgmRating?['rank']);
-
-    final scoreCountMap = bgmRating?['count'] as Map?;
-    final scoreDistribution = _parseScoreDistribution(scoreCountMap);
-
+    final rank = anibakaRating?['rank'] as int?;
+    final episodeCount = anibaka?['episodes'] as int?;
+    final status = trimmed(anibaka?['status'] as String?);
+    final date = trimmed(anibaka?['date'] as String?);
     final ids = anibaka?['ids'] as Map<String, dynamic>?;
-    final imdbId = trimmed(ids?['imdb_id']);
-    final tmdbId = trimmed(ids?['tmdb_id']);
-    final tvdbId = trimmed(ids?['tvdb_id']);
-    final bgmId =
-        toInt(ids?['bgm_id']) ?? toInt(bgm?['id']) ?? toInt(source['bgmId']);
-    final bgmTitle = trimmed(bgm?['name_cn']) ?? trimmed(bgm?['name']) ?? title;
     final collection = bgm?['collection'] as Map<String, dynamic>?;
 
-    return AnimeDetailViewData(
+    final bgmInfobox =
+        (bgm?['infobox'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
+        const <Map<String, dynamic>>[];
+    final extraInfo = <Map<String, dynamic>>[
+      if (status != null) {'key': '状态', 'value': status},
+      if (date != null) {'key': '播出日期', 'value': date},
+      if (episodeCount != null && episodeCount > 0)
+        {'key': '集数', 'value': '$episodeCount 话'},
+      if (rank != null && rank > 0) {'key': '排名', 'value': '#$rank'},
+      if (enTitle != null && enTitle != title) {'key': '英文名', 'value': enTitle},
+    ];
+    var infobox = bgmInfobox;
+    if (extraInfo.isNotEmpty) {
+      final keys = {for (final item in extraInfo) item['key'] as String};
+      for (final item in bgmInfobox) {
+        if (keys.add(item['key'] as String)) extraInfo.add(item);
+      }
+      infobox = extraInfo;
+    }
+
+    final scoreCounts = bgmRating?['count'] as Map<String, dynamic>?;
+    return AnimeDetailViewData._(
       title: title,
-      bgmTitle: bgmTitle,
+      nsfw: bgm?['nsfw'] == true || ContentFilter.isNsfw(source),
+      bgmTitle: bgmTitle ?? title,
       alias: alias,
       summary:
-          trimmed(anibaka?['overview']) ??
-          trimmed(bgm?['summary']) ??
-          trimmed(source['content']) ??
+          trimmed(anibaka?['overview'] as String?) ??
+          trimmed(bgm?['summary'] as String?) ??
+          trimmed(source['content'] as String?) ??
           '暂无简介',
       coverUrl: cover,
-      backgroundUrl: backdrops.isNotEmpty ? backdrops.first : cover,
-      logoUrl: logoUrl,
+      logoUrl: resolveLogoUrl(anibaka),
       tags: rawTags.toList(growable: false),
       genres: genres,
-      infobox: _buildInfobox(anibaka, bgm, enTitle, title),
+      infobox: infobox,
       score: score,
-      scoreCount: scoreCount,
-      scoreDistribution: scoreDistribution,
-      rank: rank,
+      scoreCount:
+          anibakaRating?['total'] as int? ?? bgmRating?['total'] as int? ?? 0,
+      scoreDistribution: scoreCounts == null
+          ? const [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          : [
+              for (var score = 1; score <= 10; score++)
+                scoreCounts['$score'] as int,
+            ],
+      rank: rank ?? bgmRating?['rank'] as int?,
       backdrops: backdrops,
       posters: posters,
-      status: trimmed(anibaka?['status']) ?? '',
-      airDate: trimmed(bgm?['date']) ?? trimmed(anibaka?['date']),
-      episodeCount:
-          toInt(anibaka?['episodes']) ??
-          toInt(bgm?['total_episodes']) ??
-          toInt(bgm?['eps']),
-      collectCount: toInt(collection?['collect']) ?? 0,
-      doingCount: toInt(collection?['doing']) ?? 0,
-      wishCount: toInt(collection?['wish']) ?? 0,
-      imdbId: imdbId,
-      tmdbId: tmdbId,
-      tvdbId: tvdbId,
-      bgmId: bgmId,
+      status: status ?? '',
+      airDate: trimmed(bgm?['date'] as String?) ?? date,
+      episodeCount: episodeCount ?? bgm?['eps'] as int?,
+      collectCount: collection?['collect'] as int? ?? 0,
+      doingCount: collection?['doing'] as int? ?? 0,
+      wishCount: collection?['wish'] as int? ?? 0,
+      imdbId: trimmed(ids?['imdb_id'] as String?),
+      tmdbId: (ids?['tmdb_id'] as int?)?.toString(),
+      tvdbId: (ids?['tvdb_id'] as int?)?.toString(),
+      bgmId: ids?['bgm_id'] as int? ?? bgm?['id'] as int? ?? bgmInfo.subjectId,
     );
   }
 
-  /// Picks the backdrop supplied by AniBaka's TMDB image source.
-  ///
-  /// Prefer a Chinese backdrop when the API provides multiple TMDB variants.
+  /// 首页横幅只使用 TMDB 剧照，语言优先级与详情 Logo 一致。
   static String? pickTmdbBackdrop(Map<String, dynamic>? detail) {
-    final images = detail?['images'];
-    if (images is! Map) return null;
-    final candidates = images['backdrops'];
-    if (candidates is! List) return null;
-    Map<String, dynamic>? fallback;
-
-    for (final candidate in candidates.cast<Map<String, dynamic>>()) {
-      if (trimmed(candidate['source'])?.toLowerCase() != 'tmdb') continue;
-      fallback ??= candidate;
-      if (trimmed(candidate['lang'])?.toLowerCase() == 'zh') {
-        return trimmed(candidate['url']) ?? trimmed(candidate['thumbnail']);
-      }
-    }
-
-    return trimmed(fallback?['url']) ?? trimmed(fallback?['thumbnail']);
+    final images = detail?['images'] as Map<String, dynamic>?;
+    return _preferredImage(
+      images?['backdrops'] as List<dynamic>?,
+      source: 'tmdb',
+    );
   }
 
-  static List<int> _parseScoreDistribution(Map? countMap) {
-    if (countMap == null || countMap.isEmpty) {
-      return const [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    }
-    return List<int>.generate(10, (i) {
-      final key = '${i + 1}';
-      return toInt(countMap[key]) ?? 0;
-    }, growable: false);
-  }
-
-  /// 取条目 logo：优先 `images.logos` 里的中文 logo，其次第一个 logo，最后
-  /// 顶层的 `logoUrl` / `logo`（播放数据里由 [resolveLogoUrl] 回填）。
+  /// 聚合图片优先中文；播放元数据沿用已选定的 logoUrl。
   static String resolveLogoUrl(Map<String, dynamic>? detail) {
-    if (detail == null) return '';
-    final rawLogos = (detail['images'] as Map?)?['logos'];
-    if (rawLogos is List && rawLogos.isNotEmpty) {
-      String? zhLogo;
-      String? firstLogo;
-      for (final item in rawLogos) {
-        if (item is! Map) continue;
-        final url = trimmed(item['url']) ?? trimmed(item['thumbnail']);
-        if (url == null) continue;
-        firstLogo ??= url;
-        final lang = item['lang']?.toString().toLowerCase();
-        if (lang != null && (lang.startsWith('zh') || lang == 'cn')) {
-          zhLogo = url;
-          break;
-        }
-      }
-      final chosen = zhLogo ?? firstLogo;
-      if (chosen != null && chosen.isNotEmpty) return chosen;
-    }
-
-    return trimmed(detail['logoUrl']) ?? trimmed(detail['logo']) ?? '';
+    final images = detail?['images'] as Map<String, dynamic>?;
+    return _preferredImage(images?['logos'] as List<dynamic>?) ??
+        trimmed(detail?['logoUrl'] as String?) ??
+        trimmed(detail?['logo'] as String?) ??
+        '';
   }
 
-  /// AniBaka 的 `posters / backdrops` 是 `{url, thumbnail, source, lang?}` 数组。
-  static List<String> _imageUrls(dynamic value) {
-    if (value is! List) return const [];
-    final urls = <String>[];
-    final seen = <String>{};
-    for (final item in value) {
-      if (item is! Map) continue;
-      final url = trimmed(item['url']) ?? trimmed(item['thumbnail']);
-      if (url != null && seen.add(url)) urls.add(url);
+  static String? _preferredImage(List<dynamic>? images, {String? source}) {
+    String? first;
+    for (final image in images ?? const []) {
+      final item = image as Map<String, dynamic>;
+      if (source != null && item['source'] != source) continue;
+      final url = item['url'] as String;
+      if (url.isEmpty) continue;
+      first ??= url;
+      final lang = (item['lang'] as String?)?.toLowerCase();
+      if (lang != null && (lang.startsWith('zh') || lang == 'cn')) return url;
     }
-    return urls;
+    return first;
   }
 
-  static List<Map<String, dynamic>> _buildInfobox(
-    Map<String, dynamic>? anibaka,
-    Map<String, dynamic>? bgm,
-    String? englishTitle,
-    String title,
-  ) {
-    final result = <Map<String, dynamic>>[];
-    final keys = <String>{};
-
-    void add(String key, dynamic value) {
-      final text = trimmed(value);
-      if (text != null && keys.add(key)) {
-        result.add({'key': key, 'value': text});
-      }
+  /// 后端可能把首张封面再次放入 posters；按 URL 去重并保留来源顺序。
+  static List<String> _imageUrls(List<dynamic>? images) {
+    if (images == null || images.isEmpty) return const [];
+    final urls = <String>{};
+    for (final image in images) {
+      final url = (image as Map<String, dynamic>)['url'] as String;
+      if (url.isNotEmpty) urls.add(url);
     }
-
-    add('状态', anibaka?['status']);
-    add('播出日期', anibaka?['date']);
-    final episodeCount = toInt(anibaka?['episodes']);
-    if (episodeCount != null && episodeCount > 0) add('集数', '$episodeCount 话');
-    final ratings = anibaka?['ratings'] as Map<String, dynamic>?;
-    final rating = ratings?['bgm'] as Map<String, dynamic>?;
-    final rank = toInt(rating?['rank']);
-    if (rank != null && rank > 0) add('排名', '#$rank');
-    if (englishTitle != null &&
-        englishTitle.isNotEmpty &&
-        englishTitle != title) {
-      add('英文名', englishTitle);
-    }
-
-    if (bgm?['infobox'] is List) {
-      for (final item in bgm!['infobox']) {
-        if (item is Map<String, dynamic>) {
-          final key = trimmed(item['key']);
-          if (key != null && keys.add(key)) {
-            result.add(item);
-          }
-        }
-      }
-    }
-    return result;
+    return urls.toList(growable: false);
   }
 }

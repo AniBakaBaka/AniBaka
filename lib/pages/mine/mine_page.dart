@@ -539,7 +539,7 @@ class _MinePageState extends State<MinePage> {
       context: context,
       builder: (ctx) => AppDialog(
         title: '支持开发者',
-        contentWidget: Column(
+        content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.favorite, color: Colors.pinkAccent, size: 36),
@@ -570,36 +570,34 @@ class _MinePageState extends State<MinePage> {
             ),
           ],
         ),
-        actions: [
-          Row(
-            children: [
-              Expanded(
-                child: TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('稍后再说'),
-                ),
+        actions: Row(
+          children: [
+            Expanded(
+              child: TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('稍后再说'),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: FilledButton(
-                  onPressed: () async {
-                    await Clipboard.setData(
-                      const ClipboardData(text: tronUsdtAddress),
-                    );
-                    if (ctx.mounted) Navigator.pop(ctx);
-                    showSnackBar('USDT-TRC20 收款地址已复制');
-                  },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.pinkAccent,
-                    elevation: 0,
-                    shadowColor: Colors.transparent,
-                  ),
-                  child: const Text('复制地址'),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton(
+                onPressed: () async {
+                  await Clipboard.setData(
+                    const ClipboardData(text: tronUsdtAddress),
+                  );
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  showSnackBar('USDT-TRC20 收款地址已复制');
+                },
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.pinkAccent,
+                  elevation: 0,
+                  shadowColor: Colors.transparent,
                 ),
+                child: const Text('复制地址'),
               ),
-            ],
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }

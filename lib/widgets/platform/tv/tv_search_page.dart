@@ -1,3 +1,4 @@
+import 'package:baka/core/content_filter.dart';
 import 'package:baka/source/models/source_search_result.dart';
 import 'package:baka/services/source/source_repository.dart';
 import 'package:flutter/material.dart';
@@ -27,8 +28,8 @@ class _TvSearchPageState extends State<TvSearchPage> {
   late final _resultChanges = Listenable.merge([
     _svc.isLoadingNotifier,
     _svc.resultsNotifier,
+    contentFilter,
   ]);
-  (String, int, int)? _pendingQuery;
 
   @override
   void initState() {
@@ -42,7 +43,7 @@ class _TvSearchPageState extends State<TvSearchPage> {
     if (!mounted) return;
     if (widget.initialKeyword != null) {
       _searchController.text = _svc.keywordNotifier.value;
-      await _search(_svc.keywordNotifier.value);
+      await _svc.search(_svc.keywordNotifier.value);
     }
   }
 
@@ -53,36 +54,6 @@ class _TvSearchPageState extends State<TvSearchPage> {
     _textFieldFocusNode.dispose();
     _svc.dispose();
     super.dispose();
-  }
-
-  Future<void> _search(String searchKey) async {
-    final query = searchKey.trim();
-    if (query.isEmpty) {
-      _svc.resetSearch();
-      return;
-    }
-    final source = _svc.selectedSourceIndexNotifier.value;
-    if (_pendingQuery == (query, source, _svc.activeSearchId)) return;
-    final searchId = ++_svc.activeSearchId;
-    final pending = (query, source, searchId);
-    _pendingQuery = pending;
-    _svc.keywordNotifier.value = query;
-    _svc.isLoadingNotifier.value = true;
-    _svc.resultsNotifier.value = const [];
-    _svc.showResultsNotifier.value = true;
-    try {
-      final results = await _svc.executeSearch(query);
-      if (!mounted || !_svc.isActiveSearch(searchId)) return;
-      _svc.resultsNotifier.value = results;
-      _svc.isLoadingNotifier.value = false;
-    } catch (e) {
-      debugPrint('TV 搜索报错: $e');
-      if (!mounted || !_svc.isActiveSearch(searchId)) return;
-      _svc.resultsNotifier.value = const [];
-      _svc.isLoadingNotifier.value = false;
-    } finally {
-      if (_pendingQuery == pending) _pendingQuery = null;
-    }
   }
 
   void _activateSearchField() async {
@@ -190,7 +161,7 @@ class _TvSearchPageState extends State<TvSearchPage> {
                                 onTap: _activateSearchField,
                                 onEditingComplete: _finishSearchEditing,
                                 onSubmitted: (v) {
-                                  _search(v);
+                                  _svc.search(v);
                                   _finishSearchEditing();
                                 },
                                 textInputAction: TextInputAction.search,
@@ -287,7 +258,7 @@ class _TvSearchPageState extends State<TvSearchPage> {
                     if (_svc.selectedSourceIndexNotifier.value != index) {
                       _svc.selectedSourceIndexNotifier.value = index;
                       if (_svc.keywordNotifier.value.trim().isNotEmpty) {
-                        _search(_svc.keywordNotifier.value);
+                        _svc.search(_svc.keywordNotifier.value);
                       }
                     }
                   },
@@ -348,7 +319,7 @@ class _TvSearchPageState extends State<TvSearchPage> {
                         fontSize: 13,
                         onPressed: () {
                           _searchController.text = item;
-                          _search(item);
+                          _svc.search(item);
                         },
                       ),
                   ],
@@ -391,7 +362,7 @@ class _TvSearchPageState extends State<TvSearchPage> {
       listenable: _resultChanges,
       builder: (context, _) {
         final isLoading = _svc.isLoadingNotifier.value;
-        final results = _svc.resultsNotifier.value;
+        final results = contentFilter.visibleItems(_svc.resultsNotifier.value);
         if (isLoading && results.isEmpty) {
           return AppSkeletonizer(
             enabled: true,

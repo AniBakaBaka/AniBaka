@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -16,22 +15,20 @@ class BlockRequest {
   final int length;
 }
 
-enum PieceState { pending, downloading, completed }
-
 /// Downloads only the selected media file and stores verified pieces on disk.
-/// In-flight block maps are sparse, so idle torrent pieces allocate no maps.
 class PieceManager {
   PieceManager({required this.metadata, required this.targetFileIndex}) {
     final file = metadata.files[targetFileIndex];
     _firstPiece = file.offset ~/ metadata.pieceLength;
     _lastPiece = (file.end - 1) ~/ metadata.pieceLength;
     _firstPieceOffset = file.offset % metadata.pieceLength;
-    _pieceStates = List<PieceState>.filled(
-      _lastPiece - _firstPiece + 1,
-      PieceState.pending,
-    );
-    _pieceStatesView = UnmodifiableListView(_pieceStates);
-    _remainingPieces = _pieceStates.length;
+    _bitmapOffset = _firstPiece ~/ 8;
+    _requestable = Uint8List(_lastPiece ~/ 8 - _bitmapOffset + 1);
+    _completed = Uint8List(_requestable.length);
+    for (var piece = _firstPiece; piece <= _lastPiece; piece++) {
+      _requestable[piece ~/ 8 - _bitmapOffset] |= 0x80 >> (piece % 8);
+    }
+    _remainingPieces = _lastPiece - _firstPiece + 1;
     _firstIncompletePiece = _firstPiece;
     _cacheFile = File(
       '${Directory.systemTemp.path}${Platform.pathSeparator}'
@@ -42,7 +39,6 @@ class PieceManager {
 
   static const int blockSize = 16 * 1024;
   static const int maxPeerRequestSize = 128 * 1024;
-  static const int _requestTimeoutMs = 8000;
   static const int _bufferTarget = 2 * 1024 * 1024;
 
   final TorrentMetadata metadata;
@@ -50,88 +46,87 @@ class PieceManager {
   late final int _firstPiece;
   late final int _lastPiece;
   late final int _firstPieceOffset;
-  late final List<PieceState> _pieceStates;
-  late final List<PieceState> _pieceStatesView;
+  late final int _bitmapOffset;
+  late final Uint8List _requestable;
+  late final Uint8List _completed;
+  int _firstRequestableByte = 0;
   late final File _cacheFile;
   late final RandomAccessFile _cache;
 
-  final Map<int, Map<int, Uint8List>> _pieceBlocks = {};
-  final Map<int, Map<int, int>> _requestedBlocks = {};
-  final Stopwatch _requestClock = Stopwatch()..start();
+  final Map<int, _PieceDownload> _downloads = {};
   late int _remainingPieces;
   late int _firstIncompletePiece;
   int _contiguousBytes = 0;
   int _downloadedBytes = 0;
   int _torrentDownloadedBytes = 0;
+  int _verifiedBytes = 0;
   Completer<void> _nextEvent = Completer<void>();
   bool _disposed = false;
 
-  void Function(int downloadedBytes, int totalBytes)? onProgress;
   void Function(int pieceIndex)? onPieceCompleted;
 
   TorrentFile get targetFile => metadata.files[targetFileIndex];
-  int get firstPiece => _firstPiece;
-  int get lastPiece => _lastPiece;
-  List<PieceState> get pieceStates => _pieceStatesView;
   int get downloadedBytes => _downloadedBytes;
   int get torrentDownloadedBytes => _torrentDownloadedBytes;
+  int get verifiedBytes => _verifiedBytes;
   int get bufferRequiredBytes => math.min(_bufferTarget, targetFile.length);
   bool get isReadyToPlay => contiguousBytes >= bufferRequiredBytes;
   double get progress => targetFile.length == 0
       ? 1
       : (_downloadedBytes / targetFile.length).clamp(0, 1);
 
-  bool get isTargetComplete => _remainingPieces == 0;
-
-  bool get isComplete => isTargetComplete;
+  bool get isComplete => _remainingPieces == 0;
+  bool get isDisposed => _disposed;
 
   Iterable<int> get completedPieceIndices sync* {
     for (var i = _firstPiece; i <= _lastPiece; i++) {
-      if (_stateOf(i) == PieceState.completed) yield i;
+      if (hasPiece(i)) yield i;
     }
   }
 
   bool hasPiece(int pieceIndex) =>
       pieceIndex >= _firstPiece &&
       pieceIndex <= _lastPiece &&
-      _stateOf(pieceIndex) == PieceState.completed;
+      _completed[pieceIndex ~/ 8 - _bitmapOffset] &
+              (0x80 >> (pieceIndex % 8)) !=
+          0;
 
   int get contiguousBytes => _contiguousBytes;
 
   Future<void> get nextProgress => _nextEvent.future;
 
-  BlockRequest? nextBlock({
-    required bool Function(int pieceIndex) peerHasPiece,
-  }) {
-    if (_disposed || isTargetComplete) return null;
-    final now = _requestClock.elapsedMilliseconds;
-    for (var piece = _firstIncompletePiece; piece <= _lastPiece; piece++) {
-      if (_stateOf(piece) == PieceState.completed || !peerHasPiece(piece)) {
-        continue;
-      }
-      final blocks = _pieceBlocks[piece];
-      final requested = _requestedBlocks[piece];
-      final pieceSize = metadata.pieceSize(piece);
-      for (var offset = 0; offset < pieceSize; offset += blockSize) {
-        if (blocks?.containsKey(offset) == true) continue;
-        final requestedAt = requested?[offset];
-        if (requestedAt != null && now - requestedAt < _requestTimeoutMs) {
-          continue;
+  BlockRequest? nextBlock(Uint8List peerBitfield) {
+    if (_disposed || isComplete) return null;
+    for (var i = _firstRequestableByte; i < _requestable.length; i++) {
+      final available = _requestable[i] & peerBitfield[i + _bitmapOffset];
+      if (available == 0) continue;
+      final piece = (i + _bitmapOffset) * 8 + 8 - available.bitLength;
+      final size = metadata.pieceSize(piece);
+      final download = _downloads[piece] ??= _PieceDownload(size);
+      final block = download.nextBlock;
+      download.requested[block] = 1;
+      download.advance();
+      if (download.nextBlock == download.blocks.length) {
+        _requestable[i] &= ~(0x80 >> (piece % 8));
+        while (_firstRequestableByte < _requestable.length &&
+            _requestable[_firstRequestableByte] == 0) {
+          _firstRequestableByte++;
         }
-        _setState(piece, PieceState.downloading);
-        (_requestedBlocks[piece] ??= {})[offset] = now;
-        return BlockRequest(
-          piece,
-          offset,
-          math.min(blockSize, pieceSize - offset),
-        );
       }
+      final begin = block * blockSize;
+      return BlockRequest(piece, begin, math.min(blockSize, size - begin));
     }
     return null;
   }
 
   void cancelBlockRequest(int pieceIndex, int begin) {
-    _requestedBlocks[pieceIndex]?.remove(begin);
+    final download = _downloads[pieceIndex];
+    if (download == null) return;
+    final block = begin ~/ blockSize;
+    if (download.blocks[block] != null) return;
+    download.requested[block] = 0;
+    download.nextBlock = math.min(download.nextBlock, block);
+    _makeRequestable(pieceIndex);
   }
 
   void onBlockReceived(int pieceIndex, int begin, Uint8List data) {
@@ -139,48 +134,55 @@ class PieceManager {
         pieceIndex < _firstPiece ||
         pieceIndex > _lastPiece ||
         begin < 0 ||
-        _stateOf(pieceIndex) == PieceState.completed) {
+        begin % blockSize != 0 ||
+        hasPiece(pieceIndex)) {
       return;
     }
     final pieceSize = metadata.pieceSize(pieceIndex);
-    if (data.isEmpty || begin + data.length > pieceSize) return;
+    if (begin >= pieceSize ||
+        data.length != math.min(blockSize, pieceSize - begin)) {
+      return;
+    }
 
-    final blocks = _pieceBlocks[pieceIndex] ??= {};
-    _requestedBlocks[pieceIndex]?.remove(begin);
-    if (blocks.containsKey(begin)) return;
-    blocks[begin] = data;
+    final download = _downloads[pieceIndex] ??= _PieceDownload(pieceSize);
+    final block = begin ~/ blockSize;
+    if (download.blocks[block] != null) return;
+    download.blocks[block] = data;
+    download.receivedBytes += data.length;
+    download.advance();
+    if (download.nextBlock == download.blocks.length) {
+      _requestable[pieceIndex ~/ 8 - _bitmapOffset] &=
+          ~(0x80 >> (pieceIndex % 8));
+    }
     _downloadedBytes += _targetOverlapBytes(pieceIndex, begin, data.length);
     _torrentDownloadedBytes += data.length;
 
-    if (_blockBytes(blocks) >= pieceSize) {
-      final assembled = _assemblePiece(blocks, pieceSize);
+    if (download.receivedBytes == pieceSize) {
+      final assembled = Uint8List(pieceSize);
+      for (var i = 0; i < download.blocks.length; i++) {
+        final bytes = download.blocks[i]!;
+        assembled.setRange(i * blockSize, i * blockSize + bytes.length, bytes);
+      }
       if (_verifyPiece(pieceIndex, assembled)) {
         _cache
           ..setPositionSync(pieceIndex * metadata.pieceLength)
           ..writeFromSync(assembled);
-        _setState(pieceIndex, PieceState.completed);
+        final byte = pieceIndex ~/ 8 - _bitmapOffset;
+        final mask = 0x80 >> (pieceIndex % 8);
+        _completed[byte] |= mask;
+        _requestable[byte] &= ~mask;
+        _verifiedBytes += pieceSize;
         _remainingPieces--;
         _advanceContiguousPrefix();
-        _pieceBlocks.remove(pieceIndex);
-        _requestedBlocks.remove(pieceIndex);
+        _downloads.remove(pieceIndex);
         onPieceCompleted?.call(pieceIndex);
+        _signalProgress();
       } else {
-        for (final entry in blocks.entries) {
-          _downloadedBytes -= _targetOverlapBytes(
-            pieceIndex,
-            entry.key,
-            entry.value.length,
-          );
-          _torrentDownloadedBytes -= entry.value.length;
-        }
-        _pieceBlocks.remove(pieceIndex);
-        _requestedBlocks.remove(pieceIndex);
-        _setState(pieceIndex, PieceState.pending);
+        _downloadedBytes -= _targetOverlapBytes(pieceIndex, 0, pieceSize);
+        _downloads.remove(pieceIndex);
+        _makeRequestable(pieceIndex);
       }
     }
-
-    onProgress?.call(_downloadedBytes, targetFile.length);
-    _signalProgress();
   }
 
   Uint8List? readFileData(int fileOffset, int length) {
@@ -220,27 +222,26 @@ class PieceManager {
     if (_disposed) return;
     _disposed = true;
     _signalProgress();
-    _pieceBlocks.clear();
-    _requestedBlocks.clear();
+    _downloads.clear();
     _cache.closeSync();
     if (_cacheFile.existsSync()) _cacheFile.deleteSync();
   }
 
   void _signalProgress() {
     final event = _nextEvent;
-    _nextEvent = Completer<void>();
-    if (!event.isCompleted) event.complete();
+    if (!_disposed) _nextEvent = Completer<void>();
+    event.complete();
   }
 
-  PieceState _stateOf(int pieceIndex) => _pieceStates[pieceIndex - _firstPiece];
-
-  void _setState(int pieceIndex, PieceState state) {
-    _pieceStates[pieceIndex - _firstPiece] = state;
+  void _makeRequestable(int pieceIndex) {
+    final byte = pieceIndex ~/ 8 - _bitmapOffset;
+    _requestable[byte] |= 0x80 >> (pieceIndex % 8);
+    _firstRequestableByte = math.min(_firstRequestableByte, byte);
   }
 
   void _advanceContiguousPrefix() {
     while (_firstIncompletePiece <= _lastPiece &&
-        _stateOf(_firstIncompletePiece) == PieceState.completed) {
+        hasPiece(_firstIncompletePiece)) {
       _contiguousBytes +=
           metadata.pieceSize(_firstIncompletePiece) -
           (_firstIncompletePiece == _firstPiece ? _firstPieceOffset : 0);
@@ -251,28 +252,12 @@ class PieceManager {
     }
   }
 
-  static int _blockBytes(Map<int, Uint8List> blocks) {
-    var total = 0;
-    for (final block in blocks.values) {
-      total += block.length;
-    }
-    return total;
-  }
-
   int _targetOverlapBytes(int pieceIndex, int begin, int length) {
     final blockStart = pieceIndex * metadata.pieceLength + begin;
     final blockEnd = blockStart + length;
     final overlapStart = math.max(blockStart, targetFile.offset);
     final overlapEnd = math.min(blockEnd, targetFile.end);
     return math.max(0, overlapEnd - overlapStart);
-  }
-
-  static Uint8List _assemblePiece(Map<int, Uint8List> blocks, int pieceSize) {
-    final result = Uint8List(pieceSize);
-    for (final entry in blocks.entries) {
-      result.setRange(entry.key, entry.key + entry.value.length, entry.value);
-    }
-    return result;
   }
 
   bool _verifyPiece(int pieceIndex, Uint8List data) {
@@ -282,5 +267,29 @@ class PieceManager {
       if (expected[i] != actual[i]) return false;
     }
     return true;
+  }
+}
+
+/// Allocated only for active pieces; request deadlines belong to the peer.
+class _PieceDownload {
+  _PieceDownload(int size)
+    : blocks = List.filled(
+        (size + PieceManager.blockSize - 1) ~/ PieceManager.blockSize,
+        null,
+      ),
+      requested = Uint8List(
+        (size + PieceManager.blockSize - 1) ~/ PieceManager.blockSize,
+      );
+
+  final List<Uint8List?> blocks;
+  final Uint8List requested;
+  int nextBlock = 0;
+  int receivedBytes = 0;
+
+  void advance() {
+    while (nextBlock < blocks.length &&
+        (requested[nextBlock] != 0 || blocks[nextBlock] != null)) {
+      nextBlock++;
+    }
   }
 }

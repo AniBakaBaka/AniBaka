@@ -4,7 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:baka/models/playback_state.dart';
-import 'package:baka/models/playback_episode.dart';
+import 'package:baka/services/playback/playback_content.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/core/app_logger.dart';
 import 'package:baka/widgets/baka_player/index.dart';
@@ -18,11 +18,7 @@ import 'package:baka/widgets/player/skip_segment_track.dart';
 enum _Panel { none, episodes, settings }
 
 class TvPlayerLayout extends StatefulWidget {
-  final Map data;
-  final List<PlaybackEpisode> videoList;
-  final int currPlayIndex;
-  final int currUrl;
-  final List<String>? sourceNames;
+  final PlaybackContent content;
   final bool inited;
   final PlaybackController controller;
   final DanmakuController danmakuController;
@@ -33,10 +29,7 @@ class TvPlayerLayout extends StatefulWidget {
   final Widget? initialFailure;
 
   const TvPlayerLayout({
-    required this.data,
-    required this.videoList,
-    required this.currPlayIndex,
-    required this.currUrl,
+    required this.content,
     required this.inited,
     required this.controller,
     required this.danmakuController,
@@ -45,7 +38,6 @@ class TvPlayerLayout extends StatefulWidget {
     required this.onWatchPartyPressed,
     this.isSearching = false,
     this.initialFailure,
-    this.sourceNames,
     super.key,
   });
 
@@ -323,6 +315,7 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
   }
 
   Widget _buildPanel() {
+    final content = widget.content;
     final panel = _panel;
     final Widget child = switch (panel) {
       _Panel.settings => TvSettingsPanel(
@@ -331,13 +324,13 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
         onClose: _closePanel,
       ),
       _Panel.episodes => TvEpisodeSelector(
-        videoList: widget.videoList,
-        currentIndex: widget.currPlayIndex,
-        currUrl: widget.currUrl,
-        sourceNames: widget.sourceNames,
-        bgmId: toInt(widget.data['bgmId']) ?? toInt(widget.data['id']),
-        tmdbId: toInt(widget.data['tmdbId']),
-        tvdbId: widget.data['tvdbId']?.toString(),
+        videoList: content.videoList,
+        currentIndex: content.currPlayIndex,
+        currUrl: content.currUrl,
+        sourceNames: content.sourceNames,
+        bgmId: content.bgmInfo.subjectId,
+        tmdbId: toInt(content.data['tmdbId']),
+        tvdbId: content.data['tvdbId']?.toString(),
         onEpisodeSelected: (index) {
           widget.onEpisodeChanged(index);
           _closePanel();
@@ -372,6 +365,9 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
   }
 
   Widget _buildPlayer() {
+    final content = widget.content;
+    final nextIndex = content.currPlayIndex + 1;
+    final hasNextEpisode = nextIndex < content.videoList.length;
     return ValueSelector<PlaybackCoreState, bool>(
       valueListenable: ctr.core,
       select: (core) => core.failed,
@@ -389,9 +385,9 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
           full: true,
           focusNode: _playerFocusNode,
           showPrompts: _panel == _Panel.none,
-          hasNextEpisode: widget.currPlayIndex + 1 < widget.videoList.length,
-          onNextEpisode: widget.currPlayIndex + 1 < widget.videoList.length
-              ? () => widget.onEpisodeChanged(widget.currPlayIndex + 1)
+          hasNextEpisode: hasNextEpisode,
+          onNextEpisode: hasNextEpisode
+              ? () => widget.onEpisodeChanged(nextIndex)
               : null,
         );
       },
@@ -480,10 +476,8 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
   }
 
   Widget _buildTopInfo() {
-    final title = widget.data['title']?.toString() ?? '';
-    final epTitle = widget.videoList.isNotEmpty
-        ? widget.videoList[widget.currPlayIndex].title
-        : '';
+    final content = widget.content;
+    final epTitle = content.currentVideoItem?.title ?? '';
     return Padding(
       padding: const EdgeInsets.fromLTRB(48, 32, 48, 0),
       child: Row(
@@ -493,7 +487,7 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  title,
+                  content.title,
                   style: TextStyle(
                     color: context.tvTextColor,
                     fontSize: 24,

@@ -22,30 +22,44 @@ class _MembersView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Text(
-          '${snapshot.members.length} 人在房间中',
-          style: TextStyle(color: colors.primary),
-        ),
-        const SizedBox(height: 8),
-        if (snapshot.isOwner)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: Text(
-              '开启成员开关，允许对方控制播放',
-              style: TextStyle(color: colors.onSurfaceVariant),
-            ),
-          ),
-        Material(
-          color: colors.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(24),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
+    return CustomScrollView(
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          sliver: SliverList.list(
             children: [
-              for (final member in snapshot.members)
-                ListTile(
+              Text(
+                '${snapshot.members.length} 人在房间中',
+                style: TextStyle(color: colors.primary),
+              ),
+              const SizedBox(height: 8),
+              if (snapshot.isOwner)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Text(
+                    '开启成员开关，允许对方控制播放',
+                    style: TextStyle(color: colors.onSurfaceVariant),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          sliver: SliverList.builder(
+            itemCount: snapshot.members.length,
+            itemBuilder: (context, index) {
+              final member = snapshot.members[index];
+              return Material(
+                color: colors.surfaceContainerHigh,
+                borderRadius: BorderRadius.vertical(
+                  top: index == 0 ? const Radius.circular(24) : Radius.zero,
+                  bottom: index == snapshot.members.length - 1
+                      ? const Radius.circular(24)
+                      : Radius.zero,
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: ListTile(
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 16,
                     vertical: 4,
@@ -81,7 +95,8 @@ class _MembersView extends StatelessWidget {
                           color: colors.primary,
                         ),
                 ),
-            ],
+              );
+            },
           ),
         ),
       ],
@@ -91,15 +106,13 @@ class _MembersView extends StatelessWidget {
 
 class _InviteView extends StatelessWidget {
   const _InviteView({required this.invite, required this.isOwner});
-  final WatchPartyInvite? invite;
+  final WatchPartyInvite invite;
   final bool isOwner;
   @override
   Widget build(BuildContext context) {
-    final inv = invite;
-    if (inv == null) return const Center(child: Text('暂无邀请信息'));
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final includePassword = isOwner && inv.controllerPassword.isNotEmpty;
+    final includePassword = isOwner && invite.controllerPassword.isNotEmpty;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       children: [
@@ -111,34 +124,32 @@ class _InviteView extends StatelessWidget {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 20),
-        if (inv.inviteUrl.isNotEmpty) ...[
-          Center(
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: QrImageView(
-                data: inv.inviteUrl,
-                size: 144,
-                backgroundColor: Colors.white,
-              ),
+        Center(
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: QrImageView(
+              data: invite.inviteUrl,
+              size: 144,
+              backgroundColor: Colors.white,
             ),
           ),
-          const SizedBox(height: 20),
-          FilledButton.icon(
-            onPressed: () => _copy(inv.inviteUrl),
-            style: FilledButton.styleFrom(
-              backgroundColor: colors.primary,
-              foregroundColor: colors.onPrimary,
-            ),
-            icon: const Icon(Icons.link_rounded),
-            label: const Text('复制邀请链接'),
+        ),
+        const SizedBox(height: 20),
+        FilledButton.icon(
+          onPressed: () => _copy(invite.inviteUrl),
+          style: FilledButton.styleFrom(
+            backgroundColor: colors.primary,
+            foregroundColor: colors.onPrimary,
           ),
-        ],
+          icon: const Icon(Icons.link_rounded),
+          label: const Text('复制邀请链接'),
+        ),
         const SizedBox(height: 12),
-        _copyTile(context, '邀请码', inv.inviteCode),
+        _copyTile(context, '邀请码', invite.inviteCode),
         const SizedBox(height: 16),
         Material(
           color: colors.surfaceContainerHigh,
@@ -154,15 +165,15 @@ class _InviteView extends StatelessWidget {
               _copyTile(
                 context,
                 '服务器',
-                '${inv.syncplayHost}:${inv.syncplayPort}',
+                '${invite.syncplayHost}:${invite.syncplayPort}',
               ),
-              _copyTile(context, '房间名称', inv.syncplayRoom),
+              _copyTile(context, '房间名称', invite.syncplayRoom),
               if (includePassword)
-                _copyTile(context, '控制密码（房主）', inv.controllerPassword),
+                _copyTile(context, '控制密码（房主）', invite.controllerPassword),
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 onPressed: () => _copy(
-                  '服务器: ${inv.syncplayHost}:${inv.syncplayPort}\n房间: ${inv.syncplayRoom}${includePassword ? '\n密码: ${inv.controllerPassword}' : ''}',
+                  '服务器: ${invite.syncplayHost}:${invite.syncplayPort}\n房间: ${invite.syncplayRoom}${includePassword ? '\n密码: ${invite.controllerPassword}' : ''}',
                 ),
                 icon: const Icon(Icons.copy_all_rounded),
                 label: const Text('复制全部 Syncplay 配置'),
@@ -281,6 +292,9 @@ class _MediaCard extends StatelessWidget {
                         imageUrl: coverUrl!,
                         width: 64,
                         height: 52,
+                        memCacheWidth:
+                            (64 * MediaQuery.devicePixelRatioOf(context))
+                                .ceil(),
                         fit: BoxFit.cover,
                         placeholder: (_, _) => cover,
                         errorWidget: (_, _, _) => cover,
@@ -397,19 +411,17 @@ class _Notice extends StatelessWidget {
 }
 
 String _errorText(Object error) =>
-    error.toString().replaceFirst('Bad state: ', '');
+    error is StateError ? error.message : error.toString();
 
 class _RoomView extends StatefulWidget {
   const _RoomView({
     required this.service,
     required this.state,
-    required this.snapshot,
     required this.compact,
     super.key,
   });
   final WatchPartyService service;
   final WatchPartyViewState state;
-  final WatchPartySnapshot snapshot;
   final bool compact;
   @override
   State<_RoomView> createState() => _RoomViewState();
@@ -421,24 +433,23 @@ class _RoomViewState extends State<_RoomView> {
   _RoomPage _page = _RoomPage.chat;
   bool _nearBottom = true;
   bool _unread = false;
-  bool _scrollScheduled = false;
   bool _leaving = false;
   String _error = '';
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
-    _scheduleScroll();
   }
 
   @override
   void didUpdateWidget(covariant _RoomView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final before = oldWidget.snapshot.chat.lastOrNull?.id;
-    final after = widget.snapshot.chat.lastOrNull;
+    final before = oldWidget.state.snapshot!.chat.lastOrNull?.id;
+    final snapshot = widget.state.snapshot!;
+    final after = snapshot.chat.lastOrNull;
     if (after != null && before != after.id) {
-      if (_nearBottom || after.memberId == widget.snapshot.selfId) {
-        _scheduleScroll();
+      if (_nearBottom || after.memberId == snapshot.selfId) {
+        _scrollToLatest();
       } else {
         _unread = true;
       }
@@ -453,43 +464,34 @@ class _RoomViewState extends State<_RoomView> {
   }
 
   void _onScroll() {
-    _nearBottom = _scroll.position.extentAfter < 64;
+    _nearBottom = _scroll.offset < 64;
     if (_nearBottom && _unread) setState(() => _unread = false);
   }
 
-  void _scheduleScroll() {
-    if (_scrollScheduled) return;
-    _scrollScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollScheduled = false;
-      if (!mounted || !_scroll.hasClients) return;
-      final end = _scroll.position.maxScrollExtent;
-      if ((_scroll.offset - end).abs() > .5) _scroll.jumpTo(end);
-    });
+  void _scrollToLatest() {
+    _nearBottom = true;
+    _unread = false;
+    if (_scroll.hasClients && _scroll.offset != 0) _scroll.jumpTo(0);
   }
 
   void _openPage(_RoomPage page) {
     FocusScope.of(context).unfocus();
+    if (_nearBottom) _scrollToLatest();
     setState(() => _page = page);
-    if (page == _RoomPage.chat && _nearBottom) _scheduleScroll();
   }
 
   void _send() {
-    final message = _chat.text.trim();
-    if (!widget.state.connected ||
-        message.isEmpty ||
-        !_chat.value.composing.isCollapsed && _chat.value.composing.isValid) {
-      return;
-    }
-    widget.service.sendChat(message);
+    if (!_canSend) return;
+    widget.service.sendChat(_chat.text);
     HapticFeedback.lightImpact();
     _chat.clear();
-    setState(() {
-      _nearBottom = true;
-      _unread = false;
-    });
-    _scheduleScroll();
+    setState(_scrollToLatest);
   }
+
+  bool get _canSend =>
+      widget.state.connected &&
+      _chat.text.trim().isNotEmpty &&
+      (!_chat.value.composing.isValid || _chat.value.composing.isCollapsed);
 
   Future<void> _leave({required bool close}) async {
     if (_leaving) return;
@@ -513,7 +515,8 @@ class _RoomViewState extends State<_RoomView> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final snapshot = widget.snapshot;
+    final snapshot = widget.state.snapshot!;
+    final canControl = snapshot.canControl;
     final chatPage = _page == _RoomPage.chat;
     final title = switch (_page) {
       _RoomPage.chat => '一起看',
@@ -595,7 +598,7 @@ class _RoomViewState extends State<_RoomView> {
                         connected: widget.state.connected,
                       )
                     : _InviteView(
-                        invite: widget.state.invite,
+                        invite: widget.state.invite!,
                         isOwner: snapshot.isOwner,
                       ),
               )
@@ -606,20 +609,18 @@ class _RoomViewState extends State<_RoomView> {
                   child: _MediaCard(
                     media: snapshot.media,
                     coverUrl:
-                        widget.service.matchesAttachedMedia(snapshot.media) ||
-                            widget.service.currentMedia?.title ==
-                                snapshot.media.title
+                        widget.service.matchesAttachedMedia(snapshot.media)
                         ? widget.service.currentCoverImageUrl
                         : null,
                     caption: switch (widget.state.status) {
                       WatchPartyConnectionStatus.connected =>
-                        snapshot.canControl ? '你可以控制播放' : '观众模式',
+                        canControl ? '你可以控制播放' : '观众模式',
                       WatchPartyConnectionStatus.reconnecting => '连接已断开，正在重连…',
                       WatchPartyConnectionStatus.connecting => '正在连接…',
                       _ => '连接已断开',
                     },
                     statusIcon: widget.state.connected
-                        ? snapshot.canControl
+                        ? canControl
                               ? Icons.verified_user_rounded
                               : Icons.visibility_outlined
                         : Icons.sync_rounded,
@@ -654,36 +655,34 @@ class _RoomViewState extends State<_RoomView> {
                         ),
                       )
                     else
-                      NotificationListener<ScrollMetricsNotification>(
-                        onNotification: (_) {
-                          if (_nearBottom) _scheduleScroll();
-                          return false;
+                      ListView.builder(
+                        key: PageStorageKey(snapshot.roomId),
+                        controller: _scroll,
+                        // Read the shared history backwards so the newest row
+                        // stays at offset zero, including keyboard resizes.
+                        reverse: true,
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        itemCount: snapshot.chat.length,
+                        itemBuilder: (_, reverseIndex) {
+                          final index = snapshot.chat.length - 1 - reverseIndex;
+                          final message = snapshot.chat[index];
+                          bool sameAuthor(WatchPartyChatMessage other) =>
+                              other.memberId == message.memberId &&
+                              other.username == message.username;
+                          return _MessageBubble(
+                            key: ValueKey(message.id),
+                            message: message,
+                            isSelf: message.memberId == snapshot.selfId,
+                            first:
+                                index == 0 ||
+                                !sameAuthor(snapshot.chat[index - 1]),
+                            last:
+                                index == snapshot.chat.length - 1 ||
+                                !sameAuthor(snapshot.chat[index + 1]),
+                          );
                         },
-                        child: ListView.builder(
-                          key: const PageStorageKey('party-chat-list'),
-                          controller: _scroll,
-                          keyboardDismissBehavior:
-                              ScrollViewKeyboardDismissBehavior.onDrag,
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                          itemCount: snapshot.chat.length,
-                          itemBuilder: (_, index) {
-                            final message = snapshot.chat[index];
-                            bool sameAuthor(WatchPartyChatMessage other) =>
-                                other.memberId == message.memberId &&
-                                other.username == message.username;
-                            return _MessageBubble(
-                              key: ValueKey(message.id),
-                              message: message,
-                              isSelf: message.memberId == snapshot.selfId,
-                              first:
-                                  index == 0 ||
-                                  !sameAuthor(snapshot.chat[index - 1]),
-                              last:
-                                  index == snapshot.chat.length - 1 ||
-                                  !sameAuthor(snapshot.chat[index + 1]),
-                            );
-                          },
-                        ),
                       ),
                     if (_unread)
                       Positioned(
@@ -691,11 +690,7 @@ class _RoomViewState extends State<_RoomView> {
                         right: 16,
                         child: FilledButton.tonalIcon(
                           onPressed: () {
-                            setState(() {
-                              _unread = false;
-                              _nearBottom = true;
-                            });
-                            _scheduleScroll();
+                            setState(_scrollToLatest);
                           },
                           icon: const Icon(
                             Icons.arrow_downward_rounded,
@@ -754,15 +749,9 @@ class _RoomViewState extends State<_RoomView> {
                         const SizedBox(width: 8),
                         ValueListenableBuilder<TextEditingValue>(
                           valueListenable: _chat,
-                          builder: (_, value, _) => IconButton.filled(
+                          builder: (_, _, _) => IconButton.filled(
                             tooltip: '发送消息',
-                            onPressed:
-                                widget.state.connected &&
-                                    value.text.trim().isNotEmpty &&
-                                    (!value.composing.isValid ||
-                                        value.composing.isCollapsed)
-                                ? _send
-                                : null,
+                            onPressed: _canSend ? _send : null,
                             style: IconButton.styleFrom(
                               minimumSize: const Size(48, 48),
                               backgroundColor: colors.primary,
@@ -883,7 +872,7 @@ class _MessageBubble extends StatelessWidget {
   }
 }
 
-class WatchPartySheet extends StatefulWidget {
+class WatchPartySheet extends StatelessWidget {
   const WatchPartySheet({required this.service, super.key});
   final WatchPartyService service;
   static Future<void> show(BuildContext context, WatchPartyService service) =>
@@ -896,88 +885,6 @@ class WatchPartySheet extends StatefulWidget {
         constraints: const BoxConstraints(maxWidth: 560),
         builder: (_) => WatchPartySheet(service: service),
       );
-  @override
-  State<WatchPartySheet> createState() => _WatchPartySheetState();
-}
-
-enum _EntryMode { create, join }
-
-enum _RoomPage { chat, members, invite }
-
-class _WatchPartySheetState extends State<WatchPartySheet> {
-  final _invite = TextEditingController();
-  late final TextEditingController _nickname;
-  final _nicknameFocus = FocusNode();
-  _EntryMode _mode = _EntryMode.create;
-  _EntryMode? _pending;
-  String _error = '';
-  bool _editingNickname = false;
-  @override
-  void initState() {
-    super.initState();
-    _nickname = TextEditingController(text: widget.service.currentNickname());
-  }
-
-  @override
-  void dispose() {
-    _invite.dispose();
-    _nickname.dispose();
-    _nicknameFocus.dispose();
-    super.dispose();
-  }
-
-  bool get _busy =>
-      _pending != null ||
-      switch (widget.service.state.value.status) {
-        WatchPartyConnectionStatus.connecting ||
-        WatchPartyConnectionStatus.reconnecting => true,
-        _ => false,
-      };
-  Future<void> _connect() async {
-    if (_busy) return;
-    final mode = _mode;
-    final code = WatchPartyLinks.inviteCodeFromValue(_invite.text);
-    if (mode == _EntryMode.join && code == null) {
-      setState(() => _error = '请输入有效的邀请码或邀请链接');
-      return;
-    }
-    FocusScope.of(context).unfocus();
-    setState(() {
-      _pending = mode;
-      _error = '';
-    });
-    try {
-      if (mode == _EntryMode.create) {
-        await widget.service.createRoom();
-      } else {
-        await widget.service.joinInvite(code!, nickname: _nickname.text.trim());
-      }
-    } catch (error) {
-      if (mounted) setState(() => _error = _errorText(error));
-    } finally {
-      if (mounted) setState(() => _pending = null);
-    }
-  }
-
-  Future<void> _pasteInvite() async {
-    try {
-      final data = await Clipboard.getData(Clipboard.kTextPlain);
-      if (!mounted) return;
-      final text = data?.text?.trim() ?? '';
-      if (text.isEmpty) {
-        setState(() => _error = '剪贴板中没有邀请内容');
-        return;
-      }
-      _invite.value = TextEditingValue(
-        text: text,
-        selection: TextSelection.collapsed(offset: text.length),
-      );
-      setState(() => _error = '');
-    } catch (_) {
-      if (mounted) setState(() => _error = '无法读取剪贴板，请手动输入邀请');
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
@@ -1032,16 +939,15 @@ class _WatchPartySheetState extends State<WatchPartySheet> {
                       ),
                       Expanded(
                         child: ValueListenableBuilder<WatchPartyViewState>(
-                          valueListenable: widget.service.state,
+                          valueListenable: service.state,
                           builder: (context, state, _) {
                             final snapshot = state.snapshot;
                             return snapshot == null
-                                ? _buildEntry(context, state)
+                                ? _EntryView(service: service)
                                 : _RoomView(
                                     key: ValueKey(snapshot.roomId),
-                                    service: widget.service,
+                                    service: service,
                                     state: state,
-                                    snapshot: snapshot,
                                     compact: height < 360,
                                   );
                           },
@@ -1057,8 +963,93 @@ class _WatchPartySheetState extends State<WatchPartySheet> {
       },
     );
   }
+}
 
-  Widget _buildEntry(BuildContext context, WatchPartyViewState state) {
+enum _EntryMode { create, join }
+
+enum _RoomPage { chat, members, invite }
+
+class _EntryView extends StatefulWidget {
+  const _EntryView({required this.service});
+  final WatchPartyService service;
+
+  @override
+  State<_EntryView> createState() => _EntryViewState();
+}
+
+class _EntryViewState extends State<_EntryView> {
+  final _invite = TextEditingController();
+  late final TextEditingController _nickname;
+  final _nicknameFocus = FocusNode();
+  _EntryMode _mode = _EntryMode.create;
+  String _error = '';
+  @override
+  void initState() {
+    super.initState();
+    _nickname = TextEditingController(text: widget.service.currentNickname());
+  }
+
+  @override
+  void dispose() {
+    _invite.dispose();
+    _nickname.dispose();
+    _nicknameFocus.dispose();
+    super.dispose();
+  }
+
+  bool get _busy => switch (widget.service.state.value.status) {
+    WatchPartyConnectionStatus.connecting ||
+    WatchPartyConnectionStatus.reconnecting ||
+    WatchPartyConnectionStatus.connected => true,
+    _ => false,
+  };
+  Future<void> _connect() async {
+    if (_busy) return;
+    final mode = _mode;
+    final code = mode == _EntryMode.join
+        ? WatchPartyLinks.inviteCodeFromValue(_invite.text)
+        : null;
+    if (mode == _EntryMode.join && code == null) {
+      setState(() => _error = '请输入有效的邀请码或邀请链接');
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    setState(() => _error = '');
+    try {
+      if (mode == _EntryMode.create) {
+        await widget.service.createRoom();
+      } else {
+        await widget.service.joinInvite(code!, nickname: _nickname.text);
+      }
+    } catch (error) {
+      if (mounted && widget.service.state.value.error.isEmpty) {
+        setState(() => _error = _errorText(error));
+      }
+    }
+  }
+
+  Future<void> _pasteInvite() async {
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      if (!mounted) return;
+      final text = data?.text?.trim() ?? '';
+      if (text.isEmpty) {
+        setState(() => _error = '剪贴板中没有邀请内容');
+        return;
+      }
+      _invite.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
+      setState(() => _error = '');
+    } catch (_) {
+      if (mounted) setState(() => _error = '无法读取剪贴板，请手动输入邀请');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = widget.service.state.value;
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final joining = _mode == _EntryMode.join;
@@ -1236,7 +1227,7 @@ class _WatchPartySheetState extends State<WatchPartySheet> {
                                 key: const ValueKey('party-nickname-input'),
                                 controller: _nickname,
                                 focusNode: _nicknameFocus,
-                                readOnly: !_editingNickname || _busy,
+                                readOnly: _busy,
                                 maxLength: 16,
                                 textInputAction: TextInputAction.done,
                                 decoration: const InputDecoration(
@@ -1247,10 +1238,7 @@ class _WatchPartySheetState extends State<WatchPartySheet> {
                                   focusedBorder: InputBorder.none,
                                   isDense: true,
                                 ),
-                                onSubmitted: (_) {
-                                  setState(() => _editingNickname = false);
-                                  _nicknameFocus.unfocus();
-                                },
+                                onSubmitted: (_) => _nicknameFocus.unfocus(),
                               )
                             : Text(
                                 '以 ${widget.service.currentNickname()} 的身份加入',
@@ -1260,12 +1248,7 @@ class _WatchPartySheetState extends State<WatchPartySheet> {
                       if (joining)
                         IconButton(
                           tooltip: '编辑昵称',
-                          onPressed: _busy
-                              ? null
-                              : () {
-                                  setState(() => _editingNickname = true);
-                                  _nicknameFocus.requestFocus();
-                                },
+                          onPressed: _busy ? null : _nicknameFocus.requestFocus,
                           icon: const Icon(Icons.edit_rounded),
                         ),
                     ],
@@ -1316,11 +1299,7 @@ class _WatchPartySheetState extends State<WatchPartySheet> {
                         ),
                   label: Text(
                     _busy
-                        ? (_pending == _EntryMode.create
-                              ? '正在创建…'
-                              : _pending == _EntryMode.join
-                              ? '正在加入…'
-                              : '正在连接…')
+                        ? (joining ? '正在加入…' : '正在创建…')
                         : joining
                         ? '加入房间'
                         : '创建房间',

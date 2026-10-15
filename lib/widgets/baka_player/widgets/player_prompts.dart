@@ -6,11 +6,10 @@ import 'package:flutter/material.dart';
 
 import '../controller.dart';
 
-/// One anchored surface for resume, skip, and episode-two opt-in.
+/// Skip actions and episode-two opt-in share one anchored surface.
 class PlayerPrompts extends StatelessWidget {
   const PlayerPrompts({
     required this.controller,
-    required this.isFullScreen,
     required this.hasNextEpisode,
     required this.onNextEpisode,
     this.isWideLayout = false,
@@ -19,7 +18,6 @@ class PlayerPrompts extends StatelessWidget {
   });
 
   final PlaybackController controller;
-  final bool isFullScreen;
   final bool hasNextEpisode;
   final VoidCallback? onNextEpisode;
   final bool isWideLayout;
@@ -42,39 +40,21 @@ class PlayerPrompts extends StatelessWidget {
             child:
                 ValueSelector<
                   PlayerOverlayState,
-                  (SkipState, String, bool, bool, String, bool, bool)
+                  (SkipState, String, bool, bool, bool)
                 >(
                   valueListenable: controller.overlay,
                   select: (state) => (
                     state.skipState,
                     state.skipLabel,
                     state.skipWasAutomatic,
-                    state.showJumpPrompt,
-                    state.jumpPromptText,
                     state.showSkipSuggestion,
                     state.controlsLocked || state.showDanmakuInput,
                   ),
                   builder: (context, state) {
-                    if (state.$7 || !controller.canControlPlayback) {
+                    if (state.$5 || !controller.canControlPlayback) {
                       return const SizedBox.shrink();
                     }
                     if (state.$4) {
-                      return _PlayerNotice(
-                        key: const ValueKey('resume-notice'),
-                        isWideLayout: isWideLayout,
-                        isTvLayout: isTvLayout,
-                        icon: Icons.history_rounded,
-                        text: state.$5,
-                        onClose: controller.hideJumpPrompt,
-                        actions: [
-                          _NoticeAction(
-                            '继续播放',
-                            controller.performJumpToPosition,
-                          ),
-                        ],
-                      );
-                    }
-                    if (state.$6) {
                       return _PlayerNotice(
                         key: const ValueKey('skip-suggestion'),
                         isWideLayout: isWideLayout,

@@ -41,14 +41,17 @@ void main() {
           client: MockClient((r) async {
             requests++;
             return http.Response(
-              r.headers['token'] == 'new' ? 'ok' : '',
+              r.headers['token'] == 'new' ? '"ok"' : '',
               r.headers['token'] == 'new' ? 200 : 401,
             );
           }),
         );
         expect(
           await Future.wait(
-            List.generate(32, (_) => client.get('https://example.test/data')),
+            List.generate(
+              32,
+              (_) => client.getJson<String>('https://example.test/data'),
+            ),
           ),
           everyElement('ok'),
         );
@@ -77,6 +80,35 @@ void main() {
       expect(prefs.getString('usertoken'), isNull);
       expect(prefs.getString('refresh_token'), isNull);
     });
+
+    test(
+      'refresh starts immediately and shares pending credential work',
+      () async {
+        final pending = Completer<TokenResponse?>();
+        var calls = 0;
+        final session = AccountSession(
+          prefs,
+          refreshTokens: (_) {
+            calls++;
+            return pending.future;
+          },
+        );
+        final first = session.refresh();
+        expect(calls, 1);
+        expect(session.refresh(), same(first));
+        pending.complete(const TokenResponse('new'));
+        expect(await first, isTrue);
+
+        await session.logout();
+        expect(await session.refresh(), isFalse);
+        await session.login(
+          const TokenResponse('next', refreshToken: 'next'),
+          user,
+        );
+        expect(await session.refresh(), isTrue);
+        expect(calls, 2);
+      },
+    );
 
     test(
       'external origins never receive tokens or refresh an expired session',
@@ -111,7 +143,7 @@ void main() {
           'https://www.anibaka.com.outside.test',
         ]) {
           await expectLater(
-            client.get('$origin/data', notifyOnError: false),
+            client.getJson<String>('$origin/data', notifyOnError: false),
             throwsA(
               isA<ApiException>().having(
                 (e) => e.statusCode,
@@ -148,17 +180,17 @@ void main() {
               started.complete();
               return pending.future;
             }
-            return http.Response('ok', 200);
+            return http.Response('"ok"', 200);
           }),
         );
         addTearDown(client.close);
-        final request = client.get('$origin/pending');
+        final request = client.getJson<String>('$origin/pending');
         await started.future;
         origin = 'https://second.test';
         pending.complete(http.Response('stale', 200));
         await expectLater(request, throwsStateError);
-        expect(await client.get('https://first.test/data'), 'ok');
-        expect(await client.get('$origin/data'), 'ok');
+        expect(await client.getJson<String>('https://first.test/data'), 'ok');
+        expect(await client.getJson<String>('$origin/data'), 'ok');
       },
     );
 
@@ -176,7 +208,10 @@ void main() {
       );
       addTearDown(client.close);
       await expectLater(
-        client.get('https://example.test/data', notifyOnError: false),
+        client.getJson<String>(
+          'https://example.test/data',
+          notifyOnError: false,
+        ),
         throwsA(same(failure)),
       );
       expect(session.token, 'old');
@@ -212,14 +247,21 @@ void main() {
           '/api/v1/bangumi/oauth/refresh',
         ]) {
           await expectLater(
-            client.post('https://example.test$path', {}, notifyOnError: false),
+            client.postJson<Object>(
+              'https://example.test$path',
+              {},
+              notifyOnError: false,
+            ),
             throwsA(isA<ApiException>()),
           );
         }
         expect(refreshes, 0);
         expect(session.token, 'old');
         await expectLater(
-          client.get('https://example.test/private', notifyOnError: false),
+          client.getJson<String>(
+            'https://example.test/private',
+            notifyOnError: false,
+          ),
           throwsA(isA<ApiException>()),
         );
         expect(refreshes, 1);
@@ -237,7 +279,7 @@ void main() {
         credentialOrigin: () => Uri.parse('https://example.test'),
         client: MockClient((_) => response.future),
       );
-      final request = client.get('https://example.test/private');
+      final request = client.getJson<String>('https://example.test/private');
       await session.login(const TokenResponse('other'), user);
       response.complete(http.Response('old account data', 200));
       await expectLater(request, throwsStateError);
@@ -274,5 +316,4 @@ void main() {
       },
     );
   });
-
 }

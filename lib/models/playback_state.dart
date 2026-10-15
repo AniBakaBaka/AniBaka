@@ -88,9 +88,6 @@ class PlayerOverlayState {
     this.skipLabel = '片头',
     this.skipWasAutomatic = false,
     this.showSkipSuggestion = false,
-    this.showJumpPrompt = false,
-    this.jumpPosition = Duration.zero,
-    this.jumpPromptText = '',
   });
 
   final bool controlsVisible;
@@ -105,9 +102,6 @@ class PlayerOverlayState {
   final String skipLabel;
   final bool skipWasAutomatic;
   final bool showSkipSuggestion;
-  final bool showJumpPrompt;
-  final Duration jumpPosition;
-  final String jumpPromptText;
 
   PlayerOverlayState copyWith({
     bool? controlsVisible,
@@ -122,9 +116,6 @@ class PlayerOverlayState {
     String? skipLabel,
     bool? skipWasAutomatic,
     bool? showSkipSuggestion,
-    bool? showJumpPrompt,
-    Duration? jumpPosition,
-    String? jumpPromptText,
   }) => PlayerOverlayState(
     controlsVisible: controlsVisible ?? this.controlsVisible,
     controlsLocked: controlsLocked ?? this.controlsLocked,
@@ -138,9 +129,6 @@ class PlayerOverlayState {
     skipLabel: skipLabel ?? this.skipLabel,
     skipWasAutomatic: skipWasAutomatic ?? this.skipWasAutomatic,
     showSkipSuggestion: showSkipSuggestion ?? this.showSkipSuggestion,
-    showJumpPrompt: showJumpPrompt ?? this.showJumpPrompt,
-    jumpPosition: jumpPosition ?? this.jumpPosition,
-    jumpPromptText: jumpPromptText ?? this.jumpPromptText,
   );
 }
 
@@ -354,30 +342,15 @@ class PlaybackTechnicalInfo {
     this.framesPerSecond,
     this.videoBitrate,
     this.videoCodec,
-    this.videoDecoder,
     this.hardwareDecoder,
     this.videoOutput,
-    this.graphicsApi,
-    this.graphicsContext,
-    this.pixelFormat,
-    this.colorSpace,
-    this.containerFormat,
     this.audioBitrate,
-    this.audioSampleRate,
     this.audioChannels,
     this.audioCodec,
-    this.audioDecoder,
-    this.audioFormat,
-    this.audioChannelLayout,
     this.rendererProfile = 'gpu',
-    this.hardwareDecodeMode = 'auto',
-    this.requestedEnhancementMode = VideoEnhancementMode.off,
     this.appliedEnhancementPipeline = VideoEnhancementMode.off,
-    this.enhancementFallbackReason,
-    this.outputWidth,
-    this.outputHeight,
-    this.frameDropCount = 0,
-    this.delayedFrameCount = 0,
+    this.frameDropCount,
+    this.delayedFrameCount,
   });
 
   final int? width;
@@ -385,55 +358,18 @@ class PlaybackTechnicalInfo {
   final double? framesPerSecond;
   final int? videoBitrate;
   final String? videoCodec;
-  final String? videoDecoder;
   final String? hardwareDecoder;
   final String? videoOutput;
-  final String? graphicsApi;
-  final String? graphicsContext;
-  final String? pixelFormat;
-  final String? colorSpace;
-  final String? containerFormat;
   final int? audioBitrate;
-  final int? audioSampleRate;
   final int? audioChannels;
   final String? audioCodec;
-  final String? audioDecoder;
-  final String? audioFormat;
-  final String? audioChannelLayout;
   final String rendererProfile;
-  final String hardwareDecodeMode;
-  final VideoEnhancementMode requestedEnhancementMode;
   final VideoEnhancementMode appliedEnhancementPipeline;
-  final String? enhancementFallbackReason;
-  final int? outputWidth;
-  final int? outputHeight;
-  final int frameDropCount;
-  final int delayedFrameCount;
+  final int? frameDropCount;
+  final int? delayedFrameCount;
 
   String? get resolution =>
       (width != null && height != null && width! > 0 && height! > 0)
       ? '$width × $height'
       : null;
-
-  String? get outputResolution =>
-      (outputWidth != null &&
-          outputHeight != null &&
-          outputWidth! > 0 &&
-          outputHeight! > 0)
-      ? '$outputWidth × $outputHeight'
-      : null;
-
-  String? get qualityLabel {
-    if (width == null || height == null || width! <= 0 || height! <= 0) {
-      return null;
-    }
-    final shortEdge = width! < height! ? width! : height!;
-    if (shortEdge >= 2160) return '4K';
-    if (shortEdge >= 1440) return '2K';
-    if (shortEdge >= 1080) return '1080p';
-    if (shortEdge >= 720) return '720p';
-    if (shortEdge >= 480) return '480p';
-    if (shortEdge >= 360) return '360p';
-    return '${shortEdge}p';
-  }
 }

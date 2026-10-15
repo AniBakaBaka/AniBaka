@@ -1,3 +1,4 @@
+import 'package:baka/core/content_filter.dart';
 import 'package:flutter/material.dart';
 
 import 'package:baka/models/collection.dart';
@@ -59,6 +60,7 @@ class _TvFavoritesPageState extends State<TvFavoritesPage> {
     final data = <String, dynamic>{
       'title': item.displayTitle,
       'bgmId': item.bgmId,
+      'nsfw': item.nsfw,
       'postId': item.postId,
       'cover': item.displayCover,
       'bgmImageUrl': item.bgmImage,
@@ -68,9 +70,17 @@ class _TvFavoritesPageState extends State<TvFavoritesPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final filtered =
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: contentFilter,
+    builder: (context, _) => _buildContent(context),
+  );
+
+  Widget _buildContent(BuildContext context) {
+    final items =
         _collectionsByStatus[_selectedTabStatus] ?? const <AnimeCollection>[];
+    final filtered = contentFilter.value
+        ? items.where((item) => !item.nsfw).toList(growable: false)
+        : items;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),

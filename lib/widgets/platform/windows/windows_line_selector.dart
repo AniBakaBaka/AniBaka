@@ -2,106 +2,37 @@ import 'package:flutter/material.dart';
 
 class WindowsLineSelector extends StatelessWidget {
   const WindowsLineSelector({
-    required this.lineCount,
+    required this.availableLineIndexes,
     required this.currUrl,
     required this.onUrlChanged,
     super.key,
-    this.title,
     this.sourceNames,
-    this.isInline = false,
-    this.availableLineIndexes,
   });
 
-  final int lineCount;
   final int currUrl;
   final ValueChanged<int> onUrlChanged;
-  final String? title;
   final List<String>? sourceNames;
-  final bool isInline;
-  final List<int>? availableLineIndexes;
+  final Iterable<int> availableLineIndexes;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final indexes =
-        availableLineIndexes ?? List.generate(lineCount, (index) => index + 1);
-
-    if (indexes.length <= 1) {
-      if (isInline) return const SizedBox.shrink();
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          color: theme.cardColor.withValues(alpha: 0.4),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.info_outline, color: theme.hintColor, size: 16),
-            const SizedBox(width: 6),
-            Text(
-              '此剧集暂无其他线路',
-              style: TextStyle(color: theme.hintColor, fontSize: 12),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (title != null && !isInline) ...[
-          Text(
-            title!,
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 8),
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final index in availableLineIndexes) _buildLine(context, index),
         ],
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: List.generate(
-              indexes.length,
-              (index) => _WindowsLineSelectorItem(
-                lineIndex: indexes[index],
-                currUrl: currUrl,
-                onTap: onUrlChanged,
-                sourceNames: sourceNames,
-              ),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
-}
 
-class _WindowsLineSelectorItem extends StatelessWidget {
-  const _WindowsLineSelectorItem({
-    required this.lineIndex,
-    required this.currUrl,
-    required this.onTap,
-    this.sourceNames,
-  });
-
-  final int lineIndex;
-  final int currUrl;
-  final ValueChanged<int> onTap;
-  final List<String>? sourceNames;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildLine(BuildContext context, int lineIndex) {
     final isSelected = lineIndex == currUrl;
     final theme = Theme.of(context);
     final primaryColor = theme.colorScheme.primary;
     final isDark = theme.brightness == Brightness.dark;
     final names = sourceNames;
-    final lineName =
-        (names != null && lineIndex > 0 && lineIndex <= names.length)
+    final lineName = (names != null && lineIndex <= names.length)
         ? names[lineIndex - 1]
         : '线路 $lineIndex';
 
@@ -123,7 +54,7 @@ class _WindowsLineSelectorItem extends StatelessWidget {
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(6),
         child: InkWell(
-          onTap: () => onTap(lineIndex),
+          onTap: () => onUrlChanged(lineIndex),
           borderRadius: BorderRadius.circular(6),
           hoverColor: isSelected ? null : Colors.white.withValues(alpha: 0.08),
           child: AnimatedContainer(

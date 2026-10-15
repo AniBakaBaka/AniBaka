@@ -1,6 +1,8 @@
+import 'dart:async';
+
+import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/models/playback_request.dart';
-import 'package:baka/core/app_storage.dart';
 import 'package:baka/app/watch_party_links.dart';
 import 'package:get/get.dart' hide ContextExtensionss;
 import 'package:baka/app_state.dart';
@@ -16,13 +18,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
-/// 单标签页 UI 状态（滚动 + CommentList key）
-class _TabUi {
+class _ThreadTab {
+  _ThreadTab(this.name, int pid) : data = ThreadController(pid);
+
+  final String name;
+  final ThreadController data;
   final ScrollController scroll = ScrollController();
   final GlobalKey<CommentListState> commentKey = GlobalKey<CommentListState>();
   double lastOffset = 0;
 
-  void dispose() => scroll.dispose();
+  void dispose() {
+    data.dispose();
+    scroll.dispose();
+  }
 }
 
 class ThreadPage extends StatefulWidget {
@@ -34,37 +42,35 @@ class ThreadPage extends StatefulWidget {
 
 class _ThreadPageState extends State<ThreadPage>
     with AutomaticKeepAliveClientMixin {
-  static final _gvRegex = RegExp(r'gv(\d+)');
-  static const int _watchPartyIndex = 2;
-
-  final ThreadController _svc = ThreadController();
-  late final PageController _pageController;
-  late final List<_TabUi> _uis;
+  static final _gvRegex = RegExp(r'^gv(\d+)$');
+  final _tabs = [
+    _ThreadTab('#茶馆', 6),
+    _ThreadTab('#baka', 8),
+    null, // 一起看
+    _ThreadTab('#求番报错', 7),
+    _ThreadTab('#反馈', 9),
+    _ThreadTab('#里世界', 10),
+  ];
+  final _pageController = PageController();
+  final _watchRooms = ValueNotifier(
+    const AsyncSnapshot<List<WatchPartyInvite>>.nothing(),
+  );
+  final _joiningRoomCode = ValueNotifier('');
+  Completer<void>? _watchRoomsAbort;
   late final Worker _commentWorker;
 
   int _index = 0;
-  String _joiningRoomCode = '';
 
   @override
   bool get wantKeepAlive => true;
 
-  int get _pageCount => _svc.tabs.length + 1;
-  bool _isWatchPartyTab(int index) => index == _watchPartyIndex;
-  int _threadIndex(int pageIndex) =>
-      pageIndex < _watchPartyIndex ? pageIndex : pageIndex - 1;
-  int _pageIndex(int threadIndex) =>
-      threadIndex < _watchPartyIndex ? threadIndex : threadIndex + 1;
-
   @override
   void initState() {
     super.initState();
-    _pageController = PageController();
-    _uis = List.generate(_svc.tabs.length, (i) {
-      final ui = _TabUi();
-      ui.scroll.addListener(() => _onScroll(i));
-      return ui;
-    });
-    _ensureLoaded(_index);
+    for (final tab in _tabs) {
+      if (tab != null) tab.scroll.addListener(() => _onScroll(tab));
+    }
+    _tabs.first!.data.load();
     _commentWorker = ever(Get.find<AppState>().sendCommentTrigger, (_) {
       _sendComment();
     });
@@ -74,111 +80,81 @@ class _ThreadPageState extends State<ThreadPage>
   void dispose() {
     _commentWorker.dispose();
     _pageController.dispose();
-    for (final ui in _uis) {
-      ui.dispose();
+    for (final tab in _tabs) {
+      tab?.dispose();
     }
+    _watchRoomsAbort?.complete();
+    _watchRooms.dispose();
+    _joiningRoomCode.dispose();
     super.dispose();
   }
 
-  Future<void> _ensureLoaded(int i) async {
-    await AppStorage.open(AppStorage.threadCommentsBoxName);
-    if (!mounted) return;
-    if (_svc.tabs[i].page > 0 || _svc.tabs[i].isRefreshing) return;
-    final hasCache = _svc.loadCached(i);
-    if (hasCache) setState(() {});
-    await _refresh(i, silent: hasCache);
-  }
-
-  Future<void> _refresh(int i, {bool silent = false}) async {
-    if (!mounted || _svc.tabs[i].isRefreshing) return;
-    final task = _svc.refresh(i);
-    setState(() {});
-    try {
-      await task;
-    } catch (e) {
-      debugPrint('刷新评论出错: $e');
-      if (mounted && _pageIndex(i) == _index && !silent) {
-        showSnackBar('加载评论失败，请检查网络');
-      }
-    } finally {
-      if (mounted) setState(() {});
+  void _onScroll(_ThreadTab tab) {
+    if (tab != _tabs[_index] || !tab.scroll.hasClients) return;
+    if (tab.data.canLoadMore && tab.scroll.position.extentAfter < 400) {
+      tab.data.load();
     }
-  }
-
-  Future<void> _loadMore(int i) async {
-    if (!mounted || !_svc.canLoadMore(i)) return;
-    final task = _svc.loadMore(i);
-    setState(() {});
-    await task;
-    if (mounted) setState(() {});
-  }
-
-  void _onScroll(int i) {
-    final c = _uis[i].scroll;
-    if (!c.hasClients) return;
-
-    if (_svc.canLoadMore(i) &&
-        c.position.pixels >= c.position.maxScrollExtent - 400) {
-      _loadMore(i);
-    }
-
-    // 仅当前页、非 Windows 上报滚动方向
-    if (_pageIndex(i) != _index || Instances.isDesktopPlatform) return;
-    final offset = c.offset;
-    final ui = _uis[i];
-    if ((offset - ui.lastOffset).abs() <= 50) return;
-    Get.find<AppState>().updateScrollDirection(offset > ui.lastOffset);
-    ui.lastOffset = offset;
+    if (Instances.isDesktopPlatform) return;
+    final offset = tab.scroll.offset;
+    if ((offset - tab.lastOffset).abs() <= 50) return;
+    Get.find<AppState>().updateScrollDirection(offset > tab.lastOffset);
+    tab.lastOffset = offset;
   }
 
   void _switch(int i, {bool fromPage = false}) {
     if (i == _index) return;
     setState(() => _index = i);
     if (!fromPage) {
-      _pageController.animateToPage(
-        i,
-        duration: const Duration(milliseconds: 260),
-        curve: Curves.easeOutCubic,
-      );
+      _pageController.jumpToPage(i);
     }
-    if (_isWatchPartyTab(i)) {
-      _refreshWatchRooms(silent: true);
-    } else {
-      final threadIndex = _threadIndex(i);
-      if (_svc.tabs[threadIndex].page == 0) _ensureLoaded(threadIndex);
+    final tab = _tabs[i];
+    if (tab == null) {
+      _refreshWatchRooms();
+    } else if (tab.data.comments.isEmpty) {
+      tab.data.load();
     }
   }
 
   Future<void> _sendComment() async {
-    if (_isWatchPartyTab(_index)) {
+    final tab = _tabs[_index];
+    if (tab == null) {
       showSnackBar('一起看房间页不支持发帖');
       return;
     }
-    final threadIndex = _threadIndex(_index);
     final result = await CommentInputWidget.show(context);
     if (result == null || !mounted) return;
-    final state = _uis[threadIndex].commentKey.currentState;
+    final state = tab.commentKey.currentState;
     if (state == null) return;
     await state.sendComment(result, 0, '');
   }
 
-  Future<void> _refreshWatchRooms({bool silent = false}) async {
-    final task = _svc.refreshWatchRooms();
-    if (!silent && mounted) setState(() {});
+  Future<void> _refreshWatchRooms() async {
+    if (_watchRoomsAbort != null) {
+      return;
+    }
+    final abort = _watchRoomsAbort = Completer<void>();
+    _watchRooms.value = _watchRooms.value.inState(ConnectionState.waiting);
     try {
-      await task;
-    } catch (_) {
-      if (mounted && _isWatchPartyTab(_index) && !silent) {
-        showSnackBar('加载一起看房间失败，请检查网络');
+      final rooms = await AniBakaApi.listWatchRooms(abortTrigger: abort.future);
+      if (mounted) {
+        _watchRooms.value = AsyncSnapshot.withData(ConnectionState.done, rooms);
+      }
+    } catch (error, stackTrace) {
+      if (mounted) {
+        _watchRooms.value = AsyncSnapshot.withError(
+          ConnectionState.done,
+          error,
+          stackTrace,
+        );
       }
     } finally {
-      if (mounted) setState(() {});
+      _watchRoomsAbort = null;
     }
   }
 
   Future<void> _onLink(String text, String? url, String title) async {
     if (url == null) return;
-    final match = _gvRegex.firstMatch(url) ?? _gvRegex.firstMatch(text);
+    final match = _gvRegex.firstMatch(url);
     if (match == null) {
       launchUrlString(url, mode: LaunchMode.externalApplication);
       return;
@@ -211,11 +187,21 @@ class _ThreadPageState extends State<ThreadPage>
           Expanded(
             child: PageView.builder(
               controller: _pageController,
-              itemCount: _pageCount,
+              itemCount: _tabs.length,
               onPageChanged: (i) => _switch(i, fromPage: true),
-              itemBuilder: (_, i) => _isWatchPartyTab(i)
-                  ? _watchPartyPage(theme)
-                  : _page(_threadIndex(i), theme),
+              itemBuilder: (_, i) {
+                final tab = _tabs[i];
+                return tab == null
+                    ? ValueListenableBuilder(
+                        valueListenable: _watchRooms,
+                        builder: (_, snapshot, _) =>
+                            _watchPartyPage(theme, snapshot),
+                      )
+                    : ListenableBuilder(
+                        listenable: tab.data,
+                        builder: (_, _) => _page(tab, theme),
+                      );
+              },
             ),
           ),
         ],
@@ -223,14 +209,11 @@ class _ThreadPageState extends State<ThreadPage>
     );
   }
 
-  Widget _page(int i, ThemeData theme) {
-    final tab = _svc.tabs[i];
-    final ui = _uis[i];
-    final showSkeleton =
-        tab.page == 0 && tab.isRefreshing && tab.comments.isEmpty;
+  Widget _page(_ThreadTab ui, ThemeData theme) {
+    final tab = ui.data;
 
     return RefreshIndicator(
-      onRefresh: () => _refresh(i),
+      onRefresh: () => tab.load(refresh: true),
       color: theme.colorScheme.primary,
       backgroundColor: theme.colorScheme.surface,
       displacement: 24,
@@ -241,18 +224,28 @@ class _ThreadPageState extends State<ThreadPage>
           parent: BouncingScrollPhysics(),
         ),
         slivers: [
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
-            sliver: CommentList(
-              pid: tab.pid,
-              comments: showSkeleton ? null : tab.comments,
-              key: ui.commentKey,
-              autoLoad: false,
-              onRefresh: () => _refresh(i),
-              asSliver: true,
-              onTapLink: _onLink,
+          if (tab.error == null || tab.comments.isNotEmpty)
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
+              sliver: CommentList(
+                pid: tab.pid,
+                comments: tab.isRefreshing && tab.comments.isEmpty
+                    ? null
+                    : tab.comments,
+                key: ui.commentKey,
+                autoLoad: false,
+                onRefresh: () => tab.load(refresh: true),
+                asSliver: true,
+                onTapLink: _onLink,
+              ),
             ),
-          ),
+          if (tab.error != null)
+            SliverToBoxAdapter(
+              child: TextButton(
+                onPressed: tab.load,
+                child: const Text('加载评论失败，点击重试'),
+              ),
+            ),
           if (tab.isLoadingMore) SliverToBoxAdapter(child: _loadingMore(theme)),
           if (!tab.hasMore && tab.comments.isNotEmpty)
             const SliverToBoxAdapter(child: _EndIndicator()),
@@ -262,8 +255,11 @@ class _ThreadPageState extends State<ThreadPage>
     );
   }
 
-  Widget _watchPartyPage(ThemeData theme) {
-    final rooms = _svc.watchRooms;
+  Widget _watchPartyPage(
+    ThemeData theme,
+    AsyncSnapshot<List<WatchPartyInvite>> snapshot,
+  ) {
+    final rooms = snapshot.data ?? const [];
     return RefreshIndicator(
       onRefresh: _refreshWatchRooms,
       color: theme.colorScheme.primary,
@@ -309,7 +305,8 @@ class _ThreadPageState extends State<ThreadPage>
               ),
             ),
           ),
-          if (_svc.watchRoomsRefreshing && rooms.isEmpty)
+          if (snapshot.connectionState == ConnectionState.waiting &&
+              rooms.isEmpty)
             const SliverFillRemaining(
               hasScrollBody: false,
               child: Center(child: CircularProgressIndicator()),
@@ -317,7 +314,7 @@ class _ThreadPageState extends State<ThreadPage>
           else if (rooms.isEmpty)
             SliverFillRemaining(
               hasScrollBody: false,
-              child: _watchPartyEmptyState(theme),
+              child: _watchPartyEmptyState(theme, snapshot.error),
             )
           else
             SliverPadding(
@@ -326,7 +323,11 @@ class _ThreadPageState extends State<ThreadPage>
                 delegate: SliverChildBuilderDelegate((context, index) {
                   final roomIndex = index ~/ 2;
                   if (index.isOdd) return const SizedBox(height: 12);
-                  return _watchPartyCard(rooms[roomIndex], theme);
+                  return ValueListenableBuilder(
+                    valueListenable: _joiningRoomCode,
+                    builder: (_, code, _) =>
+                        _watchPartyCard(rooms[roomIndex], theme, code),
+                  );
                 }, childCount: rooms.length * 2 - 1),
               ),
             ),
@@ -335,8 +336,8 @@ class _ThreadPageState extends State<ThreadPage>
     );
   }
 
-  Widget _watchPartyEmptyState(ThemeData theme) {
-    final hasError = _svc.watchRoomsError.isNotEmpty;
+  Widget _watchPartyEmptyState(ThemeData theme, Object? error) {
+    final hasError = error != null;
     return Center(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(28, 12, 28, 100),
@@ -350,7 +351,7 @@ class _ThreadPageState extends State<ThreadPage>
             ),
             const SizedBox(height: 12),
             Text(
-              hasError ? _svc.watchRoomsError : '暂时没有正在进行的房间',
+              hasError ? error.toString() : '暂时没有正在进行的房间',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium,
             ),
@@ -367,20 +368,25 @@ class _ThreadPageState extends State<ThreadPage>
     );
   }
 
-  Widget _watchPartyCard(WatchPartyInvite room, ThemeData theme) {
-    final hasTitle = room.title.trim().isNotEmpty;
-    final title = hasTitle ? room.title.trim() : 'Syncplay 房间';
+  Widget _watchPartyCard(
+    WatchPartyInvite room,
+    ThemeData theme,
+    String joiningCode,
+  ) {
+    final roomTitle = room.title.trim();
+    final hasTitle = roomTitle.isNotEmpty;
+    final title = hasTitle ? roomTitle : 'Syncplay 房间';
     final media = hasTitle
         ? 'EP${room.episodeIndex + 1}'
         : '房间 ${room.syncplayRoom}';
-    final joining = _joiningRoomCode == room.inviteCode;
+    final joining = joiningCode == room.inviteCode;
 
     return Material(
       color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.62),
       borderRadius: BorderRadius.circular(18),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: joining ? null : () => _joinWatchParty(room),
+        onTap: joiningCode.isEmpty ? () => _joinWatchParty(room) : null,
         child: Padding(
           padding: const EdgeInsets.all(15),
           child: Row(
@@ -451,12 +457,12 @@ class _ThreadPageState extends State<ThreadPage>
   }
 
   Future<void> _joinWatchParty(WatchPartyInvite room) async {
-    if (_joiningRoomCode.isNotEmpty) return;
-    setState(() => _joiningRoomCode = room.inviteCode);
+    if (_joiningRoomCode.value.isNotEmpty) return;
+    _joiningRoomCode.value = room.inviteCode;
     try {
       await Get.find<WatchPartyLinks>().joinInviteLink(room.inviteCode);
     } finally {
-      if (mounted) setState(() => _joiningRoomCode = '');
+      if (mounted) _joiningRoomCode.value = '';
     }
   }
 
@@ -507,7 +513,7 @@ class _ThreadPageState extends State<ThreadPage>
         physics: const BouncingScrollPhysics(),
         child: Row(
           children: [
-            for (var i = 0; i < _pageCount; i++) _tabChip(i, theme, isDark),
+            for (var i = 0; i < _tabs.length; i++) _tabChip(i, theme, isDark),
           ],
         ),
       ),
@@ -543,9 +549,7 @@ class _ThreadPageState extends State<ThreadPage>
             letterSpacing: 0.3,
             color: selected ? Colors.white : muted,
           ),
-          child: Text(
-            _isWatchPartyTab(i) ? '#一起看' : _svc.tabs[_threadIndex(i)].name,
-          ),
+          child: Text(_tabs[i]?.name ?? '#一起看'),
         ),
       ),
     );
@@ -556,31 +560,38 @@ class _ThreadPageState extends State<ThreadPage>
         ? Colors.white60
         : theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.5);
 
-    final refreshing = _isWatchPartyTab(_index)
-        ? _svc.watchRoomsRefreshing
-        : _svc.tabs[_threadIndex(_index)].isRefreshing;
-
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.mediumImpact();
-        if (_isWatchPartyTab(_index)) {
-          _refreshWatchRooms();
-        } else {
-          _refresh(_threadIndex(_index));
-        }
+    final tab = _tabs[_index]?.data;
+    return ListenableBuilder(
+      listenable: tab ?? _watchRooms,
+      builder: (_, _) {
+        final refreshing =
+            tab?.isRefreshing ??
+            (_watchRooms.value.connectionState == ConnectionState.waiting);
+        return GestureDetector(
+          onTap: refreshing
+              ? null
+              : () {
+                  HapticFeedback.mediumImpact();
+                  if (tab == null) {
+                    _refreshWatchRooms();
+                  } else {
+                    tab.load(refresh: true);
+                  }
+                },
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(color: chipBg, shape: BoxShape.circle),
+            child: refreshing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(Icons.refresh_rounded, size: 19, color: iconColor),
+          ),
+        );
       },
-      child: Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(color: chipBg, shape: BoxShape.circle),
-        child: refreshing
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Icon(Icons.refresh_rounded, size: 19, color: iconColor),
-      ),
     );
   }
 

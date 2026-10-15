@@ -1,3 +1,4 @@
+import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/playback_request.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/utils/json_values.dart';
@@ -240,7 +241,7 @@ class HistoryRepository {
       final response = await AniBakaApi.getPlayHistory(
         pageSize: _maxHistoryCount,
       );
-      if (response == null || response.isEmpty) return;
+      if (response.isEmpty) return;
 
       final list = getHistoryList();
       final map = <String, Map<String, dynamic>>{};
@@ -291,76 +292,68 @@ class HistoryRepository {
     String? cover,
     int? bgmId,
   }) async {
-    try {
-      if (durationMs <= 0 || positionMs < 0) return;
+    if (durationMs <= 0 || positionMs < 0) return;
 
-      final record = <String, dynamic>{
-        'id': request.metadata['id'],
-        'title': request.metadata['title'],
-        'content': request.metadata['content'],
-        'image': request.metadata['image'],
-        'bgmImageUrl': cover ?? request.metadata['bgmImageUrl'],
-        'bgmId': bgmId ?? request.metadata['bgmId'],
-        'source': request.source,
-        'seriesUrl': request.metadata['seriesUrl'],
-        'sourceUrl': request.metadata['sourceUrl'],
-        'sourceDisplayName': request.metadata['sourceDisplayName'],
-        'tag': request.metadata['tag'],
-        'score': request.metadata['score'],
-        'info': request.metadata['info'],
-        'index': episodeIndex,
-        'position': positionMs,
-        'duration': durationMs,
-        'watchTime': DateTime.now().millisecondsSinceEpoch,
-        'url': urlIndex,
-        'isFinished': positionMs / durationMs >= _completionThreshold,
-      };
+    final record = <String, dynamic>{
+      'id': request.metadata['id'],
+      'title': request.metadata['title'],
+      'content': request.metadata['content'],
+      'image': request.metadata['image'],
+      'bgmImageUrl': cover ?? request.metadata['bgmImageUrl'],
+      'bgmId': bgmId ?? request.metadata['bgmId'],
+      'source': request.source,
+      'seriesUrl': request.metadata['seriesUrl'],
+      'sourceUrl': request.metadata['sourceUrl'],
+      'sourceDisplayName': request.metadata['sourceDisplayName'],
+      'tag': request.metadata['tag'],
+      'score': request.metadata['score'],
+      'nsfw': ContentFilter.isNsfw(request.metadata),
+      'info': request.metadata['info'],
+      'index': episodeIndex,
+      'position': positionMs,
+      'duration': durationMs,
+      'watchTime': DateTime.now().millisecondsSinceEpoch,
+      'url': urlIndex,
+      'isFinished': positionMs / durationMs >= _completionThreshold,
+    };
 
-      final key = _localKey(record);
-      final list = _readList(_historyKey);
-      if (positionMs <= _minPositionToSaveMs &&
-          !list.any((item) => _localKey(item) == key)) {
-        return;
-      }
-      final next = <Map<String, dynamic>>[record];
-      for (var i = 0; i < list.length; i++) {
-        final item = list[i];
-        if (_localKey(item) == key) continue;
-        next.add(item);
-        if (next.length >= _maxHistoryCount) break;
-      }
-      await _write(_historyKey, next);
+    final key = _localKey(record);
+    final list = _readList(_historyKey);
+    if (positionMs <= _minPositionToSaveMs &&
+        !list.any((item) => _localKey(item) == key)) {
+      return;
+    }
+    final next = <Map<String, dynamic>>[record];
+    for (var i = 0; i < list.length; i++) {
+      final item = list[i];
+      if (_localKey(item) == key) continue;
+      next.add(item);
+      if (next.length >= _maxHistoryCount) break;
+    }
+    await _write(_historyKey, next);
 
-      final remote = _toRemote(record);
-      if (remote != null && session.token.isNotEmpty) {
-        unawaited(
-          AniBakaApi.savePlayHistory(remote, notifyOnError: false).catchError((
-            Object error,
-          ) {
-            _logUploadFailure(error);
-            return null;
-          }),
-        );
-      }
+    final remote = _toRemote(record);
+    if (remote != null && session.token.isNotEmpty) {
+      unawaited(
+        AniBakaApi.savePlayHistory(
+          remote,
+          notifyOnError: false,
+        ).catchError(_logUploadFailure),
+      );
+    }
 
-      final subjectId = toInt(record['bgmId']);
-      if (record['isFinished'] == true &&
-          subjectId != null &&
-          bangumi.isConnected &&
-          bangumi.autoMarkEpisode) {
-        unawaited(
-          bangumi
-              .markEpisodeWatched(
-                subjectId: subjectId,
-                watched: episodeIndex + 1,
-              )
-              .catchError((Object error, StackTrace stackTrace) {
-                debugPrint('更新 Bangumi 集数失败: $error');
-              }),
-        );
-      }
-    } catch (e) {
-      debugPrint('保存历史记录错误: $e');
+    final subjectId = toInt(record['bgmId']);
+    if (record['isFinished'] == true &&
+        subjectId != null &&
+        bangumi.isConnected &&
+        bangumi.autoMarkEpisode) {
+      unawaited(
+        bangumi
+            .markEpisodeWatched(subjectId: subjectId, watched: episodeIndex + 1)
+            .catchError((Object error, StackTrace stackTrace) {
+              debugPrint('更新 Bangumi 集数失败: $error');
+            }),
+      );
     }
   }
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:baka/models/download_task.dart';
+import 'package:baka/models/bgm.dart';
 import 'package:baka/api/bgm.dart';
 import 'package:baka/services/download/download_manager.dart';
 import 'package:baka/services/playback/history_repository.dart';
@@ -18,7 +19,7 @@ Future<int?> showEpisodeListDialog({
   required int currentIndex,
   required String videoId,
   bool isFullScreen = false,
-  Map? postDetail,
+  Map<String, dynamic>? postDetail,
   Future<String?> Function(int episodeIndex)? urlResolver,
   bool startInDownloadMode = false,
   int? currentLineIndex,
@@ -68,7 +69,7 @@ class EpisodeListDialog extends StatefulWidget {
   final int currentIndex;
   final String videoId;
   final bool isFullScreen;
-  final Map? postDetail;
+  final Map<String, dynamic>? postDetail;
   final Future<String?> Function(int episodeIndex)? urlResolver;
   final bool startInDownloadMode;
   final int? currentLineIndex;
@@ -102,43 +103,28 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
   late bool _downloadMode;
   final Set<int> _selected = {};
 
-  late Set<String> _queuedIds;
+  Set<int>? _queuedIndexes;
   late final String _taskIdPrefix;
-  late List<int> _selectableIndexes;
-  late List<int> _visibleIndexes;
+  List<int>? _visibleIndexes;
+  late final List<int> _lineIndexes =
+      widget.currentIndex < 0 || widget.currentIndex >= widget.videoList.length
+      ? const []
+      : widget.videoList[widget.currentIndex].availableLineIndexes.toList(
+          growable: false,
+        );
 
   @override
   void initState() {
     super.initState();
+    _searchController.addListener(_onSearchChanged);
     _downloadMode = widget.startInDownloadMode && widget.canDownload;
     if (widget.canDownload) {
-      downloads.init().then((_) {
-        if (!mounted) return;
-        setState(() {
-          _queuedIds = downloads.tasks.map((task) => task.id).toSet();
-          _selectableIndexes = [
-            for (var i = 0; i < widget.videoList.length; i++)
-              if (!_queuedIds.contains(_taskId(i))) i,
-          ];
-          _selected.removeWhere((i) => _queuedIds.contains(_taskId(i)));
-          _refreshVisibleIndexes();
-        });
-      });
-      _queuedIds = downloads.tasks.map((t) => t.id).toSet();
       final detail = widget.postDetail!;
-      final source = detail['source']?.toString() ?? '';
+      final source = detail['source'] as String? ?? '';
       final id = detail['id'];
       _taskIdPrefix = source.isNotEmpty ? '${source}_${id}_' : '${id}_';
-      _selectableIndexes = [
-        for (var i = 0; i < widget.videoList.length; i++)
-          if (!_queuedIds.contains(_taskId(i))) i,
-      ];
-    } else {
-      _queuedIds = const {};
-      _taskIdPrefix = '';
-      _selectableIndexes = const [];
+      if (_downloadMode) _loadQueuedEpisodes();
     }
-    _refreshVisibleIndexes();
   }
 
   @override
@@ -149,26 +135,46 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
 
   String _taskId(int index) => '$_taskIdPrefix${index + 1}';
 
-  void _refreshVisibleIndexes() {
-    _visibleIndexes = PlaybackEpisodeCatalog.filterIndexes(
-      widget.videoList,
-      searchQuery: _searchQuery,
-      ascending: _sortAscending,
-    );
+  Future<void> _loadQueuedEpisodes() async {
+    await downloads.init();
+    if (!mounted || !_downloadMode) return;
+    setState(() {
+      _queuedIndexes = {
+        for (final task in downloads.tasks)
+          if (task.id.startsWith(_taskIdPrefix))
+            if (task.episodeIndex case final episode?)
+              if (episode > 0 &&
+                  episode <= widget.videoList.length &&
+                  task.id == _taskId(episode - 1))
+                episode - 1,
+      };
+    });
+  }
+
+  void _onSearchChanged() {
+    final query = _searchController.text;
+    if (_searchQuery == query) return;
+    setState(() {
+      final normalized = query.trim().toLowerCase();
+      if (normalized != _searchQuery.trim().toLowerCase()) {
+        _visibleIndexes = normalized.isEmpty
+            ? null
+            : PlaybackEpisodeCatalog.filterIndexes(
+                widget.videoList,
+                searchQuery: normalized,
+                ascending: true,
+              );
+      }
+      _searchQuery = query;
+    });
   }
 
   bool get _isAllSelected =>
-      _selectableIndexes.isNotEmpty &&
-      _selected.length == _selectableIndexes.length;
-
-  int get _lineCount {
-    final i = widget.currentIndex;
-    if (i < 0 || i >= widget.videoList.length) return 0;
-    return widget.videoList[i].availableLineIndexes.length;
-  }
+      _selected.isNotEmpty &&
+      _selected.length == widget.videoList.length - _queuedIndexes!.length;
 
   bool get _canSwitchLine =>
-      !_downloadMode && widget.onLineChanged != null && _lineCount > 1;
+      !_downloadMode && widget.onLineChanged != null && _lineIndexes.length > 1;
 
   String _lineName(int lineIndex) {
     final names = widget.sourceNames;
@@ -183,19 +189,21 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
     HapticFeedback.lightImpact();
     setState(() {
       _downloadMode = !_downloadMode;
-      if (!_downloadMode) _selected.clear();
+      _queuedIndexes = null;
+      _selected.clear();
     });
+    if (_downloadMode) _loadQueuedEpisodes();
   }
 
   void _toggleSelectAll() {
-    if (_selectableIndexes.isEmpty) return;
     setState(() {
       if (_isAllSelected) {
         _selected.clear();
       } else {
-        _selected
-          ..clear()
-          ..addAll(_selectableIndexes);
+        _selected.clear();
+        for (var i = 0; i < widget.videoList.length; i++) {
+          if (!_queuedIndexes!.contains(i)) _selected.add(i);
+        }
       }
     });
   }
@@ -210,7 +218,7 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
   void _submitDownload() {
     if (_selected.isEmpty) return;
     final indices = [
-      for (final index in _selectableIndexes)
+      for (var index = 0; index < widget.videoList.length; index++)
         if (_selected.contains(index)) index,
     ];
     HapticFeedback.mediumImpact();
@@ -223,15 +231,12 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
 
   Future<void> _resolveAndEnqueue(List<int> indices) async {
     final service = downloads;
-    await service.init();
     final detail = widget.postDetail!;
     final bgmId = (await resolveBgmFromData(detail)).subjectId;
 
-    final sourceName = detail['sourceDisplayName']?.toString() ?? '';
-    final title = (detail['title'] ?? '未知标题').toString();
-    final thumbnail =
-        (detail['pic'] ?? detail['image'] ?? detail['bgmImageUrl'] ?? '')
-            .toString();
+    final sourceName = detail['sourceDisplayName'] as String? ?? '';
+    final title = detail['title'] as String? ?? '';
+    final thumbnail = resolveCoverImage(detail);
     final filenamePrefix = sourceName.isNotEmpty
         ? '${title}_[$sourceName]_'
         : '${title}_';
@@ -301,7 +306,8 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
   Widget _buildBody(Color? textColor) {
     final showSearch =
         widget.videoList.length > _kSearchThreshold && !_downloadMode;
-    final visible = _visibleIndexes;
+    final visible = _downloadMode ? null : _visibleIndexes;
+    final count = visible?.length ?? widget.videoList.length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -324,8 +330,11 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
               crossAxisSpacing: 8,
               mainAxisSpacing: 8,
             ),
-            itemCount: visible.length,
-            itemBuilder: (_, i) => _buildItem(visible[i], textColor),
+            itemCount: count,
+            itemBuilder: (_, i) {
+              final position = _sortAscending ? i : count - 1 - i;
+              return _buildItem(visible?[position] ?? position, textColor);
+            },
           ),
         ),
         if (_downloadMode)
@@ -370,7 +379,7 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
         const Spacer(),
         if (_downloadMode)
           TextButton(
-            onPressed: _toggleSelectAll,
+            onPressed: _queuedIndexes == null ? null : _toggleSelectAll,
             style: textColor == null
                 ? null
                 : TextButton.styleFrom(foregroundColor: textColor),
@@ -380,7 +389,6 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
           IconButton(
             onPressed: () => setState(() {
               _sortAscending = !_sortAscending;
-              _refreshVisibleIndexes();
             }),
             icon: Icon(
               _sortAscending ? Icons.arrow_upward : Icons.arrow_downward,
@@ -411,17 +419,15 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
     final base = textColor ?? theme.colorScheme.onSurface;
     final primary = theme.colorScheme.primary;
     final current = widget.currentLineIndex ?? 1;
-    final indexes = widget.videoList[widget.currentIndex].availableLineIndexes
-        .toList(growable: false);
 
     return SizedBox(
       height: 32,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        itemCount: indexes.length,
+        itemCount: _lineIndexes.length,
         separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (_, index) {
-          final lineIndex = indexes[index];
+          final lineIndex = _lineIndexes[index];
           final selected = lineIndex == current;
           return InkWell(
             onTap: selected ? null : () => _selectLine(lineIndex),
@@ -462,10 +468,6 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
       height: 36,
       child: TextField(
         controller: _searchController,
-        onChanged: (value) => setState(() {
-          _searchQuery = value;
-          _refreshVisibleIndexes();
-        }),
         style: TextStyle(color: textColor, fontSize: 13),
         decoration: InputDecoration(
           hintText: '搜索剧集',
@@ -481,13 +483,7 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
           suffixIcon: _searchQuery.isEmpty
               ? null
               : IconButton(
-                  onPressed: () {
-                    _searchController.clear();
-                    setState(() {
-                      _searchQuery = '';
-                      _refreshVisibleIndexes();
-                    });
-                  },
+                  onPressed: _searchController.clear,
                   icon: Icon(
                     Icons.close,
                     size: 16,
@@ -516,19 +512,21 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
         index: index,
         rawTitle: rawTitle,
         isDownloadMode: true,
-        isQueued: _queuedIds.contains(_taskId(index)),
+        isQueued: _queuedIndexes?.contains(index) ?? false,
         isDownloadSelected: selected,
         textColor: textColor,
-        onTap: () {
-          HapticFeedback.selectionClick();
-          setState(() {
-            if (selected) {
-              _selected.remove(index);
-            } else {
-              _selected.add(index);
-            }
-          });
-        },
+        onTap: _queuedIndexes == null
+            ? null
+            : () {
+                HapticFeedback.selectionClick();
+                setState(() {
+                  if (selected) {
+                    _selected.remove(index);
+                  } else {
+                    _selected.add(index);
+                  }
+                });
+              },
       );
     }
 

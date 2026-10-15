@@ -1,3 +1,4 @@
+import 'package:baka/core/content_filter.dart';
 import 'package:baka/source/runtime/source_operation.dart';
 import 'dart:async';
 import 'package:baka/utils/title_matcher.dart';
@@ -20,6 +21,7 @@ import 'package:baka/services/playback/danmaku_controller.dart';
 import 'package:baka/services/playback/history_repository.dart';
 import 'package:baka/services/source/source_repository.dart';
 import 'package:baka/services/torrent/torrent_service.dart';
+import 'package:baka/services/torrent/torrent_model.dart';
 import 'package:baka/source/adapter_base.dart';
 import 'package:baka/source/source_registry.dart';
 
@@ -39,11 +41,6 @@ class PlaybackContent {
     if (!isLocalSource) {
       bgmInfo = BgmInfo.fromData(data);
       bgmDetailData = data['bgmDetailData'] as Map<String, dynamic>?;
-      final embeddedEpisodes = bgmDetailData?['episodes'];
-      if (embeddedEpisodes is List) {
-        bgmEpisodes = embeddedEpisodes.cast<Map<String, dynamic>>();
-        _bgmEpisodesLoaded = true;
-      }
       // Auto matching starts before loadDetail. Keep the desired episode even
       // while its source catalog is still empty.
       final remembered = history.getResumeSelection(
@@ -104,11 +101,9 @@ class PlaybackContent {
   BgmInfo bgmInfo = const BgmInfo();
   Map<String, dynamic>? bgmDetailData;
   List<Map<String, dynamic>> bgmEpisodes = const [];
-  bool _bgmEpisodesLoaded = false;
   Future<BgmInfo>? _bgmInfoFuture;
-  Future<Map<String, dynamic>?>? _bgmDetailFuture;
+  Future<void>? _bgmDetailFuture;
   AnimeCollection? collection;
-  Future<AnimeCollection?>? _collectionFuture;
 
   AdapterBase? _playbackKeepAliveAdapter;
   int _playbackKeepAliveGeneration = 0;
@@ -167,15 +162,19 @@ class PlaybackContent {
   String get logoUrl => _logoUrl ?? AnimeDetailViewData.resolveLogoUrl(data);
 
   /// A fresh projection for old views/search sheets; never shared writable state.
-  Map<String, dynamic> buildDetailData() => {
-    ...data,
-    'source': request.source,
-    if (bgmInfo.subjectId != null) 'bgmId': bgmInfo.subjectId,
-    if (bgmInfo.score != null) 'score': bgmInfo.score,
-    if (coverImageUrl != null) 'bgmImageUrl': coverImageUrl,
-    if (bgmDetailData != null) 'bgmDetailData': bgmDetailData,
-    if (logoUrl.isNotEmpty) 'logoUrl': logoUrl,
-  };
+  Map<String, dynamic> buildDetailData() {
+    final cover = coverImageUrl;
+    final logo = logoUrl;
+    return {
+      ...data,
+      'source': request.source,
+      if (bgmInfo.subjectId != null) 'bgmId': bgmInfo.subjectId,
+      if (bgmInfo.score != null) 'score': bgmInfo.score,
+      if (cover != null) 'bgmImageUrl': cover,
+      if (bgmDetailData != null) 'bgmDetailData': bgmDetailData,
+      if (logo.isNotEmpty) 'logoUrl': logo,
+    };
+  }
 
   PlaybackMediaInfo get initialMediaInfo => PlaybackMediaInfo(
     title: title,
@@ -298,7 +297,7 @@ class PlaybackContent {
             _request = request.copyWith(
               episodes: detail.episodes,
               sourceNames: detail.sourceNames,
-              metadata: {...data, ...detail.metadata},
+              metadataUpdates: detail.metadata,
             );
           }
         } catch (e) {
@@ -402,7 +401,7 @@ class PlaybackContent {
             }
           }
         }
-        if (media.url.isEmpty || !TorrentService.isBtLink(media.url)) {
+        if (media.url.isEmpty || !isTorrentLink(media.url)) {
           return media;
         }
 
@@ -539,25 +538,20 @@ class PlaybackContent {
     }
   }
 
-  Future<Map<String, dynamic>?> ensureBgmDetail() {
-    if (isLocalSource) return Future.value(null);
-    if (bgmDetailData != null && _bgmEpisodesLoaded && logoUrl.isNotEmpty) {
-      return Future.value(bgmDetailData);
-    }
+  Future<void> ensureBgmDetail() {
+    if (isLocalSource) return Future.value();
     return _bgmDetailFuture ??= _loadBgmDetail();
   }
 
-  Future<Map<String, dynamic>?> _loadBgmDetail() async {
+  Future<void> _loadBgmDetail() async {
     try {
       final subjectId = (await ensureBgmInfo()).subjectId;
-      if (subjectId == null) return null;
+      if (subjectId == null) return;
 
       final detailFuture = bgmDetailData == null
           ? getBgmSubject(subjectId)
           : Future.value(bgmDetailData!);
-      final episodesFuture = _bgmEpisodesLoaded
-          ? Future.value(bgmEpisodes)
-          : getBgmEpisodes(subjectId);
+      final episodesFuture = getBgmEpisodes(subjectId);
       final animeDetailFuture = logoUrl.isEmpty
           ? AniBakaApi.getAnimeDetail(subjectId).catchError((_) => null)
           : Future<Map<String, dynamic>?>.value(null);
@@ -570,16 +564,12 @@ class PlaybackContent {
       final detail = result.$1;
       bgmEpisodes = result.$2;
       final animeDetail = result.$3;
-      _bgmEpisodesLoaded = true;
-
       bgmDetailData = detail;
       final resolvedLogo = AnimeDetailViewData.resolveLogoUrl(animeDetail);
       if (resolvedLogo.isNotEmpty) _logoUrl = resolvedLogo;
-      return detail;
     } catch (e) {
       debugPrint('获取 BGM 放映信息失败: $e');
       _bgmDetailFuture = null;
-      return null;
     }
   }
 
@@ -617,44 +607,23 @@ class PlaybackContent {
   }
 
   /// 贴文 id 只对本站条目成立；BGM 条目 id 一旦写进收藏的 post_id 就是串号。
-  int? get validPostId {
-    if (needsSourceMatch) return null;
-    final postId = toInt(data['id']);
-    return postId != null && postId > 0 ? postId : null;
-  }
+  int? get validPostId =>
+      AnimeCollection.postIdFrom(data, source: request.source);
 
   bool isFollow() =>
       CollectionStatus.fromValue(collection?.status) == CollectionStatus.doing;
 
-  Future<AnimeCollection?> ensureCollectionStatus() {
-    if (isLocalSource) return Future.value(collection);
-    return _collectionFuture ??= _loadCollection();
-  }
-
-  Future<AnimeCollection?> _loadCollection() async {
-    try {
-      final bgmId = (await ensureBgmInfo()).subjectId;
-      if (bgmId == null) return collection;
-      final result = await collections.getByBgmId(bgmId);
-      if (result != null) collection = result;
-      return collection;
-    } catch (e) {
-      debugPrint('获取追番状态失败: $e');
-      _collectionFuture = null;
-      return collection;
-    }
-  }
-
-  Future<String> toggleFollow() async {
-    await Future.wait([
-      ensureBgmInfo(),
-      ensureBgmDetail(),
-      ensureCollectionStatus(),
-    ]);
+  Future<void> toggleFollow() async {
+    final bgmId = (await ensureBgmInfo()).subjectId;
+    final postId = validPostId;
+    collection = bgmId != null
+        ? await collections.getByBgmId(bgmId)
+        : postId != null
+        ? await collections.getByPostId(postId)
+        : null;
 
     if (isFollow()) {
-      final current = collection;
-      if (current == null) return '操作失败';
+      final current = collection!;
       final bgmId = current.bgmId ?? bgmInfo.subjectId;
       final postId = current.postId ?? validPostId;
       final success = bgmId != null
@@ -664,7 +633,7 @@ class PlaybackContent {
           : false;
       if (!success) throw Exception('取消追番失败');
       collection = null;
-      return '已取消在看';
+      return;
     }
 
     final detail = bgmDetailData;
@@ -674,6 +643,7 @@ class PlaybackContent {
         postId: validPostId,
         bgmId: bgmInfo.subjectId,
         status: CollectionStatus.doing.value,
+        nsfw: detail?['nsfw'] == true || ContentFilter.isNsfw(data),
         epTotal: epCount,
         epWatched: epCount == null ? null : currPlayIndex + 1,
         postTitle: title,
@@ -685,9 +655,7 @@ class PlaybackContent {
             title,
       ),
     );
-    if (result == null) throw Exception('追番失败');
     collection = result;
-    return '已加入在看';
   }
 
   Future<void>? _disposing;

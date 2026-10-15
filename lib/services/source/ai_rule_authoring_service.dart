@@ -188,38 +188,27 @@ class AiRuleAuthoringService {
             });
             continue;
           }
-          final batch = rawRequests
-              .whereType<Map>()
-              .take(remaining < 4 ? remaining : 4)
-              .toList();
+          final batch = rawRequests.take(remaining < 4 ? remaining : 4);
           final results = <Map<String, dynamic>>[];
           for (final raw in batch) {
             _throwIfCancelled();
-            final request = SiteProbeRequest.fromJson(
-              Map<String, dynamic>.from(raw),
-            );
             probeCount++;
-            onProgress(
-              RuleAuthoringProgress(
-                round: round,
-                stage: 'probe',
-                message: isUnlimited
-                    ? '正在探测站点（已探测 $probeCount 次）：${_displayHost(request.url)}'
-                    : '正在探测站点（$probeCount/$effectiveMaxProbes）：${_displayHost(request.url)}',
-              ),
-            );
             try {
-              final probeRes = await _probeService.execute(request);
-              final body = probeRes['body']?.toString() ?? '';
-              if (body.length > 16000) {
-                probeRes['body'] = '${body.substring(0, 16000)}…';
-              }
-              results.add(probeRes);
+              final request = SiteProbeRequest.fromJson(
+                raw as Map<String, dynamic>,
+              );
+              onProgress(
+                RuleAuthoringProgress(
+                  round: round,
+                  stage: 'probe',
+                  message: isUnlimited
+                      ? '正在探测站点（已探测 $probeCount 次）：${_displayHost(request.url)}'
+                      : '正在探测站点（$probeCount/$effectiveMaxProbes）：${_displayHost(request.url)}',
+                ),
+              );
+              results.add(await _probeService.execute(request));
             } catch (error) {
-              results.add({
-                'request': {'method': request.method, 'url': request.url},
-                'error': SiteProbeService.safeError(error),
-              });
+              results.add({'error': SiteProbeService.safeError(error)});
             }
           }
           messages.add({

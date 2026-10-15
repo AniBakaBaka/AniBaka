@@ -5,13 +5,13 @@ import 'package:baka/source/models/series.dart';
 /// A source result retains its Series. Only the legacy internal API needs a map.
 class SourceSearchResult {
   SourceSearchResult(
-    this.series, {
+    Series this.series, {
     required this.source,
     required this.displayName,
     this.fallbackDescription = '',
   }) : internalData = null;
 
-  SourceSearchResult.internal(this.internalData)
+  SourceSearchResult.internal(Map<String, dynamic> this.internalData)
     : series = null,
       source = 'internal',
       displayName = '站内',
@@ -35,22 +35,25 @@ class SourceSearchResult {
     return count > 0 ? count : null;
   }
 
-  Map<String, dynamic> toLegacyMap() =>
-      internalData ??
-      {
-        'title': title,
-        'seriesId': id,
-        'source': source,
-        'sourceDisplayName': displayName,
-        'tag': displayName,
-        'description': description,
-        'subtitle': description,
-        'image': cover,
-        'content': cover,
-        if (series?.bgmId != null) 'bgmId': series!.bgmId,
-        if (series?.score != null) 'score': series!.score,
-        if (cover.isNotEmpty) 'bgmImageUrl': cover,
-      };
+  Map<String, dynamic> toLegacyMap() {
+    final data = internalData;
+    if (data != null) return data;
+    final image = cover;
+    return {
+      'title': title,
+      'seriesId': id,
+      'source': source,
+      'sourceDisplayName': displayName,
+      'tag': displayName,
+      'description': description,
+      'subtitle': description,
+      'image': image,
+      'content': image,
+      if (series!.bgmId != null) 'bgmId': series!.bgmId,
+      if (series!.score != null) 'score': series!.score,
+      if (image.isNotEmpty) 'bgmImageUrl': image,
+    };
+  }
 
   /// Old search pages cross this boundary once when opening playback.
   factory SourceSearchResult.fromLegacy(Map<String, dynamic> data) {

@@ -1,3 +1,4 @@
+import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/utils/json_values.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -8,6 +9,7 @@ import 'package:baka/api/bgm.dart';
 import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/models/anime_detail_view_data.dart';
 import 'package:baka/models/collection.dart';
+import 'package:baka/models/playback_request.dart';
 import 'package:baka/services/collection/collection_repository.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/anime/post_card.dart';
@@ -34,7 +36,6 @@ class AnimeDetailPlaceholder extends StatefulWidget {
 }
 
 class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
-  int? _postId;
   int _loadGeneration = 0;
   int _collectionRevision = 0;
 
@@ -66,11 +67,9 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   late AnimeDetailViewData _detail;
 
   int? get _subjectId => _bgmInfo.subjectId;
+  int? get _postId => toInt(widget.data['id']);
 
-  int? get _validPostId {
-    final postId = _postId;
-    return (postId != null && postId > 0) ? postId : null;
-  }
+  int? get _validPostId => AnimeCollection.postIdFrom(widget.data);
 
   void _rebuildDetail() {
     _detail = AnimeDetailViewData.from(
@@ -90,15 +89,25 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   @override
   void didUpdateWidget(covariant AnimeDetailPlaceholder oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.data, widget.data)) return;
     final bgmInfo = BgmInfo.fromData(widget.data);
-    if (_postId == toInt(widget.data['id']) &&
-        (bgmInfo.subjectId == null || bgmInfo.subjectId == _subjectId) &&
-        (_validPostId != null ||
-            bgmInfo.subjectId != null ||
-            oldWidget.data['title'] == widget.data['title'])) {
+    final oldBgmId = BgmInfo.fromData(oldWidget.data).subjectId;
+    if (_postId != toInt(oldWidget.data['id']) ||
+        bgmInfo.subjectId != oldBgmId ||
+        (_validPostId == null &&
+            bgmInfo.subjectId == null &&
+            oldWidget.data['title'] != widget.data['title'])) {
+      _initializeData(bgmInfo);
       return;
     }
-    _initializeData(bgmInfo);
+    _bgmInfo = BgmInfo(
+      subjectId: bgmInfo.subjectId ?? _subjectId,
+      score: bgmInfo.score ?? _bgmInfo.score,
+      imageUrl: bgmInfo.imageUrl ?? _bgmInfo.imageUrl,
+    );
+    _detailData =
+        widget.data['bgmDetailData'] as Map<String, dynamic>? ?? _detailData;
+    _rebuildDetail();
   }
 
   void _initializeData(BgmInfo bgmInfo) {
@@ -107,7 +116,6 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     _detailPending = false;
     _collection.value = null;
     _isStatusUpdating = false;
-    _postId = toInt(widget.data['id']);
     // Hydrate from the API-owned cache before constructing the first frame.
     // A warm request still returns a Future; queuing its .then callback behind
     // the transition would incorrectly animate default content for 320 ms.
@@ -166,14 +174,19 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   }
 
   void _startWatching() {
-    NavigationService.toPlayer(context, {
-      ...widget.data,
-      if (_subjectId != null) 'bgmId': _subjectId,
-      if (_bgmInfo.score != null) 'score': _bgmInfo.score,
-      if (_bgmInfo.imageUrl != null) 'bgmImageUrl': _bgmInfo.imageUrl,
-      if (_detailData != null) 'bgmDetailData': _detailData,
-      if (_detail.logoUrl.isNotEmpty) 'logoUrl': _detail.logoUrl,
-    }, autoMatch: true);
+    NavigationService.toPlayback(
+      context,
+      PlaybackRequest.fromMap(
+        widget.data,
+        metadataUpdates: {
+          if (_subjectId != null) 'bgmId': _subjectId,
+          if (_bgmInfo.score != null) 'score': _bgmInfo.score,
+          if (_bgmInfo.imageUrl != null) 'bgmImageUrl': _bgmInfo.imageUrl,
+          if (_detailData != null) 'bgmDetailData': _detailData,
+          if (_detail.logoUrl.isNotEmpty) 'logoUrl': _detail.logoUrl,
+        },
+      ),
+    );
   }
 
   Future<void> _loadInitialData(int generation) async {
@@ -243,18 +256,6 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
         });
   }
 
-  AnimeCollection _buildCollection(int statusValue) {
-    return AnimeCollection(
-      postId: _validPostId,
-      bgmId: _subjectId,
-      status: statusValue,
-      postTitle: widget.data['title']?.toString() ?? '',
-      postCover: _detail.coverUrl,
-      bgmImage: _bgmInfo.imageUrl,
-      bgmTitle: _detail.bgmTitle,
-    );
-  }
-
   Future<void> _updateCollectionStatus(CollectionStatus? status) async {
     if (!mounted || _isStatusUpdating) return;
     final collection = _collection.value;
@@ -280,16 +281,21 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
         }
       } else {
         final result = await collections.addOrUpdate(
-          _buildCollection(status.value),
+          AnimeCollection(
+            postId: _validPostId,
+            bgmId: _subjectId,
+            status: status.value,
+            nsfw: _detail.nsfw,
+            postTitle: widget.data['title'] as String? ?? '',
+            postCover: _detail.coverUrl,
+            bgmImage: _bgmInfo.imageUrl,
+            bgmTitle: _detail.bgmTitle,
+          ),
         );
         if (!mounted || generation != _loadGeneration) return;
-        if (result != null) {
-          _collectionRevision++;
-          _collection.value = result;
-          showSnackBar('已标记为「${status.label}」');
-        } else {
-          showSnackBar('操作失败，请重试');
-        }
+        _collectionRevision++;
+        _collection.value = result;
+        showSnackBar('已标记为「${status.label}」');
       }
     } catch (e) {
       if (!mounted || generation != _loadGeneration) return;
@@ -350,7 +356,18 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
       : Colors.black.withValues(alpha: 0.05);
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: contentFilter,
+    builder: (context, _) => _buildPage(context),
+  );
+
+  Widget _buildPage(BuildContext context) {
+    if (contentFilter.value && _detail.nsfw) {
+      return Scaffold(
+        appBar: AppBar(),
+        body: const Center(child: Text('已隐藏 NSFW 内容')),
+      );
+    }
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: AnnotatedRegion<SystemUiOverlayStyle>(
@@ -471,20 +488,15 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                       SliverPadding(
                         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
                         sliver: SliverToBoxAdapter(
-                          child: ValueListenableBuilder<AnimeCollection?>(
-                            valueListenable: _collection,
-                            builder: (context, collection, _) =>
-                                AnimeDetailHeader(
-                                  detail: _detail,
-                                  updateTime: widget.data['time']?.toString(),
-                                  category: widget.data['sort']?.toString(),
-                                  heroTag: coverHeroTag(widget.data),
-                                  enableCoverEffects:
-                                      _initialRouteTransitionFinished,
-                                  collection: collection,
-                                  onCollectionTap: _handleCollectionTap,
-                                  onSearchTap: _startWatching,
-                                ),
+                          child: AnimeDetailHeader(
+                            detail: _detail,
+                            updateTime: widget.data['time'] as String?,
+                            category: widget.data['sort'] as String?,
+                            heroTag: coverHeroTag(widget.data),
+                            enableCoverEffects: _initialRouteTransitionFinished,
+                            collection: _collection,
+                            onCollectionTap: _handleCollectionTap,
+                            onSearchTap: _startWatching,
                           ),
                         ),
                       ),
@@ -829,10 +841,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                 children: [
                   SizedBox(
                     width: 90,
-                    child: Text(
-                      infobox[i]['key'] as String? ?? '',
-                      style: labelStyle,
-                    ),
+                    child: Text(infobox[i]['key'] as String, style: labelStyle),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
@@ -925,17 +934,11 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     }
 
     if (tmdbId != null && tmdbId.isNotEmpty) {
-      final tmdbUrl = tmdbId.contains('/')
-          ? 'https://www.themoviedb.org/$tmdbId'
-          : 'https://www.themoviedb.org/tv/$tmdbId';
-      links.add(('TMDB', tmdbUrl));
+      links.add(('TMDB', 'https://www.themoviedb.org/tv/$tmdbId'));
     }
 
     if (tvdbId != null && tvdbId.isNotEmpty) {
-      final tvdbUrl = tvdbId.contains('/')
-          ? 'https://thetvdb.com/$tvdbId'
-          : 'https://thetvdb.com/dereferer/series/$tvdbId';
-      links.add(('TVDB', tvdbUrl));
+      links.add(('TVDB', 'https://thetvdb.com/dereferer/series/$tvdbId'));
     }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -948,53 +951,48 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
         : const Color(0xFF1C1C1E);
     final iconColor = isDark ? Colors.white70 : const Color(0xFF636366);
 
-    return links.map((link) {
-      final (label, url) = link;
-      return ScaleButton(
-        onTap: () {
-          HapticFeedback.lightImpact();
-          unawaited(launchUrlString(url, mode: LaunchMode.externalApplication));
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: borderColor, width: 1),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.link_rounded, size: 16, color: iconColor),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.2,
+    return [
+      for (final (label, url) in links)
+        ScaleButton(
+          onTap: () {
+            HapticFeedback.lightImpact();
+            unawaited(
+              launchUrlString(url, mode: LaunchMode.externalApplication),
+            );
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: BoxDecoration(
+              color: cardBg,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: borderColor, width: 1),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.link_rounded, size: 16, color: iconColor),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.2,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      );
-    }).toList();
+    ];
   }
 
-  String _formatInfoboxValue(dynamic value) {
-    if (value is String) return value;
-    if (value is List) {
-      return value
-          .map(
-            (item) =>
-                item is Map ? (item['v'] ?? item).toString() : item.toString(),
-          )
-          .join('、');
-    }
-    return value?.toString() ?? '';
-  }
+  String _formatInfoboxValue(dynamic value) => value is String
+      ? value
+      : (value as List<dynamic>)
+            .map((item) => (item as Map<String, dynamic>)['v'] as String)
+            .join('、');
 }
 
 class _TabBarDelegate extends SliverPersistentHeaderDelegate {

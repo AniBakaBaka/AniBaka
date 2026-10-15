@@ -147,12 +147,13 @@ Widget buildNetworkImage(
   double width,
   double height, {
   BoxFit fit = BoxFit.cover,
+  int cacheWidth = 300,
 }) {
   // 原生 Image 保留快速滚动时延迟解码的行为；缓存仍交给同一个 provider。
   // 不走零时长的淡入淡出组件，避免每张新封面创建两套动画状态和叠层。
   return Image(
     image: ResizeImage.resizeIfNeeded(
-      300,
+      cacheWidth,
       null,
       CachedNetworkImageProvider(imageUrl),
     ),

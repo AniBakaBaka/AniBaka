@@ -46,13 +46,9 @@ class _SelectionPlayback extends PlaybackController {
   }
 
   @override
-  Future<void> seek(
-    Duration target, {
-    bool fromSlider = false,
-    bool remote = false,
-  }) {
+  Future<void> seek(Duration target, {bool remote = false}) {
     seeks.add(target);
-    return super.seek(target, fromSlider: fromSlider, remote: remote);
+    return super.seek(target, remote: remote);
   }
 }
 
@@ -144,11 +140,9 @@ void main() {
         expect(events, isEmpty);
         controller.cancelSkipSelection();
         expect(
-          controller.skipService.mergeLocal(
-            controller.skipContext!,
-            1440000,
-            [],
-          ),
+          controller.skipService
+              .mergeLocal(controller.skipContext!, 1440000, [], message: 'test')
+              .segments,
           isEmpty,
         );
         await subscription.cancel();

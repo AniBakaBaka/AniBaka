@@ -17,14 +17,12 @@ class WatchPartyViewState {
     this.invite,
     this.snapshot,
     this.error = '',
-    this.latencyMs,
   });
 
   final WatchPartyConnectionStatus status;
   final WatchPartyInvite? invite;
   final WatchPartySnapshot? snapshot;
   final String error;
-  final int? latencyMs;
 
   bool get connected => status == WatchPartyConnectionStatus.connected;
 
@@ -33,13 +31,11 @@ class WatchPartyViewState {
     WatchPartyInvite? invite,
     WatchPartySnapshot? snapshot,
     String? error,
-    int? latencyMs,
   }) => WatchPartyViewState(
     status: status ?? this.status,
     invite: invite ?? this.invite,
     snapshot: snapshot ?? this.snapshot,
     error: error ?? this.error,
-    latencyMs: latencyMs ?? this.latencyMs,
   );
 }
 
@@ -77,11 +73,8 @@ class WatchPartyService {
   bool _applyingRemote = false;
   bool? _lastPlaying;
   int _reconnectAttempt = 0;
-  int _requestSerial = 0;
   int _connectionGeneration = 0;
   Completer<void>? _initialSnapshot;
-  String? _pendingPingId;
-  final Stopwatch _pingClock = Stopwatch();
 
   WatchPartyMedia? get currentMedia {
     final content = _content;
@@ -207,13 +200,11 @@ class WatchPartyService {
       error: '',
     );
     _reconnectAttempt = 0;
-    _pendingPingId = null;
-    _pingClock.stop();
-    _sendPing();
+    _send('ping', const {});
     _heartbeat?.cancel();
     _heartbeat = Timer.periodic(
       const Duration(seconds: 15),
-      (_) => _sendPing(),
+      (_) => _send('ping', const {}),
     );
     try {
       await initialSnapshot.future.timeout(const Duration(seconds: 5));
@@ -317,8 +308,6 @@ class WatchPartyService {
     final channel = _channel;
     _channelSubscription = null;
     _channel = null;
-    _pendingPingId = null;
-    _pingClock.stop();
     await subscription?.cancel();
     await channel?.sink.close(closeCode);
   }
@@ -379,17 +368,7 @@ class WatchPartyService {
         }
         return;
       }
-      if (type == 'pong') {
-        final requestId = envelope['requestId']?.toString() ?? '';
-        if (requestId == _pendingPingId) {
-          _pendingPingId = null;
-          _pingClock.stop();
-          state.value = state.value.copyWith(
-            latencyMs: _pingClock.elapsedMilliseconds,
-          );
-        }
-        return;
-      }
+      if (type == 'pong') return;
       if (envelope['payload'] is! Map) return;
       final snapshot = WatchPartySnapshot.fromJson(
         envelope['payload'] as Map<String, dynamic>,
@@ -423,16 +402,6 @@ class WatchPartyService {
         initialSnapshot.completeError(StateError('无法解析一起看房间状态'), stackTrace);
       }
     }
-  }
-
-  void _sendPing() {
-    if (_pendingPingId != null && _pingClock.elapsed.inSeconds < 45) return;
-    final requestId = _send('ping', const <String, Object>{});
-    if (requestId.isEmpty) return;
-    _pendingPingId = requestId;
-    _pingClock
-      ..reset()
-      ..start();
   }
 
   void _queueRemoteApply(
@@ -563,19 +532,10 @@ class WatchPartyService {
     });
   }
 
-  String _send(String type, Map<String, dynamic> payload) {
+  void _send(String type, Map<String, dynamic> payload) {
     final channel = _channel;
-    if (channel == null || !state.value.connected) return '';
-    final requestId = (++_requestSerial).toString();
-    channel.sink.add(
-      jsonEncode({
-        'v': 1,
-        'type': type,
-        'requestId': requestId,
-        'payload': payload,
-      }),
-    );
-    return requestId;
+    if (channel == null || !state.value.connected) return;
+    channel.sink.add(jsonEncode({'v': 1, 'type': type, 'payload': payload}));
   }
 
   void _onDisconnected(int generation, IOWebSocketChannel channel) {

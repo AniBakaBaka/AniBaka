@@ -49,23 +49,26 @@ class _TvLogExportDialogState extends State<TvLogExportDialog> {
     await _downloadSubscription?.cancel();
     await oldSession?.stop();
 
-    if (mounted) {
-      setState(() {
-        _info = null;
-        _error = null;
-        _downloads = 0;
-      });
-    }
+    if (!mounted) return;
+    setState(() {
+      _info = null;
+      _error = null;
+      _downloads = 0;
+    });
 
     final session = TvLogExportSession();
     _session = session;
     try {
       AppLogger.instance.info('TV log export requested', tag: 'TvLogExport');
       final info = await session.start();
+      if (!mounted) {
+        await session.stop();
+        return;
+      }
       _downloadSubscription = session.downloadCount.listen((count) {
         if (mounted) setState(() => _downloads = count);
       });
-      if (mounted) setState(() => _info = info);
+      setState(() => _info = info);
     } catch (error, stackTrace) {
       AppLogger.instance.error(
         'TV log export failed',

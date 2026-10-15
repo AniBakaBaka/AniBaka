@@ -1,5 +1,6 @@
 import 'package:baka/source/runtime/source_operation.dart';
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -67,10 +68,9 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
   bool get useSystemProxy => !rule.directConnection;
 
   @override
-  Dio createDio({Map<String, String>? extraHeaders}) {
-    final dio = super.createDio(
-      extraHeaders: {...rule.headers, ...?extraHeaders},
-    );
+  Dio createDio() {
+    final dio = super.createDio();
+    dio.options.headers.addAll(rule.headers);
     dio.interceptors.add(CookieManager(_cookieJar));
     return dio;
   }
@@ -116,10 +116,12 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
   late final Map<String, String> _mediaValidationHeaders =
       rule.headers.values.every((value) => value.isEmpty)
       ? super.mediaValidationHeaders
-      : Map.unmodifiable({
+      : rule.headers.values.any((value) => value.isEmpty)
+      ? Map.unmodifiable({
           for (final entry in rule.headers.entries)
             if (entry.value.isNotEmpty) entry.key: entry.value,
-        });
+        })
+      : rule.headers;
 
   @override
   Future<List<Series>> search(String query, {bool enhanceWithBgm = true}) =>
@@ -337,13 +339,13 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
       SourceOperation.check();
       prepared = resolved;
     }
+    if (!VideoUrlExtractor.isHlsUrl(prepared.url)) return prepared;
 
     final filtersAds =
         filterHlsAds ??
         PlaybackSettingsService.getFilterHlsAdsOverride() ??
         _playFeatures.filtersHlsAds;
-    if ((!_playFeatures.materializesHls && !filtersAds) ||
-        !VideoUrlExtractor.isHlsUrl(prepared.url)) {
+    if (!_playFeatures.materializesHls && !filtersAds) {
       return prepared;
     }
     final manifestUri = Uri.tryParse(prepared.url);
@@ -560,23 +562,6 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
         .catchError((Object _) => null);
   }
 
-  static Map<String, String> _headersForRedirectTarget(
-    Map<String, String> headers,
-  ) {
-    return Map<String, String>.from(headers)..removeWhere((name, _) {
-      switch (name.toLowerCase()) {
-        case 'authorization':
-        case 'cookie':
-        case 'host':
-        case 'origin':
-        case 'referer':
-          return true;
-        default:
-          return false;
-      }
-    });
-  }
-
   @override
   void stopPlaybackKeepAlive() {
     _playbackKeepAliveGeneration++;
@@ -613,11 +598,28 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
         return '$baseUrl/media/${id.toRadixString(36)}';
       }
 
-      final materialized = _materializeHlsManifest(
-        body,
-        manifestUri,
-        proxyUrlFor,
-      );
+      final manifest = StringBuffer();
+      var firstLine = true;
+      for (final line in LineSplitter.split(body)) {
+        if (!firstLine) manifest.write('\n');
+        firstLine = false;
+        final trimmed = line.trim();
+        if (trimmed.isEmpty) continue;
+        if (!trimmed.startsWith('#')) {
+          manifest.write(
+            proxyUrlFor(manifestUri.resolve(trimmed), isSegment: true),
+          );
+        } else {
+          manifest.write(
+            line.replaceAllMapped(_hlsUriAttrPattern, (match) {
+              final resolved = manifestUri.resolve(match.group(1)!);
+              return 'URI="${proxyUrlFor(resolved, isSegment: false)}"';
+            }),
+          );
+        }
+      }
+      if (body.endsWith('\n') || body.endsWith('\r')) manifest.write('\n');
+      final materialized = manifest.toString();
       if (!materialized.contains('#EXTM3U') ||
           !materialized.contains('#EXT-X-ENDLIST')) {
         throw const FormatException('incomplete VOD manifest');
@@ -792,28 +794,6 @@ class PipelineSourceAdapter extends AdapterBase implements PipelineHost {
     final session = _hlsSession;
     _hlsSession = null;
     await session?.close();
-  }
-
-  static String _materializeHlsManifest(
-    String body,
-    Uri manifestUri,
-    String Function(Uri target, {required bool isSegment}) proxyUrlFor,
-  ) {
-    return body
-        .replaceAll('\r\n', '\n')
-        .split('\n')
-        .map((line) {
-          final trimmed = line.trim();
-          if (trimmed.isEmpty) return '';
-          if (!trimmed.startsWith('#')) {
-            return proxyUrlFor(manifestUri.resolve(trimmed), isSegment: true);
-          }
-          return line.replaceAllMapped(_hlsUriAttrPattern, (match) {
-            final resolved = manifestUri.resolve(match.group(1)!);
-            return 'URI="${proxyUrlFor(resolved, isSegment: false)}"';
-          });
-        })
-        .join('\n');
   }
 
   Future<void> _sendPlaybackKeepAlive(
@@ -1153,6 +1133,13 @@ class RemoteMediaRedirectResolver {
     'transfer-encoding',
     'upgrade',
   };
+  static const _originHeaders = {
+    'authorization',
+    'cookie',
+    'host',
+    'origin',
+    'referer',
+  };
 
   RemoteMediaRedirectResolver({bool useSystemProxy = true})
     : _client =
@@ -1174,26 +1161,19 @@ class RemoteMediaRedirectResolver {
     String remoteUrl, {
     Map<String, String> headers = const {},
   }) async {
-    final url = await _resolve(remoteUrl, headers: headers);
-    final original = Uri.tryParse(remoteUrl);
-    final target = Uri.tryParse(url);
-    return (
-      url: url,
-      httpHeaders:
-          original != null && target != null && _sameAuthority(original, target)
-          ? headers
-          : PipelineSourceAdapter._headersForRedirectTarget(headers),
-    );
-  }
-
-  Future<String> _resolve(
-    String remoteUrl, {
-    Map<String, String> headers = const {},
-  }) async {
     final original = Uri.tryParse(remoteUrl);
     if (original == null ||
         (original.scheme != 'http' && original.scheme != 'https')) {
-      return remoteUrl;
+      return (
+        url: remoteUrl,
+        httpHeaders: original != null
+            ? headers
+            : {
+                for (final entry in headers.entries)
+                  if (!_originHeaders.contains(entry.key.toLowerCase()))
+                    entry.key: entry.value,
+              },
+      );
     }
 
     Map<String, String>? safeHeaders;
@@ -1242,10 +1222,19 @@ class RemoteMediaRedirectResolver {
                 '${current.host}:${current.port}',
               );
             }
-            return current.toString();
+            return (
+              url: current.toString(),
+              httpHeaders: _sameAuthority(current, original)
+                  ? headers
+                  : {
+                      for (final entry in headers.entries)
+                        if (!_originHeaders.contains(entry.key.toLowerCase()))
+                          entry.key: entry.value,
+                    },
+            );
           }
           debugPrint('[RemoteMediaResolver] HTTP $status for ${current.host}');
-          return remoteUrl;
+          return (url: remoteUrl, httpHeaders: headers);
         } finally {
           detach?.call();
           request.abort();
@@ -1258,7 +1247,7 @@ class RemoteMediaRedirectResolver {
       SourceOperation.check();
       debugPrint('[RemoteMediaResolver] ${original.host} failed: $error');
     }
-    return remoteUrl;
+    return (url: remoteUrl, httpHeaders: headers);
   }
 
   static bool _isRedirectStatus(int status) =>

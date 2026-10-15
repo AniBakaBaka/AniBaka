@@ -4,27 +4,17 @@ import 'package:flutter/services.dart';
 
 class SettingsSliverAppBar extends StatelessWidget {
   final String title;
-  final Color? backgroundColor;
-  final double expandedHeight;
 
-  const SettingsSliverAppBar({
-    required this.title,
-    this.backgroundColor,
-    this.expandedHeight = 120,
-    super.key,
-  });
+  const SettingsSliverAppBar({required this.title, super.key});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final background =
-        backgroundColor ?? (isDark ? Colors.black : const Color(0xFFF2F2F7));
-
     return SliverAppBar(
-      expandedHeight: expandedHeight,
+      expandedHeight: 120,
       pinned: true,
-      backgroundColor: background,
+      backgroundColor: isDark ? Colors.black : const Color(0xFFF2F2F7),
       elevation: 0,
       scrolledUnderElevation: 0,
       flexibleSpace: FlexibleSpaceBar(
@@ -91,22 +81,22 @@ class SettingsGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final reduceVisualEffects = context.reduceMotion;
-    return Container(
+    return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: const BorderRadius.all(Radius.circular(16)),
         boxShadow: reduceVisualEffects
             ? null
-            : [
+            : const [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.02),
+                  color: Color(0x05000000),
                   blurRadius: 10,
-                  offset: const Offset(0, 2),
+                  offset: Offset(0, 2),
                 ),
               ],
       ),
       child: Material(
         color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: const BorderRadius.all(Radius.circular(16)),
         clipBehavior: Clip.antiAlias,
         child: Column(children: children),
       ),
@@ -137,8 +127,9 @@ class _SettingsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
     final foreground = isDark ? Colors.white : Colors.black;
 
     return InkWell(

@@ -60,7 +60,7 @@ abstract class AdapterBase {
     return _dio ??= createDio();
   }
 
-  Dio createDio({Map<String, String>? extraHeaders}) {
+  Dio createDio() {
     final dio = Dio(
       BaseOptions(
         headers: {
@@ -69,7 +69,6 @@ abstract class AdapterBase {
               'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
           'Connection': 'keep-alive',
-          ...?extraHeaders,
         },
         followRedirects: true,
         maxRedirects: 5,
@@ -125,6 +124,7 @@ abstract class AdapterBase {
 
   bool get validatesOwnUrls => false;
 
+  /// Shared request headers with empty values removed by the adapter.
   Map<String, String> get mediaValidationHeaders => const {
     'User-Agent': defaultUserAgent,
     'Accept': '*/*',
@@ -580,12 +580,20 @@ abstract class AdapterBase {
       maxAttempts: maxAttempts,
       reachTimeout: reachTimeout,
     );
-    final headers = Map<String, String>.from(mediaValidationHeaders)
-      ..removeWhere((_, value) => value.isEmpty);
-    if (url.isNotEmpty && VideoUrlExtractor.isSignedCdnUrl(url)) {
-      headers.removeWhere((key, _) => key.toLowerCase() == 'referer');
-    }
-    return (url: url, httpHeaders: headers);
+    final headers = mediaValidationHeaders;
+    return (
+      url: url,
+      httpHeaders:
+          url.isNotEmpty &&
+              VideoUrlExtractor.isSignedCdnUrl(url) &&
+              headers.keys.any((key) => key.toLowerCase() == 'referer')
+          ? {
+              for (final entry in headers.entries)
+                if (entry.key.toLowerCase() != 'referer')
+                  entry.key: entry.value,
+            }
+          : headers,
+    );
   }
 
   /// Starts any source-specific authorization refresh required while the

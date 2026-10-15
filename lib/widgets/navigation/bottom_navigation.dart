@@ -1,4 +1,5 @@
 import 'package:baka/instance.dart';
+import 'package:baka/widgets/common/value_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -27,21 +28,28 @@ class AppBottomNavigation extends StatefulWidget {
     required this.items,
     this.visible = true,
     super.key,
-  });
+  }) : assert(items.length > 0),
+       assert(currentIndex >= 0 && currentIndex < items.length);
 
   @override
   State<AppBottomNavigation> createState() => _AppBottomNavigationState();
 }
 
 class _AppBottomNavigationState extends State<AppBottomNavigation> {
-  double? _dragIndex;
-  int? _lastHapticIndex;
+  final _dragIndex = ValueNotifier<double?>(null);
+
+  @override
+  void dispose() {
+    _dragIndex.dispose();
+    super.dispose();
+  }
 
   void _onDragUpdate(Offset pos, double width) {
-    if (widget.items.isEmpty || width <= 0) return;
     const padding = 8.0;
     final usableWidth = width - padding * 2;
-    final dx = (pos.dx - padding).clamp(0.0, usableWidth);
+    final dx = Directionality.of(context) == TextDirection.rtl
+        ? width - pos.dx - padding
+        : pos.dx - padding;
     final itemWidth = usableWidth / widget.items.length;
     final clampedIndex = ((dx - itemWidth / 2) / itemWidth).clamp(
       0.0,
@@ -49,25 +57,19 @@ class _AppBottomNavigationState extends State<AppBottomNavigation> {
     );
 
     final hover = clampedIndex.round();
-    if (_lastHapticIndex != hover) {
-      _lastHapticIndex = hover;
+    if (_dragIndex.value?.round() != hover) {
       HapticFeedback.selectionClick();
     }
-    setState(() => _dragIndex = clampedIndex);
+    _dragIndex.value = clampedIndex;
   }
 
   void _onDragEnd() {
-    if (_dragIndex != null) {
-      final target = _dragIndex!.round().clamp(0, widget.items.length - 1);
-      if (target != widget.currentIndex) {
-        HapticFeedback.lightImpact();
-        widget.onTap(target);
-      }
+    final target = _dragIndex.value?.round();
+    _dragIndex.value = null;
+    if (target != null && target != widget.currentIndex) {
+      HapticFeedback.lightImpact();
+      widget.onTap(target);
     }
-    setState(() {
-      _dragIndex = null;
-      _lastHapticIndex = null;
-    });
   }
 
   @override
@@ -77,11 +79,12 @@ class _AppBottomNavigationState extends State<AppBottomNavigation> {
     final safeBottom = MediaQuery.paddingOf(context).bottom;
     final isDark = colors.brightness == Brightness.dark;
 
-    final activeIndex = _dragIndex ?? widget.currentIndex.toDouble();
-    final highlightedIndex = activeIndex.round().clamp(
-      0,
-      widget.items.length - 1,
-    );
+    final primaryColor = isDark
+        ? Color.lerp(colors.primary, Colors.white, 0.25)!
+        : colors.primary;
+    final unselectedColor = isDark
+        ? colors.onSurface.withValues(alpha: 0.45)
+        : colors.onSurfaceVariant.withValues(alpha: 0.65);
 
     final bgDecoration = BoxDecoration(
       color: isDark
@@ -127,117 +130,127 @@ class _AppBottomNavigationState extends State<AppBottomNavigation> {
               decoration: bgDecoration,
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  return GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    onHorizontalDragStart: (d) =>
-                        _onDragUpdate(d.localPosition, constraints.maxWidth),
-                    onHorizontalDragUpdate: (d) =>
-                        _onDragUpdate(d.localPosition, constraints.maxWidth),
-                    onHorizontalDragEnd: (_) => _onDragEnd(),
-                    onHorizontalDragCancel: _onDragEnd,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 6,
-                      ),
-                      child: Stack(
-                        children: [
-                          AnimatedAlign(
-                            duration: reduceMotion || _dragIndex != null
-                                ? Duration.zero
-                                : const Duration(milliseconds: 250),
-                            curve: Curves.easeOutCubic,
-                            alignment: widget.items.length > 1
-                                ? AlignmentDirectional(
-                                    -1 +
-                                        2 *
-                                            activeIndex /
-                                            (widget.items.length - 1),
-                                    0,
-                                  )
-                                : Alignment.center,
-                            child: FractionallySizedBox(
-                              widthFactor: 1 / widget.items.length,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                ),
-                                child: Container(
-                                  height: 52,
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(26),
-                                    color: isDark
-                                        ? colors.primary.withValues(alpha: 0.28)
-                                        : colors.primary.withValues(
-                                            alpha: 0.12,
-                                          ),
+                  return Listener(
+                    // Accepted drags report PointerCancel as drag end too.
+                    onPointerCancel: (_) => _dragIndex.value = null,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onHorizontalDragStart: (d) =>
+                          _onDragUpdate(d.localPosition, constraints.maxWidth),
+                      onHorizontalDragUpdate: (d) =>
+                          _onDragUpdate(d.localPosition, constraints.maxWidth),
+                      onHorizontalDragEnd: (_) => _onDragEnd(),
+                      onHorizontalDragCancel: () => _dragIndex.value = null,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 6,
+                        ),
+                        child: Stack(
+                          children: [
+                            ValueListenableBuilder<double?>(
+                              valueListenable: _dragIndex,
+                              builder: (_, dragIndex, child) => AnimatedAlign(
+                                duration: reduceMotion || dragIndex != null
+                                    ? Duration.zero
+                                    : const Duration(milliseconds: 250),
+                                curve: Curves.easeOutCubic,
+                                alignment: widget.items.length > 1
+                                    ? AlignmentDirectional(
+                                        -1 +
+                                            2 *
+                                                (dragIndex ??
+                                                    widget.currentIndex
+                                                        .toDouble()) /
+                                                (widget.items.length - 1),
+                                        0,
+                                      )
+                                    : Alignment.center,
+                                child: child,
+                              ),
+                              child: FractionallySizedBox(
+                                widthFactor: 1 / widget.items.length,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                  ),
+                                  child: Container(
+                                    height: 52,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(26),
+                                      color: isDark
+                                          ? colors.primary.withValues(
+                                              alpha: 0.28,
+                                            )
+                                          : colors.primary.withValues(
+                                              alpha: 0.12,
+                                            ),
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                          Row(
-                            children: List.generate(widget.items.length, (i) {
-                              final selected = highlightedIndex == i;
-                              final item = widget.items[i];
-                              final primaryColor = isDark
-                                  ? Color.lerp(
-                                      colors.primary,
-                                      Colors.white,
-                                      0.25,
-                                    )!
-                                  : colors.primary;
-                              final unselectedColor = isDark
-                                  ? colors.onSurface.withValues(alpha: 0.45)
-                                  : colors.onSurfaceVariant.withValues(
-                                      alpha: 0.65,
-                                    );
-                              final itemColor = selected
-                                  ? primaryColor
-                                  : unselectedColor;
+                            ValueSelector<double?, int>(
+                              valueListenable: _dragIndex,
+                              select: (index) =>
+                                  index?.round() ?? widget.currentIndex,
+                              builder: (_, highlightedIndex) => Row(
+                                children: List.generate(widget.items.length, (
+                                  i,
+                                ) {
+                                  final selected = highlightedIndex == i;
+                                  final item = widget.items[i];
+                                  final itemColor = selected
+                                      ? primaryColor
+                                      : unselectedColor;
 
-                              return Expanded(
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () {
-                                    if (widget.currentIndex == i) return;
-                                    HapticFeedback.lightImpact();
-                                    widget.onTap(i);
-                                  },
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      _NavItemIcon(
-                                        item: item,
-                                        selected: selected,
-                                        color: itemColor,
+                                  return Expanded(
+                                    child: GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
+                                      onTap: () {
+                                        if (widget.currentIndex == i) return;
+                                        HapticFeedback.lightImpact();
+                                        widget.onTap(i);
+                                      },
+                                      child: Column(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          _NavItemIcon(
+                                            item: item,
+                                            selected: selected,
+                                            color: itemColor,
+                                          ),
+                                          const SizedBox(height: 2),
+                                          AnimatedDefaultTextStyle(
+                                            duration: reduceMotion
+                                                ? Duration.zero
+                                                : const Duration(
+                                                    milliseconds: 180,
+                                                  ),
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              height: 1.2,
+                                              fontWeight: selected
+                                                  ? FontWeight.w600
+                                                  : FontWeight.w500,
+                                              color: itemColor,
+                                            ),
+                                            child: Text(
+                                              item.label,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                      const SizedBox(height: 2),
-                                      AnimatedDefaultTextStyle(
-                                        duration: const Duration(
-                                          milliseconds: 180,
-                                        ),
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          height: 1.2,
-                                          fontWeight: selected
-                                              ? FontWeight.w600
-                                              : FontWeight.w500,
-                                          color: itemColor,
-                                        ),
-                                        child: Text(
-                                          item.label,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            }),
-                          ),
-                        ],
+                                    ),
+                                  );
+                                }),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   );

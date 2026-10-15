@@ -6,7 +6,6 @@ import 'dart:typed_data';
 
 import 'package:baka/services/torrent/bencode.dart';
 import 'package:flutter/foundation.dart';
-import 'package:baka/services/torrent/torrent_model.dart';
 
 /// Tracker 客户端 — 从 HTTP/UDP tracker 获取 peer 列表
 class TrackerClient {
@@ -34,13 +33,6 @@ class TrackerClient {
 
   static const int defaultListenPort = 6881;
 
-  static const List<String> _fallbackTrackers = [
-    'udp://tracker.opentrackr.org:1337/announce',
-    'udp://open.stealth.si:80/announce',
-    'udp://tracker.openbittorrent.com:6969/announce',
-    'https://tracker.gbitt.info/announce',
-  ];
-
   static String _generatePeerId() {
     final rng = Random();
     final suffix = List.generate(12, (_) => rng.nextInt(10).toString()).join();
@@ -51,29 +43,34 @@ class TrackerClient {
   Future<TrackerAnnounceResult> announce({
     required Uint8List infoHash,
     required Iterable<String> trackers,
-    int totalSize = 0,
+    required int left,
     int downloaded = 0,
     int uploaded = 0,
     int port = defaultListenPort,
     String? event,
   }) async {
-    final urls = normalizeTrackers(trackers);
-    final results = <TrackerAnnounceResult>[];
-    var next = 0;
+    final urls = trackers.toSet();
+    final iterator = urls.iterator;
+    final peers = <PeerAddress>{};
+    Duration? interval;
     Future<void> worker() async {
-      while (!_disposed && next < urls.length) {
-        final url = urls[next++];
-        results.add(
-          await _announceOne(
-            url: url,
-            infoHash: infoHash,
-            totalSize: totalSize,
-            downloaded: downloaded,
-            uploaded: uploaded,
-            port: port,
-            event: event,
-          ),
-        );
+      while (!_disposed && iterator.moveNext()) {
+        final url = iterator.current;
+        final result =
+            await (url.startsWith('udp:') ? _announceUdp : _announceHttp)(
+              url: url,
+              infoHash: infoHash,
+              left: left,
+              downloaded: downloaded,
+              uploaded: uploaded,
+              port: port,
+              event: event,
+            );
+        peers.addAll(result.peers);
+        final candidate = result.interval;
+        if (candidate != null && (interval == null || candidate < interval!)) {
+          interval = candidate;
+        }
       }
     }
 
@@ -83,112 +80,21 @@ class TrackerClient {
       ]).then<void>((_) {}),
       _closed.future,
     ]);
-    Duration? interval;
-    final peers = <PeerAddress>{};
-    for (final result in results) {
-      peers.addAll(result.peers);
-      final candidate = result.interval;
-      if (candidate != null &&
-          candidate > Duration.zero &&
-          (interval == null || candidate < interval)) {
-        interval = candidate;
-      }
-    }
     return TrackerAnnounceResult(
       peers: peers.toList(growable: false),
       interval: interval,
     );
   }
 
-  Future<TrackerAnnounceResult> announceMetadata({
-    required TorrentMetadata metadata,
-    int downloaded = 0,
-    int uploaded = 0,
-    int port = defaultListenPort,
-    String? event,
-  }) {
-    return announce(
-      infoHash: metadata.infoHash,
-      trackers: metadata.trackers,
-      totalSize: metadata.totalSize,
-      downloaded: downloaded,
-      uploaded: uploaded,
-      port: port,
-      event: event,
-    );
-  }
-
-  Future<TrackerAnnounceResult> announceFromMagnet({
-    required MagnetLink magnet,
-    int port = defaultListenPort,
-  }) {
-    return announce(
-      infoHash: magnet.infoHashBytes,
-      trackers: magnet.trackers,
-      totalSize: 1,
-      port: port,
-    );
-  }
-
-  @visibleForTesting
-  static List<String> normalizeTrackers(Iterable<String> trackers) {
-    final seen = <String>{};
-    final result = <String>[];
-    // A torrent's embedded tracker list can be years out of date. Always keep
-    // the exact list, then augment it with the maintained public fallbacks.
-    for (final raw in [...trackers, ..._fallbackTrackers]) {
-      final url = raw.trim();
-      final lower = url.toLowerCase();
-      if (url.isEmpty || !seen.add(lower)) continue;
-      if (lower.startsWith('http://') ||
-          lower.startsWith('https://') ||
-          lower.startsWith('udp://')) {
-        result.add(url);
-      }
-    }
-    return result;
-  }
-
-  Future<TrackerAnnounceResult> _announceOne({
-    required String url,
-    required Uint8List infoHash,
-    required int totalSize,
-    required int downloaded,
-    required int uploaded,
-    required int port,
-    String? event,
-  }) {
-    return url.toLowerCase().startsWith('udp://')
-        ? _announceUdp(
-            url: url,
-            infoHash: infoHash,
-            totalSize: totalSize,
-            downloaded: downloaded,
-            uploaded: uploaded,
-            port: port,
-            event: event,
-          )
-        : _announceHttp(
-            url: url,
-            infoHash: infoHash,
-            totalSize: totalSize,
-            downloaded: downloaded,
-            uploaded: uploaded,
-            port: port,
-            event: event,
-          );
-  }
-
   Future<TrackerAnnounceResult> _announceHttp({
     required String url,
     required Uint8List infoHash,
-    required int totalSize,
+    required int left,
     required int downloaded,
     required int uploaded,
     required int port,
     String? event,
   }) async {
-    final left = (totalSize - downloaded).clamp(0, totalSize);
     final query = StringBuffer()
       ..write('info_hash=${_urlEncodeBytes(infoHash)}')
       ..write('&peer_id=${_urlEncodeBytes(peerId)}')
@@ -198,8 +104,7 @@ class TrackerClient {
       ..write('&left=$left')
       ..write('&compact=1')
       ..write('&numwant=80');
-    final announceEvent = event ?? (downloaded == 0 ? 'started' : null);
-    if (announceEvent != null) query.write('&event=$announceEvent');
+    if (event != null) query.write('&event=$event');
 
     final separator = url.contains('?') ? '&' : '?';
     final requestUrl = '$url$separator$query';
@@ -219,16 +124,16 @@ class TrackerClient {
         return const TrackerAnnounceResult();
       }
 
-      final body = await _collectBytes(response);
-      final decoded = Bencode.decode(body);
-      if (decoded is! Map) return const TrackerAnnounceResult();
+      final body = BytesBuilder(copy: false);
+      await response.forEach(body.add);
+      final decoded = Bencode.decode(body.takeBytes()) as Map<String, dynamic>;
 
       final failure = decoded['failure reason'];
       if (failure != null) {
         debugPrint('[Tracker] $url 失败: ${bencodeString(failure)}');
         return const TrackerAnnounceResult();
       }
-      final seconds = bencodeInt(decoded['interval']);
+      final seconds = (decoded['interval'] as int);
       return TrackerAnnounceResult(
         peers: _parsePeers(decoded['peers']),
         interval: seconds > 0 ? Duration(seconds: seconds) : null,
@@ -244,7 +149,7 @@ class TrackerClient {
   Future<TrackerAnnounceResult> _announceUdp({
     required String url,
     required Uint8List infoHash,
-    required int totalSize,
+    required int left,
     required int downloaded,
     required int uploaded,
     required int port,
@@ -261,7 +166,7 @@ class TrackerClient {
       if (_disposed || addresses.isEmpty) return const TrackerAnnounceResult();
 
       final address = addresses.first;
-      final port = uri.hasPort ? uri.port : 80;
+      final trackerPort = uri.port;
       final rng = Random();
       socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
       if (_disposed) {
@@ -276,7 +181,7 @@ class TrackerClient {
         ..setInt64(0, 0x41727101980)
         ..setInt32(8, 0)
         ..setInt32(12, connectTx);
-      socket.send(Uint8List.view(connectReq.buffer), address, port);
+      socket.send(Uint8List.view(connectReq.buffer), address, trackerPort);
 
       final connectResp = await _readUdp(socket, events: events);
       if (connectResp == null || connectResp.length < 16) {
@@ -290,8 +195,7 @@ class TrackerClient {
 
       final connectionId = connectView.getInt64(8);
       final announceTx = rng.nextInt(0x7fffffff);
-      final left = (totalSize - downloaded).clamp(0, totalSize);
-      final eventId = switch (event ?? (downloaded == 0 ? 'started' : null)) {
+      final eventId = switch (event) {
         'completed' => 1,
         'started' => 2,
         'stopped' => 3,
@@ -312,7 +216,7 @@ class TrackerClient {
       final announceBytes = Uint8List.view(announceReq.buffer);
       announceBytes.setRange(16, 36, infoHash);
       announceBytes.setRange(36, 56, peerId);
-      socket.send(announceBytes, address, port);
+      socket.send(announceBytes, address, trackerPort);
 
       final announceResp = await _readUdp(socket, events: events);
       if (announceResp == null || announceResp.length < 20) {
@@ -375,8 +279,8 @@ class TrackerClient {
     if (peers is List) {
       return [
         for (final p in peers.whereType<Map>())
-          if (bencodeInt(p['port'] ?? 0) > 0)
-            PeerAddress(bencodeString(p['ip'] ?? ''), bencodeInt(p['port'])),
+          if ((p['port'] as int) > 0)
+            PeerAddress(bencodeString(p['ip']), (p['port'] as int)),
       ];
     }
     return const [];
@@ -400,12 +304,6 @@ class TrackerClient {
       }
     }
     return sb.toString();
-  }
-
-  static Future<Uint8List> _collectBytes(HttpClientResponse response) async {
-    final builder = BytesBuilder(copy: false);
-    await response.forEach(builder.add);
-    return builder.toBytes();
   }
 }
 

@@ -14,21 +14,17 @@ import 'package:baka/widgets/anime_detail/controller/video_source_search_control
 /// 视频源搜索与线路切换底部滑栏
 class VideoSourceSearchSheet extends StatefulWidget {
   final Map<String, dynamic> seedData;
-  final int targetEpisodeIndex;
   final int currentEpisodeIndex;
   final int currentLineIndex;
   final String? currentSource;
   final VideoSourceSearchController? searchController;
-  final String? heroTag;
 
   const VideoSourceSearchSheet({
     required this.seedData,
-    this.targetEpisodeIndex = 0,
     this.currentEpisodeIndex = 0,
     this.currentLineIndex = 1,
     this.currentSource,
     this.searchController,
-    this.heroTag,
     super.key,
   });
 
@@ -39,7 +35,6 @@ class VideoSourceSearchSheet extends StatefulWidget {
     int currentLineIndex = 1,
     String? currentSource,
     VideoSourceSearchController? searchController,
-    String? heroTag,
   }) => showModalBottomSheet<PlaybackRequest>(
     context: context,
     isScrollControlled: true,
@@ -49,12 +44,10 @@ class VideoSourceSearchSheet extends StatefulWidget {
     constraints: const BoxConstraints(maxWidth: 860),
     builder: (_) => VideoSourceSearchSheet(
       seedData: seedData,
-      targetEpisodeIndex: currentEpisodeIndex,
       currentEpisodeIndex: currentEpisodeIndex,
       currentLineIndex: currentLineIndex,
       currentSource: currentSource,
       searchController: searchController,
-      heroTag: heroTag,
     ),
   );
 
@@ -68,8 +61,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
   late final VideoSourceSearchController _controller;
   late final bool _ownsController;
   String _selectedFilter = 'all';
-  late List<String> _sourceKeys;
-  final _meta = <String, SourceMeta>{};
+  late List<({String key, String label, IconData icon})> _sources;
 
   late final Set<String> _currentIds;
   late final String _title;
@@ -110,17 +102,16 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
         widget.searchController ??
         VideoSourceSearchController(
           seedData: seed,
-          targetEpisodeIndex: widget.targetEpisodeIndex,
+          targetEpisodeIndex: widget.currentEpisodeIndex,
         );
 
-    _sourceKeys = _currentSourceKeys();
+    _sources = _readSources();
 
     sourceRepository.init().then<void>(
       (_) {
         if (!mounted) return;
         setState(() {
-          _sourceKeys = _currentSourceKeys();
-          _meta.clear();
+          _sources = _readSources();
         });
       },
       // 搜索初始化失败由 controller 的搜索状态和错误横幅报告。
@@ -132,12 +123,17 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     }
   }
 
-  List<String> _currentSourceKeys() => [
-    'all',
-    'internal',
-    for (final s in sourceCatalog.quickSearchSources) s.key,
+  List<({String key, String label, IconData icon})> _readSources() => [
+    (key: 'all', label: '全部', icon: Icons.all_inclusive_rounded),
+    (key: 'internal', label: '站内', icon: Icons.shield_moon_rounded),
+    for (final s in sourceCatalog.quickSearchSources)
+      (key: s.key, label: s.displayName, icon: s.icon),
     for (final s in sourceCatalog.enabledCustomSources)
-      AdapterRegistry.customSourceKey(s.id),
+      (
+        key: AdapterRegistry.customSourceKey(s.id),
+        label: s.name,
+        icon: Icons.extension_rounded,
+      ),
   ];
 
   @override
@@ -150,11 +146,13 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
   }
 
   void _refreshRoutes() {
-    _routes = _controller.getDirectSourceGroups(
+    final routes = _controller.getDirectSourceGroups(
       episodeIndex: widget.currentEpisodeIndex,
       preferredLine: widget.currentLineIndex,
       currentSource: widget.currentSource,
     );
+    if (identical(routes, _routes)) return;
+    _routes = routes;
     _readyRouteCount = 0;
     var hasPending = false;
     for (final group in _routes) {
@@ -162,17 +160,21 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
       if (group.status == SourceProbeStatus.pending) hasPending = true;
     }
     _filterRoutes();
-    if (hasPending && !_probeScheduled) {
-      _probeScheduled = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _probeScheduled = false;
-        if (mounted && !_isSelecting && !_controller.isDisposed) {
-          _controller.startSwitchProbes(
-            _routes.expand((group) => group.origins),
-          );
-        }
-      });
-    }
+    if (hasPending) _scheduleProbes();
+  }
+
+  void _scheduleProbes() {
+    if (_probeScheduled || _isSelecting) return;
+    _probeScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _probeScheduled = false;
+      if (mounted &&
+          ModalRoute.of(context)?.isActive == true &&
+          !_isSelecting &&
+          !_controller.isDisposed) {
+        _controller.startSwitchProbes(_routes.expand((group) => group.origins));
+      }
+    });
   }
 
   void _filterRoutes() {
@@ -237,6 +239,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     final origin = group.primary;
     _controller.markUserSelected();
 
+    var selectionTransferred = false;
     setState(() => _selectingKey = group.key);
     try {
       final probe = await _controller.ensureCandidatePlayable(
@@ -245,6 +248,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
         preferredLine: origin.preferredLine,
       );
       if (!mounted ||
+          ModalRoute.of(context)?.isCurrent != true ||
           _controller.isDisposed ||
           !_controller.results.contains(origin.item)) {
         return;
@@ -254,17 +258,17 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
         _message('线路解析失败，请尝试其他线路');
         return;
       }
-      final lineIndex = probe.resolvedLineIndex ?? probe.preferredLine;
-      final selectionData = data.copyWith(lineIndex: lineIndex);
+      final selectionData = data.copyWith();
       await _controller.persistMatchMemory(origin.item, selectionData);
       if (mounted &&
+          ModalRoute.of(context)?.isCurrent == true &&
           !_controller.isDisposed &&
           _controller.results.contains(origin.item)) {
         _controller.cancelSearch();
         if (_isFromPlayer) {
           Navigator.of(context).pop(selectionData);
         } else {
-          VideoSourceSearchController.cacheGlobal(_title, _controller);
+          VideoSourceSearchController.cacheGlobal(_controller);
           NavigationService.toPlayback(
             context,
             selectionData,
@@ -272,15 +276,14 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
             autoMatch: false,
           );
         }
+        selectionTransferred = true;
       }
     } catch (_) {
       _message('线路解析失败，请尝试其他线路');
     } finally {
-      if (mounted) {
-        setState(() {
-          _selectingKey = null;
-          _refreshRoutes();
-        });
+      if (mounted && !selectionTransferred) {
+        setState(() => _selectingKey = null);
+        _scheduleProbes();
       }
     }
   }
@@ -363,8 +366,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
           child: ListenableBuilder(
             listenable: _controller,
             builder: (context, _) {
-              // ListenableBuilder coalesces progress events into one build per
-              // frame, so grouping and filtering run only for a rendered frame.
+              // Controller progress and layout changes reuse the route snapshot.
               _refreshRoutes();
               return CustomScrollView(
                 controller: scrollController,
@@ -670,7 +672,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
   Widget _buildProgressSection(Color primary) {
     final searching = _controller.isSearching;
     final completed = _controller.finishedSources.length;
-    final total = _sourceKeys.length - 1;
+    final total = _sources.length - 1;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -722,11 +724,11 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     height: 40,
     child: ListView.separated(
       scrollDirection: Axis.horizontal,
-      itemCount: _sourceKeys.length,
+      itemCount: _sources.length,
       separatorBuilder: (_, _) => const SizedBox(width: 6),
       itemBuilder: (context, index) {
-        final key = _sourceKeys[index];
-        final meta = _meta.putIfAbsent(key, () => _resolveSourceMeta(key));
+        final source = _sources[index];
+        final key = source.key;
         final count = key == 'all'
             ? _controller.results.length
             : _controller.resultCountFor(key);
@@ -734,12 +736,13 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
         return ChoiceChip(
           selected: _selectedFilter == key,
           showCheckmark: false,
-          avatar: Icon(searching ? Icons.sync_rounded : meta.icon, size: 15),
-          label: Text('${meta.label} $count'),
+          avatar: Icon(searching ? Icons.sync_rounded : source.icon, size: 15),
+          label: Text('${source.label} $count'),
           onSelected: (_) {
             if (_selectedFilter == key) return;
             setState(() {
               _selectedFilter = key;
+              _filterRoutes();
             });
           },
           visualDensity: VisualDensity.compact,
@@ -834,7 +837,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     final labels = <String>{};
     var isCurrent = false;
     for (final origin in group.origins) {
-      labels.add(_sourceLabel(origin.item));
+      labels.add(origin.item.displayName);
       if (!isCurrent && _matchesCurrent(origin)) isCurrent = true;
     }
     final sourcesStr = labels.join(' · ');
@@ -908,12 +911,10 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
                 _buildCoverThumb(
                   item.cover.isNotEmpty ? item.cover : _cover,
                   isDark: isDark,
-                  fallbackIcon: _meta
-                      .putIfAbsent(
-                        item.source,
-                        () => _resolveSourceMeta(item.source),
-                      )
-                      .icon,
+                  fallbackIcon: item.source == 'internal'
+                      ? Icons.shield_moon_rounded
+                      : AdapterRegistry.descriptorFor(item.source)?.icon ??
+                            Icons.extension_rounded,
                   fallbackColor: accent,
                 ),
                 const SizedBox(width: 12),
@@ -1091,71 +1092,6 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
       ],
     ),
   );
-
-  String _sourceLabel(SourceSearchResult item) {
-    if (item.source == 'internal') {
-      return '站内';
-    }
-    final displayName = item.displayName.trim();
-    if (displayName.isNotEmpty) return displayName;
-    return _meta
-        .putIfAbsent(item.source, () => _resolveSourceMeta(item.source))
-        .label;
-  }
-}
-
-typedef SourceMeta = ({String label, IconData icon, Color color});
-
-SourceMeta _resolveSourceMeta(String key) {
-  if (key == 'all') {
-    return (
-      label: '全部',
-      icon: Icons.all_inclusive_rounded,
-      color: const Color(0xFF9E9E9E),
-    );
-  }
-  if (key == 'internal') {
-    return (
-      label: '站内',
-      icon: Icons.shield_moon_rounded,
-      color: const Color(0xFF4CAF50),
-    );
-  }
-
-  final descriptor = AdapterRegistry.descriptorFor(key);
-  if (descriptor != null) {
-    return (
-      label: descriptor.displayName,
-      icon: descriptor.icon,
-      color: descriptor.color,
-    );
-  }
-
-  if (AdapterRegistry.isCustomSource(key)) {
-    final id = key.substring(AdapterRegistry.customSourcePrefix.length);
-    for (final s in sourceCatalog.enabledCustomSources) {
-      if (s.id == id) {
-        const colors = [
-          Color(0xFF7C4DFF),
-          Color(0xFF00BCD4),
-          Color(0xFFFF5722),
-          Color(0xFF8BC34A),
-          Color(0xFFE91E63),
-          Color(0xFF3F51B5),
-        ];
-        return (
-          label: s.name,
-          icon: Icons.extension_rounded,
-          color: colors[s.name.hashCode.abs() % colors.length],
-        );
-      }
-    }
-  }
-  return (
-    label: '其他来源',
-    icon: Icons.layers_rounded,
-    color: const Color(0xFF9E9E9E),
-  );
 }
 
 extension _SearchPresentation on SourceSearchResult {
@@ -1163,13 +1099,8 @@ extension _SearchPresentation on SourceSearchResult {
     final int count when count > 0 => '约 $count 集',
     _ => null,
   };
-  String? get updateInfo => _updateInfo(internalData ?? const {});
-
-  static String? _updateInfo(Map data) {
-    final s = data['time']?.toString().trim() ?? '';
-    if (s.isEmpty) {
-      return null;
-    }
-    return '更新时间 ${formatDate(s)}';
+  String? get updateInfo {
+    final time = internalData?['time'] as String?;
+    return time == null || time.isEmpty ? null : '更新时间 ${formatDate(time)}';
   }
 }

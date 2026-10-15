@@ -23,6 +23,7 @@ class BgmInfo {
 
 class BgmSubjectInfo {
   final int subjectId;
+  final bool nsfw;
   final String? name;
   final String? nameCn;
   final String? summary;
@@ -33,6 +34,7 @@ class BgmSubjectInfo {
 
   BgmSubjectInfo({
     required this.subjectId,
+    this.nsfw = false,
     this.name,
     this.nameCn,
     this.summary,
@@ -42,6 +44,7 @@ class BgmSubjectInfo {
 
   factory BgmSubjectInfo.fromJson(Map<String, dynamic> data) => BgmSubjectInfo(
     subjectId: data['id'] as int,
+    nsfw: data['nsfw'] == true,
     name: trimmed(data['name']),
     nameCn: trimmed(data['name_cn']),
     summary: trimmed(data['summary']),
@@ -99,6 +102,7 @@ List<Map<String, dynamic>> convertBgmSubjectsToAppFormat(
       if (!compact) 'status': 'public',
       if (!compact) 'time': trimmed(subject['date']) ?? '',
       'bgmId': id,
+      'nsfw': subject['nsfw'] == true,
       'score': BgmUtils.extractScore(rating) ?? 0.0,
       if (!compact) 'rank': rating['rank'] as int,
       if (!compact) 'summary': trimmed(subject['summary']) ?? '',

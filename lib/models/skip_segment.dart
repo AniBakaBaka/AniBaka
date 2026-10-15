@@ -24,6 +24,8 @@ class SkipContext {
       seriesKey ?? (subjectId == null ? null : 'bgm:$subjectId');
   bool get bound => (subjectId ?? 0) > 0 && (episodeId ?? 0) > 0;
   String get localKey => '$sourceKey:$timelineKey';
+  String? get seriesLocalKey =>
+      seriesKey == null ? null : 'series:$seriesKey:$timelineKey';
   SkipContext bind(int subject, int episode) => SkipContext(
     sourceKey: sourceKey,
     timelineKey: timelineKey,
@@ -39,6 +41,7 @@ class SkipContext {
     'bgm_id': subjectId,
     'episode_id': episodeId,
     'duration_ms': durationMs,
+    if (seriesKey != null) 'series_key': seriesKey,
   };
 
   /// Stable source identity; never send signed playback URLs or local paths.
@@ -58,9 +61,12 @@ class SkipSegment {
     this.status = 'candidate',
     this.confirms = 0,
     this.reports = 0,
+    this.scope = 'episode',
   });
 
   final String id, type, origin, status;
+  final String scope;
+  bool get allEpisodes => scope == 'series';
   final int startMs, endMs, durationMs, confirms, reports;
   final bool automatic;
   String get label => type == 'op' ? '片头' : '片尾';
@@ -71,7 +77,14 @@ class SkipSegment {
       endMs > startMs &&
       endMs <= durationMs;
   bool fits(int duration) =>
-      valid && endMs <= duration && (durationMs - duration).abs() <= 2000;
+      valid &&
+      endMs <= duration &&
+      (allEpisodes || (durationMs - duration).abs() <= 2000);
+
+  // Public candidates with a different reference duration may be inspected,
+  // but must not enter the automatic playback session until locally confirmed.
+  bool canPreview(int duration) =>
+      origin == 'local' ? fits(duration) : valid && endMs <= duration;
 
   factory SkipSegment.fromJson(Map<String, dynamic> json) => SkipSegment(
     id: '${json['id']}',
@@ -84,6 +97,7 @@ class SkipSegment {
     status: json['status'] as String? ?? 'candidate',
     confirms: (json['confirms'] as num?)?.toInt() ?? 0,
     reports: (json['reports'] as num?)?.toInt() ?? 0,
+    scope: json['scope'] as String? ?? 'episode',
   );
 
   Map<String, dynamic> toJson() => {
@@ -97,6 +111,7 @@ class SkipSegment {
     'status': status,
     'confirms': confirms,
     'reports': reports,
+    'scope': scope,
   };
 }
 
@@ -105,13 +120,15 @@ class SkipData {
     this.context,
     this.segments = const [],
     this.availableSegments,
+    this.disabled = (op: false, ed: false),
     this.message = '等待视频信息',
   });
   final SkipContext? context;
   final List<SkipSegment> segments;
-  // Includes disabled intervals so settings can still inspect and edit them.
+  // Includes disabled and duration-mismatched candidates for manual inspection.
   final List<SkipSegment>? availableSegments;
   List<SkipSegment> get editableSegments => availableSegments ?? segments;
+  final ({bool op, bool ed}) disabled;
   final String message;
 }
 
@@ -130,10 +147,20 @@ class SkipSession {
   }
 
   void install(List<SkipSegment> values, int position) {
+    final previousSegments = segments;
     segments = values;
     // Late data and resumed playback must not suddenly seek mid-segment.
     for (final segment in values) {
-      if (segment.contains(position) && position > segment.startMs) {
+      final alreadyInstalled = previousSegments.any(
+        (previous) =>
+            previous.type == segment.type &&
+            previous.startMs == segment.startMs &&
+            previous.endMs == segment.endMs &&
+            previous.durationMs == segment.durationMs,
+      );
+      if (!alreadyInstalled &&
+          segment.contains(position) &&
+          position > segment.startMs) {
         suppress(segment);
       }
     }
@@ -170,12 +197,13 @@ class SkipSession {
         continue;
       }
       if (previous != null && position < previous) suppress(segment);
+      // Loading/playing events may lag behind the first position in a segment.
+      // Explicit seeks, late data and undo are already tracked by suppression.
       final auto =
           canAuto &&
           segment.automatic &&
           !_suppressed.contains(segment.type) &&
-          previous != null &&
-          previous <= segment.startMs;
+          previous != null;
       if (auto) suppress(segment);
       return (segment: segment, automatic: auto);
     }
@@ -194,7 +222,7 @@ double? skipEpisodeNumber(String title) {
 }
 
 final _episodeNumber = RegExp(
-  r'^(?:第\s*(\d+(?:\.\d+)?)\s*[集话話]|(?:EP?|Episode)\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?))$',
+  r'^(?:第\s*(\d+(?:\.\d+)?)\s*[集话話]|(?:EP?\.?|Episode)\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?))$',
   caseSensitive: false,
 );
 

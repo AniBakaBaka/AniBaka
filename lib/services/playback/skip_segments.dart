@@ -56,23 +56,34 @@ class SkipSegmentsService {
     await Instances.sp.setString(_storageKey, jsonEncode(data));
   }
 
-  Future<void> saveLocal(SkipContext context, SkipSegment segment) async {
+  Future<void> saveLocal(
+    SkipContext context,
+    SkipSegment segment, {
+    bool allEpisodes = false,
+  }) async {
+    final key = allEpisodes ? context.seriesLocalKey : context.localKey;
+    if (key == null) throw const FormatException('当前视频没有番剧信息');
     final data = _read();
-    final local = Map<String, dynamic>.from(
-      data[context.localKey] as Map? ?? {},
-    );
-    local[segment.type] = segment.toJson();
+    final local = data[key] as Map<String, dynamic>? ?? {};
+    local[segment.type] = {
+      ...segment.toJson(),
+      'scope': allEpisodes ? 'series' : 'episode',
+    };
     local.remove('disabled_${segment.type}');
-    data.remove(context.localKey);
-    data[context.localKey] = local;
+    data.remove(key);
+    data[key] = local;
+    if (allEpisodes) {
+      // Replace this episode's correction; other explicit corrections stay intact.
+      final current = data[context.localKey] as Map<String, dynamic>?;
+      current?.remove(segment.type);
+      current?.remove('disabled_${segment.type}');
+    }
     await _write(data);
   }
 
   Future<void> disable(SkipContext context, String type, bool disabled) async {
     final data = _read();
-    final local = Map<String, dynamic>.from(
-      data[context.localKey] as Map? ?? {},
-    );
+    final local = data[context.localKey] as Map<String, dynamic>? ?? {};
     if (disabled) {
       local['disabled_$type'] = true;
     } else {
@@ -82,37 +93,48 @@ class SkipSegmentsService {
     await _write(data);
   }
 
-  Set<String> disabledTypes(SkipContext context) {
-    final local = _read()[context.localKey] as Map? ?? {};
-    return {
-      for (final type in ['op', 'ed'])
-        if (local['disabled_$type'] == true) type,
-    };
-  }
-
-  List<SkipSegment> mergeLocal(
+  SkipData mergeLocal(
     SkipContext context,
     int duration,
-    List<SkipSegment> remote, {
-    bool includeDisabled = false,
+    Iterable<SkipSegment> remote, {
+    required String message,
   }) {
-    final local = _read()[context.localKey] as Map? ?? {};
-    final result = <SkipSegment>[];
-    for (final type in ['op', 'ed']) {
-      final value = local[type];
-      if (!includeDisabled && local['disabled_$type'] == true) continue;
+    final stored = _read();
+    final local = stored[context.localKey] as Map? ?? {};
+    final series = stored[context.seriesLocalKey] as Map? ?? {};
+    final available = <SkipSegment>[];
+    final enabled = <SkipSegment>[];
+    for (final type in const ['op', 'ed']) {
+      final value = local[type] ?? series[type];
+      final disabled = local['disabled_$type'] == true;
       if (value is Map) {
-        final segment = SkipSegment.fromJson(Map<String, dynamic>.from(value));
+        final segment = SkipSegment.fromJson(value as Map<String, dynamic>);
         if (segment.fits(duration)) {
-          result.add(segment);
-          continue;
+          available.add(segment);
+          if (!disabled) enabled.add(segment);
         }
         // A saved correction for another cut must not fall back to public data.
         continue;
       }
-      result.addAll(remote.where((s) => s.type == type && s.fits(duration)));
+      for (final segment in remote) {
+        if (segment.type != type || !segment.canPreview(duration)) continue;
+        available.add(segment);
+        if (!disabled && segment.fits(duration)) enabled.add(segment);
+      }
     }
-    return List.unmodifiable(result);
+    final segments = List<SkipSegment>.unmodifiable(enabled);
+    return SkipData(
+      context: context,
+      disabled: (
+        op: local['disabled_op'] == true,
+        ed: local['disabled_ed'] == true,
+      ),
+      segments: segments,
+      availableSegments: enabled.length == available.length
+          ? null
+          : List<SkipSegment>.unmodifiable(available),
+      message: message,
+    );
   }
 
   Future<SkipData> load(SkipContext context, int duration) async {
@@ -131,42 +153,47 @@ class SkipSegmentsService {
           notifyOnError: false,
         );
         remote = [
-          for (final value in json['segments'] as List? ?? [])
-            SkipSegment.fromJson(Map<String, dynamic>.from(value as Map)),
+          for (final value in json['segments'] as List)
+            SkipSegment.fromJson(value as Map<String, dynamic>),
         ];
         if (json['upstream_unavailable'] == true) {
           message = '公共数据暂不可用，仍可使用已保存的标注';
+        } else if (remote.isNotEmpty) {
+          message = '已查询当前剧集；未确认或时长不符的区间仅支持手动试用';
+        } else if (context.timelineKey != 'original') {
+          message = '去广告后时间轴已变化，仅使用当前片源的标注';
         }
-        if (remote.isNotEmpty) message = '已查询当前剧集；未确认区间仅支持手动跳过';
       } catch (_) {
         message = '服务器暂不支持或查询失败，仍可在本机标注';
       }
     }
-    return SkipData(
-      context: context,
-      segments: mergeLocal(context, duration, remote),
-      availableSegments: mergeLocal(
-        context,
-        duration,
-        remote,
-        includeDisabled: true,
-      ),
-      message: message,
-    );
+    return mergeLocal(context, duration, remote, message: message);
   }
 
-  Future<void> submit(SkipContext context, SkipSegment segment) async {
+  Future<void> submit(
+    SkipContext context,
+    SkipSegment segment, {
+    bool allEpisodes = false,
+  }) async {
     if (!context.bound) throw const FormatException('请先绑定 Bangumi 剧集');
-    await apiTransport.postData<Map<String, dynamic>>(
+    if (allEpisodes && context.seriesKey == null) {
+      throw const FormatException('当前视频没有番剧信息');
+    }
+    final result = await apiTransport.postData<Map<String, dynamic>>(
       '${ApiConfig.host}/api/v1/skip-segments',
       {
         ...context.toJson(segment.durationMs),
         'type': segment.type,
         'start_ms': segment.startMs,
         'end_ms': segment.endMs,
+        'scope': allEpisodes ? 'series' : 'episode',
+        if (allEpisodes) 'source_key': context.seriesKey,
       },
       notifyOnError: false,
     );
+    if (allEpisodes && result['scope'] != 'series') {
+      throw const FormatException('服务器尚不支持全集共享，请升级服务端');
+    }
   }
 
   Future<void> feedback(

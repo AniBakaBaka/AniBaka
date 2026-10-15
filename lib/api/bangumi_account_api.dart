@@ -13,6 +13,65 @@ import 'package:http/io_client.dart';
 
 const _bangumiApiBase = 'https://api.bgm.tv';
 
+/// OAuth can span browser/app switches. A failed request must not discard the
+/// whole login, while cancellation and terminal authentication errors still do.
+Future<T> _waitForOAuth<T>(
+  Uri uri,
+  Future<T?> Function(Future<void> abort) read, {
+  required Duration timeout,
+  required String timeoutMessage,
+  Future<void>? abortTrigger,
+}) async {
+  final abort = Completer<void>();
+  var timedOut = false;
+  void stop() {
+    if (!abort.isCompleted) abort.complete();
+  }
+
+  final timer = Timer(timeout, () {
+    timedOut = true;
+    stop();
+  });
+  abortTrigger?.then((_) => stop());
+  final cancelled = abort.future.then<T?>(
+    (_) => throw http.RequestAbortedException(uri),
+  );
+  try {
+    while (!abort.isCompleted) {
+      try {
+        final result = await Future.any([read(abort.future), cancelled]);
+        if (abort.isCompleted) break;
+        if (result != null) return result;
+      } catch (error) {
+        if (error is http.RequestAbortedException) rethrow;
+        final status = switch (error) {
+          ApiException() => error.statusCode,
+          BangumiSyncException() => error.statusCode,
+          _ => null,
+        };
+        if (error is! TimeoutException &&
+            error is! SocketException &&
+            error is! http.ClientException &&
+            status != 408 &&
+            status != 429 &&
+            !(status != null && status >= 500 && status <= 599)) {
+          rethrow;
+        }
+      }
+      await Future.any([
+        Future<void>.delayed(const Duration(seconds: 2)),
+        abort.future,
+      ]);
+    }
+    throw http.RequestAbortedException(uri);
+  } on http.RequestAbortedException {
+    if (timedOut) throw TimeoutException(timeoutMessage, timeout);
+    rethrow;
+  } finally {
+    timer.cancel();
+  }
+}
+
 class BangumiSyncException implements Exception {
   const BangumiSyncException(this.message, {this.statusCode});
 
@@ -99,48 +158,29 @@ class BangumiOAuthBroker {
     String state, {
     Future<void>? abortTrigger,
     Duration timeout = const Duration(minutes: 10),
-  }) async {
+  }) {
     final uri = Uri.parse(
       '${ApiConfig.host}/api/v1/bangumi/oauth/status',
     ).replace(queryParameters: {'state': state});
-    final abort = Completer<void>();
-    var timedOut = false;
-    void stop() {
-      if (!abort.isCompleted) abort.complete();
-    }
-
-    final timer = Timer(timeout, () {
-      timedOut = true;
-      stop();
-    });
-    abortTrigger?.then((_) => stop());
-    try {
-      while (!abort.isCompleted) {
-        final root = await Future.any<Map<String, dynamic>>([
-          apiTransport.getJson<Map<String, dynamic>>(
-            uri.toString(),
-            notifyOnError: false,
-            abortTrigger: abort.future,
-          ),
-          // Stop waiting even if a shared account refresh is still running.
-          abort.future.then((_) => throw http.RequestAbortedException(uri)),
-        ]);
-        if (abort.isCompleted) break;
+    return _waitForOAuth(
+      uri,
+      (abort) async {
+        final root = await apiTransport.getJson<Map<String, dynamic>>(
+          uri.toString(),
+          notifyOnError: false,
+          abortTrigger: abort,
+        );
         final data = _parseBrokerResponse(root);
-        if (data['status'] == 'complete') return _tokenFromJson(data);
-        // The broker currently specifies polling; do not assume long polling.
-        await Future.any([
-          Future<void>.delayed(const Duration(seconds: 2)),
-          abort.future,
-        ]);
-      }
-      throw http.RequestAbortedException(uri);
-    } on http.RequestAbortedException {
-      if (timedOut) throw TimeoutException('Bangumi 登录超时，请重试', timeout);
-      rethrow;
-    } finally {
-      timer.cancel();
-    }
+        return data['status'] == 'complete' ? _tokenFromJson(data) : null;
+      },
+      abortTrigger: abortTrigger,
+      timeout: timeout,
+      timeoutMessage: '等待 AniBaka 授权结果超时，请检查网络后重试',
+    );
+  }
+
+  Future<void> acknowledge(String state) async {
+    await _post('/api/v1/bangumi/oauth/ack', {'state': state});
   }
 
   Future<BangumiOAuthToken> refresh(String refreshToken) async {
@@ -225,7 +265,17 @@ class BangumiApi {
   Future<BangumiAccount> getMe(
     String token, {
     Future<void>? abortTrigger,
+    bool retryForOAuth = false,
   }) async {
+    if (retryForOAuth) {
+      return _waitForOAuth(
+        Uri.parse('$_bangumiApiBase/v0/me'),
+        (abort) => getMe(token, abortTrigger: abort),
+        abortTrigger: abortTrigger,
+        timeout: const Duration(minutes: 2),
+        timeoutMessage: '读取 Bangumi 账号超时，请检查网络后重试',
+      );
+    }
     final json = await _request<Map<String, dynamic>>(
       'GET',
       '/v0/me',

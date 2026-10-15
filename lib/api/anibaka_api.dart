@@ -39,33 +39,30 @@ final class AniBakaApi {
         shouldCache: (value) => value != null,
       );
 
-  static Future<T?> _read<T>(
-    Future<Map<String, dynamic>?> data,
-    T Function(Map<String, dynamic>) parse,
-  ) async {
-    final value = await data;
-    return value == null ? null : parse(value);
+  static Future<AnimeCollection?> _getCollection(String url) async {
+    final value = await apiTransport.getOptionalData<Map<String, dynamic>>(url);
+    return value == null ? null : AnimeCollection.fromJson(value);
   }
 
   static Future<bool> _deleted(String url) async => ApiTransport.accepted(
     await apiTransport.deleteJson<Map<String, dynamic>>(url),
   );
 
-  static Future<AnimeCollection?> saveCollection(AnimeCollection collection) =>
-      _read(
-        apiTransport.postData<Map<String, dynamic>>(
-          '$_baseUrl/collection',
-          collection.toJson(),
-        ),
-        AnimeCollection.fromJson,
-      );
+  static Future<AnimeCollection> saveCollection(
+    AnimeCollection collection,
+  ) async => AnimeCollection.fromJson(
+    await apiTransport.postData<Map<String, dynamic>>(
+      '$_baseUrl/collection',
+      collection.toJson(),
+    ),
+  );
 
-  static Future<PageData<AnimeCollection>?> getCollections({
+  static Future<PageData<AnimeCollection>> getCollections({
     int page = 1,
     int pageSize = 20,
     int? status,
     int? bgmId,
-  }) {
+  }) async {
     final uri = Uri.parse('$_baseUrl/collection').replace(
       queryParameters: {
         'page': '$page',
@@ -74,30 +71,24 @@ final class AniBakaApi {
         if (bgmId != null) 'bgm_id': '$bgmId',
       },
     );
-    return _read(
-      apiTransport.getData<Map<String, dynamic>?>(uri.toString()),
-      (json) => parsePage(json, AnimeCollection.fromJson),
+    return parsePage(
+      await apiTransport.getData<Map<String, dynamic>>(uri.toString()),
+      AnimeCollection.fromJson,
     );
   }
 
-  static Future<CollectionStats?> getCollectionStats() => _read(
-    apiTransport.getData<Map<String, dynamic>?>('$_baseUrl/collection/stats'),
-    CollectionStats.fromJson,
-  );
+  static Future<CollectionStats> getCollectionStats() async =>
+      CollectionStats.fromJson(
+        await apiTransport.getData<Map<String, dynamic>>(
+          '$_baseUrl/collection/stats',
+        ),
+      );
 
-  static Future<AnimeCollection?> getCollectionByPostId(int postId) => _read(
-    apiTransport.getOptionalData<Map<String, dynamic>>(
-      '$_baseUrl/collection/post/$postId',
-    ),
-    AnimeCollection.fromJson,
-  );
+  static Future<AnimeCollection?> getCollectionByPostId(int postId) =>
+      _getCollection('$_baseUrl/collection/post/$postId');
 
-  static Future<AnimeCollection?> getCollectionByBgmId(int bgmId) => _read(
-    apiTransport.getOptionalData<Map<String, dynamic>>(
-      '$_baseUrl/bgm-collection/$bgmId',
-    ),
-    AnimeCollection.fromJson,
-  );
+  static Future<AnimeCollection?> getCollectionByBgmId(int bgmId) =>
+      _getCollection('$_baseUrl/bgm-collection/$bgmId');
 
   static Future<bool> deleteCollection(int postId) =>
       _deleted('$_baseUrl/collection/$postId');
@@ -105,25 +96,23 @@ final class AniBakaApi {
   static Future<bool> deleteCollectionByBgmId(int bgmId) =>
       _deleted('$_baseUrl/bgm-collection/$bgmId');
 
-  static Future<PlayHistory?> savePlayHistory(
+  static Future<void> savePlayHistory(
     PlayHistory history, {
     bool notifyOnError = true,
-  }) => _read(
-    apiTransport.postData<Map<String, dynamic>>(
+  }) async {
+    await apiTransport.postData<Map<String, dynamic>>(
       '$_baseUrl/play-history',
       history.toJson(),
       notifyOnError: notifyOnError,
-    ),
-    PlayHistory.fromJson,
-  );
+    );
+  }
 
-  static Future<List<PlayHistory>?> getPlayHistory({int pageSize = 20}) =>
-      _read(
-        apiTransport.getData<Map<String, dynamic>?>(
-          '$_baseUrl/play-history?page_size=$pageSize',
-        ),
-        (json) => parseList(json['list'], PlayHistory.fromJson),
-      );
+  static Future<List<PlayHistory>> getPlayHistory({int pageSize = 20}) async {
+    final json = await apiTransport.getData<Map<String, dynamic>>(
+      '$_baseUrl/play-history?page_size=$pageSize',
+    );
+    return parseList(json['list'], PlayHistory.fromJson);
+  }
 
   static Future<bool> clearPlayHistory() =>
       _deleted('$_baseUrl/play-history-clear');
@@ -182,10 +171,13 @@ final class AniBakaApi {
     }, notifyOnError: false),
   );
 
-  static Future<List<WatchPartyInvite>> listWatchRooms() async {
+  static Future<List<WatchPartyInvite>> listWatchRooms({
+    Future<void>? abortTrigger,
+  }) async {
     final data = await apiTransport.getData<Map<String, dynamic>>(
       '$_watchBaseUrl/rooms',
       notifyOnError: false,
+      abortTrigger: abortTrigger,
     );
     return [
       for (final room in data['rooms'] as List<dynamic>)
