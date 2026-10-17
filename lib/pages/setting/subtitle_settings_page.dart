@@ -1,18 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
+
+import 'package:baka/models/playback_state.dart';
 import 'package:baka/models/subtitle_config.dart';
-import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:baka/utils/toast_utils.dart';
+import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:baka/widgets/player/settings_panel.dart';
 
-export 'package:baka/models/subtitle_config.dart';
-
-final _subtitleFontLabels = {
-  for (final font in SubtitleConfig.availableFonts)
-    font['value']!: font['name']!,
-};
-
-const _subtitleColors = <Color>[
+const _palette = <Color>[
   Colors.white,
   Colors.black,
   Color(0xFFFFFF00),
@@ -26,361 +21,202 @@ const _subtitleColors = <Color>[
 ];
 
 class SubtitleSettingsPage extends StatefulWidget {
-  final PlaybackController controller;
-
   const SubtitleSettingsPage({required this.controller, super.key});
+
+  final PlaybackController controller;
 
   static Future<void> show(
     BuildContext context,
     PlaybackController controller,
-  ) async {
-    return showPlayerSettingsPanel(
-      context,
-      SubtitleSettingsPage(controller: controller),
-    );
-  }
+  ) => showPlayerSettingsPanel(
+    context,
+    SubtitleSettingsPage(controller: controller),
+  );
 
   @override
   State<SubtitleSettingsPage> createState() => _SubtitleSettingsPageState();
 }
 
 class _SubtitleSettingsPageState extends State<SubtitleSettingsPage> {
-  late SubtitleConfig _config;
-  bool _isAdvancedExpanded = false;
+  late SubtitleTrack _track = widget.controller.currentSubtitleTrack;
 
-  late List<SubtitleTrack> _subtitleTracks;
-  SubtitleTrack? _currentTrack;
-
-  @override
-  void initState() {
-    super.initState();
-    _config = widget.controller.preferences.value.subtitleConfig;
-    _subtitleTracks = widget.controller.subtitleTracks
-        .where((track) => track.id != 'auto' && track.id != 'no')
-        .toList(growable: false);
-    _currentTrack = widget.controller.currentSubtitleTrack;
+  void _selectTrack(SubtitleTrack? track) {
+    setState(() => _track = track!);
+    widget.controller.setSubtitleTrack(track!);
   }
 
-  void _updateConfig(
-    SubtitleConfig newConfig, {
-    bool apply = true,
-    bool persist = false,
-  }) {
-    setState(() => _config = newConfig);
-    if (apply) {
-      widget.controller.updateSubtitleConfig(newConfig, persist: persist);
-    }
+  static String _label(SubtitleTrack track) {
+    if (track.id == 'no') return '关闭';
+    final name = [?track.title, ?track.language].join(' · ');
+    return name.isEmpty ? '轨道 ${track.id}' : name;
   }
-
-  void _persistConfig() =>
-      widget.controller.updateSubtitleConfig(_config, persist: true);
-
-  void _resetSettings() {
-    _updateConfig(const SubtitleConfig(), persist: true);
-    showSnackBar('已恢复默认字幕设置');
-  }
-
-  void _selectTrack(SubtitleTrack track) async {
-    await widget.controller.setSubtitleTrack(track);
-    if (mounted) setState(() => _currentTrack = track);
-  }
-
-  Future<void> _selectFont() => showPlayerSettingsPanel(
-    context,
-    Builder(
-      builder: (pageContext) => PanelContainer(
-        title: '选择字体',
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            for (final font in _subtitleFontLabels.entries)
-              ListTile(
-                title: Text(font.value),
-                selected: font.key == _config.fontFamily,
-                trailing: font.key == _config.fontFamily
-                    ? const Icon(Icons.check_rounded)
-                    : null,
-                onTap: () {
-                  if (font.key != _config.fontFamily) {
-                    _updateConfig(
-                      _config.copyWith(fontFamily: font.key),
-                      persist: true,
-                    );
-                  }
-                  Navigator.of(pageContext).pop();
-                },
-              ),
-          ],
-        ),
-      ),
-    ),
-  );
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final compact = isCompactPlayerPanel(context);
-    final primaryColor = theme.colorScheme.primary;
-
+    final controller = widget.controller;
+    final gap = SizedBox(height: isCompactPlayerPanel(context) ? 12 : 24);
     return PanelContainer(
       title: '字幕设置',
-      child: CustomScrollView(
-        physics: const BouncingScrollPhysics(),
-        slivers: [
-          SliverPadding(
+      child: ValueListenableBuilder<PlaybackPreferences>(
+        valueListenable: controller.preferences,
+        builder: (context, preferences, _) {
+          final c = preferences.subtitleConfig;
+          void update(SubtitleConfig next, {bool persist = true}) =>
+              controller.updateSubtitleConfig(next, persist: persist);
+          Widget slider(
+            String title,
+            double value,
+            String label,
+            double min,
+            double max,
+            int divisions,
+            SubtitleConfig Function(double value) change,
+          ) => PanelSliderTile(
+            title: title,
+            value: value,
+            valueLabel: label,
+            min: min,
+            max: max,
+            divisions: divisions,
+            onChanged: (v) => update(change(v), persist: false),
+            onChangeEnd: (v) => update(change(v)),
+          );
+
+          return ListView(
             padding: playerPanelContentPadding(context),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                const PanelSectionTitle('字幕轨道'),
-                PanelSettingsGroup(
-                  children: [
-                    if (_subtitleTracks.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 16,
-                        ),
-                        child: Text(
-                          '当前视频无内嵌字幕轨道',
-                          style: TextStyle(color: Colors.white54, fontSize: 13),
-                        ),
-                      )
-                    else ...[
-                      _buildTrackTile(
-                        label: '关闭字幕',
-                        isSelected: _currentTrack?.id == 'no',
-                        onTap: () => _selectTrack(SubtitleTrack.no()),
-                      ),
-                      ..._subtitleTracks.map((track) {
-                        final label = _buildTrackLabel(track);
-                        return Column(
-                          children: [
-                            const PanelDivider(),
-                            _buildTrackTile(
-                              label: label,
-                              isSelected: _currentTrack?.id == track.id,
-                              onTap: () => _selectTrack(track),
-                            ),
-                          ],
-                        );
-                      }),
-                    ],
-                  ],
-                ),
-
-                SizedBox(height: compact ? 12 : 24),
-
-                const PanelSectionTitle('字幕外观'),
-                PanelSettingsGroup(
-                  children: [
-                    _buildFontPicker(),
-                    const PanelDivider(),
-                    PanelSliderTile(
-                      title: '字体大小',
-                      value: _config.fontSize,
-                      valueLabel: '${_config.fontSize.round()}',
-                      min: 12,
-                      max: 60,
-                      divisions: 24,
-                      onChanged: (v) => _updateConfig(
-                        _config.copyWith(fontSize: v),
-                        apply: false,
-                      ),
-                      onChangeEnd: (_) => _persistConfig(),
-                    ),
-                    const PanelDivider(),
-                    PanelSliderTile(
-                      title: '字幕位置',
-                      value: _config.position,
-                      valueLabel: '${_config.position.round()}%',
-                      min: 0,
-                      max: 100,
-                      divisions: 20,
-                      onChanged: (v) => _updateConfig(
-                        _config.copyWith(position: v),
-                        apply: false,
-                      ),
-                      onChangeEnd: (_) => _persistConfig(),
-                    ),
-                    const PanelDivider(),
-                    PanelSliderTile(
-                      title: '透明度',
-                      value: _config.opacity,
-                      valueLabel: '${(_config.opacity * 100).round()}%',
-                      min: 0.1,
-                      max: 1.0,
-                      divisions: 9,
-                      onChanged: (v) => _updateConfig(
-                        _config.copyWith(opacity: v),
-                        apply: false,
-                      ),
-                      onChangeEnd: (_) => _persistConfig(),
-                    ),
-                    if (_isAdvancedExpanded) ...[
-                      const PanelDivider(),
-                      PanelSliderTile(
-                        title: '描边宽度',
-                        value: _config.borderWidth,
-                        valueLabel: _config.borderWidth.toStringAsFixed(1),
-                        min: 0,
-                        max: 6,
-                        divisions: 12,
-                        onChanged: (v) => _updateConfig(
-                          _config.copyWith(borderWidth: v),
-                          apply: false,
-                        ),
-                        onChangeEnd: (_) => _persistConfig(),
-                      ),
-                      const PanelDivider(),
-                      PanelSwitchTile(
-                        title: '粗体',
-                        value: _config.bold,
-                        onChanged: (value) => _updateConfig(
-                          _config.copyWith(bold: value),
-                          persist: true,
-                        ),
-                      ),
-                      const PanelDivider(),
-                      _buildColorPicker(
-                        title: '字体颜色',
-                        currentColor: _config.fontColor,
-                        onSelect: (c) => _updateConfig(
-                          _config.copyWith(fontColor: c),
-                          persist: true,
-                        ),
-                        primaryColor: primaryColor,
-                      ),
-                      const PanelDivider(),
-                      _buildColorPicker(
-                        title: '描边颜色',
-                        currentColor: _config.borderColor,
-                        onSelect: (c) => _updateConfig(
-                          _config.copyWith(borderColor: c),
-                          persist: true,
-                        ),
-                        primaryColor: primaryColor,
-                      ),
-                      const PanelDivider(),
-                      _buildColorPicker(
-                        title: '背景颜色',
-                        currentColor: _config.backgroundColor,
-                        onSelect: (c) => _updateConfig(
-                          _config.copyWith(backgroundColor: c),
-                          persist: true,
-                        ),
-                        primaryColor: primaryColor,
-                        includeTransparent: true,
-                      ),
-                    ],
-                    const PanelDivider(),
-                    PanelExpandToggle(
-                      isExpanded: _isAdvancedExpanded,
-                      onTap: () => setState(
-                        () => _isAdvancedExpanded = !_isAdvancedExpanded,
-                      ),
-                    ),
-                  ],
-                ),
-
-                SizedBox(height: compact ? 16 : 32),
-
-                PanelResetButton(onPressed: _resetSettings),
-                SizedBox(height: compact ? 16 : 32),
-              ]),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _buildTrackLabel(SubtitleTrack track) {
-    final parts = <String>[];
-    if (track.title != null && track.title!.isNotEmpty) {
-      parts.add(track.title!);
-    }
-    if (track.language != null && track.language!.isNotEmpty) {
-      parts.add('[${track.language}]');
-    }
-    if (parts.isEmpty) {
-      parts.add('轨道 ${track.id}');
-    }
-    return parts.join(' ');
-  }
-
-  Widget _buildTrackTile({
-    required String label,
-    required bool isSelected,
-    required VoidCallback onTap,
-  }) {
-    final colors = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Semantics(
-        selected: isSelected,
-        child: FilledButton.tonal(
-          onPressed: onTap,
-          style: FilledButton.styleFrom(
-            backgroundColor: isSelected
-                ? colors.primary
-                : colors.secondaryContainer.withValues(alpha: 0.66),
-            foregroundColor: isSelected
-                ? colors.onPrimary
-                : colors.onSecondaryContainer,
-          ),
-          child: Row(
             children: [
-              Expanded(
-                child: Text(
-                  label,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+              const PanelSectionTitle('字幕轨道'),
+              RadioGroup<SubtitleTrack>(
+                groupValue: _track,
+                onChanged: _selectTrack,
+                child: PanelSettingsGroup(
+                  children: [
+                    for (final track in [
+                      SubtitleTrack.no(),
+                      ...controller.subtitleTracks.where(
+                        (t) => t.id != 'auto' && t.id != 'no',
+                      ),
+                    ])
+                      RadioListTile<SubtitleTrack>(
+                        contentPadding: EdgeInsets.zero,
+                        value: track,
+                        title: Text(_label(track)),
+                      ),
+                  ],
                 ),
               ),
-              if (isSelected) const Icon(Icons.check_rounded, size: 20),
+              gap,
+              const PanelSectionTitle('字幕外观'),
+              PanelSettingsGroup(
+                children: [
+                  PanelSelectTile(
+                    title: '字体',
+                    value: c.fontFamily,
+                    options: SubtitleConfig.fonts,
+                    onChanged: (v) => update(c.copyWith(fontFamily: v)),
+                  ),
+                  const PanelDivider(),
+                  slider(
+                    '字体大小',
+                    c.fontSize,
+                    '${c.fontSize.round()}',
+                    12,
+                    60,
+                    24,
+                    (v) => c.copyWith(fontSize: v),
+                  ),
+                  const PanelDivider(),
+                  slider(
+                    '字幕位置',
+                    c.position,
+                    '${c.position.round()}%',
+                    0,
+                    100,
+                    20,
+                    (v) => c.copyWith(position: v),
+                  ),
+                  const PanelDivider(),
+                  slider(
+                    '透明度',
+                    c.opacity,
+                    '${(c.opacity * 100).round()}%',
+                    .1,
+                    1,
+                    9,
+                    (v) => c.copyWith(opacity: v),
+                  ),
+                  const PanelDivider(),
+                  slider(
+                    '描边宽度',
+                    c.borderWidth,
+                    c.borderWidth.toStringAsFixed(1),
+                    0,
+                    6,
+                    12,
+                    (v) => c.copyWith(borderWidth: v),
+                  ),
+                  const PanelDivider(),
+                  PanelSwitchTile(
+                    title: '粗体',
+                    value: c.bold,
+                    onChanged: (v) => update(c.copyWith(bold: v)),
+                  ),
+                  const PanelDivider(),
+                  _ColorRow(
+                    title: '字体颜色',
+                    value: c.fontColor,
+                    onChanged: (v) => update(c.copyWith(fontColor: v)),
+                  ),
+                  const PanelDivider(),
+                  _ColorRow(
+                    title: '描边颜色',
+                    value: c.borderColor,
+                    onChanged: (v) => update(c.copyWith(borderColor: v)),
+                  ),
+                  const PanelDivider(),
+                  _ColorRow(
+                    title: '背景颜色',
+                    value: c.backgroundColor,
+                    transparent: true,
+                    onChanged: (v) => update(c.copyWith(backgroundColor: v)),
+                  ),
+                ],
+              ),
+              gap,
+              PanelResetButton(
+                onPressed: () {
+                  update(const SubtitleConfig());
+                  showSnackBar('已恢复默认字幕设置');
+                },
+              ),
             ],
-          ),
-        ),
+          );
+        },
       ),
     );
   }
+}
 
-  Widget _buildFontPicker() {
-    final currentLabel =
-        _subtitleFontLabels[_config.fontFamily] ??
-        _subtitleFontLabels.values.first;
+class _ColorRow extends StatelessWidget {
+  const _ColorRow({
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    this.transparent = false,
+  });
 
-    return FilledButton.tonal(
-      onPressed: _selectFont,
-      child: Row(
-        children: [
-          const Text('字体'),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text(
-              currentLabel,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.end,
-            ),
-          ),
-          const SizedBox(width: 8),
-          const Icon(Icons.chevron_right_rounded, size: 20),
-        ],
-      ),
-    );
-  }
+  final String title;
+  final Color value;
+  final ValueChanged<Color> onChanged;
+  final bool transparent;
 
-  Widget _buildColorPicker({
-    required String title,
-    required Color currentColor,
-    required ValueChanged<Color> onSelect,
-    required Color primaryColor,
-    bool includeTransparent = false,
-  }) {
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
+        spacing: 10,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
@@ -391,79 +227,40 @@ class _SubtitleSettingsPageState extends State<SubtitleSettingsPage> {
               fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 12),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final color in <Color>[
-                if (includeTransparent) Colors.transparent,
-                ..._subtitleColors,
+              for (final color in [
+                if (transparent) Colors.transparent,
+                ..._palette,
               ])
-                _buildColorChoice(color, currentColor, primaryColor, onSelect),
+                GestureDetector(
+                  onTap: () => onChanged(color),
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: color == value ? primary : Colors.white30,
+                        width: color == value ? 3 : 1,
+                      ),
+                    ),
+                    child: color == Colors.transparent
+                        ? const Icon(
+                            Icons.block_rounded,
+                            size: 16,
+                            color: Colors.white54,
+                          )
+                        : null,
+                  ),
+                ),
             ],
           ),
         ],
       ),
     );
   }
-
-  Widget _buildColorChoice(
-    Color color,
-    Color currentColor,
-    Color primaryColor,
-    ValueChanged<Color> onSelect,
-  ) {
-    final isSelected = currentColor == color;
-    final isTransparent = color == Colors.transparent;
-    return GestureDetector(
-      onTap: () => onSelect(color),
-      child: Container(
-        width: 28,
-        height: 28,
-        decoration: BoxDecoration(
-          color: isTransparent ? null : color,
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: isSelected
-                ? primaryColor
-                : Colors.white.withValues(alpha: 0.3),
-            width: isSelected ? 2.5 : 1,
-          ),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: primaryColor.withValues(alpha: 0.4),
-                    blurRadius: 6,
-                    spreadRadius: 1,
-                  ),
-                ]
-              : null,
-        ),
-        child: isTransparent
-            ? const CustomPaint(painter: _DiagonalLinePainter())
-            : null,
-      ),
-    );
-  }
-}
-
-class _DiagonalLinePainter extends CustomPainter {
-  const _DiagonalLinePainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0x80FFFFFF)
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
-    canvas.drawLine(
-      Offset(size.width * 0.2, size.height * 0.8),
-      Offset(size.width * 0.8, size.height * 0.2),
-      paint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

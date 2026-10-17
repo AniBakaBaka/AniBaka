@@ -15,6 +15,10 @@ import 'package:win32_registry/win32_registry.dart';
 class SystemProxyService {
   SystemProxyService._();
 
+  /// Installed by NetworkService after persisted privacy settings are loaded.
+  static Future<ConnectionTask<Socket>> Function(Uri, String?, int?)?
+  connectionFactory;
+
   static const String _internetSettings =
       r'Software\Microsoft\Windows\CurrentVersion\Internet Settings';
   static final RegExp _schemePrefix = RegExp(r'^[a-z][a-z0-9+.-]*://');
@@ -85,6 +89,7 @@ class SystemProxyService {
   static HttpClient createHttpClient() {
     final client = HttpClient();
     client.findProxy = findProxy;
+    if (connectionFactory != null) client.connectionFactory = connectionFactory;
     client.badCertificateCallback = (cert, host, port) => true;
     return client;
   }
@@ -92,6 +97,7 @@ class SystemProxyService {
   static HttpClient createDirectHttpClient() {
     final client = HttpClient();
     client.findProxy = directProxy;
+    if (connectionFactory != null) client.connectionFactory = connectionFactory;
     client.badCertificateCallback = (cert, host, port) => true;
     return client;
   }
@@ -209,8 +215,10 @@ class SystemProxyHttpOverrides extends HttpOverrides {
   HttpClient createHttpClient(SecurityContext? context) {
     final client = super.createHttpClient(context);
     client.findProxy = SystemProxyService.findProxy;
+    if (SystemProxyService.connectionFactory != null) {
+      client.connectionFactory = SystemProxyService.connectionFactory;
+    }
     client.badCertificateCallback = (cert, host, port) => true;
     return client;
   }
 }
-

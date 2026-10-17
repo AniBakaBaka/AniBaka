@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:baka/core/network_service.dart';
 
 import 'package:baka/storage/storage_provider.dart';
 import 'package:dio/dio.dart';
@@ -42,7 +43,7 @@ class WebDavStorageProvider extends StorageProvider {
            : Map.unmodifiable({
                'Authorization': _basicAuth(username, password),
              }),
-       _dio = Dio(
+       _dio = NetworkService.createDio(
          BaseOptions(
            baseUrl: StoragePath.trimTrailingSlash(baseUrl.trim()),
            connectTimeout: const Duration(seconds: 15),

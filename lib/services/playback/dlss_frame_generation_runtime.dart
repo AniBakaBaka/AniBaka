@@ -1,3 +1,4 @@
+import 'package:baka/core/network_service.dart';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -67,8 +68,7 @@ class DlssFrameGenerationRuntime {
     directory = directory.absolute;
     onProgress('正在校验 NVIDIA 帧生成运行库…');
     final cached = _verified?.$1;
-    if (cached?.parent.uri == directory.uri &&
-        await _valid(cached!, cancel)) {
+    if (cached?.parent.uri == directory.uri && await _valid(cached!, cancel)) {
       return cached;
     }
     if (await directory.exists()) {
@@ -89,7 +89,7 @@ class DlssFrameGenerationRuntime {
     if (!allowDownload) throw StateError('帧生成运行库缺失或校验失败，请在实验室重新开启并配置');
     await directory.create(recursive: true);
     Directory? staging;
-    final dio = Dio(
+    final dio = NetworkService.createDio(
       BaseOptions(
         connectTimeout: const Duration(seconds: 20),
         receiveTimeout: const Duration(seconds: 60),

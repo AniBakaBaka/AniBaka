@@ -1,3 +1,4 @@
+import 'package:baka/core/network_service.dart';
 import 'dart:io';
 
 import 'package:baka/instance.dart';
@@ -97,7 +98,7 @@ class _DownloadDialog extends StatefulWidget {
 }
 
 class _DownloadDialogState extends State<_DownloadDialog> {
-  final _client = Dio();
+  final _client = NetworkService.createDio();
   final _cancelToken = CancelToken();
   int? _percent;
   String _status = '正在下载...';

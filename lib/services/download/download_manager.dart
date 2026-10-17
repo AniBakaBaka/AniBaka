@@ -1,6 +1,7 @@
 import 'package:baka/utils/title_matcher.dart';
 import 'dart:async';
 import 'dart:io';
+import 'package:baka/core/network_service.dart';
 
 import 'package:baka/instance.dart';
 import 'package:baka/models/download_task.dart';
@@ -32,7 +33,7 @@ class DownloadService {
   void Function(DownloadTask task)? onCompleted;
 
   /// 视频与图片下载共用连接池、系统代理和应用关闭时的资源释放。
-  final client = Dio(
+  final client = NetworkService.createDio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 30),
       receiveTimeout: const Duration(seconds: 0),

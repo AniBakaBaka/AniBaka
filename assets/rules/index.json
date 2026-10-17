@@ -124,7 +124,7 @@
       "key": "ios_mifun",
       "title": "MiFun",
       "by": "auto-generator",
-      "rev": 6,
+      "rev": 7,
       "intro": "MiFun在线动漫专注于资源收集整理，海量有效的高质量动漫资源在线观看，完全免费。",
       "site": "https://ios.mifun.org/",
       "badge": "https://ugc.hitv.com/1/230324151010E2CA349174CE432E9353E29DE5C0EQ0NF/sVoWeL0.png?mxtheme/images/favicon.png",
@@ -135,7 +135,7 @@
       ],
       "ref": "ios_mifun.json",
       "engine": "anx-rule/2",
-      "sha256": "c39a459c2cf31ea3278a6b875a3b5265c70897f01902884c60dab8080faad8ac"
+      "sha256": "7715478e1bce61c3f7e33bdb6e7bcdd1bca81cdb74789a93ee6ec6e67b214bcd"
     },
     {
       "key": "lm6",

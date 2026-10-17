@@ -164,6 +164,15 @@ fvm flutter test
 
 ## 隐私与网络请求
 
+可在「设置 → 网络设置」启用 DoH 与 ECH，保存后重启应用生效，默认关闭。
+DoH 使用 RFC 8484 DNS 消息格式，默认端点为 `https://1.1.1.1/dns-query`，
+
+通用实现维护于组织的
+[ech_http](https://github.com/AniBakaBaka/ech_http)，保留
+[上游项目](https://github.com/ech-research/ech_http)历史，AniBaka 通过固定 Git 提交引用。
+原生构建说明见该仓库的 `ANIBAKA_CHANGES.md`，首次构建需联网下载按 SHA-256
+校验的原生依赖。
+
 应用每次启动时会向 `https://dau.anibaka.com/track` 发送一个匿名安装标识，用于统计各平台的日活跃安装量。该标识由应用首次运行时使用安全随机数在本地生成，格式为 `install_<platform>_<random>`，保存在本地设置中并在后续启动时复用；上报内容不包含账号 Token、用户名或设备硬件标识。对应实现位于 `lib/services/dau_tracker.dart`。
 
 其他主要网络端点如下：
@@ -221,5 +230,7 @@ OP、ED 都可分别一键“应用到全集”，同一番剧、同片源线路
 ## 许可证
 
 除单独标注的第三方组件和资产外，本项目以 [GNU General Public License v3.0](LICENSE) 发布，对应 SPDX 标识为 `GPL-3.0-only`。
+
+“AniBaka” 名称及应用图标（`assets/ic_launcher.png` 及由其生成的各平台图标文件）的著作权与相关权益归开发者所有，不适用上述 GPLv3 授权。未经开发者事先书面同意，不得将上述名称或图标用于再发布构建、衍生作品或任何其他用途。
 
 依赖、第三方源码和资产继续适用其各自许可证及版权声明，仓库内直接包含的第三方材料见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

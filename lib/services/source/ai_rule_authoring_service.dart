@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:baka/core/network_service.dart';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -30,7 +31,7 @@ class AiRuleAuthoringService {
     this.includeBundledExamples = true,
   }) : _modelClient =
            modelClient ??
-           Dio(
+           NetworkService.createDio(
              BaseOptions(
                connectTimeout: const Duration(seconds: 20),
                receiveTimeout: const Duration(seconds: 90),

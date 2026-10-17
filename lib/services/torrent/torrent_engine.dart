@@ -1,3 +1,4 @@
+import 'package:baka/core/network_service.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' show min;
@@ -57,7 +58,7 @@ class TorrentEngine {
   TorrentMetadata? _metadata;
   PieceManager? _pieceManager;
   final _streamServer = TorrentStreamServer();
-  final _dio = Dio(
+  final _dio = NetworkService.createDio(
     BaseOptions(
       headers: {'User-Agent': 'Baka/1.0', 'Accept': 'application/x-bittorrent'},
       connectTimeout: const Duration(seconds: 15),

@@ -66,25 +66,23 @@ Future<Map<String, dynamic>> getBgmSubject(
   ),
 );
 
-/// Pagination is needed for schedules of long-running series beyond episode 200.
-Future<Map<String, dynamic>> getBgmEpisodePage(
-  int subjectId, {
-  int offset = 0,
-}) => apiTransport.getJson<Map<String, dynamic>>(
-  '$_bgmApiBase/v0/episodes?subject_id=$subjectId&type=0&limit=200&offset=$offset',
-  notifyOnError: false,
-);
+/// Bangumi's image endpoint redirects to the cover without loading subject JSON.
+String bgmSubjectImageUrl(int subjectId) =>
+    '$_bgmApiBase/v0/subjects/$subjectId/image?type=large';
 
 Future<Map<String, dynamic>> getBgmEpisode(int episodeId) => apiTransport
     .getJson<Map<String, dynamic>>('$_bgmApiBase/v0/episodes/$episodeId');
 
-Future<List<Map<String, dynamic>>> getBgmEpisodes(int subjectId) {
+Future<List<Map<String, dynamic>>> getBgmEpisodes(
+  int subjectId, {
+  bool refresh = false,
+}) {
   return _episodeCache.get(subjectId, () async {
     final episodes = <Map<String, dynamic>>[];
     while (true) {
-      final response = await getBgmEpisodePage(
-        subjectId,
-        offset: episodes.length,
+      final response = await apiTransport.getJson<Map<String, dynamic>>(
+        '$_bgmApiBase/v0/episodes?subject_id=$subjectId&type=0&limit=200&offset=${episodes.length}',
+        notifyOnError: false,
       );
       final page = (response['data'] as List<dynamic>)
           .cast<Map<String, dynamic>>();
@@ -95,7 +93,7 @@ Future<List<Map<String, dynamic>>> getBgmEpisodes(int subjectId) {
       (left, right) => (left['sort'] as num).compareTo(right['sort'] as num),
     );
     return episodes;
-  });
+  }, refresh: refresh);
 }
 
 /// 角色响应通常远大于条目本身，只由角色页按需读取，不驻留全局缓存。
@@ -126,18 +124,44 @@ Future<List<Map<String, dynamic>>> getTrendingSubjects({
   return (response['data'] as List<dynamic>).cast<Map<String, dynamic>>();
 }
 
-/// BGM 每日放送（一周更新表）。
-///
-/// 返回以星期为 key（1=周一 … 7=周日）的 Map，值为
-/// `[{subject: {...}, watchers: n}]`，subject 与 trending 接口同构。
-Future<Map<String, List<Map<String, dynamic>>>> getBgmCalendar() async {
-  final data = await apiTransport.getJson<Map<String, dynamic>>(
-    '$_bgmNextBase/p1/calendar',
-  );
-  return {
-    for (final entry in data.entries)
-      entry.key: (entry.value as List<dynamic>).cast<Map<String, dynamic>>(),
-  };
+const _calendarKey = 'home_xinfan_bgm_v3';
+final _calendarCache = TtlCache(
+  AppStorage.homeCacheBox,
+  ttl: const Duration(hours: 24),
+);
+final _calendarRequests = RequestCache<int, List<List<Map>>>(limit: 0);
+
+/// 首页与排期页共用日历条目；Hive 恢复后只创建类型视图，不复制条目。
+List<List<Map>>? peekBgmCalendar({bool allowExpired = false}) {
+  final days =
+      _calendarCache.read(_calendarKey, allowExpired: allowExpired) as List?;
+  return days == null
+      ? null
+      : List.generate(
+          7,
+          (day) => (days[day] as List).cast<Map>(),
+          growable: false,
+        );
+}
+
+Future<List<List<Map>>> getBgmCalendar({bool force = false}) {
+  final cached = force ? null : peekBgmCalendar();
+  if (cached != null) return Future.value(cached);
+  return _calendarRequests.get(0, () async {
+    final data = await apiTransport.getJson<Map<String, dynamic>>(
+      '$_bgmNextBase/p1/calendar',
+      notifyOnError: false,
+    );
+    final days = List.generate(7, (_) => <Map>[], growable: false);
+    for (final entry in data.entries) {
+      days[int.parse(entry.key) - 1] = convertBgmSubjectsToAppFormat(
+        (entry.value as List).cast<Map<String, dynamic>>(),
+        trending: true,
+      );
+    }
+    await _calendarCache.write(_calendarKey, days);
+    return days;
+  });
 }
 
 Future<BgmCommentPage> getBgmSubjectComments(

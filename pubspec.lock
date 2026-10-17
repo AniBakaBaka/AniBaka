@@ -345,6 +345,15 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.9.0"
+  ech_http:
+    dependency: "direct main"
+    description:
+      path: "."
+      ref: cc730936d57561a6ce3889a922ed1a4e561e9fe0
+      resolved-ref: cc730936d57561a6ce3889a922ed1a4e561e9fe0
+      url: "https://github.com/AniBakaBaka/ech_http.git"
+    source: git
+    version: "0.2.2-anibaka.1"
   encrypt:
     dependency: "direct main"
     description:

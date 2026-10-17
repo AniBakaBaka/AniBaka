@@ -16,6 +16,7 @@ import 'package:baka/core/account_session.dart';
 import 'package:baka/core/api_transport.dart';
 import 'package:baka/core/app_storage.dart';
 import 'package:baka/core/system_proxy.dart';
+import 'package:baka/core/network_service.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/pages/player/download_page.dart';
 import 'package:baka/services/account/bangumi_session.dart';
@@ -36,7 +37,6 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart' hide ContextExtensionss;
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:http/io_client.dart';
 
 /// Composition root and owner of application-lifetime resources.
 class AppRuntime {
@@ -69,6 +69,8 @@ class AppRuntime {
     WidgetsFlutterBinding.ensureInitialized();
     SystemProxyService.initialize();
     await Instances.init();
+    NetworkService.initialize(Instances.sp);
+    _cleanup.add(NetworkService.close);
     PlaybackSettingsService.applyLowMemoryMode(
       PlaybackSettingsService.getLowMemoryMode(),
     );
@@ -88,7 +90,14 @@ class AppRuntime {
       },
     );
     final previousImageCache = CachedNetworkImageProvider.defaultCacheManager;
-    final imageCache = MonitoredImageCache(previousImageCache, networkNotices);
+    final imageClient = NetworkService.createClient();
+    final privateImageCache = CacheManager(
+      Config(
+        'libCachedImageData',
+        fileService: HttpFileService(httpClient: imageClient),
+      ),
+    );
+    final imageCache = MonitoredImageCache(privateImageCache, networkNotices);
     CachedNetworkImageProvider.defaultCacheManager = imageCache;
     _cleanup.add(() {
       networkNotices.dispose();
@@ -99,7 +108,11 @@ class AppRuntime {
         CachedNetworkImageProvider.defaultCacheManager = previousImageCache;
       }
     });
-    final client = IOClient(SystemProxyService.createHttpClient());
+    _cleanup.add(() async {
+      await privateImageCache.dispose();
+      imageClient.close();
+    });
+    final client = NetworkService.createClient();
     _cleanup.add(client.close);
     final auth = AuthApi(client, () => ApiConfig.host);
     account = AccountSession(Instances.sp, refreshTokens: auth.refresh);

@@ -4,6 +4,7 @@
 #include <flutter_windows.h>
 
 #include "resource.h"
+#include "utils.h"
 
 namespace {
 
@@ -100,7 +101,12 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
     window_class.hbrBackground = 0;
     window_class.lpszMenuName = nullptr;
     window_class.lpfnWndProc = Win32Window::WndProc;
-    RegisterClass(&window_class);
+    if (!RegisterClass(&window_class)) {
+      const DWORD error = GetLastError();
+      WriteStartupLog("RegisterClass failed; Win32 error " +
+                      std::to_string(error));
+      return nullptr;
+    }
     class_registered_ = true;
   }
   return kWindowClassName;
@@ -127,13 +133,18 @@ bool Win32Window::Create(const std::wstring& title,
 
   const wchar_t* window_class =
       WindowClassRegistrar::GetInstance()->GetWindowClass();
+  if (window_class == nullptr) {
+    return false;
+  }
 
   const POINT target_point = {static_cast<LONG>(origin.x),
                               static_cast<LONG>(origin.y)};
   HMONITOR monitor = MonitorFromPoint(target_point, MONITOR_DEFAULTTONEAREST);
+  WriteStartupLog("Querying native window DPI");
   UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
   double scale_factor = dpi / 96.0;
 
+  WriteStartupLog("Creating native Win32 host window");
   HWND window = CreateWindow(
       window_class, title.c_str(), WS_OVERLAPPEDWINDOW & ~WS_CAPTION,
       Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
@@ -141,8 +152,12 @@ bool Win32Window::Create(const std::wstring& title,
       nullptr, nullptr, GetModuleHandle(nullptr), this);
 
   if (!window) {
+    const DWORD error = GetLastError();
+    WriteStartupLog("CreateWindow failed; Win32 error " +
+                    std::to_string(error));
     return false;
   }
+  WriteStartupLog("Native Win32 host window created");
 
   UpdateTheme(window);
 

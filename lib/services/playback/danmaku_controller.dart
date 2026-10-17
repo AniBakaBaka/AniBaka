@@ -22,49 +22,6 @@ class DanmakuController extends ChangeNotifier {
   static final LinkedHashMap<String, List<DanmakuItem>> _cache =
       LinkedHashMap<String, List<DanmakuItem>>();
 
-  static DanmakuOption _readOption() {
-    final raw = Instances.sp.getString(_settingsKey);
-    return _parseOption(
-      raw == null || raw.isEmpty
-          ? const {}
-          : jsonDecode(raw) as Map<String, dynamic>,
-    );
-  }
-
-  static String getSavedFontFamily() => _readOption().fontFamily;
-
-  static Future<void> setFontFamily(String fontFamily) {
-    final normalized = fontFamily == AppFonts.systemFont
-        ? AppFonts.systemFont
-        : AppFonts.normalizeFont(fontFamily);
-    final option = _readOption().copyWith(fontFamily: normalized);
-    return Instances.sp.setString(
-      _settingsKey,
-      jsonEncode(_optionToJson(option)),
-    );
-  }
-
-  static DanmakuOption _parseOption(Map<String, dynamic> settings) {
-    final savedFont = settings['fontFamily'];
-    final fontFamily = switch (savedFont) {
-      null => AppFonts.defaultFont,
-      AppFonts.systemFont => AppFonts.systemFont,
-      final String value => AppFonts.normalizeFont(value),
-      _ => AppFonts.defaultFont,
-    };
-    return DanmakuOption(
-      fontSize: toDouble(settings['fontSize']) ?? DanmakuOption.defaultFontSize,
-      fontFamily: fontFamily,
-      area: toDouble(settings['area']) ?? 1.0,
-      opacity: toDouble(settings['opacity']) ?? 1.0,
-      duration: toDouble(settings['duration']) ?? 8.0,
-      hideTop: settings['hideTop'] == true,
-      hideBottom: settings['hideBottom'] == true,
-      hideScroll: settings['hideScroll'] == true,
-      strokeWidth: toDouble(settings['strokeWidth']) ?? 2.0,
-    );
-  }
-
   static Future<void> saveSettings(DanmakuController controller) async {
     final option = controller.option;
     final preferences = Instances.sp;
@@ -90,14 +47,30 @@ class DanmakuController extends ChangeNotifier {
 
   static void loadSettings(DanmakuController controller) {
     final preferences = Instances.sp;
-    final option = _readOption();
-    final raw = preferences.getString(_blockWordsKey);
-    controller.blockWords = raw == null || raw.isEmpty
-        ? <String>[]
-        : (jsonDecode(raw) as List).map((value) => value.toString()).toList();
+    final rawSettings = preferences.getString(_settingsKey);
+    final settings = rawSettings == null
+        ? const <String, dynamic>{}
+        : jsonDecode(rawSettings) as Map<String, dynamic>;
+    final rawWords = preferences.getString(_blockWordsKey);
+    controller.blockWords = rawWords == null
+        ? const <String>[]
+        : (jsonDecode(rawWords) as List).cast<String>();
     controller.blockRepeat = preferences.getBool(_blockRepeatKey) ?? false;
     controller.blockColor = preferences.getBool(_blockColorKey) ?? false;
-    controller.updateOption(option);
+    controller.updateOption(
+      DanmakuOption(
+        fontSize:
+            toDouble(settings['fontSize']) ?? DanmakuOption.defaultFontSize,
+        fontFamily: AppFonts.normalizeFont(settings['fontFamily'] as String?),
+        area: toDouble(settings['area']) ?? 1.0,
+        opacity: toDouble(settings['opacity']) ?? 1.0,
+        duration: toDouble(settings['duration']) ?? 8.0,
+        hideTop: settings['hideTop'] == true,
+        hideBottom: settings['hideBottom'] == true,
+        hideScroll: settings['hideScroll'] == true,
+        strokeWidth: toDouble(settings['strokeWidth']) ?? 2.0,
+      ),
+    );
   }
 
   static Future<List<DanmakuItem>> loadLocal(

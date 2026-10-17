@@ -15,25 +15,19 @@ import 'package:baka/widgets/danmaku/danmaku_list_sheet.dart';
 class VideoDetailCard extends StatelessWidget {
   final PlaybackContent content;
   final ValueNotifier<bool> followNotifier;
-  final List<String> cachedTags;
   final VoidCallback onFollowPressed;
   final VoidCallback onShowDetail;
-  final DanmakuController? danmakuController;
-  final String? sourceName;
-  final String? lineName;
-  final VoidCallback? onSourceTap;
+  final DanmakuController danmakuController;
+  final VoidCallback onSourceTap;
   final bool isSearching;
 
   const VideoDetailCard({
     required this.content,
     required this.followNotifier,
-    required this.cachedTags,
     required this.onFollowPressed,
     required this.onShowDetail,
-    this.danmakuController,
-    this.sourceName,
-    this.lineName,
-    this.onSourceTap,
+    required this.danmakuController,
+    required this.onSourceTap,
     this.isSearching = false,
     super.key,
   });
@@ -120,58 +114,55 @@ class VideoDetailCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              if (danmakuController != null) ...[
-                ListenableBuilder(
-                  listenable: danmakuController!,
-                  builder: (context, _) {
-                    final count = danmakuController!.items.length;
-                    return ScaleButton(
-                      onTap: () => DanmakuListSheet.show(
-                        context,
-                        danmakuController!,
-                        defaultTitle: content.title,
-                        defaultEpisode: content.currPlayIndex + 1,
+              ListenableBuilder(
+                listenable: danmakuController,
+                builder: (context, _) {
+                  final count = danmakuController.items.length;
+                  return ScaleButton(
+                    onTap: () => DanmakuListSheet.show(
+                      context,
+                      danmakuController,
+                      defaultTitle: content.title,
+                      defaultEpisode: content.currPlayIndex + 1,
+                    ),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
                       ),
-
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
+                      decoration: BoxDecoration(
+                        color: theme.cardColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: theme.dividerColor.withValues(alpha: 0.1),
                         ),
-                        decoration: BoxDecoration(
-                          color: theme.cardColor,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: theme.dividerColor.withValues(alpha: 0.1),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.subtitles_outlined,
+                            size: 14,
+                            color: theme.textTheme.bodyMedium?.color
+                                ?.withValues(alpha: 0.8),
                           ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.subtitles_outlined,
-                              size: 14,
+                          const SizedBox(width: 4),
+                          Text(
+                            '弹幕 $count',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
                               color: theme.textTheme.bodyMedium?.color
                                   ?.withValues(alpha: 0.8),
                             ),
-                            const SizedBox(width: 4),
-                            Text(
-                              '弹幕 $count',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: theme.textTheme.bodyMedium?.color
-                                    ?.withValues(alpha: 0.8),
-                              ),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                    );
-                  },
-                ),
-                const SizedBox(width: 8),
-              ],
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(width: 8),
               ScaleButton(
                 onTap: onShowDetail,
                 child: Container(
@@ -213,31 +204,23 @@ class VideoDetailCard extends StatelessWidget {
               ),
             ],
           ),
-          if (cachedTags.isNotEmpty || sourceName != null) ...[
-            const SizedBox(height: 14),
-
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              child: Row(
-                children: [
-                  if (sourceName != null && onSourceTap != null) ...[
-                    _SourceChip(
-                      sourceName: sourceName!,
-                      lineName: lineName,
-                      isSearching: isSearching,
-                      onTap: onSourceTap!,
-                    ),
-                    if (cachedTags.isNotEmpty) const SizedBox(width: 8),
-                  ],
-                  for (int i = 0; i < cachedTags.length; i++) ...[
-                    if (i > 0) const SizedBox(width: 8),
-                    _TagChip(tag: cachedTags[i]),
-                  ],
-                ],
-              ),
+          const SizedBox(height: 14),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Row(
+              spacing: 8,
+              children: [
+                _SourceChip(
+                  sourceName: content.sourceName,
+                  lineName: content.lineName,
+                  isSearching: isSearching,
+                  onTap: onSourceTap,
+                ),
+                for (final tag in content.tags) _TagChip(tag: tag),
+              ],
             ),
-          ],
+          ),
         ],
       ),
     );

@@ -63,59 +63,38 @@ class BgmDetailPage extends StatefulWidget {
 }
 
 class _BgmDetailPageState extends State<BgmDetailPage> {
+  /// Bangumi v0 subject; shared with the player through the API cache.
+  Map<String, dynamic>? _detail;
   bool _error = false;
-  late String _title = widget.title;
-  late String _summary = widget.fixedSummary ?? '暂无简介';
-  late double _score = widget.initialScore ?? 0;
-  String _cnName = '';
-  int _ratingCount = 0;
-  Map? _collection;
-  List<Map<String, dynamic>> _tags = [];
-  List<Map<String, dynamic>> _infobox = [];
+
+  bool get _hasFixedSummary => widget.fixedSummary?.isNotEmpty == true;
 
   @override
   void initState() {
     super.initState();
-    if (widget.subjectId != null) _fetchDetail();
+    final subjectId = widget.subjectId;
+    if (subjectId == null) return;
+    _detail = peekBgmSubject(subjectId);
+    if (_detail == null) _fetchDetail(subjectId);
   }
 
-  Future<void> _fetchDetail() async {
-    setState(() => _error = false);
+  Future<void> _fetchDetail(int subjectId) async {
     try {
-      final detail = await getBgmSubject(widget.subjectId!);
-      if (!mounted) return;
-      setState(() {
-        final rating = detail['rating'] as Map?;
-        _collection = detail['collection'] as Map?;
-        _tags = (detail['tags'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-        _infobox =
-            (detail['infobox'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-        _title = detail['name']?.toString() ?? widget.title;
-        _cnName = detail['name_cn']?.toString() ?? '';
-        if (widget.fixedSummary?.isNotEmpty != true) {
-          _summary = detail['summary']?.toString() ?? '暂无简介';
-        }
-        _score =
-            (rating?['score'] as num?)?.toDouble() ?? widget.initialScore ?? 0;
-        _ratingCount = (rating?['total'] as num?)?.toInt() ?? 0;
-      });
+      final detail = await getBgmSubject(subjectId);
+      if (mounted) setState(() => _detail = detail);
     } catch (_) {
-      if (mounted) {
-        setState(() {
-          _error = widget.fixedSummary?.isNotEmpty != true;
-        });
-      }
+      if (mounted) setState(() => _error = !_hasFixedSummary);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
+    return ColoredBox(
       color: theme.scaffoldBackgroundColor,
       child: Stack(
         children: [
-          _buildBody(theme),
+          if (_error) _buildError(theme) else _buildBody(theme),
           if (widget.onClose != null)
             Positioned(
               top: 8,
@@ -132,8 +111,10 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
   }
 
   Widget _buildBody(ThemeData theme) {
-    if (_error) return _buildError(theme);
-
+    final detail = _detail;
+    final tags = detail?['tags'] as List? ?? const [];
+    final infobox = detail?['infobox'] as List? ?? const [];
+    final subjectId = widget.subjectId;
     return CustomScrollView(
       controller: widget.scrollController,
       slivers: [
@@ -141,37 +122,39 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
           padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
           sliver: SliverList.list(
             children: [
-              _buildHeader(theme),
-              _buildSectionTitle('简介'),
-              _buildSummary(theme),
-              if (_tags.isNotEmpty) ...[
-                _buildSectionTitle('标签'),
-                _buildTags(theme),
-              ],
-              if (_infobox.isNotEmpty) _buildSectionTitle('详细信息'),
+              _buildHeader(theme, detail),
+              _sectionTitle('简介'),
+              _buildSummary(
+                theme,
+                _hasFixedSummary
+                    ? widget.fixedSummary!
+                    : detail?['summary'] as String? ?? '暂无简介',
+              ),
+              if (tags.isNotEmpty) ...[_sectionTitle('标签'), _buildTags(theme, tags)],
+              if (infobox.isNotEmpty) _sectionTitle('详细信息'),
             ],
           ),
         ),
-        if (_infobox.isNotEmpty)
+        if (infobox.isNotEmpty)
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             sliver: SliverList.builder(
-              itemCount: _infobox.length,
+              itemCount: infobox.length,
               itemBuilder: (context, index) =>
-                  _buildInfoboxItem(_infobox[index], theme),
+                  _buildInfoboxItem(theme, infobox[index] as Map),
             ),
           ),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
           sliver: SliverToBoxAdapter(
-            child: widget.subjectId == null
-                ? const SizedBox.shrink()
+            child: subjectId == null
+                ? null
                 : Padding(
                     padding: const EdgeInsets.only(top: 24),
                     child: Center(
                       child: TextButton.icon(
                         onPressed: () => launchUrlString(
-                          'https://bgm.tv/subject/${widget.subjectId}',
+                          'https://bgm.tv/subject/$subjectId',
                           mode: LaunchMode.externalApplication,
                         ),
                         icon: const Icon(Icons.open_in_new_rounded, size: 16),
@@ -185,7 +168,7 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
     );
   }
 
-  Widget _buildSectionTitle(String text) {
+  Widget _sectionTitle(String text) {
     return Padding(
       padding: const EdgeInsets.only(top: 28, bottom: 12),
       child: Text(
@@ -211,13 +194,31 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
             style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 8),
-          TextButton(onPressed: _fetchDetail, child: const Text('重试')),
+          TextButton(
+            onPressed: () {
+              setState(() => _error = false);
+              _fetchDetail(widget.subjectId!);
+            },
+            child: const Text('重试'),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildHeader(ThemeData theme) {
+  Widget _buildHeader(ThemeData theme, Map<String, dynamic>? detail) {
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final title = detail?['name'] as String? ?? widget.title;
+    final nameCn = detail?['name_cn'] as String? ?? '';
+    final rating = detail?['rating'] as Map?;
+    final score =
+        (rating?['score'] as num?)?.toDouble() ?? widget.initialScore ?? 0;
+    final collection = detail?['collection'] as Map?;
+    final placeholder = Container(
+      width: 100,
+      height: 150,
+      color: theme.colorScheme.surfaceContainerHighest,
+    );
     return Padding(
       padding: const EdgeInsets.only(right: 24),
       child: Row(
@@ -232,16 +233,8 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
                 height: 150,
                 fit: BoxFit.cover,
                 memCacheWidth: 300,
-                placeholder: (_, _) => Container(
-                  width: 100,
-                  height: 150,
-                  color: theme.colorScheme.surfaceContainerHighest,
-                ),
-                errorWidget: (_, _, _) => Container(
-                  width: 100,
-                  height: 150,
-                  color: theme.colorScheme.surfaceContainerHighest,
-                ),
+                placeholder: (_, _) => placeholder,
+                errorWidget: (_, _, _) => placeholder,
               ),
             ),
             const SizedBox(width: 16),
@@ -251,7 +244,7 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _title,
+                  title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -260,19 +253,16 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
                     height: 1.3,
                   ),
                 ),
-                if (_cnName.isNotEmpty && _cnName != _title) ...[
+                if (nameCn.isNotEmpty && nameCn != title) ...[
                   const SizedBox(height: 4),
                   Text(
-                    _cnName,
+                    nameCn,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+                    style: TextStyle(fontSize: 14, color: muted),
                   ),
                 ],
-                if (_score > 0) ...[
+                if (score > 0) ...[
                   const SizedBox(height: 12),
                   Row(
                     children: [
@@ -283,7 +273,7 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        _score.toStringAsFixed(1),
+                        score.toStringAsFixed(1),
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -292,25 +282,19 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        '$_ratingCount 人评分',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
+                        '${rating?['total'] ?? 0} 人评分',
+                        style: TextStyle(fontSize: 12, color: muted),
                       ),
                     ],
                   ),
                 ],
-                if (_collection != null) ...[
+                if (collection != null) ...[
                   const SizedBox(height: 8),
                   Text(
-                    '${_collection!['doing'] ?? 0} 在看 · '
-                    '${_collection!['collect'] ?? 0} 看过 · '
-                    '${_collection!['wish'] ?? 0} 想看',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+                    '${collection['doing']} 在看 · '
+                    '${collection['collect']} 看过 · '
+                    '${collection['wish']} 想看',
+                    style: TextStyle(fontSize: 12, color: muted),
                   ),
                 ],
               ],
@@ -321,7 +305,7 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
     );
   }
 
-  Widget _buildSummary(ThemeData theme) {
+  Widget _buildSummary(ThemeData theme, String summary) {
     final bodyStyle = TextStyle(
       fontSize: 15,
       height: 1.8,
@@ -331,7 +315,7 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
     // for each paragraph in a long synopsis.
     return SelectionArea(
       child: MarkdownBody(
-        data: _summary,
+        data: summary,
         styleSheet: MarkdownStyleSheet(
           p: bodyStyle,
           blockquote: bodyStyle,
@@ -348,32 +332,30 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
     );
   }
 
-  Widget _buildTags(ThemeData theme) {
+  Widget _buildTags(ThemeData theme, List tags) {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: _tags.take(15).map((e) {
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(6),
+      children: [
+        for (final tag in tags.take(15))
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              '${tag['name']}  ${tag['count']}',
+              style: const TextStyle(fontSize: 12),
+            ),
           ),
-          child: Text(
-            '${e['name']}  ${e['count']}',
-            style: const TextStyle(fontSize: 12),
-          ),
-        );
-      }).toList(),
+      ],
     );
   }
 
-  Widget _buildInfoboxItem(Map<String, dynamic> item, ThemeData theme) {
-    final dynamic v = item['value'];
-    final valueStr = v is List
-        ? v.map((i) => (i is Map ? i['v'] : i).toString()).join(' / ')
-        : v.toString();
-
+  /// Infobox value is a string, or a list of `{k?, v}` entries.
+  Widget _buildInfoboxItem(ThemeData theme, Map item) {
+    final value = item['value'];
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -382,14 +364,21 @@ class _BgmDetailPageState extends State<BgmDetailPage> {
           SizedBox(
             width: 80,
             child: Text(
-              item['key'].toString(),
+              item['key'] as String,
               style: TextStyle(
                 fontSize: 13,
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
           ),
-          Expanded(child: Text(valueStr, style: const TextStyle(fontSize: 13))),
+          Expanded(
+            child: Text(
+              value is List
+                  ? value.map((entry) => entry['v']).join(' / ')
+                  : value as String,
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
         ],
       ),
     );

@@ -6,6 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/models/skip_selection.dart';
+import 'package:baka/models/subtitle_config.dart';
 import 'package:baka/pages/search/search_controller.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/app/platform_page_route.dart';

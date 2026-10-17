@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:baka/widgets/common/expressive_slider_theme.dart';
 
 bool isCompactPlayerPanel(BuildContext context) =>
     MediaQuery.sizeOf(context).shortestSide < 600;
@@ -436,32 +437,6 @@ class PanelResetButton extends StatelessWidget {
   );
 }
 
-class PanelExpandToggle extends StatelessWidget {
-  final bool isExpanded;
-  final VoidCallback onTap;
-  const PanelExpandToggle({
-    required this.isExpanded,
-    required this.onTap,
-    super.key,
-  });
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 4),
-    child: FilledButton.tonal(
-      onPressed: onTap,
-      child: Row(
-        children: [
-          Expanded(child: Text(isExpanded ? '收起更多设置' : '展开更多设置')),
-          Icon(
-            isExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
 class PanelSectionTitle extends StatelessWidget {
   final String title;
   const PanelSectionTitle(this.title, {super.key});
@@ -598,16 +573,19 @@ class PanelSliderTile extends StatelessWidget {
               ),
             ],
           ),
-          Semantics(
-            label: title,
-            child: Slider(
-              value: value.clamp(min, max),
-              min: min,
-              max: max,
-              divisions: divisions,
-              label: valueLabel,
-              onChanged: onChanged,
-              onChangeEnd: onChangeEnd,
+          SliderTheme(
+            data: ExpressiveSliderTheme.from(colors),
+            child: Semantics(
+              label: title,
+              child: Slider(
+                value: value.clamp(min, max),
+                min: min,
+                max: max,
+                divisions: divisions,
+                label: valueLabel,
+                onChanged: onChanged,
+                onChangeEnd: onChangeEnd,
+              ),
             ),
           ),
         ],

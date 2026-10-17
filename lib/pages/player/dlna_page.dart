@@ -1,304 +1,313 @@
-import 'package:baka/utils/format_utils.dart';
-import 'package:baka/widgets/player/settings_panel.dart';
 import 'dart:async';
 
 import 'package:dlna_dart/dlna.dart';
 import 'package:flutter/material.dart';
-import 'package:baka/models/playback_episode.dart';
 import 'package:flutter/services.dart';
-import 'package:get/get.dart' hide ContextExtensionss;
 
-/// DLNA 投屏下一集 URL 解析回调
-typedef DlnaEpisodeUrlResolver = Future<String?> Function(int episodeIndex);
+import 'package:baka/services/playback/playback_content.dart';
+import 'package:baka/utils/format_utils.dart';
+import 'package:baka/widgets/player/settings_panel.dart';
 
-/// 投屏切集回调（通知 PlayerPage 同步更新 UI 状态）
-typedef DlnaEpisodeChangedCallback = void Function(int episodeIndex);
+enum DlnaCastState { loading, playing, paused, stopped, error, finished }
 
-/// 投屏控制器（持久化，不随 UI 关闭而销毁）
-class DlnaController extends GetxController {
-  DlnaController({
-    required this.initialDatasource,
-    required this.animeTitle,
-    required this.videoList,
-    required this.initialEpisodeIndex,
-  });
+/// 投屏会话随播放页存在：面板收起后仍轮询设备并自动续播下一集。
+/// 剧集、标题与地址解析直接读取播放页的 [PlaybackContent]，不另存副本。
+class DlnaCastController extends ChangeNotifier {
+  DlnaCastController(this.content, {required this.onEpisodeChanged}) {
+    unawaited(startSearch());
+  }
 
-  String initialDatasource;
-  String animeTitle;
-  List<PlaybackEpisode> videoList;
-  int initialEpisodeIndex;
-  DlnaEpisodeUrlResolver? urlResolver;
-  DlnaEpisodeChangedCallback? onEpisodeChanged;
-
-  final deviceList = <String, DLNADevice>{}.obs;
-  DLNADevice? selectedDevice;
-
-  final isSearching = true.obs;
-  final isConnected = false.obs;
-  final autoNextEnabled = true.obs;
-  final currentEpisodeIndex = 0.obs;
-  final transportState = 'UNKNOWN'.obs;
-  final isLoadingNext = false.obs;
-
-  final currentPosition = Duration.zero.obs;
-  final totalDuration = Duration.zero.obs;
-  final isSeeking = false.obs;
-
-  final DLNAManager searcher = DLNAManager();
-  Timer? _stopSearchTimer;
-  Timer? _pollTimer;
-  StreamSubscription? _deviceSub;
-  bool _hasStartedPlaying = false;
-  bool _isPolling = false;
-
-  static final _stateRegex = RegExp(
+  static final _transportState = RegExp(
     r'<CurrentTransportState>([^<]+)</CurrentTransportState>',
   );
-  static final _relTimeRegex = RegExp(r'<RelTime>([^<]+)</RelTime>');
-  static final _trackDurRegex = RegExp(
+  static final _relTime = RegExp(r'<RelTime>([^<]+)</RelTime>');
+  static final _trackDuration = RegExp(
     r'<TrackDuration>([^<]+)</TrackDuration>',
   );
 
-  bool get hasNextEpisode => currentEpisodeIndex.value + 1 < videoList.length;
-  bool get hasPrevEpisode => currentEpisodeIndex.value > 0;
+  final PlaybackContent content;
+  final ValueChanged<int> onEpisodeChanged;
 
-  @override
-  void onInit() {
-    super.onInit();
-    currentEpisodeIndex.value = initialEpisodeIndex;
-    searcher.stop();
-    startSearch();
-  }
+  /// (position, duration). Polling updates it without rebuilding the panel.
+  final progress = ValueNotifier<(Duration, Duration)>((
+    Duration.zero,
+    Duration.zero,
+  ));
 
-  @override
-  void onClose() {
-    _deviceSub?.cancel();
-    _stopSearchTimer?.cancel();
-    _pollTimer?.cancel();
-    searcher.stop();
-    super.onClose();
-  }
+  DLNAManager? _manager;
+  StreamSubscription<Map<String, DLNADevice>>? _discovery;
+  Timer? _searchTimeout;
+  Timer? _poll;
+  int _session = 0;
+  bool _started = false;
+  bool _seeking = false;
 
-  void startSearch() async {
-    _deviceSub?.cancel();
-    _stopSearchTimer?.cancel();
+  List<DLNADevice> devices = const [];
+  bool searching = false;
+  DLNADevice? device;
+  int episodeIndex = 0;
+  DlnaCastState state = DlnaCastState.loading;
+  bool autoNext = true;
 
-    isSearching.value = true;
-    isConnected.value = false;
-    deviceList.clear();
+  bool get connected => device != null;
+  bool get busy => state == DlnaCastState.loading;
+  bool get hasPrevious => episodeIndex > 0;
+  bool get hasNext => episodeIndex + 1 < content.videoList.length;
+  String get episodeTitle => episodeIndex < content.videoList.length
+      ? content.videoList[episodeIndex].title
+      : '第 ${episodeIndex + 1} 集';
 
-    _stopSearchTimer = Timer(const Duration(seconds: 20), () {
-      isSearching.value = false;
-      searcher.stop();
-    });
-
-    final m = await searcher.start();
-    _deviceSub = m.devices.stream.listen((devices) {
-      deviceList.assignAll(devices);
-    });
-  }
-
-  Future<void> selectDevice(DLNADevice dev) async {
-    if (selectedDevice != null) {
-      _pollTimer?.cancel();
-      selectedDevice!.stop();
-    }
-
-    selectedDevice = dev;
-    isConnected.value = true;
-    _hasStartedPlaying = false;
-
-    await _castCurrentEpisode(initialDatasource);
-  }
-
-  Future<void> _castCurrentEpisode(String url) async {
-    if (selectedDevice == null || url.isEmpty) return;
-    final title = '$animeTitle P${currentEpisodeIndex.value + 1}';
-    await selectedDevice!.setUrl(url, title: title);
-    await selectedDevice!.play();
-    _hasStartedPlaying = true;
-    transportState.value = 'PLAYING';
-    currentPosition.value = Duration.zero;
-    totalDuration.value = Duration.zero;
-    _startPolling();
-  }
-
-  void _startPolling() {
-    _pollTimer?.cancel();
-    _isPolling = false;
-    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
-      if (_isPolling) return;
-      _isPolling = true;
-      await _pollStatus();
-      _isPolling = false;
-    });
-  }
-
-  Future<void> _pollStatus() async {
-    if (selectedDevice == null) return;
+  Future<void> startSearch() async {
+    if (searching) return;
+    final manager = _manager = DLNAManager();
+    devices = const [];
+    searching = true;
+    notifyListeners();
+    _searchTimeout = Timer(const Duration(seconds: 20), _stopSearch);
     try {
-      final futures = await Future.wait([
-        selectedDevice!.getTransportInfo(),
-        selectedDevice!.position(),
-      ]);
-
-      final stateMatch = _stateRegex.firstMatch(futures[0]);
-      final state = stateMatch?.group(1) ?? 'UNKNOWN';
-      transportState.value = state;
-
-      if (!isSeeking.value) {
-        final posMatch = _relTimeRegex.firstMatch(futures[1]);
-        if (posMatch != null) {
-          final pos = _parseDuration(posMatch.group(1)!);
-          if (pos != null) currentPosition.value = pos;
-        }
-
-        final durMatch = _trackDurRegex.firstMatch(futures[1]);
-        if (durMatch != null) {
-          final dur = _parseDuration(durMatch.group(1)!);
-          if (dur != null && dur > Duration.zero) totalDuration.value = dur;
-        }
-      }
-
-      if (_hasStartedPlaying && state == 'STOPPED') {
-        _hasStartedPlaying = false;
-        if (autoNextEnabled.value) {
-          _playNextEpisode();
-        }
-      }
-    } catch (_) {
-      // 忽略轮询错误以保持连接
-    }
-  }
-
-  Duration? _parseDuration(String str) {
-    final parts = str.split(':');
-    if (parts.length == 3) {
-      final h = int.tryParse(parts[0]) ?? 0;
-      final m = int.tryParse(parts[1]) ?? 0;
-      final s = int.tryParse(parts[2].split('.').first) ?? 0;
-      return Duration(hours: h, minutes: m, seconds: s);
-    }
-    return null;
-  }
-
-  Future<void> seekTo(Duration position) async {
-    if (selectedDevice == null) return;
-    isSeeking.value = true;
-    final h = position.inHours.toString().padLeft(2, '0');
-    final m = (position.inMinutes % 60).toString().padLeft(2, '0');
-    final s = (position.inSeconds % 60).toString().padLeft(2, '0');
-    try {
-      await selectedDevice!.seek('$h:$m:$s');
-      currentPosition.value = position;
-    } finally {
-      isSeeking.value = false;
-    }
-  }
-
-  Future<void> _playNextEpisode() async {
-    final nextIndex = currentEpisodeIndex.value + 1;
-    if (nextIndex >= videoList.length) {
-      transportState.value = 'COMPLETED_ALL';
-      _pollTimer?.cancel();
-      return;
-    }
-    await playEpisodeAt(nextIndex);
-  }
-
-  Future<void> playEpisodeAt(int index) async {
-    if (index < 0 || index >= videoList.length || selectedDevice == null) {
-      return;
-    }
-
-    _pollTimer?.cancel();
-    _hasStartedPlaying = false;
-    isLoadingNext.value = true;
-
-    try {
-      String? url;
-      if (urlResolver != null) {
-        url = await urlResolver!(index);
-      }
-      if (url == null || url.isEmpty) {
-        transportState.value = 'ERROR';
+      final found = (await manager.start()).devices.stream;
+      if (!identical(_manager, manager)) {
+        // Stopped while the sockets were binding.
+        manager.stop();
         return;
       }
+      _discovery = found.listen((map) {
+        devices = map.values.toList(growable: false);
+        notifyListeners();
+      });
+    } catch (error) {
+      debugPrint('DLNA 搜索失败: $error');
+      if (identical(_manager, manager)) _stopSearch();
+    }
+  }
 
-      currentEpisodeIndex.value = index;
-      onEpisodeChanged?.call(index);
-      await _castCurrentEpisode(url);
+  void _stopSearch({bool notify = true}) {
+    _searchTimeout?.cancel();
+    _discovery?.cancel();
+    _discovery = null;
+    _manager?.stop();
+    _manager = null;
+    if (!searching) return;
+    searching = false;
+    if (notify) notifyListeners();
+  }
+
+  Future<void> select(DLNADevice target, String url) {
+    _stopSearch(notify: false);
+    device = target;
+    episodeIndex = content.currPlayIndex;
+    return _cast(url);
+  }
+
+  void _setState(DlnaCastState next) {
+    if (state == next) return;
+    state = next;
+    notifyListeners();
+  }
+
+  Future<void> _cast(String url) async {
+    final target = device!;
+    final session = ++_session;
+    _poll?.cancel();
+    _started = false;
+    state = DlnaCastState.loading;
+    progress.value = (Duration.zero, Duration.zero);
+    notifyListeners();
+    try {
+      await target.setUrl(url, title: '${content.title} P${episodeIndex + 1}');
+      await target.play();
+    } catch (error) {
+      debugPrint('DLNA 投屏失败: $error');
+      if (session == _session) _setState(DlnaCastState.error);
+      return;
+    }
+    if (session != _session) return;
+    _setState(DlnaCastState.playing);
+    _schedulePoll(session);
+  }
+
+  Future<void> playEpisode(int index) async {
+    if (device == null || index < 0 || index >= content.videoList.length) {
+      return;
+    }
+    final session = ++_session;
+    _poll?.cancel();
+    _setState(DlnaCastState.loading);
+    String? url;
+    try {
+      url = await content.resolveEpisodeUrl(index);
+    } catch (error) {
+      debugPrint('DLNA 解析剧集失败: $error');
+    }
+    if (session != _session) return;
+    if (url == null || url.isEmpty) {
+      _setState(DlnaCastState.error);
+      return;
+    }
+    episodeIndex = index;
+    onEpisodeChanged(index);
+    await _cast(url);
+  }
+
+  /// One request pair in flight at a time; the next poll is scheduled after.
+  void _schedulePoll(int session) {
+    _poll = Timer(
+      const Duration(seconds: 2),
+      () => unawaited(_pollOnce(session)),
+    );
+  }
+
+  Future<void> _pollOnce(int session) async {
+    final target = device;
+    if (target == null || session != _session) return;
+    try {
+      final (info, position) = await (
+        target.getTransportInfo(),
+        target.position(),
+      ).wait;
+      if (session != _session) return;
+      if (!_seeking) {
+        final (oldPosition, oldDuration) = progress.value;
+        final duration = _parseTime(_trackDuration.firstMatch(position));
+        progress.value = (
+          _parseTime(_relTime.firstMatch(position)) ?? oldPosition,
+          duration != null && duration > Duration.zero ? duration : oldDuration,
+        );
+      }
+      switch (_transportState.firstMatch(info)?.group(1)) {
+        case 'PLAYING':
+          _started = true;
+          _setState(DlnaCastState.playing);
+        case 'PAUSED_PLAYBACK':
+          _setState(DlnaCastState.paused);
+        // Renderers may report STOPPED while still loading; only a stop after
+        // real playback means the episode ended.
+        case 'STOPPED' when _started:
+          _started = false;
+          if (autoNext) {
+            if (hasNext) {
+              unawaited(playEpisode(episodeIndex + 1));
+            } else {
+              _setState(DlnaCastState.finished);
+            }
+            return;
+          }
+          _setState(DlnaCastState.stopped);
+        case 'STOPPED' || 'NO_MEDIA_PRESENT':
+          _setState(DlnaCastState.stopped);
+      }
     } catch (_) {
-      transportState.value = 'ERROR';
+      // 渲染器偶尔丢弃轮询请求；保持连接，下一轮再取状态。
+    }
+    if (session == _session) _schedulePoll(session);
+  }
+
+  Future<void> seek(Duration position) async {
+    final target = device;
+    if (target == null) return;
+    final session = _session;
+    _seeking = true;
+    progress.value = (position, progress.value.$2);
+    try {
+      await target.seek(_formatTime(position));
+    } catch (error) {
+      debugPrint('DLNA 跳转失败: $error');
     } finally {
-      isLoadingNext.value = false;
+      if (session == _session) _seeking = false;
     }
   }
 
   Future<void> togglePlayPause() async {
-    if (selectedDevice == null) return;
-    if (transportState.value == 'PLAYING') {
-      await selectedDevice!.pause();
-      transportState.value = 'PAUSED_PLAYBACK';
-    } else if (transportState.value == 'PAUSED_PLAYBACK') {
-      await selectedDevice!.play();
-      transportState.value = 'PLAYING';
+    final target = device;
+    final resume = state == DlnaCastState.paused;
+    if (target == null || (!resume && state != DlnaCastState.playing)) return;
+    final session = _session;
+    try {
+      await (resume ? target.play() : target.pause());
+      if (session == _session) {
+        _setState(resume ? DlnaCastState.playing : DlnaCastState.paused);
+      }
+    } catch (error) {
+      debugPrint('DLNA 播放控制失败: $error');
     }
   }
 
-  Future<void> stopCast() async {
-    _pollTimer?.cancel();
-    _hasStartedPlaying = false;
-    await selectedDevice?.stop();
-    isConnected.value = false;
-    transportState.value = 'STOPPED';
-    currentPosition.value = Duration.zero;
-    totalDuration.value = Duration.zero;
+  void setAutoNext(bool value) {
+    autoNext = value;
+    notifyListeners();
   }
+
+  Future<void> disconnect() async {
+    final target = device;
+    _session++;
+    _poll?.cancel();
+    _seeking = false;
+    device = null;
+    progress.value = (Duration.zero, Duration.zero);
+    notifyListeners();
+    try {
+      await target?.stop();
+    } catch (error) {
+      debugPrint('DLNA 断开失败: $error');
+    }
+  }
+
+  /// The renderer keeps playing after the page closes; only local work stops.
+  @override
+  void dispose() {
+    _session++;
+    _poll?.cancel();
+    _stopSearch(notify: false);
+    progress.dispose();
+    super.dispose();
+  }
+}
+
+/// UPnP AVTransport time: `H+:MM:SS[.F+]`, or `NOT_IMPLEMENTED`.
+Duration? _parseTime(RegExpMatch? match) {
+  final parts = match?.group(1)?.split(':');
+  if (parts == null || parts.length != 3) return null;
+  final hours = int.tryParse(parts[0]);
+  final minutes = int.tryParse(parts[1]);
+  final seconds = double.tryParse(parts[2]);
+  if (hours == null || minutes == null || seconds == null) return null;
+  return Duration(
+    milliseconds: ((hours * 60 + minutes) * 60000 + seconds * 1000).round(),
+  );
+}
+
+String _formatTime(Duration value) {
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${two(value.inHours)}:${two(value.inMinutes % 60)}:'
+      '${two(value.inSeconds % 60)}';
 }
 
 /// 投屏面板（Bottom Sheet）
 class DlnaCastPanel extends StatelessWidget {
-  final String datasource;
-  final String animeTitle;
-  final List<PlaybackEpisode> videoList;
-  final int currentEpisodeIndex;
-  final DlnaEpisodeUrlResolver? urlResolver;
-  final DlnaEpisodeChangedCallback? onEpisodeChanged;
+  const DlnaCastPanel({required this.controller, required this.url, super.key});
 
-  const DlnaCastPanel({
-    required this.datasource,
-    required this.animeTitle,
-    required this.videoList,
-    required this.currentEpisodeIndex,
-    this.urlResolver,
-    this.onEpisodeChanged,
-    super.key,
-  });
+  final DlnaCastController controller;
 
-  static const _tag = 'dlna_cast';
+  /// Cast when a device is picked; ignored while already connected.
+  final String url;
+
+  static Future<void> show(
+    BuildContext context,
+    DlnaCastController controller, {
+    required String url,
+  }) {
+    return showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.transparent,
+      builder: (_) => DlnaCastPanel(controller: controller, url: url),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final c = Get.isRegistered<DlnaController>(tag: _tag)
-        ? Get.find<DlnaController>(tag: _tag)
-        : Get.put(
-            DlnaController(
-              initialDatasource: datasource,
-              animeTitle: animeTitle,
-              videoList: videoList,
-              initialEpisodeIndex: currentEpisodeIndex,
-            ),
-            tag: _tag,
-            permanent: true,
-          );
-
-    // 每次构建更新最新的瞬态回调和列表，避免旧闭包捕获
-    c.urlResolver = urlResolver;
-    c.onEpisodeChanged = onEpisodeChanged;
-    c.videoList = videoList;
-    c.animeTitle = animeTitle;
-
     final portrait = isBottomPlayerPanel(context);
     final theme = playerPanelTheme(
       Theme.of(context),
@@ -359,10 +368,11 @@ class DlnaCastPanel extends StatelessWidget {
                   ),
                 ),
                 Expanded(
-                  child: Obx(
-                    () => c.isConnected.value
-                        ? _buildCastControls(c, theme)
-                        : _buildDeviceList(c, theme),
+                  child: ListenableBuilder(
+                    listenable: controller,
+                    builder: (context, _) => controller.connected
+                        ? _buildControls(theme)
+                        : _buildDevices(theme),
                   ),
                 ),
               ],
@@ -373,8 +383,10 @@ class DlnaCastPanel extends StatelessWidget {
     );
   }
 
-  Widget _buildDeviceList(DlnaController c, ThemeData theme) {
+  Widget _buildDevices(ThemeData theme) {
     final colors = theme.colorScheme;
+    final searching = controller.searching;
+    final devices = controller.devices;
     return CustomScrollView(
       slivers: [
         SliverPadding(
@@ -384,7 +396,7 @@ class DlnaCastPanel extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    c.isSearching.value ? '正在搜索设备' : '可用设备',
+                    searching ? '正在搜索设备' : '可用设备',
                     style: theme.textTheme.titleSmall?.copyWith(
                       color: colors.primary,
                     ),
@@ -392,14 +404,14 @@ class DlnaCastPanel extends StatelessWidget {
                 ),
                 IconButton(
                   tooltip: '重新搜索设备',
-                  onPressed: c.startSearch,
+                  onPressed: searching ? null : controller.startSearch,
                   icon: const Icon(Icons.refresh_rounded),
                 ),
               ],
             ),
           ),
         ),
-        if (c.deviceList.isEmpty)
+        if (devices.isEmpty)
           SliverFillRemaining(
             hasScrollBody: false,
             child: Padding(
@@ -407,13 +419,13 @@ class DlnaCastPanel extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (c.isSearching.value)
+                  if (searching)
                     const CircularProgressIndicator()
                   else
                     Icon(Icons.tv_off_rounded, size: 48, color: colors.primary),
                   const SizedBox(height: 20),
                   Text(
-                    c.isSearching.value ? '寻找附近的投屏设备' : '未找到可用设备',
+                    searching ? '寻找附近的投屏设备' : '未找到可用设备',
                     style: theme.textTheme.titleMedium,
                   ),
                   const SizedBox(height: 8),
@@ -424,10 +436,10 @@ class DlnaCastPanel extends StatelessWidget {
                       color: colors.onSurfaceVariant,
                     ),
                   ),
-                  if (!c.isSearching.value) ...[
+                  if (!searching) ...[
                     const SizedBox(height: 24),
                     FilledButton.tonalIcon(
-                      onPressed: c.startSearch,
+                      onPressed: controller.startSearch,
                       icon: const Icon(Icons.refresh_rounded),
                       label: const Text('重新搜索'),
                     ),
@@ -440,9 +452,9 @@ class DlnaCastPanel extends StatelessWidget {
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
             sliver: SliverList.builder(
-              itemCount: c.deviceList.length,
+              itemCount: devices.length,
               itemBuilder: (context, index) {
-                final dev = c.deviceList.values.elementAt(index);
+                final device = devices[index];
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Material(
@@ -457,14 +469,14 @@ class DlnaCastPanel extends StatelessWidget {
                       ),
                       leading: Icon(Icons.cast_rounded, color: colors.primary),
                       title: Text(
-                        dev.info.friendlyName,
+                        device.info.friendlyName,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () {
                         HapticFeedback.mediumImpact();
-                        c.selectDevice(dev);
+                        controller.select(device, url);
                       },
                     ),
                   ),
@@ -476,11 +488,31 @@ class DlnaCastPanel extends StatelessWidget {
     );
   }
 
-  Widget _buildCastControls(DlnaController c, ThemeData theme) {
+  Widget _buildControls(ThemeData theme) {
+    final c = controller;
     final colors = theme.colorScheme;
     final groupShape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(24),
     );
+    final busy = c.busy;
+    final playing = c.state == DlnaCastState.playing;
+    final canToggle = playing || c.state == DlnaCastState.paused;
+    final sectionStyle = theme.textTheme.titleSmall?.copyWith(
+      color: colors.primary,
+    );
+    final mutedSmall = theme.textTheme.bodySmall?.copyWith(
+      color: colors.onSurfaceVariant,
+    );
+    final stepStyle = IconButton.styleFrom(
+      minimumSize: const Size(48, 48),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+    );
+
+    void step(int delta) {
+      HapticFeedback.lightImpact();
+      c.playEpisode(c.episodeIndex + delta);
+    }
+
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
       child: Column(
@@ -499,7 +531,7 @@ class DlnaCastPanel extends StatelessWidget {
                 child: const Icon(Icons.cast_connected_rounded),
               ),
               title: Text(
-                c.selectedDevice?.info.friendlyName ?? '投屏设备',
+                c.device!.info.friendlyName,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.titleMedium?.copyWith(
@@ -516,12 +548,7 @@ class DlnaCastPanel extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 16, 8, 8),
-            child: Text(
-              '正在播放',
-              style: theme.textTheme.titleSmall?.copyWith(
-                color: colors.primary,
-              ),
-            ),
+            child: Text('正在播放', style: sectionStyle),
           ),
           Material(
             color: colors.surfaceContainerHigh,
@@ -531,158 +558,104 @@ class DlnaCastPanel extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Obx(() {
-                    final index = c.currentEpisodeIndex.value;
-                    final episode = index >= 0 && index < c.videoList.length
-                        ? c.videoList[index].title
-                        : '第 ${index + 1} 集';
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${c.animeTitle} · $episode',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          c.isLoadingNext.value
-                              ? '正在切换剧集…'
-                              : switch (c.transportState.value) {
-                                  'ERROR' => '切集失败，请重试',
-                                  'PAUSED_PLAYBACK' => '已暂停',
-                                  'COMPLETED_ALL' => '已播放完全部剧集',
-                                  _ => '当前剧集',
-                                },
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colors.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    );
-                  }),
-                  _buildSeekBar(c, theme),
+                  Text(
+                    '${c.content.title} · ${c.episodeTitle}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(switch (c.state) {
+                    DlnaCastState.loading => '正在加载…',
+                    DlnaCastState.error => '投屏失败，请重试',
+                    DlnaCastState.paused => '已暂停',
+                    DlnaCastState.stopped => '已停止',
+                    DlnaCastState.finished => '已播放完全部剧集',
+                    DlnaCastState.playing => '当前剧集',
+                  }, style: mutedSmall),
+                  _CastSeekBar(c),
                   const SizedBox(height: 8),
-                  Obx(() {
-                    final busy = c.isLoadingNext.value;
-                    final playing = c.transportState.value == 'PLAYING';
-                    final canToggle =
-                        playing || c.transportState.value == 'PAUSED_PLAYBACK';
-                    return Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton.filledTonal(
-                          tooltip: '上一集',
-                          iconSize: 28,
-                          style: IconButton.styleFrom(
-                            minimumSize: const Size(48, 48),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(18),
-                            ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    spacing: 12,
+                    children: [
+                      IconButton.filledTonal(
+                        tooltip: '上一集',
+                        iconSize: 28,
+                        style: stepStyle,
+                        onPressed: !busy && c.hasPrevious
+                            ? () => step(-1)
+                            : null,
+                        icon: const Icon(Icons.skip_previous_rounded),
+                      ),
+                      IconButton.filled(
+                        tooltip: playing ? '暂停投屏' : '继续投屏',
+                        iconSize: 40,
+                        style: IconButton.styleFrom(
+                          minimumSize: const Size(72, 72),
+                          backgroundColor: colors.primary,
+                          foregroundColor: colors.onPrimary,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(24),
                           ),
-                          onPressed: !busy && c.hasPrevEpisode
-                              ? () {
-                                  HapticFeedback.lightImpact();
-                                  c.playEpisodeAt(
-                                    c.currentEpisodeIndex.value - 1,
-                                  );
-                                }
-                              : null,
-                          icon: const Icon(Icons.skip_previous_rounded),
                         ),
-                        const SizedBox(width: 12),
-                        IconButton.filled(
-                          tooltip: playing ? '暂停投屏' : '继续投屏',
-                          iconSize: 40,
-                          style: IconButton.styleFrom(
-                            minimumSize: const Size(72, 72),
-                            backgroundColor: colors.primary,
-                            foregroundColor: colors.onPrimary,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(24),
-                            ),
-                          ),
-                          onPressed: !busy && canToggle
-                              ? () {
-                                  HapticFeedback.mediumImpact();
-                                  c.togglePlayPause();
-                                }
-                              : null,
-                          icon: busy
-                              ? const SizedBox(
-                                  width: 28,
-                                  height: 28,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 3,
-                                  ),
-                                )
-                              : Icon(
-                                  playing
-                                      ? Icons.pause_rounded
-                                      : Icons.play_arrow_rounded,
+                        onPressed: !busy && canToggle
+                            ? () {
+                                HapticFeedback.mediumImpact();
+                                c.togglePlayPause();
+                              }
+                            : null,
+                        icon: busy
+                            ? const SizedBox(
+                                width: 28,
+                                height: 28,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 3,
                                 ),
-                        ),
-                        const SizedBox(width: 12),
-                        IconButton.filledTonal(
-                          tooltip: '下一集',
-                          iconSize: 28,
-                          style: IconButton.styleFrom(
-                            minimumSize: const Size(48, 48),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                          ),
-                          onPressed: !busy && c.hasNextEpisode
-                              ? () {
-                                  HapticFeedback.lightImpact();
-                                  c.playEpisodeAt(
-                                    c.currentEpisodeIndex.value + 1,
-                                  );
-                                }
-                              : null,
-                          icon: const Icon(Icons.skip_next_rounded),
-                        ),
-                      ],
-                    );
-                  }),
+                              )
+                            : Icon(
+                                playing
+                                    ? Icons.pause_rounded
+                                    : Icons.play_arrow_rounded,
+                              ),
+                      ),
+                      IconButton.filledTonal(
+                        tooltip: '下一集',
+                        iconSize: 28,
+                        style: stepStyle,
+                        onPressed: !busy && c.hasNext ? () => step(1) : null,
+                        icon: const Icon(Icons.skip_next_rounded),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 16, 8, 8),
-            child: Text(
-              '播放设置',
-              style: theme.textTheme.titleSmall?.copyWith(
-                color: colors.primary,
-              ),
-            ),
+            child: Text('播放设置', style: sectionStyle),
           ),
           Material(
             color: colors.surfaceContainerHigh,
             shape: groupShape,
             clipBehavior: Clip.antiAlias,
-            child: Obx(
-              () => SwitchListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                title: Text('自动播放下一集', style: theme.textTheme.bodyLarge),
-                subtitle: Text(
-                  c.hasNextEpisode
-                      ? '剩余 ${c.videoList.length - c.currentEpisodeIndex.value - 1} 集'
-                      : '已是最后一集',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colors.onSurfaceVariant,
-                  ),
-                ),
-                value: c.autoNextEnabled.value,
-                onChanged: (v) {
-                  HapticFeedback.selectionClick();
-                  c.autoNextEnabled.value = v;
-                },
+            child: SwitchListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+              title: Text('自动播放下一集', style: theme.textTheme.bodyLarge),
+              subtitle: Text(
+                c.hasNext
+                    ? '剩余 ${c.content.videoList.length - c.episodeIndex - 1} 集'
+                    : '已是最后一集',
+                style: mutedSmall,
               ),
+              value: c.autoNext,
+              onChanged: (value) {
+                HapticFeedback.selectionClick();
+                c.setAutoNext(value);
+              },
             ),
           ),
           const SizedBox(height: 18),
@@ -700,57 +673,75 @@ class DlnaCastPanel extends StatelessWidget {
                   color: colors.primary,
                 ),
               ),
-              onTap: c.stopCast,
+              onTap: c.disconnect,
             ),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildSeekBar(DlnaController c, ThemeData theme) {
-    return Obx(() {
-      final pos = c.currentPosition.value;
-      final dur = c.totalDuration.value;
-      final seekable = dur > Duration.zero && !c.isLoadingNext.value;
-      final progress = dur.inMilliseconds > 0
-          ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
-          : 0.0;
-      final timeStyle = theme.textTheme.bodySmall?.copyWith(
-        color: theme.colorScheme.onSurfaceVariant,
-        fontFeatures: const [FontFeature.tabularFigures()],
-      );
-      return Column(
-        children: [
-          Slider(
-            value: progress,
-            semanticFormatterCallback: (_) =>
-                '${pos.toTimeString()} / ${dur.toTimeString()}',
-            onChangeStart: seekable ? (_) => c.isSeeking.value = true : null,
-            onChanged: seekable
-                ? (v) {
-                    c.currentPosition.value = Duration(
-                      milliseconds: (v * dur.inMilliseconds).round(),
-                    );
-                  }
-                : null,
-            onChangeEnd: seekable
-                ? (v) {
-                    c.seekTo(
-                      Duration(milliseconds: (v * dur.inMilliseconds).round()),
-                    );
-                  }
-                : null,
-          ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(pos.toTimeString(), style: timeStyle),
-              Text(dur.toTimeString(), style: timeStyle),
-            ],
-          ),
-        ],
-      );
-    });
+class _CastSeekBar extends StatefulWidget {
+  const _CastSeekBar(this.controller);
+
+  final DlnaCastController controller;
+
+  @override
+  State<_CastSeekBar> createState() => _CastSeekBarState();
+}
+
+class _CastSeekBarState extends State<_CastSeekBar> {
+  /// Drag fraction; shown instead of polled progress until released.
+  double? _drag;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final timeStyle = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    return ValueListenableBuilder<(Duration, Duration)>(
+      valueListenable: widget.controller.progress,
+      builder: (context, progress, _) {
+        final (position, duration) = progress;
+        final total = duration.inMilliseconds;
+        final drag = _drag;
+        final shown = drag == null
+            ? position
+            : Duration(milliseconds: (drag * total).round());
+        final seekable = total > 0 && !widget.controller.busy;
+        return Column(
+          children: [
+            Slider(
+              value:
+                  drag ??
+                  (total > 0
+                      ? (position.inMilliseconds / total).clamp(0.0, 1.0)
+                      : 0.0),
+              semanticFormatterCallback: (_) =>
+                  '${shown.toTimeString()} / ${duration.toTimeString()}',
+              onChanged: seekable ? (v) => setState(() => _drag = v) : null,
+              onChangeEnd: seekable
+                  ? (v) {
+                      setState(() => _drag = null);
+                      widget.controller.seek(
+                        Duration(milliseconds: (v * total).round()),
+                      );
+                    }
+                  : null,
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(shown.toTimeString(), style: timeStyle),
+                Text(duration.toTimeString(), style: timeStyle),
+              ],
+            ),
+          ],
+        );
+      },
+    );
   }
 }

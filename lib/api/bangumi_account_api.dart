@@ -7,9 +7,8 @@ import 'package:baka/instance.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/core/api_transport.dart';
 import 'package:baka/core/http_request.dart';
-import 'package:baka/core/system_proxy.dart';
+import 'package:baka/core/network_service.dart';
 import 'package:http/http.dart' as http;
-import 'package:http/io_client.dart';
 
 const _bangumiApiBase = 'https://api.bgm.tv';
 
@@ -254,7 +253,7 @@ class _BangumiEpisodeRecord {
 
 class BangumiApi {
   BangumiApi({http.Client? client})
-    : _client = client ?? IOClient(SystemProxyService.createHttpClient());
+    : _client = client ?? NetworkService.createClient();
 
   final http.Client _client;
   final String _userAgent =

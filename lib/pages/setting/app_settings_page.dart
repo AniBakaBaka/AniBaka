@@ -1,34 +1,33 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:get/get.dart' hide ContextExtensionss;
 import 'package:open_filex/open_filex.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import 'package:baka/app/update_presenter.dart';
 import 'package:baka/app_state.dart';
 import 'package:baka/core/account_session.dart';
 import 'package:baka/core/api_transport.dart';
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/app_storage.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/pages/mine/mine_profile.dart';
 import 'package:baka/pages/setting/ai_rule_settings_page.dart';
 import 'package:baka/pages/setting/bangumi_sync_page.dart';
-import 'package:baka/pages/setting/font_settings_page.dart';
 import 'package:baka/pages/setting/labs_settings_page.dart';
+import 'package:baka/pages/setting/network_settings_page.dart';
 import 'package:baka/pages/setting/playback_settings_page.dart';
 import 'package:baka/pages/source/source_management_page.dart';
-import 'package:baka/services/source/rule_repository_service.dart';
 import 'package:baka/services/account/bangumi_session.dart';
 import 'package:baka/services/account/login_service.dart';
+import 'package:baka/services/source/rule_repository_service.dart';
 import 'package:baka/theme.dart';
-import 'package:baka/core/app_logger.dart';
-import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/utils/format_utils.dart';
+import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
+import 'package:baka/widgets/dialog/update_dialog.dart';
 import 'package:baka/widgets/platform/tv/tv_log_export_dialog.dart';
 import 'package:baka/widgets/settings/settings_widgets.dart';
 
@@ -40,18 +39,10 @@ class AppSettingsPage extends StatefulWidget {
 }
 
 class _AppSettingsPageState extends State<AppSettingsPage> {
-  late final AppState _appState = Get.find<AppState>();
-  late final AccountSession _session = Get.find<AccountSession>();
-  late final LoginService _loginService = LoginService(
-    _session,
-    Get.find<ApiTransport>(),
-  );
-
-  String _cacheSize = '计算中...';
-  bool _isClearing = false;
-  bool _isExportingLogs = false;
-  bool _isSharingLogs = false;
-  bool _isCheckingUpdate = false;
+  final _appState = Get.find<AppState>();
+  final _session = Get.find<AccountSession>();
+  String? _cacheSize;
+  String? _busy;
 
   @override
   void initState() {
@@ -64,165 +55,76 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
     if (mounted) setState(() => _cacheSize = formatBytes(size));
   }
 
+  Future<void> _run(String action, Future<void> Function() task) async {
+    if (_busy != null) return;
+    setState(() => _busy = action);
+    try {
+      await task();
+    } catch (e) {
+      showSnackBar('$action失败：$e', isError: true);
+    } finally {
+      if (mounted) setState(() => _busy = null);
+    }
+  }
+
   Future<void> _clearCache() async {
-    HapticFeedback.mediumImpact();
-    final confirm = await showAppConfirmDialog(
+    final confirmed = await showAppConfirmDialog(
       context,
       title: '清理缓存',
-      content: '将清理图片缓存和临时文件，不会影响您的账号数据和观看历史。',
+      content: '清理图片缓存和临时文件',
       confirmText: '清理',
     );
-    if (!confirm || !mounted) return;
+    if (!confirmed) return;
+    await _run('清理缓存', () async {
+      final ok = await AppStorage.clearAllCache();
+      showSnackBar(ok ? '缓存已清理' : '清理缓存失败', isError: !ok);
+      await _loadCacheSize();
+    });
+  }
 
-    setState(() => _isClearing = true);
-    final ok = await AppStorage.clearAllCache();
-    if (!mounted) return;
-    setState(() => _isClearing = false);
+  Future<void> _exportLogs() => _run('导出日志', () async {
+    final archive = await AppLogger.instance.exportLogs();
+    if (archive == null) return;
+    showSnackBar(
+      '日志已导出：${archive.fileName}',
+      action: SnackBarAction(
+        label: '打开',
+        onPressed: () => OpenFilex.open(archive.file.path),
+      ),
+    );
+  });
 
-    if (ok) {
-      showSnackBar('缓存已清理');
-      HapticFeedback.mediumImpact();
-      _loadCacheSize();
+  Future<void> _checkUpdate() => _run('检查更新', () async {
+    final info = await VersionService.checkUpdateInfo();
+    if (info.hasUpdate) {
+      showAnnouncementDialog(content: '', updateInfo: info);
     } else {
-      showSnackBar('清理失败，请重试');
-      HapticFeedback.heavyImpact();
+      showSnackBar('已是最新版本');
     }
-  }
+  });
 
-  Future<void> _exportLogs() async {
-    if (_isExportingLogs) return;
-    HapticFeedback.mediumImpact();
-    setState(() => _isExportingLogs = true);
-    try {
-      AppLogger.instance.info('Export logs requested', tag: 'Settings');
-      final archive = await AppLogger.instance.exportLogs();
-      if (!mounted) return;
-      if (archive == null) {
-        showSnackBar('已取消导出日志');
-      } else {
-        showSnackBar(
-          '日志已导出：${archive.fileName}',
-          action: SnackBarAction(
-            label: '打开',
-            onPressed: () => OpenFilex.open(archive.file.path),
-          ),
-        );
-      }
-    } catch (e, st) {
-      AppLogger.instance.error(
-        'Export logs failed',
-        tag: 'Settings',
-        error: e,
-        stackTrace: st,
-      );
-      if (mounted) showSnackBar('导出日志失败：$e', isError: true);
-    } finally {
-      if (mounted) setState(() => _isExportingLogs = false);
-    }
-  }
-
-  Future<void> _shareLogs() async {
-    if (_isSharingLogs) return;
-    HapticFeedback.mediumImpact();
-    setState(() => _isSharingLogs = true);
-    try {
-      AppLogger.instance.info('Share logs requested', tag: 'Settings');
-      final result = await AppLogger.instance.shareLogs();
-      if (!mounted) return;
-      showSnackBar(switch (result.status) {
-        ShareResultStatus.success => '日志已分享',
-        ShareResultStatus.dismissed => '已取消分享日志',
-        ShareResultStatus.unavailable => '已打开系统分享',
-      });
-    } catch (e, st) {
-      AppLogger.instance.error(
-        'Share logs failed',
-        tag: 'Settings',
-        error: e,
-        stackTrace: st,
-      );
-      if (mounted) showSnackBar('分享日志失败：$e', isError: true);
-    } finally {
-      if (mounted) setState(() => _isSharingLogs = false);
-    }
-  }
-
-  Future<void> _editUserField(String title, String field) async {
-    HapticFeedback.selectionClick();
+  Future<void> _editUser(String title, String field) async {
     final value = await showAppInputDialog(context, title: title);
-    if (value == null || value.isEmpty || !_session.isLoggedIn) return;
-
-    final user = _session.user.value;
-    final result = await _loginService.updateUser(user, field, value);
-    if (!mounted) return;
+    if (value == null || value.isEmpty) return;
+    final result = await LoginService(
+      _session,
+      apiTransport,
+    ).updateUser(_session.user.value, field, value);
     showSnackBar(result.message, isError: !result.success);
-
-    if (result.user != null) {
-      await _session.saveUser(result.user!);
-      HapticFeedback.mediumImpact();
-    }
+    if (result.user case final user?) await _session.saveUser(user);
   }
 
   Future<void> _logout() async {
-    HapticFeedback.mediumImpact();
-    final ok = await showAppConfirmDialog(
+    final confirmed = await showAppConfirmDialog(
       context,
-      title: '退出 AniBaka',
-      content:
-          '退出后，播放历史将不再保存到 AniBaka 云端，也不能回复 AniBaka 评论。已连接的 Bangumi 账号不会被退出，其收藏与集数同步仍可继续使用。',
+      title: '退出登录',
+      content: '确定退出 AniBaka 账号？',
       confirmText: '退出',
       isDestructive: true,
     );
-    if (!ok || !mounted) return;
+    if (!confirmed) return;
     _session.logout();
-    Navigator.pop(context);
-  }
-
-  Future<void> _showThemeModeDialog() async {
-    HapticFeedback.selectionClick();
-    final selected = await showDialog<int>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('选择主题模式'),
-        children: [
-          for (var i = 0; i < AppState.themeModeLabels.length; i++)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(ctx, i),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(AppState.themeModeLabels[i]),
-                  if (_appState.themeMode == i)
-                    Icon(
-                      Icons.check_rounded,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-    if (selected != null) _appState.setThemeMode(selected);
-  }
-
-  Future<void> _checkUpdate() async {
-    if (_isCheckingUpdate) return;
-    setState(() => _isCheckingUpdate = true);
-    showSnackBar('正在检查更新...');
-    try {
-      final info = await VersionService.checkUpdateInfo();
-      if (!mounted) return;
-      if (info.hasUpdate) {
-        VersionService.checkAndShowUpdate();
-      } else {
-        showSnackBar('当前已是最新版本 (v${Instances.appVersion})');
-      }
-    } catch (_) {
-      if (mounted) showSnackBar('版本检查失败，请稍后重试', isError: true);
-    } finally {
-      if (mounted) setState(() => _isCheckingUpdate = false);
-    }
+    if (mounted) Navigator.pop(context);
   }
 
   void _switchHost() {
@@ -231,346 +133,258 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
     showSnackBar('已切换至 ${_session.currentHost}，重启生效');
   }
 
-  void _showDisclaimerDialog() {
-    showAppInfoDialog(
-      context,
-      title: '免责声明',
-      content:
-          '本软件仅供学习与交流使用，所有资源均来源于互联网。\n\n'
-          '1. 本软件不提供任何视频内容的存储或上传服务。\n'
-          '2. 视频版权均归原作者所有，如有侵权请联系我们删除。\n'
-          '3. 请勿将本软件用于任何商业目的。',
-      buttonText: '我知道啦',
-    );
-  }
+  Future<void> _push(Widget page) =>
+      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => page));
 
-  void _pushPage(Widget page) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => page));
-  }
-
-  Widget _buildAccountSection() {
-    return Obx(() {
-      final user = _session.user.value;
-      final isLoggedIn = _session.isLoggedIn;
-      final bgm = bangumiSession.account;
-      final bgmLabel = !bangumiSession.isConnected
-          ? '未关联'
-          : (bgm?.nickname.isNotEmpty == true
-                ? bgm!.nickname
-                : (bgm?.username.isNotEmpty == true
-                      ? '@${bgm!.username}'
-                      : '已关联'));
-
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SettingsSectionHeader('账户与同步'),
-          SettingsGroup(
+  @override
+  Widget build(BuildContext context) {
+    return SettingsPage(
+      title: '设置',
+      children: [
+        Obx(() {
+          final user = _session.user.value;
+          final loggedIn = _session.isLoggedIn;
+          return SettingsSection(
+            title: '账户',
             children: [
-              if (isLoggedIn) ...[
+              if (loggedIn) ...[
                 SettingsTile(
+                  icon: Icons.person_outline_rounded,
                   title: '昵称',
                   value: user.name,
-                  icon: Icons.person_outline_rounded,
-                  onTap: () => _editUserField('修改昵称', 'name'),
+                  onTap: () => _editUser('修改昵称', 'name'),
                 ),
                 SettingsTile(
+                  icon: Icons.chat_bubble_outline_rounded,
                   title: 'QQ',
                   value: user.qq,
-                  icon: Icons.chat_bubble_outline_rounded,
-                  onTap: () => _editUserField('修改QQ', 'qq'),
+                  onTap: () => _editUser('修改 QQ', 'qq'),
                 ),
                 SettingsTile(
+                  icon: Icons.edit_note_rounded,
                   title: '个性签名',
                   value: user.sign,
-                  icon: Icons.edit_note_rounded,
-                  onTap: () => _editUserField('修改签名', 'sign'),
-                  showDivider: true,
+                  onTap: () => _editUser('修改签名', 'sign'),
                 ),
                 if (user.hasPassword)
                   SettingsTile(
-                    title: '修改密码',
-                    value: '******',
                     icon: Icons.lock_outline_rounded,
-                    onTap: () => _editUserField('修改密码', 'pwd'),
-                    showDivider: true,
+                    title: '修改密码',
+                    onTap: () => _editUser('修改密码', 'pwd'),
                   ),
               ] else
                 SettingsTile(
+                  icon: Icons.account_circle_outlined,
                   title: 'AniBaka 账号',
                   value: '未登录',
-                  icon: Icons.account_circle_outlined,
                   onTap: () => Navigator.pushNamed(context, 'Baka://login'),
-                  showDivider: true,
                 ),
               SettingsTile(
-                title: 'Bangumi 同步',
-                value: bgmLabel,
                 icon: Icons.sync_alt_rounded,
-                onTap: () => _pushPage(const BangumiSyncPage()),
-                showDivider: false,
+                title: 'Bangumi 同步',
+                value: bangumiSession.account?.nickname ?? '未关联',
+                onTap: () async {
+                  await _push(const BangumiSyncPage());
+                  _session.refreshView();
+                },
               ),
+              if (loggedIn)
+                SettingsTile(
+                  icon: Icons.logout_rounded,
+                  title: '退出登录',
+                  color: Theme.of(context).colorScheme.error,
+                  onTap: _logout,
+                ),
             ],
-          ),
-          const SizedBox(height: 24),
-        ],
-      );
-    });
-  }
-
-  Widget _buildPlaybackSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SettingsSectionHeader('播放与拓展'),
-        SettingsGroup(
+          );
+        }),
+        SettingsSection(
+          title: '播放与扩展',
           children: [
             SettingsTile(
-              title: '播放设置',
-              value: '解码 / 渲染 / 广告过滤 / 跳过片头等',
               icon: Icons.play_circle_outline_rounded,
-              onTap: () => _pushPage(const PlaybackSettingsPage()),
+              title: '播放设置',
+              onTap: () => _push(const PlaybackSettingsPage()),
             ),
             ListenableBuilder(
               listenable: ruleRepository,
               builder: (context, _) => SettingsTile(
+                icon: Icons.extension_outlined,
                 title: '搜索源管理',
                 value: ruleRepository.updateCount > 0
-                    ? '${ruleRepository.updateCount} 个源有更新'
-                    : '开关 / 排序 / 自定义导入',
-                icon: Icons.extension_rounded,
-                iconWidget: Badge.count(
-                  count: ruleRepository.updateCount,
-                  isLabelVisible: ruleRepository.updateCount > 0,
-                  child: const Icon(Icons.extension_rounded, size: 18),
-                ),
-                onTap: () => _pushPage(const SourceManagementPage()),
+                    ? '${ruleRepository.updateCount} 个更新'
+                    : null,
+                onTap: () => _push(const SourceManagementPage()),
               ),
             ),
             SettingsTile(
+              icon: Icons.auto_awesome_outlined,
               title: 'AI 规则编写',
-              value: 'OpenAI 兼容模型 / API Key',
-              icon: Icons.auto_awesome_rounded,
-              onTap: () => _pushPage(const AiRuleSettingsPage()),
-              showDivider: Platform.isWindows,
+              onTap: () => _push(const AiRuleSettingsPage()),
             ),
             if (Platform.isWindows)
               SettingsTile(
-                title: '实验室',
-                value: 'DLSS 5 视频增强',
                 icon: Icons.science_outlined,
-                onTap: () => _pushPage(const LabsSettingsPage()),
-                showDivider: false,
+                title: '实验室',
+                onTap: () => _push(const LabsSettingsPage()),
               ),
           ],
         ),
-        const SizedBox(height: 24),
-      ],
-    );
-  }
-
-  Widget _buildAppearanceSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SettingsSectionHeader('外观与交互'),
         Obx(
-          () => SettingsGroup(
+          () => SettingsSection(
+            title: '外观',
             children: [
-              SettingsTile(
-                title: '主题模式',
-                value: _appState.themeModeLabel,
+              SettingsSelectTile<int>(
                 icon: Icons.brightness_6_outlined,
-                onTap: _showThemeModeDialog,
+                title: '主题模式',
+                value: _appState.themeMode,
+                options: AppState.themeModeLabels.asMap(),
+                onChanged: _appState.setThemeMode,
               ),
-              SettingsSwitchTile(
-                title: '动态取色',
-                subtitle: '使用系统壁纸或强调色生成 Material 3 配色',
+              SwitchListTile(
+                secondary: const Icon(Icons.palette_outlined),
+                title: const Text('动态取色'),
                 value: _appState.dynamicColor,
-                icon: Icons.palette_outlined,
                 onChanged: _appState.setDynamicColor,
               ),
-              SettingsTile(
+              SettingsSelectTile<String>(
+                icon: Icons.font_download_outlined,
                 title: '字体',
-                value: AppFonts.getLabelForFont(_appState.fontFamily),
-                icon: Icons.font_download_rounded,
-                onTap: () => _pushPage(const FontSettingsPage()),
+                value: _appState.fontFamily,
+                options: AppFonts.fontOptions,
+                onChanged: _appState.setFontFamily,
               ),
-              SettingsSwitchTile(
-                title: '减少视觉效果',
-                subtitle: '关闭动效、毛玻璃与自动轮播，并减少装饰阴影',
+              SettingsSelectTile<int>(
+                icon: Icons.format_bold_rounded,
+                title: '字重',
+                value: _appState.fontWeightIndex,
+                options: AppFonts.weightLabels.asMap(),
+                onChanged: _appState.setFontWeightIndex,
+              ),
+              SettingsSliderTile(
+                icon: Icons.format_size_rounded,
+                title: '字号',
+                value: _appState.fontScale,
+                min: .8,
+                max: 1.3,
+                divisions: 10,
+                label: '${(_appState.fontScale * 100).round()}%',
+                onChanged: _appState.setFontScale,
+              ),
+              SwitchListTile(
+                secondary: const Icon(Icons.motion_photos_off_outlined),
+                title: const Text('减少视觉效果'),
                 value: _appState.reduceVisualEffects,
-                icon: Icons.motion_photos_off_outlined,
                 onChanged: _appState.setReduceVisualEffects,
-              ),
-              SettingsSwitchTile(
-                title: '滑动时隐藏底栏',
-                subtitle: '向下浏览内容时收起底部导航',
-                value: _appState.isHideBottomNavOnScroll.value,
-                icon: Icons.swipe_down_rounded,
-                onChanged: _appState.toggleHideBottomNavOnScroll,
-                showDivider: false,
               ),
             ],
           ),
         ),
-        const SizedBox(height: 24),
-      ],
-    );
-  }
-
-  Widget _buildStorageSection() {
-    final isTV = Instances.isTV;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SettingsSectionHeader('存储与诊断'),
-        SettingsGroup(
+        SettingsSection(
+          title: '浏览',
           children: [
-            SettingsTile(
-              title: '清理缓存',
-              value: _isClearing ? '清理中...' : _cacheSize,
-              icon: Icons.cleaning_services_rounded,
-              onTap: _isClearing ? null : _clearCache,
+            ValueListenableBuilder<bool>(
+              valueListenable: contentFilter,
+              builder: (context, enabled, _) => SwitchListTile(
+                secondary: const Icon(Icons.visibility_off_outlined),
+                title: const Text('隐藏 NSFW 内容'),
+                value: enabled,
+                onChanged: (value) =>
+                    contentFilter.setEnabled(value, Instances.sp),
+              ),
             ),
-            SettingsTile(
-              title: '导出日志',
-              value: isTV ? '手机扫码下载' : (_isExportingLogs ? '导出中...' : 'ZIP'),
-              icon: Icons.file_download_outlined,
-              onTap: isTV
-                  ? () => showTvLogExportDialog(context)
-                  : (_isExportingLogs ? null : _exportLogs),
-              showDivider: !isTV,
-            ),
-            if (!isTV)
-              SettingsTile(
-                title: '分享日志',
-                value: _isSharingLogs ? '准备中...' : '系统分享',
-                icon: Icons.ios_share_rounded,
-                onTap: _isSharingLogs ? null : _shareLogs,
-                showDivider: false,
+            if (!Instances.isDesktopPlatform)
+              Obx(
+                () => SwitchListTile(
+                  secondary: const Icon(Icons.swipe_down_outlined),
+                  title: const Text('滑动时隐藏底栏'),
+                  value: _appState.isHideBottomNavOnScroll.value,
+                  onChanged: _appState.toggleHideBottomNavOnScroll,
+                ),
               ),
           ],
         ),
-        const SizedBox(height: 24),
-      ],
-    );
-  }
-
-  Widget _buildAboutSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SettingsSectionHeader('关于与支持'),
-        SettingsGroup(
+        SettingsSection(
+          title: '网络',
           children: [
             SettingsTile(
-              title: '检查更新',
-              value: _isCheckingUpdate ? '检查中...' : 'v${Instances.appVersion}',
-              icon: Icons.system_update_alt_rounded,
-              onTap: _checkUpdate,
-            ),
-            SettingsTile(
+              icon: Icons.swap_calls_outlined,
               title: 'APP 线路',
               value: _session.currentHost,
-              icon: Icons.swap_calls_outlined,
+              trailingIcon: Icons.swap_horiz_rounded,
               onTap: _switchHost,
             ),
             SettingsTile(
-              title: '免责声明',
-              value: '条款说明',
-              icon: Icons.gavel_outlined,
-              onTap: _showDisclaimerDialog,
+              icon: Icons.security_outlined,
+              title: '网络设置',
+              onTap: () => _push(const NetworkSettingsPage()),
+            ),
+          ],
+        ),
+        SettingsSection(
+          title: '存储与诊断',
+          children: [
+            SettingsTile(
+              icon: Icons.cleaning_services_outlined,
+              title: '清理缓存',
+              value: _cacheSize,
+              busy: _busy == '清理缓存',
+              onTap: _clearCache,
             ),
             SettingsTile(
-              title: 'GitHub 开源',
-              value: 'AniBaka',
+              icon: Icons.file_download_outlined,
+              title: '导出日志',
+              busy: _busy == '导出日志',
+              onTap: Instances.isTV
+                  ? () => showTvLogExportDialog(context)
+                  : _exportLogs,
+            ),
+            if (!Instances.isTV)
+              SettingsTile(
+                icon: Icons.ios_share_rounded,
+                title: '分享日志',
+                busy: _busy == '分享日志',
+                onTap: () => _run('分享日志', AppLogger.instance.shareLogs),
+              ),
+          ],
+        ),
+        SettingsSection(
+          title: '关于',
+          children: [
+            SettingsTile(
+              icon: Icons.system_update_alt_rounded,
+              title: '检查更新',
+              value: 'v${Instances.appVersion}',
+              busy: _busy == '检查更新',
+              onTap: _checkUpdate,
+            ),
+            SettingsTile(
+              icon: Icons.gavel_outlined,
+              title: '免责声明',
+              onTap: () => showAppInfoDialog(
+                context,
+                title: '免责声明',
+                content:
+                    '本软件仅供学习与交流使用，所有资源均来源于互联网。\n\n'
+                    '1. 本软件不提供任何视频内容的存储或上传服务。\n'
+                    '2. 视频版权均归原作者所有，如有侵权请联系我们删除。\n'
+                    '3. 请勿将本软件用于任何商业目的。',
+                buttonText: '我知道啦',
+              ),
+            ),
+            SettingsTile(
               icon: Icons.code_rounded,
+              title: 'GitHub',
+              value: 'AniBaka',
+              trailingIcon: Icons.open_in_new_rounded,
               onTap: () => launchUrlString(
                 'https://github.com/AniBakaBaka/AniBaka',
                 mode: LaunchMode.externalApplication,
               ),
-              showDivider: false,
             ),
           ],
         ),
       ],
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Scaffold(
-      body: CustomScrollView(
-        physics: const BouncingScrollPhysics(
-          parent: AlwaysScrollableScrollPhysics(),
-        ),
-        slivers: [
-          const SettingsSliverAppBar(title: '设置'),
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            sliver: SliverList.list(
-              children: [
-                const SizedBox(height: 20),
-                _buildAccountSection(),
-                _buildPlaybackSection(),
-                const SettingsSectionHeader('内容偏好'),
-                SettingsGroup(
-                  children: [
-                    ValueListenableBuilder<bool>(
-                      valueListenable: contentFilter,
-                      builder: (context, enabled, _) => SettingsSwitchTile(
-                        title: '隐藏 NSFW 内容',
-                        subtitle: '开启后隐藏被数据源标记为 NSFW 的内容',
-                        icon: Icons.visibility_off_outlined,
-                        value: enabled,
-                        onChanged: (value) =>
-                            contentFilter.setEnabled(value, Instances.sp),
-                        showDivider: false,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                _buildAppearanceSection(),
-                _buildStorageSection(),
-                _buildAboutSection(),
-                Obx(() {
-                  if (!_session.isLoggedIn) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 36),
-                    child: FilledButton.tonalIcon(
-                      onPressed: _logout,
-                      icon: const Icon(Icons.logout_rounded),
-                      label: const Text('退出登录'),
-                      style: FilledButton.styleFrom(
-                        foregroundColor: Theme.of(context).colorScheme.error,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                    ),
-                  );
-                }),
-                const SizedBox(height: 48),
-                Center(
-                  child: Text(
-                    'Designed for Baka',
-                    style: TextStyle(
-                      color: isDark ? Colors.white24 : Colors.black26,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      letterSpacing: 1,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 40),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

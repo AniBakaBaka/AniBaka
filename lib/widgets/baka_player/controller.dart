@@ -1005,7 +1005,10 @@ class PlaybackController {
         next = next.copyWith(videoRenderer: 'gpu');
       }
     }
-    if (previous == next) return;
+    if (previous == next) {
+      if (persist) await _persistPreferences(next);
+      return;
+    }
     preferences.value = next;
     _updateSkipSuggestion();
     if (next.enableSkipOpEd != previous.enableSkipOpEd) {
@@ -1041,18 +1044,17 @@ class PlaybackController {
         await _syncProperties(buildVideoRendererProperties(next.videoRenderer));
       }
     }
-    if (persist) {
-      _settingsWrites = _settingsWrites.then((_) async {
-        final persisted = _persistedPreferences;
-        await PlaybackSettingsService.saveChanges(persisted, next);
-        _persistedPreferences = next;
-      });
-      await _settingsWrites;
-    }
+    if (persist) await _persistPreferences(next);
     if (previous.filterHlsAds != next.filterHlsAds) {
       await onHlsAdFilterChanged?.call(next.filterHlsAds);
     }
   }
+
+  Future<void> _persistPreferences(PlaybackPreferences next) =>
+      _settingsWrites = _settingsWrites.then((_) async {
+        await PlaybackSettingsService.saveChanges(_persistedPreferences, next);
+        _persistedPreferences = next;
+      });
 
   /// 清单处理属于播放页面；切换去广告时由页面重新准备当前媒体。
   Future<void> Function(bool enabled)? onHlsAdFilterChanged;

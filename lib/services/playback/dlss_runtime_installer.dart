@@ -1,3 +1,4 @@
+import 'package:baka/core/network_service.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -114,7 +115,7 @@ class DlssRuntimeInstaller extends ChangeNotifier {
     _notify();
     Directory? staging;
     String? root;
-    final dio = Dio(
+    final dio = NetworkService.createDio(
       BaseOptions(
         connectTimeout: const Duration(seconds: 20),
         receiveTimeout: const Duration(seconds: 60),

@@ -1,8 +1,9 @@
-import 'package:baka/core/content_filter.dart';
 import 'dart:async';
 
+import 'package:baka/api/bgm.dart';
 import 'package:baka/app/navigation.dart';
 import 'package:baka/app_state.dart';
+import 'package:baka/core/content_filter.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/anime_schedule.dart';
 import 'package:baka/models/bgm.dart';
@@ -28,10 +29,9 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
     with WidgetsBindingObserver {
   static const _weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
   final _scrollController = ScrollController();
-  final _details = <String, ValueNotifier<ScheduleDetails?>>{};
-  final _groupSizes = <String, int>{};
-  late final ScheduleService _service =
-      widget.service ?? ScheduleService(now: _now);
+  late final ScheduleService _service = widget.service ?? ScheduleService();
+  List<ScheduleEntry> _entries = const [];
+  List<int> _groupSizes = const [];
   late DateTime _today = scheduleToday(_now());
   late DateTime _monday = _today.subtract(Duration(days: _today.weekday - 1));
   late int _selectedDay = _today.weekday - 1;
@@ -39,7 +39,6 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
   bool _loading = true;
   String? _error;
   int _loadGeneration = 0;
-  int _detailGeneration = 0;
   double _lastScrollOffset = 0;
   AppState? _appState;
 
@@ -49,6 +48,7 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    contentFilter.addListener(_filterChanged);
     if (!Instances.isDesktopPlatform &&
         !Instances.isTV &&
         Get.isRegistered<AppState>()) {
@@ -61,9 +61,7 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _loadGeneration++;
-    _detailGeneration++;
-    _clearDetails();
+    contentFilter.removeListener(_filterChanged);
     _scrollController.dispose();
     super.dispose();
   }
@@ -86,7 +84,6 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
 
   Future<void> _loadSchedule({bool force = false}) async {
     final generation = ++_loadGeneration;
-    _detailGeneration++;
     final today = scheduleToday(_now());
     final monday = today.subtract(Duration(days: today.weekday - 1));
     setState(() {
@@ -94,8 +91,8 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
       _error = null;
       if (monday != _monday) {
         _week = null;
-        _clearDetails();
         _selectedDay = today.weekday - 1;
+        _updateEntries();
       }
       _today = today;
       _monday = monday;
@@ -104,110 +101,56 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
       final result = await _service.loadWeek(monday, force: force);
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
-        // A temporary endpoint outage must not erase previously known clock times.
-        if (result.timingUnavailable &&
-            _week != null &&
-            !_week!.timingUnavailable) {
-          _error = '暂时无法刷新，正在显示上次排期';
-        } else {
-          _week = result;
-          _indexGroups(result);
-        }
-        if (force) _clearDetails();
+        _week = result;
+        _updateEntries();
         _loading = false;
       });
-      unawaited(_loadDayDetails());
     } catch (_) {
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
-        if (force) _clearDetails();
         _loading = false;
         _error = _week == null ? '暂时无法获取更新时间表' : '暂时无法刷新，正在显示上次排期';
       });
-      if (_week != null) unawaited(_loadDayDetails());
     }
   }
 
-  Future<void> _loadDayDetails() async {
-    final generation = ++_detailGeneration;
-    final entries = (_week?.days[_selectedDay] ?? const <ScheduleEntry>[])
-        .where((entry) => contentFilter.allows(entry.post))
-        .toList(growable: false);
-    var next = 0;
-    // Bound requests when switching days; only the selected day gets enrichment.
-    Future<void> worker() async {
-      while (mounted &&
-          generation == _detailGeneration &&
-          next < entries.length) {
-        final entry = entries[next++];
-        final notifier = _detailFor(entry);
-        if (notifier.value != null) continue;
-        ScheduleDetails details;
-        try {
-          details = await _service.loadDetails(entry);
-        } catch (_) {
-          details = const ScheduleDetails(episodeLabel: '章节加载失败，下拉重试');
-        }
-        if (!mounted || generation != _detailGeneration) return;
-        notifier.value = details;
+  void _filterChanged() => setState(_updateEntries);
+
+  void _updateEntries() {
+    final entries = _week?.days[_selectedDay] ?? const <ScheduleEntry>[];
+    _entries = contentFilter.value
+        ? entries
+              .where((entry) => contentFilter.allows(entry.post))
+              .toList(growable: false)
+        : entries;
+    _groupSizes = List.filled(_entries.length, 0);
+    for (var start = 0; start < _entries.length;) {
+      var end = start + 1;
+      while (end < _entries.length &&
+          _entries[end].time == _entries[start].time) {
+        end++;
       }
-    }
-
-    await Future.wait(
-      List.generate(entries.length.clamp(0, 4), (_) => worker()),
-    );
-  }
-
-  ValueNotifier<ScheduleDetails?> _detailFor(ScheduleEntry entry) =>
-      _details.putIfAbsent(entry.key, () => ValueNotifier(null));
-
-  void _clearDetails() {
-    for (final details in _details.values) {
-      details.dispose();
-    }
-    _details.clear();
-  }
-
-  void _indexGroups(ScheduleWeek week) {
-    _groupSizes.clear();
-    for (final day in week.days) {
-      final entries = day
-          .where((entry) => contentFilter.allows(entry.post))
-          .toList(growable: false);
-      for (var start = 0; start < entries.length;) {
-        var end = start + 1;
-        while (end < entries.length &&
-            entries[end].time == entries[start].time) {
-          end++;
-        }
-        _groupSizes[entries[start].key] = end - start;
-        start = end;
-      }
+      _groupSizes[start] = end - start;
+      start = end;
     }
   }
 
   void _selectDay(int day) {
     if (_selectedDay == day) return;
-    setState(() => _selectedDay = day);
+    setState(() {
+      _selectedDay = day;
+      _updateEntries();
+    });
     _lastScrollOffset = 0;
     if (_scrollController.hasClients) _scrollController.jumpTo(0);
     _appState?.updateScrollDirection(false);
-    unawaited(_loadDayDetails());
   }
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: contentFilter,
-    builder: (context, _) => _buildContent(context),
-  );
-
-  Widget _buildContent(BuildContext context) {
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final entries = (_week?.days[_selectedDay] ?? const <ScheduleEntry>[])
-        .where((entry) => contentFilter.allows(entry.post))
-        .toList(growable: false);
-    if (_week != null) _indexGroups(_week!);
+    final entries = _entries;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -306,7 +249,7 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
                                     itemBuilder: (context, index) =>
                                         _buildTimelineEntry(
                                           entries[index],
-                                          _groupSizes[entries[index].key] ?? 0,
+                                          _groupSizes[index],
                                           index == entries.length - 1 ||
                                               entries[index + 1].time !=
                                                   entries[index].time,
@@ -350,14 +293,7 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
   }
 
   String? get _notice =>
-      _error ??
-      (_week?.timingUnavailable == true
-          ? '具体时间暂不可用，先显示每日番剧'
-          : _week?.stale == true
-          ? '排期数据较旧，请以官方公告为准'
-          : _week?.calendarUnavailable == true
-          ? '部分番剧信息暂未加载'
-          : null);
+      _error ?? (_week?.stale == true ? '排期数据较旧，请以官方公告为准' : null);
 
   Widget _buildNotice(ThemeData theme, String notice) => Padding(
     padding: const EdgeInsets.only(left: 16, right: 6),
@@ -583,10 +519,10 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
                         ),
                       ),
                     _ScheduleRow(
-                      key: ValueKey((entry.key, _loadGeneration)),
+                      key: ObjectKey(entry),
                       entry: entry,
-                      details: _detailFor(entry),
                       service: _service,
+                      today: _today,
                       compact: narrow || largeText,
                       onPlatforms: _showPlatforms,
                     ),
@@ -652,10 +588,10 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
               const Text(
                 '集数与标题按 Bangumi 章节的播出日期匹配；时间未知的番剧按日历日期匹配。过去日期无匹配时显示“未查到当日章节”，不会按周数推算集数。平台可能存在地区限制。',
               ),
-              if (_week?.checkedAt != null) ...[
+              if (_week != null) ...[
                 const SizedBox(height: 12),
                 Text(
-                  '排期最近检查：${scheduleDate(_week!.checkedAt!.toUtc().add(const Duration(hours: 8)))}',
+                  '排期最近检查：${scheduleDate(_week!.checkedAt.toUtc().add(const Duration(hours: 8)))}',
                 ),
               ],
               const SizedBox(height: 12),
@@ -728,15 +664,15 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
 class _ScheduleRow extends StatefulWidget {
   const _ScheduleRow({
     required this.entry,
-    required this.details,
     required this.service,
+    required this.today,
     required this.compact,
     required this.onPlatforms,
     super.key,
   });
   final ScheduleEntry entry;
-  final ValueNotifier<ScheduleDetails?> details;
   final ScheduleService service;
+  final DateTime today;
   final bool compact;
   final ValueChanged<ScheduleEntry> onPlatforms;
 
@@ -745,57 +681,23 @@ class _ScheduleRow extends StatefulWidget {
 }
 
 class _ScheduleRowState extends State<_ScheduleRow> {
-  String? _coverUrl;
-  int _coverGeneration = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _updateCover();
-  }
-
-  @override
-  void didUpdateWidget(covariant _ScheduleRow oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!identical(widget.entry, oldWidget.entry) ||
-        widget.service != oldWidget.service) {
-      _updateCover();
-    }
-  }
-
-  void _updateCover() {
-    _coverGeneration++;
-    _coverUrl = resolveCoverImage(widget.entry.post);
-    if (_coverUrl == null) unawaited(_loadCover());
-  }
-
-  Future<void> _loadCover() async {
-    final generation = _coverGeneration;
-    try {
-      final image = await widget.service.loadCover(widget.entry);
-      if (mounted && generation == _coverGeneration && image != null) {
-        setState(() => _coverUrl = image);
-      }
-    } catch (_) {
-      // Keep the local placeholder; refreshing retries failed cover requests.
-    }
-  }
+  late final _labels = widget.service.loadEpisodeLabels(widget.entry);
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final entry = widget.entry;
+    final coverUrl =
+        resolveCoverImage(entry.post) ??
+        (entry.bgmId == null ? null : bgmSubjectImageUrl(entry.bgmId!));
     final heroTag = 'schedule/${entry.key}';
     final coverWidth = widget.compact ? 60.0 : 80.0;
     void open() {
       if (entry.bgmId == null) {
         NavigationService.toSearch(context, keyword: entry.title);
       } else {
-        navigateToDetail(context, {
-          ...entry.post,
-          if (_coverUrl != null) 'bgmImageUrl': _coverUrl,
-        }, heroTag: heroTag);
+        navigateToDetail(context, entry.post, heroTag: heroTag);
       }
     }
 
@@ -814,7 +716,7 @@ class _ScheduleRowState extends State<_ScheduleRow> {
                 borderRadius: BorderRadius.circular(4),
                 child: ColoredBox(
                   color: colors.surfaceContainerHighest,
-                  child: _coverUrl == null
+                  child: coverUrl == null
                       ? SizedBox(
                           width: coverWidth,
                           height: coverWidth * 1.5,
@@ -824,10 +726,14 @@ class _ScheduleRowState extends State<_ScheduleRow> {
                           ),
                         )
                       : buildNetworkImage(
-                          _coverUrl!,
+                          coverUrl,
                           coverWidth,
                           coverWidth * 1.5,
                           fit: BoxFit.contain,
+                          cacheWidth:
+                              (coverWidth *
+                                      MediaQuery.devicePixelRatioOf(context))
+                                  .ceil(),
                         ),
                 ),
               ),
@@ -848,10 +754,18 @@ class _ScheduleRowState extends State<_ScheduleRow> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  ValueListenableBuilder<ScheduleDetails?>(
-                    valueListenable: widget.details,
-                    builder: (context, details, child) {
-                      final label = details?.episodeLabel ?? '正在加载章节…';
+                  FutureBuilder<Map<String, String>>(
+                    future: _labels,
+                    builder: (context, snapshot) {
+                      final label = snapshot.hasError
+                          ? '章节加载失败，下拉重试'
+                          : snapshot.connectionState != ConnectionState.done
+                          ? '正在加载章节…'
+                          : snapshot.data![entry.episodeDate ??
+                                    scheduleDate(entry.date)] ??
+                                (entry.date.isBefore(widget.today)
+                                    ? '未查到当日章节'
+                                    : '本集信息待公布');
                       return Tooltip(
                         message: label,
                         child: Text(

@@ -27,6 +27,7 @@ bool FlutterWindow::OnCreate() {
   WriteStartupLog("Flutter view controller constructed");
   // Ensure that basic setup of the controller was successful.
   if (!flutter_controller_->engine() || !flutter_controller_->view()) {
+    WriteStartupLog("Flutter view controller initialization failed");
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
@@ -90,20 +91,22 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     return 0;
   }
 
-  // Give Flutter, including plugins, an opportunity to handle window messages.
-  if (flutter_controller_) {
+  // CreateWindow and Flutter controller construction can synchronously dispatch
+  // messages before the controller is assigned. Teardown can also dispatch
+  // messages after it is cleared. Only forward messages or reload fonts while
+  // both the engine and view are available.
+  if (flutter_controller_ && flutter_controller_->engine() &&
+      flutter_controller_->view()) {
     std::optional<LRESULT> result =
         flutter_controller_->HandleTopLevelWindowProc(hwnd, message, wparam,
                                                       lparam);
     if (result) {
       return *result;
     }
-  }
 
-  switch (message) {
-    case WM_FONTCHANGE:
+    if (message == WM_FONTCHANGE) {
       flutter_controller_->engine()->ReloadSystemFonts();
-      break;
+    }
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);

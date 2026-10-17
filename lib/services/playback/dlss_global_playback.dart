@@ -52,6 +52,24 @@ class DlssPlaybackEffects {
     );
   }
 
+  DlssPlaybackEffects copyWith({
+    double? intensity,
+    double? sharpness,
+    int? maxHeight,
+    bool? superResolution,
+    bool? frameGeneration,
+    bool? neuralRendering,
+    bool? comparison,
+  }) => DlssPlaybackEffects(
+    intensity: intensity ?? this.intensity,
+    sharpness: sharpness ?? this.sharpness,
+    maxHeight: maxHeight ?? this.maxHeight,
+    superResolution: superResolution ?? this.superResolution,
+    frameGeneration: frameGeneration ?? this.frameGeneration,
+    neuralRendering: neuralRendering ?? this.neuralRendering,
+    comparison: comparison ?? this.comparison,
+  );
+
   Map<String, dynamic> toJson() => {
     'intensity': intensity,
     'sharpness': sharpness,
@@ -61,6 +79,28 @@ class DlssPlaybackEffects {
     'neuralRendering': neuralRendering,
     'comparison': comparison,
   };
+
+  @override
+  bool operator ==(Object other) =>
+      other is DlssPlaybackEffects &&
+      intensity == other.intensity &&
+      sharpness == other.sharpness &&
+      maxHeight == other.maxHeight &&
+      superResolution == other.superResolution &&
+      frameGeneration == other.frameGeneration &&
+      neuralRendering == other.neuralRendering &&
+      comparison == other.comparison;
+
+  @override
+  int get hashCode => Object.hash(
+    intensity,
+    sharpness,
+    maxHeight,
+    superResolution,
+    frameGeneration,
+    neuralRendering,
+    comparison,
+  );
 }
 
 /// Configures the shared Windows video renderer, including preview players.
@@ -136,15 +176,14 @@ class DlssGlobalPlayback extends ChangeNotifier {
 
   Future<bool> applyEffects(DlssPlaybackEffects value) async {
     if (!Platform.isWindows || busy) return false;
-    final candidate = DlssPlaybackEffects.fromJson(value.toJson());
     if (enabled && playbackEnabled) {
-      return _enable(allowInstall: true, nextEffects: candidate);
+      return _enable(allowInstall: true, nextEffects: value);
     }
     busy = true;
     notifyListeners();
     try {
-      await Instances.sp.setString(_effectsKey, jsonEncode(candidate.toJson()));
-      effects = candidate;
+      await Instances.sp.setString(_effectsKey, jsonEncode(value.toJson()));
+      effects = value;
       error = null;
       status = '效果已保存，开启播放增强后生效';
       return true;

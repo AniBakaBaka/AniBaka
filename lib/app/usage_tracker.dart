@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'dart:math';
-import 'package:http/http.dart' as http;
+import 'package:baka/core/network_service.dart';
 import 'package:baka/instance.dart';
 
 /// 日活统计上报（fire-and-forget，失败静默）。
@@ -20,7 +20,7 @@ class DauTracker {
         _baseUrl,
       ).replace(path: '/track', queryParameters: {'id': userId});
 
-      final client = http.Client();
+      final client = NetworkService.createClient();
       try {
         await client.get(uri).timeout(_timeout);
       } finally {

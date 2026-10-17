@@ -3,7 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:baka/core/system_proxy.dart';
+import 'package:baka/core/network_service.dart';
+import 'package:http/http.dart' as http;
 import 'package:baka/source/webview_adapter.dart';
 
 class SiteProbeRequest {
@@ -35,11 +36,10 @@ class SiteProbeRequest {
 }
 
 class SiteProbeService {
-  SiteProbeService() : _client = SystemProxyService.createHttpClient() {
-    _client
-      ..connectionTimeout = const Duration(seconds: 8)
-      ..idleTimeout = const Duration(seconds: 8);
-  }
+  SiteProbeService()
+    : _client = NetworkService.createClient(
+        connectTimeout: const Duration(seconds: 8),
+      );
 
   static const int maxResponseBytes = 16 * 1024;
   static const int maxRequestBodyBytes = 32 * 1024;
@@ -67,7 +67,7 @@ class SiteProbeService {
     'x-api-key',
   };
 
-  final HttpClient _client;
+  final http.Client _client;
   final WebViewTaskScope _webViewScope = WebViewTaskScope();
   final Map<String, List<Cookie>> _cookies = {};
   bool _cancelled = false;
@@ -76,7 +76,7 @@ class SiteProbeService {
     if (_cancelled) return;
     _cancelled = true;
     _webViewScope.cancel();
-    _client.close(force: true);
+    _client.close();
     _cookies.clear();
   }
 
@@ -133,41 +133,54 @@ class SiteProbeService {
     for (var redirect = 0; ; redirect++) {
       await validatePublicUri(uri);
       _throwIfCancelled();
-      final req = await _client.openUrl(method, uri);
-      final timer = Timer(
-        const Duration(seconds: 12),
-        () => req.abort(TimeoutException('Site probe timed out')),
+      final abort = Completer<void>();
+      void cancel() {
+        if (!abort.isCompleted) abort.complete();
+      }
+
+      final req = http.AbortableRequest(
+        method,
+        uri,
+        abortTrigger: abort.future,
       );
+      final timer = Timer(const Duration(seconds: 12), cancel);
       try {
         req.followRedirects = false;
-        req.headers.set(
-          HttpHeaders.userAgentHeader,
-          'AniBaka-AI-Rule-Probe/1.0',
-        );
-        req.headers.set(HttpHeaders.acceptHeader, '*/*');
+        req.headers[HttpHeaders.userAgentHeader] = 'AniBaka-AI-Rule-Probe/1.0';
+        req.headers[HttpHeaders.acceptHeader] = '*/*';
         for (final entry in request.headers.entries) {
           if (_sensitiveHeaders.contains(entry.key.toLowerCase())) continue;
-          req.headers.set(entry.key, entry.value);
+          req.headers[entry.key] = entry.value;
         }
         final cookies = _cookies[uri.host];
-        if (cookies != null && cookies.isNotEmpty) req.cookies.addAll(cookies);
-        if (body != null) req.add(body);
-
-        final response = await req.close();
-        if (response.cookies.isNotEmpty) {
-          _cookies[uri.host] = response.cookies;
+        if (cookies != null && cookies.isNotEmpty) {
+          req.headers[HttpHeaders.cookieHeader] = cookies
+              .map((cookie) => '${cookie.name}=${cookie.value}')
+              .join('; ');
         }
-        final location = response.headers.value(HttpHeaders.locationHeader);
+        if (body != null) req.bodyBytes = body;
+
+        final response = await _client
+            .send(req)
+            .timeout(const Duration(seconds: 12));
+        final receivedCookies =
+            response.headersSplitValues[HttpHeaders.setCookieHeader];
+        if (receivedCookies != null && receivedCookies.isNotEmpty) {
+          _cookies[uri.host] = receivedCookies
+              .map(Cookie.fromSetCookieValue)
+              .toList();
+        }
+        final location = response.headers[HttpHeaders.locationHeader];
         if (response.isRedirect && location != null) {
           if (redirect == 3) throw StateError('探测重定向次数过多');
           uri = uri.resolve(location);
-          await response.listen(null).cancel();
+          await response.stream.listen(null).cancel();
           continue;
         }
 
         final bytes = BytesBuilder(copy: false);
         var truncated = false;
-        await for (final chunk in response) {
+        await for (final chunk in response.stream) {
           final remaining = maxResponseBytes - bytes.length;
           if (chunk.length < remaining) {
             bytes.add(chunk);
@@ -181,8 +194,7 @@ class SiteProbeService {
           truncated =
               chunk.length > remaining ||
               response.contentLength != maxResponseBytes ||
-              response.compressionState ==
-                  HttpClientResponseCompressionState.decompressed;
+              response.headers[HttpHeaders.contentEncodingHeader] == 'gzip';
           break;
         }
 
@@ -190,19 +202,17 @@ class SiteProbeService {
           'request': {'method': method, 'url': safeUrl(originalUri)},
           'status': response.statusCode,
           'finalUrl': safeUrl(uri),
-          'contentType': response.headers.contentType?.toString() ?? '',
+          'contentType': response.headers[HttpHeaders.contentTypeHeader] ?? '',
           'headers': {
             for (final name in const ['content-type', 'location', 'server'])
-              if (response.headers.value(name) != null)
-                name: response.headers.value(name),
+              if (response.headers[name] != null) name: response.headers[name],
           },
           'body': utf8.decode(bytes.takeBytes(), allowMalformed: true),
           'truncated': truncated,
         };
       } finally {
         timer.cancel();
-        req.done.ignore();
-        req.abort();
+        cancel();
       }
     }
   }
@@ -215,9 +225,10 @@ class SiteProbeService {
     if (host == 'localhost' || host.endsWith('.localhost')) {
       throw const FormatException('不允许访问本机地址');
     }
-    final addresses = await InternetAddress.lookup(
-      host,
-    ).timeout(const Duration(seconds: 5));
+    final addresses =
+        await (NetworkService.resolver?.lookup(host) ??
+                InternetAddress.lookup(host))
+            .timeout(const Duration(seconds: 5));
     if (addresses.isEmpty || addresses.any(_isPrivateAddress)) {
       throw const FormatException('不允许访问私网或保留地址');
     }

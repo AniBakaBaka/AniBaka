@@ -24,18 +24,18 @@ class SubtitleConfig {
   static const String defaultFontFamily = '';
 
   /// 可选字体列表
-  static const List<Map<String, String>> availableFonts = [
-    {'name': '系统默认', 'value': ''},
-    {'name': 'Microsoft YaHei', 'value': 'Microsoft YaHei'},
-    {'name': 'SimHei (黑体)', 'value': 'SimHei'},
-    {'name': 'SimSun (宋体)', 'value': 'SimSun'},
-    {'name': 'KaiTi (楷体)', 'value': 'KaiTi'},
-    {'name': 'FangSong (仿宋)', 'value': 'FangSong'},
-    {'name': 'Noto Sans SC', 'value': 'Noto Sans SC'},
-    {'name': 'Source Han Sans', 'value': 'Source Han Sans'},
-    {'name': 'Arial', 'value': 'Arial'},
-    {'name': 'Segoe UI', 'value': 'Segoe UI'},
-  ];
+  static const fonts = {
+    '': '系统默认',
+    'Microsoft YaHei': 'Microsoft YaHei',
+    'SimHei': 'SimHei (黑体)',
+    'SimSun': 'SimSun (宋体)',
+    'KaiTi': 'KaiTi (楷体)',
+    'FangSong': 'FangSong (仿宋)',
+    'Noto Sans SC': 'Noto Sans SC',
+    'Source Han Sans': 'Source Han Sans',
+    'Arial': 'Arial',
+    'Segoe UI': 'Segoe UI',
+  };
 
   const SubtitleConfig({
     this.fontSize = defaultFontSize,
@@ -96,7 +96,9 @@ class SubtitleConfig {
     borderColor: _parseColor(json['borderColor'], defaultBorderColor),
     bold: json['bold'] as bool? ?? defaultBold,
     opacity: (json['opacity'] as num?)?.toDouble() ?? defaultOpacity,
-    fontFamily: json['fontFamily'] as String? ?? defaultFontFamily,
+    fontFamily: fonts.containsKey(json['fontFamily'])
+        ? json['fontFamily'] as String
+        : defaultFontFamily,
   );
 
   static Color _parseColor(dynamic value, Color fallback) {

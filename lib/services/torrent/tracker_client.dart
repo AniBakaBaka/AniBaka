@@ -5,6 +5,8 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:baka/services/torrent/bencode.dart';
+import 'package:baka/core/network_service.dart';
+import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 
 /// Tracker 客户端 — 从 HTTP/UDP tracker 获取 peer 列表
@@ -14,8 +16,9 @@ class TrackerClient {
     utf8.encode(_generatePeerId()),
   );
 
-  final HttpClient _httpClient = HttpClient()
-    ..connectionTimeout = const Duration(seconds: 10);
+  final http.Client _httpClient = NetworkService.createClient(
+    connectTimeout: const Duration(seconds: 10),
+  );
 
   bool _disposed = false;
   final _closed = Completer<void>();
@@ -24,7 +27,7 @@ class TrackerClient {
     if (_disposed) return;
     _disposed = true;
     _closed.complete();
-    _httpClient.close(force: true);
+    _httpClient.close();
     for (final socket in _sockets) {
       socket.close();
     }
@@ -112,20 +115,24 @@ class TrackerClient {
     Timer? timer;
     try {
       if (_disposed) return const TrackerAnnounceResult();
-      final request = await _httpClient.getUrl(Uri.parse(requestUrl));
-      timer = Timer(
-        const Duration(seconds: 15),
-        () => request.abort(TimeoutException('Tracker HTTP timed out')),
+      final abort = Completer<void>();
+      final request = http.AbortableRequest(
+        'GET',
+        Uri.parse(requestUrl),
+        abortTrigger: abort.future,
       );
-      request.headers.set('User-Agent', 'Baka/1.0');
-      final response = await request.close();
+      timer = Timer(const Duration(seconds: 15), () => abort.complete());
+      request.headers['User-Agent'] = 'Baka/1.0';
+      final response = await _httpClient
+          .send(request)
+          .timeout(const Duration(seconds: 15));
       if (response.statusCode != 200) {
-        request.abort();
+        await response.stream.listen(null).cancel();
         return const TrackerAnnounceResult();
       }
 
       final body = BytesBuilder(copy: false);
-      await response.forEach(body.add);
+      await response.stream.forEach(body.add);
       final decoded = Bencode.decode(body.takeBytes()) as Map<String, dynamic>;
 
       final failure = decoded['failure reason'];

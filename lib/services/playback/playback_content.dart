@@ -1,4 +1,5 @@
 import 'package:baka/core/content_filter.dart';
+import 'package:baka/models/skip_segment.dart';
 import 'package:baka/source/runtime/source_operation.dart';
 import 'dart:async';
 import 'package:baka/utils/title_matcher.dart';
@@ -144,6 +145,83 @@ class PlaybackContent {
   }
 
   String get title => data['title']?.toString() ?? '';
+
+  bool get isNsfw =>
+      ContentFilter.isNsfw(data) || bgmDetailData?['nsfw'] == true;
+
+  /// Matching progress is rendered by the source chips themselves.
+  String get sourceName => needsSourceMatch
+      ? '选择播放源'
+      : trimmed(data['sourceDisplayName']) ?? trimmed(request.source) ?? '播放源';
+
+  String? get lineName {
+    final names = sourceNames;
+    return names != null && currUrl <= names.length
+        ? trimmed(names[currUrl - 1])
+        : null;
+  }
+
+  /// External sources share one comment thread per Bangumi subject.
+  int? get commentPostId {
+    final id = (isAdapter ? bgmInfo.subjectId : null) ?? toInt(data['id']);
+    return id != null && id > 0 ? id : null;
+  }
+
+  /// Must match the episode picker, or the progress bar misses local tasks.
+  String get downloadTaskPrefix {
+    final id = data['id'];
+    return request.source.isNotEmpty ? '${request.source}_${id}_' : '${id}_';
+  }
+
+  List<String> get tags {
+    final bgmTags = bgmDetailData?['tags'] as List?;
+    if (bgmTags != null && bgmTags.isNotEmpty) {
+      return [for (final tag in bgmTags.take(6)) (tag as Map)['name'] as String];
+    }
+    final raw = data['tag']?.toString();
+    if (raw == null) return const [];
+    final hidden = {
+      data['sourceDisplayName']?.toString(),
+      request.source,
+      sourceName,
+    };
+    return raw
+        .split(' ')
+        .map((tag) => tag.trim())
+        .where((tag) => tag.isNotEmpty && !hidden.contains(tag))
+        .take(5)
+        .toList(growable: false);
+  }
+
+  /// Annotation identity of the open line. The hashed parts must stay stable,
+  /// or saved OP/ED segments of existing users stop matching.
+  SkipContext buildSkipContext(String timelineKey) {
+    final names = sourceNames;
+    final Object line = names != null && currUrl <= names.length
+        ? names[currUrl - 1]
+        : currUrl;
+    return SkipContext(
+      sourceKey: SkipContext.sourceIdentity([
+        request.source,
+        request.contentId,
+        currentVideoItem?.lineAt(currUrl),
+        line,
+      ]),
+      timelineKey: timelineKey,
+      episodeNumber:
+          skipEpisodeNumber(currentEpisodeTitle) ??
+          (currPlayIndex + 1).toDouble(),
+      seriesKey: SkipContext.sourceIdentity([
+        request.source,
+        request.contentId,
+        line,
+      ]),
+      // Display metadata may come from fuzzy title search; only an explicit
+      // playback identity (or a saved personal binding) can drive a seek.
+      subjectId: BgmInfo.fromData(data).subjectId,
+    );
+  }
+
   String? _searchTitle;
   List<String> _searchTitles = const [];
 
@@ -163,24 +241,17 @@ class PlaybackContent {
 
   /// A fresh projection for old views/search sheets; never shared writable state.
   Map<String, dynamic> buildDetailData() {
-    final cover = coverImageUrl;
     final logo = logoUrl;
     return {
       ...data,
       'source': request.source,
-      if (bgmInfo.subjectId != null) 'bgmId': bgmInfo.subjectId,
-      if (bgmInfo.score != null) 'score': bgmInfo.score,
-      if (cover != null) 'bgmImageUrl': cover,
-      if (bgmDetailData != null) 'bgmDetailData': bgmDetailData,
+      'bgmId': ?bgmInfo.subjectId,
+      'score': ?bgmInfo.score,
+      'bgmImageUrl': ?coverImageUrl,
+      'bgmDetailData': ?bgmDetailData,
       if (logo.isNotEmpty) 'logoUrl': logo,
     };
   }
-
-  PlaybackMediaInfo get initialMediaInfo => PlaybackMediaInfo(
-    title: title,
-    imageUrl: coverImageUrl ?? '',
-    logoUrl: logoUrl,
-  );
 
   PlaybackMediaInfo get currentMediaInfo {
     final episodeTitle = bgmEpisodeTitle;
@@ -643,7 +714,7 @@ class PlaybackContent {
         postId: validPostId,
         bgmId: bgmInfo.subjectId,
         status: CollectionStatus.doing.value,
-        nsfw: detail?['nsfw'] == true || ContentFilter.isNsfw(data),
+        nsfw: isNsfw,
         epTotal: epCount,
         epWatched: epCount == null ? null : currPlayIndex + 1,
         postTitle: title,

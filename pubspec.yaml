@@ -18,7 +18,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # In iOS, build-name is used as CFBundleShortVersionString while build-number used as CFBundleVersion.
 # Read more about iOS versioning at
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
-version: 5.2.1+1007
+version: 5.2.2+1017
 
 environment:
   sdk: '>=3.12.0 <4.0.0'
@@ -48,6 +48,11 @@ dependencies:
   flutter_secure_storage: ^10.3.4
   flutter_staggered_grid_view: ^0.7.0
   http: ^1.6.0
+  # Organization fork: reusable DoH/ECH clients and Windows compatibility fixes.
+  ech_http:
+    git:
+      url: https://github.com/AniBakaBaka/ech_http.git
+      ref: cc730936d57561a6ce3889a922ed1a4e561e9fe0
   web_socket_channel: ^3.0.3
   ios_orientation: ^0.0.7
   webview_flutter: ^4.14.1
@@ -146,6 +151,7 @@ flutter:
     - assets/anime4k/
     # Only built-in rules are shipped. Community rules come from AniBakaRule.
     - assets/rules/
+    - assets/licenses/ech_http/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

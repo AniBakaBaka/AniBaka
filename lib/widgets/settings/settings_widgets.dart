@@ -1,207 +1,110 @@
 import 'package:flutter/material.dart';
-import 'package:baka/instance.dart';
-import 'package:flutter/services.dart';
+import 'package:baka/widgets/common/expressive_slider_theme.dart';
 
-class SettingsSliverAppBar extends StatelessWidget {
+class SettingsPage extends StatelessWidget {
+  const SettingsPage({required this.title, required this.children, super.key});
+
   final String title;
-
-  const SettingsSliverAppBar({required this.title, super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    return SliverAppBar(
-      expandedHeight: 120,
-      pinned: true,
-      backgroundColor: isDark ? Colors.black : const Color(0xFFF2F2F7),
-      elevation: 0,
-      scrolledUnderElevation: 0,
-      flexibleSpace: FlexibleSpaceBar(
-        titlePadding: const EdgeInsetsDirectional.only(
-          start: 72,
-          bottom: 16,
-          end: 20,
-        ),
-        title: Text(
-          title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: isDark ? Colors.white : Colors.black,
-            fontSize: 24,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.5,
-          ),
-        ),
-        centerTitle: false,
-      ),
-      leading: IconButton(
-        icon: Icon(
-          Icons.arrow_back,
-          color: isDark ? Colors.white : Colors.black,
-        ),
-        onPressed: () => Navigator.pop(context),
-      ),
-    );
-  }
-}
-
-class SettingsSectionHeader extends StatelessWidget {
-  final String title;
-  final double bottomPadding;
-
-  const SettingsSectionHeader(this.title, {this.bottomPadding = 8, super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = Theme.of(
-      context,
-    ).colorScheme.onSurface.withValues(alpha: 0.55);
-    return Padding(
-      padding: EdgeInsets.only(left: 16, bottom: bottomPadding),
-      child: Text(
-        title,
-        style: TextStyle(
-          color: color,
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
-class SettingsGroup extends StatelessWidget {
   final List<Widget> children;
 
-  const SettingsGroup({required this.children, super.key});
-
   @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final reduceVisualEffects = context.reduceMotion;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: const BorderRadius.all(Radius.circular(16)),
-        boxShadow: reduceVisualEffects
-            ? null
-            : const [
-                BoxShadow(
-                  color: Color(0x05000000),
-                  blurRadius: 10,
-                  offset: Offset(0, 2),
-                ),
-              ],
-      ),
-      child: Material(
-        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-        borderRadius: const BorderRadius.all(Radius.circular(16)),
-        clipBehavior: Clip.antiAlias,
-        child: Column(children: children),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Scaffold(
+    body: CustomScrollView(
+      slivers: [
+        SliverAppBar.large(
+          title: Text(title),
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        ),
+        SliverSafeArea(
+          top: false,
+          sliver: SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            sliver: SliverList.list(children: children),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
-class _SettingsRow extends StatelessWidget {
-  const _SettingsRow({
-    required this.title,
-    required this.icon,
-    required this.trailing,
-    this.iconWidget,
-    this.subtitle,
-    this.onTap,
-    this.showDivider = true,
-    this.verticalPadding = 16,
-  });
+class SettingsSection extends StatelessWidget {
+  const SettingsSection({required this.children, this.title, super.key});
 
-  final String title;
-  final IconData icon;
-  final Widget? iconWidget;
-  final String? subtitle;
-  final Widget trailing;
-  final VoidCallback? onTap;
-  final bool showDivider;
-  final double verticalPadding;
+  final String? title;
+  final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colors = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
-    final foreground = isDark ? Colors.white : Colors.black;
-
-    return InkWell(
-      onTap: onTap == null
-          ? null
-          : () {
-              HapticFeedback.lightImpact();
-              onTap!();
-            },
-      highlightColor: foreground.withValues(alpha: isDark ? 0.05 : 0.03),
-      splashColor: Colors.transparent,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: verticalPadding,
+          if (title case final title?)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+              child: Text(
+                title,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white38 : Colors.black45,
+                ),
+              ),
             ),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: foreground.withValues(alpha: isDark ? 0.05 : 0.03),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child:
-                      iconWidget ??
-                      Icon(
-                        icon,
-                        size: 18,
-                        color: isDark ? Colors.white70 : Colors.black87,
-                      ),
+          Material(
+            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.black.withValues(alpha: 0.04),
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: ListTileTheme(
+              data: ListTileThemeData(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                minLeadingWidth: 20,
+                horizontalTitleGap: 12,
+                minTileHeight: 48,
+                minVerticalPadding: 12,
+                iconColor: isDark ? Colors.white70 : Colors.black87,
+                titleTextStyle: theme.textTheme.bodyLarge?.copyWith(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.white : Colors.black87,
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                          color: foreground,
+                subtitleTextStyle: theme.textTheme.bodySmall?.copyWith(
+                  fontSize: 12,
+                  height: 1.5,
+                  color: isDark ? Colors.white54 : Colors.black54,
+                ),
+              ),
+              child: IconTheme.merge(
+                data: const IconThemeData(size: 20),
+                child: Column(
+                  children: [
+                    for (var index = 0; index < children.length; index++) ...[
+                      if (index > 0)
+                        Divider(
+                          height: 1,
+                          thickness: 0.5,
+                          indent: 48,
+                          color: isDark
+                              ? Colors.white10
+                              : Colors.black.withValues(alpha: 0.05),
                         ),
-                      ),
-                      if (subtitle != null) ...[
-                        const SizedBox(height: 3),
-                        Text(
-                          subtitle!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            height: 1.35,
-                            color: foreground.withValues(alpha: 0.54),
-                          ),
-                        ),
-                      ],
+                      children[index],
                     ],
-                  ),
+                  ],
                 ),
-                trailing,
-              ],
+              ),
             ),
           ),
-          if (showDivider)
-            Divider(
-              height: 1,
-              thickness: 0.5,
-              indent: 56,
-              color: colors.onSurface.withValues(alpha: isDark ? 0.1 : 0.05),
-            ),
         ],
       ),
     );
@@ -209,51 +112,186 @@ class _SettingsRow extends StatelessWidget {
 }
 
 class SettingsTile extends StatelessWidget {
-  final String title;
-  final String value;
-  final IconData icon;
-  final Widget? iconWidget;
-  final VoidCallback? onTap;
-  final bool showDivider;
-
   const SettingsTile({
-    required this.title,
-    required this.value,
     required this.icon,
-    super.key,
-    this.iconWidget,
+    required this.title,
+    this.subtitle,
+    this.value,
     this.onTap,
-    this.showDivider = true,
+    this.trailingIcon,
+    this.busy = false,
+    this.enabled = true,
+    this.color,
+    super.key,
   });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final String? value;
+  final VoidCallback? onTap;
+  final IconData? trailingIcon;
+  final bool busy;
+  final bool enabled;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final subtitleColor = isDark ? Colors.white54 : Colors.black54;
-    return _SettingsRow(
-      title: title,
-      icon: icon,
-      iconWidget: iconWidget,
-      onTap: onTap,
-      showDivider: showDivider,
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 150),
-            child: Text(
-              value,
-              style: TextStyle(fontSize: 14, color: subtitleColor),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.end,
+    final theme = Theme.of(context);
+    final value = this.value;
+    final isDark = theme.brightness == Brightness.dark;
+    final trailingIcon =
+        this.trailingIcon ??
+        (onTap != null && value == null ? Icons.chevron_right_rounded : null);
+    return LayoutBuilder(
+      builder: (context, constraints) => ListTile(
+        enabled: enabled,
+        leading: Icon(icon),
+        title: Text(title),
+        subtitle: subtitle == null ? null : Text(subtitle!),
+        iconColor: color,
+        textColor: color,
+        onTap: busy || !enabled ? null : onTap,
+        trailing: busy
+            ? const SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : value == null && trailingIcon == null
+            ? null
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                spacing: 4,
+                children: [
+                  if (value != null)
+                    _SettingsValue(
+                      value,
+                      maxWidth: (constraints.maxWidth * 0.4).clamp(0, 180),
+                      enabled: enabled,
+                    ),
+                  if (trailingIcon != null)
+                    Icon(
+                      trailingIcon,
+                      size: 18,
+                      color:
+                          color ?? (isDark ? Colors.white24 : Colors.black26),
+                    ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class SettingsSelectTile<T> extends StatelessWidget {
+  const SettingsSelectTile({
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final T value;
+  final Map<T, String> options;
+  final ValueChanged<T>? onChanged;
+
+  Future<void> _pick(BuildContext context) async {
+    final selected = await showModalBottomSheet<T>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => RadioGroup<T>(
+        groupValue: value,
+        onChanged: (next) => Navigator.pop(context, next),
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.only(bottom: 16),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+              child: Text(
+                title,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
             ),
+            for (final MapEntry(:key, value: label) in options.entries)
+              RadioListTile<T>(value: key, title: Text(label)),
+          ],
+        ),
+      ),
+    );
+    if (selected != null && selected != value) onChanged?.call(selected);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SettingsTile(
+      enabled: onChanged != null,
+      icon: icon,
+      title: title,
+      value: options[value] ?? '$value',
+      onTap: onChanged == null ? null : () => _pick(context),
+    );
+  }
+}
+
+class SettingsSliderTile extends StatelessWidget {
+  const SettingsSliderTile({
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.label,
+    required this.onChanged,
+    this.min = 0,
+    this.max = 1,
+    this.divisions,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final double value;
+  final String label;
+  final ValueChanged<double>? onChanged;
+  final double min;
+  final double max;
+  final int? divisions;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tileTheme = ListTileTheme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        spacing: 8,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 20, color: tileTheme.iconColor),
+              const SizedBox(width: 12),
+              Expanded(child: Text(title, style: tileTheme.titleTextStyle)),
+              const SizedBox(width: 12),
+              _SettingsValue(label, maxWidth: 100, enabled: onChanged != null),
+            ],
           ),
-          const SizedBox(width: 8),
-          Icon(
-            Icons.chevron_right_rounded,
-            size: 18,
-            color: isDark ? Colors.white24 : Colors.black26,
+          SliderTheme(
+            data: ExpressiveSliderTheme.from(theme.colorScheme),
+            child: Semantics(
+              label: title,
+              child: Slider(
+                value: value,
+                min: min,
+                max: max,
+                divisions: divisions,
+                label: label,
+                onChanged: onChanged,
+              ),
+            ),
           ),
         ],
       ),
@@ -261,44 +299,35 @@ class SettingsTile extends StatelessWidget {
   }
 }
 
-class SettingsSwitchTile extends StatelessWidget {
-  final String title;
-  final String? subtitle;
-  final bool value;
-  final IconData icon;
-  final ValueChanged<bool> onChanged;
-  final bool showDivider;
+class _SettingsValue extends StatelessWidget {
+  const _SettingsValue(this.text, {this.maxWidth = 180, this.enabled = true});
 
-  const SettingsSwitchTile({
-    required this.title,
-    required this.value,
-    required this.icon,
-    required this.onChanged,
-    this.subtitle,
-    super.key,
-    this.showDivider = true,
-  });
+  final String text;
+  final double maxWidth;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
-    final activeColor = Theme.of(context).colorScheme.primary;
-
-    void handleChanged(bool next) {
-      HapticFeedback.lightImpact();
-      onChanged(next);
-    }
-
-    return _SettingsRow(
-      title: title,
-      subtitle: subtitle,
-      icon: icon,
-      onTap: () => onChanged(!value),
-      showDivider: showDivider,
-      verticalPadding: 12,
-      trailing: Switch.adaptive(
-        value: value,
-        onChanged: handleChanged,
-        activeTrackColor: activeColor,
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.labelMedium?.copyWith(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: enabled
+              ? (isDark ? Colors.white70 : Colors.black54)
+              : theme.disabledColor,
+        ),
       ),
     );
   }

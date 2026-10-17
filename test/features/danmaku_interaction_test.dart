@@ -87,10 +87,14 @@ void main() {
         final saved =
             jsonDecode(Instances.sp.getString('danmaku_settings')!) as Map;
         expect(saved['hideTop'], isTrue);
+        await tester.ensureVisible(find.text('屏蔽重复弹幕'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('屏蔽重复弹幕'));
         await tester.pumpAndSettle();
         expect(controller.blockRepeat, isTrue);
         expect(Instances.sp.getBool('danmaku_block_repeat'), isTrue);
+        await tester.ensureVisible(find.byType(TextField));
+        await tester.pumpAndSettle();
         await tester.enterText(find.byType(TextField), '剧透');
         await tester.tap(find.byTooltip('添加屏蔽词'));
         await tester.pumpAndSettle();
@@ -98,6 +102,8 @@ void main() {
         expect(jsonDecode(Instances.sp.getString('danmaku_block_words')!), [
           '剧透',
         ]);
+        await tester.ensureVisible(find.byTooltip('移除屏蔽词'));
+        await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('移除屏蔽词'));
         await tester.pumpAndSettle();
         expect(controller.blockWords, isEmpty);

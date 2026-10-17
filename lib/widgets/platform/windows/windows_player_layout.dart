@@ -6,7 +6,6 @@ import 'package:baka/services/playback/playback_content.dart';
 import 'package:baka/pages/setting/player_settings_page.dart';
 import 'package:baka/services/torrent/torrent_engine.dart';
 import 'package:baka/utils/format_utils.dart';
-import 'package:baka/utils/json_values.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:baka/widgets/baka_player/view.dart';
 import 'package:baka/widgets/comment/comment_widget.dart';
@@ -21,10 +20,7 @@ class WindowsPlayerLayout extends StatefulWidget {
   final PlaybackController controller;
   final DanmakuController danmakuController;
   final ValueNotifier<bool> followNotifier;
-  final String sourceName;
-  final String? lineName;
   final VoidCallback onSourceTap;
-  final GlobalKey<CIslandCommentWidgetState> commentKey;
   final void Function(int) onEpisodeChanged;
   final VoidCallback onCastPressed;
   final VoidCallback onWatchPartyPressed;
@@ -44,10 +40,7 @@ class WindowsPlayerLayout extends StatefulWidget {
     required this.controller,
     required this.danmakuController,
     required this.followNotifier,
-    required this.sourceName,
-    required this.lineName,
     required this.onSourceTap,
-    required this.commentKey,
     required this.onEpisodeChanged,
     required this.onCastPressed,
     required this.onWatchPartyPressed,
@@ -513,8 +506,8 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout>
         bgmInfo: content.bgmInfo,
         followNotifier: widget.followNotifier,
         onFollowPressed: widget.onFollowPressed,
-        sourceName: widget.sourceName,
-        lineName: widget.lineName,
+        sourceName: content.sourceName,
+        lineName: content.lineName,
         onSourceTap: widget.onSourceTap,
         isSearching: widget.isSearching,
         danmakuController: widget.danmakuController,
@@ -524,10 +517,8 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout>
 
   Widget _buildCommentTab() {
     final content = widget.content;
-    final pid = (content.isAdapter && content.bgmInfo.subjectId != null)
-        ? content.bgmInfo.subjectId
-        : toInt(content.data['id']);
-    if (pid == null || pid <= 0) {
+    final pid = content.commentPostId;
+    if (pid == null) {
       return const Center(
         child: Text('此视频没有关联评论', style: TextStyle(color: Colors.white54)),
       );
@@ -546,7 +537,6 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout>
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
         child: CIslandCommentWidget(
-          key: widget.commentKey,
           postId: pid,
           bgmSubjectId: content.bgmInfo.subjectId,
           episodeIndex: content.currPlayIndex,

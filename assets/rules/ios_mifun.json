@@ -31,7 +31,8 @@
   ],
   "play": [
     {
-      "op": "follow"
+      "op": "follow",
+      "filterHlsAds": true
     },
     {
       "op": "playerAaaa",

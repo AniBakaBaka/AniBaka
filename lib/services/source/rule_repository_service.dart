@@ -1,3 +1,4 @@
+import 'package:baka/core/network_service.dart';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -87,7 +88,7 @@ class RuleRepositoryService extends ChangeNotifier {
     directSubscription,
   };
 
-  final Dio _dio = Dio(
+  final Dio _dio = NetworkService.createDio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 12),
       receiveTimeout: const Duration(seconds: 20),

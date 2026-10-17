@@ -16,44 +16,17 @@ class AppFonts {
   static const String defaultFont = 'Noto Serif SC';
   static const String spKey = 'app_font_family';
 
-  static const List<Map<String, String>> systemFonts = [
-    {'name': 'system', 'label': '系统默认', 'preview': '跟随系统'},
-  ];
-
-  static const List<Map<String, String>> sansFonts = [
-    {'name': 'Noto Sans SC', 'label': '思源黑体', 'preview': '清晰阅读'},
-    {'name': 'M PLUS Rounded 1c', 'label': 'M PLUS 圆体', 'preview': '柔和圆润'},
-    {'name': 'Zen Maru Gothic', 'label': '禅丸圆体', 'preview': '清爽可爱'},
-    {'name': 'Sawarabi Gothic', 'label': '早蕨黑体', 'preview': '简洁现代'},
-  ];
-
-  static const List<Map<String, String>> serifFonts = [
-    {'name': 'Noto Serif SC', 'label': '思源宋体', 'preview': '典雅风格'},
-    {'name': 'Sawarabi Mincho', 'label': '早蕨明朝体', 'preview': '书卷气息'},
-  ];
-
-  static const List<Map<String, String>> displayFonts = [
-    {'name': 'ZCOOL KuaiLe', 'label': '站酷快乐体', 'preview': '快乐追番'},
-    {'name': 'ZCOOL XiaoWei', 'label': '站酷小薇体', 'preview': '文艺清新'},
-    {'name': 'ZCOOL QingKe HuangYou', 'label': '站酷庆科黄油体', 'preview': '圆润可爱'},
-  ];
-
-  static const List<Map<String, String>> _allFonts = [
-    ...systemFonts,
-    ...sansFonts,
-    ...serifFonts,
-    ...displayFonts,
-  ];
-
-  static final Map<String, String> fontOptions = Map.unmodifiable({
-    for (final font in _allFonts) font['name']!: font['label']!,
-  });
-
-  static const Map<String, String> categoryLabels = {
-    'system': '系统',
-    'sans': '黑体',
-    'serif': '宋体',
-    'display': '艺术 / 创意',
+  static const fontOptions = {
+    systemFont: '系统默认',
+    'Noto Sans SC': '思源黑体',
+    'M PLUS Rounded 1c': 'M PLUS 圆体',
+    'Zen Maru Gothic': '禅丸圆体',
+    'Sawarabi Gothic': '早蕨黑体',
+    'Noto Serif SC': '思源宋体',
+    'Sawarabi Mincho': '早蕨明朝体',
+    'ZCOOL KuaiLe': '站酷快乐体',
+    'ZCOOL XiaoWei': '站酷小薇体',
+    'ZCOOL QingKe HuangYou': '站酷庆科黄油体',
   };
 
   static const String fontScaleKey = 'app_font_scale';
@@ -89,9 +62,6 @@ class AppFonts {
 
   static int getSavedFontWeightIndex() =>
       Instances.sp.getInt(fontWeightKey) ?? defaultFontWeightIndex;
-
-  static String getLabelForFont(String fontName) =>
-      fontOptions[fontName] ?? fontName;
 }
 
 // Keep Flutter's gesture tracking/cancellation, but finish ordinary back

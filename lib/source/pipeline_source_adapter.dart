@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:http/http.dart' as http;
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:flutter/foundation.dart';
 import 'package:cookie_jar/cookie_jar.dart';
@@ -25,7 +26,7 @@ import 'package:baka/source/engine/recipes.dart';
 import 'package:baka/source/models/source_rule.dart';
 import 'package:baka/source/runtime/request_scheduler.dart';
 import 'package:baka/source/runtime/scheduler_interceptor.dart';
-import 'package:baka/core/system_proxy.dart';
+import 'package:baka/core/network_service.dart';
 import 'package:baka/api/bgm.dart';
 
 /// Connects a source rule to the adapter and pipeline host contracts.
@@ -1142,15 +1143,12 @@ class RemoteMediaRedirectResolver {
   };
 
   RemoteMediaRedirectResolver({bool useSystemProxy = true})
-    : _client =
-          (useSystemProxy
-                ? SystemProxyService.createHttpClient()
-                : SystemProxyService.createDirectHttpClient())
-            ..connectionTimeout = _requestTimeout
-            ..idleTimeout = const Duration(seconds: 15)
-            ..userAgent = 'Baka Media Resolver';
+    : _client = NetworkService.createClient(
+        useSystemProxy: useSystemProxy,
+        connectTimeout: _requestTimeout,
+      );
 
-  final HttpClient _client;
+  final http.Client _client;
 
   Future<String> resolve(
     String remoteUrl, {
@@ -1190,23 +1188,32 @@ class RemoteMediaRedirectResolver {
     try {
       for (var hop = 0; hop <= _maxRedirects; hop++) {
         SourceOperation.check();
-        final request = await _client.headUrl(current).timeout(_requestTimeout);
-        final detach = SourceOperation.current?.token.onCancel(
-          () => request.abort(),
+        final abort = Completer<void>();
+        void cancel() {
+          if (!abort.isCompleted) abort.complete();
+        }
+
+        final request = http.AbortableRequest(
+          'HEAD',
+          current,
+          abortTrigger: abort.future,
         );
+        final timer = Timer(_requestTimeout, cancel);
+        final detach = SourceOperation.current?.token.onCancel(cancel);
         try {
           SourceOperation.check();
           request.followRedirects = false;
-          request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+          request.headers[HttpHeaders.acceptEncodingHeader] = 'identity';
+          request.headers[HttpHeaders.userAgentHeader] = 'Baka Media Resolver';
 
           if (safeHeaders != null && _sameAuthority(current, original)) {
-            safeHeaders.forEach(request.headers.set);
+            request.headers.addAll(safeHeaders);
           }
 
-          final response = await request.close().timeout(_requestTimeout);
-          final location = response.headers.value(HttpHeaders.locationHeader);
+          final response = await _client.send(request).timeout(_requestTimeout);
+          final location = response.headers[HttpHeaders.locationHeader];
           final status = response.statusCode;
-          await response.drain<void>().timeout(_requestTimeout);
+          await response.stream.drain<void>().timeout(_requestTimeout);
 
           if (location != null &&
               location.isNotEmpty &&
@@ -1237,7 +1244,8 @@ class RemoteMediaRedirectResolver {
           return (url: remoteUrl, httpHeaders: headers);
         } finally {
           detach?.call();
-          request.abort();
+          timer.cancel();
+          cancel();
         }
       }
       debugPrint(
@@ -1262,7 +1270,7 @@ class RemoteMediaRedirectResolver {
       left.host.toLowerCase() == right.host.toLowerCase() &&
       left.port == right.port;
 
-  void close() => _client.close(force: true);
+  void close() => _client.close();
 }
 
 class _HlsSession {

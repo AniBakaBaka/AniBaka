@@ -5,13 +5,12 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
-import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:baka/source/models/series.dart';
 import 'package:baka/source/models/source.dart';
 import 'package:baka/source/video_url_extractor.dart';
 import 'package:baka/source/webview_adapter.dart';
-import 'package:baka/core/system_proxy.dart';
+import 'package:baka/core/network_service.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/source/runtime/scheduler_interceptor.dart';
 
@@ -77,10 +76,8 @@ abstract class AdapterBase {
         validateStatus: (status) => status != null && status < 600,
       ),
     );
-    dio.httpClientAdapter = IOHttpClientAdapter(
-      createHttpClient: useSystemProxy
-          ? SystemProxyService.createHttpClient
-          : SystemProxyService.createDirectHttpClient,
+    dio.httpClientAdapter = NetworkService.createDioAdapter(
+      useSystemProxy: useSystemProxy,
     );
     dio.interceptors.add(SchedulerInterceptor());
     dio.interceptors.add(RetryInterceptor(dio));
@@ -335,10 +332,8 @@ abstract class AdapterBase {
             validateStatus: (_) => true,
           ),
         )
-        ..httpClientAdapter = IOHttpClientAdapter(
-          createHttpClient: useSystemProxy
-              ? SystemProxyService.createHttpClient
-              : SystemProxyService.createDirectHttpClient,
+        ..httpClientAdapter = NetworkService.createDioAdapter(
+          useSystemProxy: useSystemProxy,
         );
 
   /// 探测用的共享客户端。路由必须和规则本身一致：声明 `directConnection`

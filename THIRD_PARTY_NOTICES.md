@@ -1,5 +1,18 @@
 # Third-party notices
 
+## ech_http native TLS transport
+
+- Package: `ech_http`, resolved through a pinned pub Git dependency
+- Fork: <https://github.com/AniBakaBaka/ech_http>
+- Upstream: <https://github.com/ech-research/ech_http>
+- License: MIT; full text in `assets/licenses/ech_http/LICENSE`
+- Native dependencies: libcurl, BoringSSL, zlib, Mozilla CA bundle, and Android
+  libc++; their notices are in `assets/licenses/ech_http/THIRD_PARTY_NOTICES.md`.
+
+The dependency SDKs are downloaded at build time from pinned, SHA-256 verified
+archives. The full license notices above are included in the Flutter asset
+bundle; the build hook bundles the native runtime.
+
 This file records third-party source and assets included directly in this
 repository. Packages resolved through Flutter or Dart package management retain
 their own license files in their respective distributions.

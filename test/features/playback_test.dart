@@ -408,5 +408,15 @@ void main() {
       expect(changes, [true, false]);
       await controller.dispose();
     });
+
+    test('拖动时只应用、松手时持久化同一值', () async {
+      final controller = PlaybackController();
+      final next = controller.preferences.value.copyWith(longPressSpeed: 3.5);
+      await controller.updatePreferences(next, persist: false);
+      expect(Instances.sp.getDouble('player_longPressSpeed'), isNull);
+      await controller.updatePreferences(next);
+      expect(Instances.sp.getDouble('player_longPressSpeed'), 3.5);
+      await controller.dispose();
+    });
   });
 }

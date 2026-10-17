@@ -54,7 +54,7 @@ class HomeController {
     _swipersKey = _swiperCacheKey(_seasonStart(_now()));
     final cachedSwipers = _readCache(_swipersKey, allowExpired: true);
     final cachedRank = _readCache('home_rank_bgm_v2_0', allowExpired: true);
-    final cachedSchedule = _readCache('home_xinfan_bgm_v3', allowExpired: true);
+    final cachedSchedule = peekBgmCalendar(allowExpired: true);
 
     if (cachedFeed is List) _feed.value = List<Map>.of(cachedFeed.cast<Map>());
     if (cachedSwipers is List) swipers.value = cachedSwipers.cast<Map>();
@@ -64,13 +64,7 @@ class HomeController {
         ..._emptyGroups(rankDays.length - 1),
       ];
     }
-    if (cachedSchedule is List && cachedSchedule.length == 7) {
-      schedule.value = List.generate(
-        7,
-        (index) => (cachedSchedule[index] as List).cast<Map>(),
-        growable: false,
-      );
-    }
+    if (cachedSchedule != null) schedule.value = cachedSchedule;
   }
 
   static List<HomeItems> _emptyGroups(int count) =>
@@ -333,33 +327,10 @@ class HomeController {
 
   Future<void> loadSchedule({bool force = false}) async {
     try {
-      schedule.value = await loadSharedXinfan(force: force);
+      schedule.value = await getBgmCalendar(force: force);
     } catch (error) {
       debugPrint('home schedule: $error');
     }
-  }
-
-  /// 新番更新表与更新时间表页面共用同一份缓存。
-  /// 数据源为 BGM 每日放送（p1/calendar），key 1=周一 … 7=周日。
-  static Future<List<HomeItems>> loadSharedXinfan({bool force = false}) async {
-    final raw = await _cached('home_xinfan_bgm_v3', () async {
-      final groups = _emptyGroups(7);
-      final days = await getBgmCalendar();
-
-      days.forEach((key, value) {
-        final day = int.tryParse(key);
-        if (day == null || day < 1 || day > 7) return;
-        groups[day - 1] = convertBgmSubjectsToAppFormat(value, trending: true);
-      });
-      return groups;
-    }, force: force);
-
-    final groups = raw as List;
-    return List.generate(
-      7,
-      (index) => (groups[index] as List).cast<Map>(),
-      growable: false,
-    );
   }
 
   /// 读取缓存，并合并同一 key 的并发网络请求。
