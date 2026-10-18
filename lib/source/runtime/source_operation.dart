@@ -60,14 +60,25 @@ class SourceOperation {
     final done = Completer<void>();
     final timer = Timer(duration, done.complete);
     try {
-      final operation = current;
-      if (operation == null) {
-        await done.future;
-      } else {
-        await operation.wait(done.future);
-      }
+      await (current?.wait(done.future) ?? done.future);
     } finally {
       timer.cancel();
     }
   }
+}
+
+/// Runs [task] for indexes `0..count-1` in order, at most [limit] at a time.
+Future<void> runConcurrent(
+  int count,
+  int limit,
+  Future<void> Function(int index) task,
+) async {
+  var next = 0;
+  Future<void> worker() async {
+    while (next < count) {
+      await task(next++);
+    }
+  }
+
+  await Future.wait([for (var i = 0; i < limit && i < count; i++) worker()]);
 }

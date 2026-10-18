@@ -1,13 +1,11 @@
-import 'package:baka/source/runtime/source_operation.dart';
 import 'package:baka/source/runtime/request_scheduler.dart';
 
-/// The pipeline's I/O boundary. Parsing uses the shared parsers directly.
+/// The pipeline's I/O boundary. Calls inherit the current source operation.
 abstract class PipelineHost {
   /// 是否允许 WebView 渲染/嗅探。
   bool get allowWebview;
 
-  /// 经调度器发起 HTTP 请求，返回响应体文本。
-  /// [operation] defaults to the current source operation inherited by async work.
+  /// 经调度器发起 HTTP 请求，返回响应体文本；失败返回空串。
   ///
   /// [contentType] 为 `form` 时以 `application/x-www-form-urlencoded` 发送 Map
   /// 请求体；默认按 Dio 常规（Map→JSON）处理。
@@ -18,15 +16,10 @@ abstract class PipelineHost {
     Object? body,
     String? referer,
     String? contentType,
-    SourceOperation? operation,
     RequestPriority priority = RequestPriority.search,
   });
 
-  /// WebView 渲染取页面 HTML；未启用返回空串。
-  ///
-  /// 管线里的 `sniff(goal: html)` 可以通过 [isReady] 把规则声明的就绪条件
-  /// 传到底层 WebView，配合 [timeout] / [settleDelay] 避免在 JS challenge
-  /// 或客户端渲染尚未完成时过早读取 HTML。
+  /// WebView 渲染取页面 HTML；未启用返回空串。[isReady] 是规则声明的就绪条件。
   Future<String> renderWithWebview(
     String url, {
     bool Function(String html)? isReady,

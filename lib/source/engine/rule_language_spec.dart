@@ -44,8 +44,6 @@ class RuleLanguageSpec {
     'maccmsSuggest': 'Search through MacCMS suggest endpoints.',
   };
 
-  static final Set<String> knownOps = Set.unmodifiable(operations.keys);
-
   static String get promptReference {
     final ops = operations.entries
         .map((entry) => '- ${entry.key}: ${entry.value}')

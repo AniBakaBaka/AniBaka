@@ -1391,10 +1391,9 @@ class _BakaPlayerState extends State<BakaPlayer> {
               minimum: const EdgeInsets.only(left: 24),
               child: PlatformTooltip(
                 message: isLocked ? '解锁屏幕' : '锁定屏幕',
-                child: TextButton.icon(
-                  style: TextButton.styleFrom(
+                child: IconButton(
+                  style: IconButton.styleFrom(
                     foregroundColor: Colors.white,
-                    backgroundColor: Colors.black54,
                     minimumSize: const Size(48, 48),
                   ),
                   onPressed: () =>
@@ -1404,7 +1403,6 @@ class _BakaPlayerState extends State<BakaPlayer> {
                     size: 24,
                     color: Colors.white,
                   ),
-                  label: Text(isLocked ? '解锁' : '锁定'),
                 ),
               ),
             ),

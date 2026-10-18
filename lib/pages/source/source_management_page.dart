@@ -482,7 +482,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
                           );
                         },
                         titleOf: (source) => source.displayName,
-                        subtitleOf: (source) => source.statusLabel,
+                        subtitleOf: (_) => '第三方源',
                         onReorder: (oldIndex, newIndex) async {
                           await _catalog.reorderBuiltinSource(
                             oldIndex,
@@ -765,7 +765,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
                 subtitle:
                     Uri.tryParse(config?.baseUrl ?? '')?.host ??
                     config?.baseUrl ??
-                    source.statusLabel,
+                    '第三方源',
                 badge: hasLocalOverride ? (version > 0 ? '规则库' : '本地') : '内置',
                 versionLabel: hasUpdate
                     ? '${version > 0 ? 'v$version' : '本地版本'} → v${rule!.item.version}'

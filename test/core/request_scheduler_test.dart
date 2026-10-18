@@ -6,6 +6,23 @@ import 'package:baka/source/runtime/scheduler_interceptor.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+extension on RequestScheduler {
+  Future<T> run<T>(
+    Future<T> Function() task, {
+    required String host,
+    RequestPriority priority = RequestPriority.search,
+    RequestCancelToken? cancelToken,
+  }) async {
+    await acquire(host, priority: priority, cancelToken: cancelToken);
+    try {
+      cancelToken?.throwIfCancelled();
+      return await task();
+    } finally {
+      release(host);
+    }
+  }
+}
+
 class _StreamingAdapter implements HttpClientAdapter {
   final body = StreamController<Uint8List>();
 

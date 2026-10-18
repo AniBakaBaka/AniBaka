@@ -247,31 +247,26 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
         episodeIndex: origin.episodeIndex,
         preferredLine: origin.preferredLine,
       );
-      if (!mounted ||
+      bool stale() =>
           ModalRoute.of(context)?.isCurrent != true ||
           _controller.isDisposed ||
-          !_controller.results.contains(origin.item)) {
-        return;
-      }
+          !_controller.hasResult(origin.item);
+      if (!mounted || stale()) return;
       final data = probe.data;
       if (!probe.isReady || data == null) {
         _message('线路解析失败，请尝试其他线路');
         return;
       }
-      final selectionData = data.copyWith();
-      await _controller.persistMatchMemory(origin.item, selectionData);
-      if (mounted &&
-          ModalRoute.of(context)?.isCurrent == true &&
-          !_controller.isDisposed &&
-          _controller.results.contains(origin.item)) {
+      await _controller.persistMatchMemory(origin.item);
+      if (mounted && !stale()) {
         _controller.cancelSearch();
         if (_isFromPlayer) {
-          Navigator.of(context).pop(selectionData);
+          Navigator.of(context).pop(data);
         } else {
           VideoSourceSearchController.cacheGlobal(_controller);
           NavigationService.toPlayback(
             context,
-            selectionData,
+            data,
             popFirst: true,
             autoMatch: false,
           );
@@ -671,7 +666,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
 
   Widget _buildProgressSection(Color primary) {
     final searching = _controller.isSearching;
-    final completed = _controller.finishedSources.length;
+    final completed = _controller.finishedCount;
     final total = _sources.length - 1;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

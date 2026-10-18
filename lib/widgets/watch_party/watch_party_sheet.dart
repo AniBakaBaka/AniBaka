@@ -889,11 +889,7 @@ class WatchPartySheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final portrait = isBottomPlayerPanel(context);
-    final theme = playerPanelTheme(
-      Theme.of(context),
-      bottom: true,
-      compact: false,
-    );
+    final theme = Theme.of(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         final available = math.max(
@@ -909,52 +905,47 @@ class WatchPartySheet extends StatelessWidget {
         final height = math.min(preferred, available);
         return Padding(
           padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
-          child: Theme(
-            data: theme,
-            child: Material(
-              color: theme.colorScheme.surfaceContainerLow,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(32),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: SizedBox(
-                height: height,
-                child: SafeArea(
-                  top: false,
-                  child: Column(
-                    children: [
-                      SizedBox(
-                        height: 24,
-                        child: Center(
-                          child: Container(
-                            width: 40,
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.onSurfaceVariant
-                                  .withValues(alpha: .4),
-                              borderRadius: BorderRadius.circular(2),
-                            ),
+          child: Material(
+            color: theme.colorScheme.surfaceContainerLow,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+            clipBehavior: Clip.antiAlias,
+            child: SizedBox(
+              height: height,
+              child: SafeArea(
+                top: false,
+                child: Column(
+                  children: [
+                    SizedBox(
+                      height: 24,
+                      child: Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.onSurfaceVariant
+                                .withValues(alpha: .4),
+                            borderRadius: BorderRadius.circular(2),
                           ),
                         ),
                       ),
-                      Expanded(
-                        child: ValueListenableBuilder<WatchPartyViewState>(
-                          valueListenable: service.state,
-                          builder: (context, state, _) {
-                            final snapshot = state.snapshot;
-                            return snapshot == null
-                                ? _EntryView(service: service)
-                                : _RoomView(
-                                    key: ValueKey(snapshot.roomId),
-                                    service: service,
-                                    state: state,
-                                    compact: height < 360,
-                                  );
-                          },
-                        ),
+                    ),
+                    Expanded(
+                      child: ValueListenableBuilder<WatchPartyViewState>(
+                        valueListenable: service.state,
+                        builder: (context, state, _) {
+                          final snapshot = state.snapshot;
+                          return snapshot == null
+                              ? _EntryView(service: service)
+                              : _RoomView(
+                                  key: ValueKey(snapshot.roomId),
+                                  service: service,
+                                  state: state,
+                                  compact: height < 360,
+                                );
+                        },
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),

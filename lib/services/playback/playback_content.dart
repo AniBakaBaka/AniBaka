@@ -23,7 +23,7 @@ import 'package:baka/services/playback/history_repository.dart';
 import 'package:baka/services/source/source_repository.dart';
 import 'package:baka/services/torrent/torrent_service.dart';
 import 'package:baka/services/torrent/torrent_model.dart';
-import 'package:baka/source/adapter_base.dart';
+import 'package:baka/source/source_adapter.dart';
 import 'package:baka/source/source_registry.dart';
 
 /// 播放器业务逻辑服务
@@ -107,7 +107,7 @@ class PlaybackContent {
   AnimeCollection? collection;
   int _collectionRevision = 0;
 
-  AdapterBase? _playbackKeepAliveAdapter;
+  SourceAdapter? _playbackKeepAliveAdapter;
   int _playbackKeepAliveGeneration = 0;
 
   PlaybackEpisode? get currentVideoItem =>
@@ -177,7 +177,9 @@ class PlaybackContent {
   List<String> get tags {
     final bgmTags = bgmDetailData?['tags'] as List?;
     if (bgmTags != null && bgmTags.isNotEmpty) {
-      return [for (final tag in bgmTags.take(6)) (tag as Map)['name'] as String];
+      return [
+        for (final tag in bgmTags.take(6)) (tag as Map)['name'] as String,
+      ];
     }
     final raw = data['tag']?.toString();
     if (raw == null) return const [];
@@ -394,7 +396,7 @@ class PlaybackContent {
     );
   }
 
-  Future<AdapterBase> prepareAdapterSource() async {
+  Future<SourceAdapter> prepareAdapterSource() async {
     final operation = SourceOperation(
       parent: _lifetime,
       timeout: const Duration(seconds: 15),
@@ -433,9 +435,8 @@ class PlaybackContent {
 
   String get currentEpisodeId => currentVideoItem?.lineAt(currUrl) ?? '';
 
-  Future<({String url, Map<String, String> httpHeaders})>
-  resolveAdapterPlaybackMedia(
-    AdapterBase adapter,
+  Future<PlaybackMedia> resolveAdapterPlaybackMedia(
+    SourceAdapter adapter,
     String episodeId, {
     Duration torrentBufferTimeout = TorrentService.defaultBufferTimeout,
     bool preferPrefetch = true,
@@ -498,7 +499,7 @@ class PlaybackContent {
   }
 
   Future<int> startAdapterPlaybackKeepAlive(
-    AdapterBase adapter,
+    SourceAdapter adapter,
     String mediaUrl,
   ) async {
     _lifetime.token.throwIfCancelled();
@@ -531,7 +532,7 @@ class PlaybackContent {
     applySelection(normalizeSelection(currPlayIndex, currUrl));
   }
 
-  ({String url, Map<String, String> httpHeaders})? _readPrefetchedPlaybackMedia(
+  PlaybackMedia? _readPrefetchedPlaybackMedia(
     String episodeId, {
     int? episodeIndex,
   }) {

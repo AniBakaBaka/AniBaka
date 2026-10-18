@@ -1,17 +1,17 @@
-import 'package:baka/source/runtime/source_operation.dart';
-import 'package:baka/models/playback_request.dart';
-import 'package:baka/source/models/source_search_result.dart';
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
-import 'package:baka/source/adapter_base.dart';
-import 'package:baka/source/source_registry.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:baka/models/custom_source_config.dart';
+
 import 'package:baka/core/app_storage.dart';
+import 'package:baka/models/custom_source_config.dart';
+import 'package:baka/models/playback_request.dart';
 import 'package:baka/services/source/source_codec.dart';
 import 'package:baka/source/engine/rule_validator.dart';
-import 'package:baka/source/pipeline_source_adapter.dart';
+import 'package:baka/source/models/source_search_result.dart';
+import 'package:baka/source/runtime/source_operation.dart';
+import 'package:baka/source/source_adapter.dart';
+import 'package:baka/source/source_registry.dart';
 import 'package:baka/source/store/bundled_rule_store.dart';
 
 /// 适配器的创建、缓存与搜索/播放调用入口。
@@ -32,14 +32,14 @@ class SourceAdapterService {
   final SourceCatalog _catalog;
 
   /// LinkedHashMap insertion order = LRU (re-insert on hit).
-  final LinkedHashMap<String, ({AdapterBase adapter, DateTime? revision})>
+  final LinkedHashMap<String, ({SourceAdapter adapter, DateTime? revision})>
   _adapterCache = LinkedHashMap();
 
-  final Map<Object, AdapterBase> _playbackOwners = {};
-  final Set<AdapterBase> _retired = {};
+  final Map<Object, SourceAdapter> _playbackOwners = {};
+  final Set<SourceAdapter> _retired = {};
   bool _disposed = false;
 
-  void retainPlayback(Object owner, AdapterBase adapter) {
+  void retainPlayback(Object owner, SourceAdapter adapter) {
     if (_disposed) throw StateError('SourceAdapterService is disposed');
     _playbackOwners[owner] = adapter;
     _trimAdapters();
@@ -50,10 +50,10 @@ class SourceAdapterService {
     _trimAdapters();
   }
 
-  bool _inUse(AdapterBase adapter) =>
+  bool _inUse(SourceAdapter adapter) =>
       adapter.hasActiveOperations || _playbackOwners.containsValue(adapter);
 
-  void _retire(AdapterBase adapter) {
+  void _retire(SourceAdapter adapter) {
     if (_inUse(adapter)) {
       _retired.add(adapter);
     } else {
@@ -62,7 +62,7 @@ class SourceAdapterService {
     }
   }
 
-  void _trimAdapters({AdapterBase? keep}) {
+  void _trimAdapters({SourceAdapter? keep}) {
     _retired.removeWhere((adapter) {
       if (_inUse(adapter)) return false;
       adapter.onIdle = null;
@@ -113,23 +113,10 @@ class SourceAdapterService {
   Future<List<SourceSearchResult>> search(
     String sourceKey,
     String query, {
-    SourceOperation? operation,
     String fallbackDescription = '',
     bool skipBgmEnhancement = false,
   }) async {
-    if (operation != null) {
-      return operation.run(
-        () => search(
-          sourceKey,
-          query,
-          fallbackDescription: fallbackDescription,
-          skipBgmEnhancement: skipBgmEnhancement,
-        ),
-      );
-    }
-    SourceOperation.check();
-    final adapter = adapterFor(sourceKey);
-    if (adapter == null) throw StateError('视频源不可用: $sourceKey');
+    final adapter = _requireAdapter(sourceKey);
     final displayName = _displayName(sourceKey);
     final results = await adapter.search(
       query,
@@ -146,24 +133,18 @@ class SourceAdapterService {
     ];
   }
 
+  /// Loads the catalog of [item]. [metadata] is merged once at construction.
   Future<PlaybackRequest?> buildPlaybackRequest(
     SourceSearchResult item, {
-    SourceOperation? operation,
+    Map<String, dynamic> metadata = const {},
   }) async {
-    if (operation != null) {
-      return operation.run(() => buildPlaybackRequest(item));
-    }
-    SourceOperation.check();
     final sourceKey = item.source;
-
-    final adapter = adapterFor(sourceKey);
-    if (adapter == null) throw StateError('视频源不可用: $sourceKey');
+    final adapter = _requireAdapter(sourceKey);
     final seriesId = item.id;
     final catalog = await adapter.getPlaybackCatalog(seriesId);
     SourceOperation.check();
     if (catalog.isEmpty) return null;
 
-    final descriptor = AdapterRegistry.descriptorFor(sourceKey);
     final custom = AdapterRegistry.isCustomSource(sourceKey)
         ? _catalog.customSourceById(
             sourceKey.substring(AdapterRegistry.customSourcePrefix.length),
@@ -179,7 +160,10 @@ class SourceAdapterService {
       lineIndex: 1,
       metadata: {
         'id':
-            descriptor?.resolveNumericId(seriesId) ?? stableSourceId(seriesId),
+            AdapterRegistry.descriptorFor(
+              sourceKey,
+            )?.resolveNumericId(seriesId) ??
+            stableSourceId(seriesId),
         'seriesId': seriesId,
         'seriesUrl': seriesId,
         'title': item.title,
@@ -191,17 +175,23 @@ class SourceAdapterService {
             ? '来源: $displayName'
             : custom.description,
         if (cover.isNotEmpty) 'image': cover,
-        if (item.series?.bgmId != null) 'bgmId': item.series!.bgmId,
-        if (item.series?.score != null) 'score': item.series!.score,
+        'bgmId': ?item.series?.bgmId,
+        'score': ?item.series?.score,
+        ...metadata,
       },
     );
+  }
+
+  SourceAdapter _requireAdapter(String sourceKey) {
+    SourceOperation.check();
+    return adapterFor(sourceKey) ?? (throw StateError('视频源不可用: $sourceKey'));
   }
 
   /// 按 source key 取（或创建）缓存中的适配器实例。
   ///
   /// 与 [buildPlaybackRequest] 共用同一 LRU 缓存，保证搜索/探针阶段的 Cookie
   /// 与后续 `resolvePlaybackMedia` 一致。
-  AdapterBase? adapterFor(String sourceKey) {
+  SourceAdapter? adapterFor(String sourceKey) {
     if (_disposed) throw StateError('SourceAdapterService is disposed');
     if (sourceKey.isEmpty || sourceKey == 'internal') return null;
     final custom = AdapterRegistry.isCustomSource(sourceKey);
@@ -222,7 +212,7 @@ class SourceAdapterService {
     if (cached != null) _retire(cached.adapter);
     final adapter = config == null
         ? AdapterRegistry.createAdapter(sourceKey)
-        : PipelineSourceAdapter(config.rule);
+        : SourceAdapter(config.rule);
     if (adapter == null) return null;
     adapter.onIdle = _trimAdapters;
     _adapterCache[sourceKey] = (adapter: adapter, revision: config?.updatedAt);

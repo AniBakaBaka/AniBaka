@@ -10,7 +10,7 @@ import 'package:baka/services/source/source_codec.dart';
 import 'package:baka/services/source/source_repository.dart';
 import 'package:baka/source/engine/rule_validator.dart';
 import 'package:baka/source/models/source_rule.dart';
-import 'package:baka/source/pipeline_source_adapter.dart';
+import 'package:baka/source/source_adapter.dart';
 import 'package:baka/source/source_registry.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:flutter/material.dart';
@@ -64,7 +64,7 @@ class _AiRuleAuthoringPageState extends State<AiRuleAuthoringPage> {
   String? _testSeriesUrl;
   String? _testEpisodeUrl;
   final _testResults = <_TestStage, ({bool passed, String log})>{};
-  PipelineSourceAdapter? _testAdapter;
+  SourceAdapter? _testAdapter;
   late (String, String, String) _testInput;
 
   bool get _busy => _running || _runningTest != null || _saving;
@@ -419,7 +419,7 @@ class _AiRuleAuthoringPageState extends State<AiRuleAuthoringPage> {
         stage == _TestStage.playback && _testEpisodeUrl == null) {
       return;
     }
-    final adapter = _testAdapter ??= PipelineSourceAdapter(validated.rule);
+    final adapter = _testAdapter ??= SourceAdapter(validated.rule);
     setState(() {
       _runningTest = stage;
       _testResults.removeWhere((key, _) => key.index >= stage.index);

@@ -1,22 +1,22 @@
-import 'package:baka/utils/title_matcher.dart';
-import 'package:baka/source/models/source_search_result.dart';
-import 'package:baka/source/models/series.dart';
-import 'package:baka/utils/json_values.dart';
-import 'package:baka/source/runtime/source_operation.dart';
-import 'package:baka/api/request_cache.dart';
-import 'package:baka/models/playback_request.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import 'package:baka/source/source_registry.dart';
-import 'package:baka/source/video_url_extractor.dart';
 import 'package:baka/api/post.dart';
+import 'package:baka/api/request_cache.dart';
+import 'package:baka/models/playback_request.dart';
 import 'package:baka/services/matching/match_memory_service.dart';
 import 'package:baka/services/matching/media_readiness.dart';
 import 'package:baka/services/matching/probe_scheduler.dart';
 import 'package:baka/services/matching/source_match_engine.dart';
 import 'package:baka/services/source/source_repository.dart';
+import 'package:baka/source/models/series.dart';
+import 'package:baka/source/models/source_search_result.dart';
+import 'package:baka/source/runtime/source_operation.dart';
+import 'package:baka/source/source_adapter.dart';
+import 'package:baka/source/source_registry.dart';
+import 'package:baka/utils/json_values.dart';
+import 'package:baka/utils/title_matcher.dart';
 
 final _reAliasSep = RegExp(r'[/／、,，;；\n]');
 final _reBrackets = RegExp(r'[（(].*?[）)]');
@@ -24,54 +24,66 @@ final _reWhitespace = RegExp(r'\s+');
 
 String _norm(String value) => value.toLowerCase().replaceAll(_reWhitespace, '');
 
-/// 探针状态：
-/// - [direct]：目标集媒体已解析并可即点即播（含预取直链 + headers）
-/// - [playable]：剧集目录就绪，但媒体地址尚未解析（点选时仍会再取直链）
+/// 探针状态，按展示优先级声明（换源列表按 index 分桶）：
+/// - [direct]：目标集媒体已解析，可即点即播（含预取直链 + headers）
+/// - [playable]：剧集目录就绪，媒体地址待点选时再取
 /// - [failed]：目录或媒体解析失败
-enum SourceProbeStatus { pending, resolving, playable, direct, failed }
+enum SourceProbeStatus { direct, playable, resolving, pending, failed }
 
+/// One candidate resolved for one (episode, preferred line) selection.
 class SourceProbeState {
+  SourceProbeState(this.item, this.episodeIndex, this.preferredLine);
+
   SourceSearchResult item;
   final int episodeIndex;
   final int preferredLine;
   SourceProbeStatus status = SourceProbeStatus.pending;
   PlaybackRequest? data;
   String? routeKey;
-  int? get resolvedLineIndex => data?.lineIndex;
-  String? error;
   int score = 0;
-  SourceOperation? operation;
   Future<SourceProbeState>? future;
+  SourceOperation? _operation;
 
-  SourceProbeState({
-    required this.item,
-    required this.episodeIndex,
-    required this.preferredLine,
-  });
+  int? get resolvedLineIndex => data?.lineIndex;
 
-  /// 目录就绪即可选；[direct] 额外保证已预取可播媒体。
-  bool get isReady =>
-      status == SourceProbeStatus.playable ||
-      status == SourceProbeStatus.direct;
-
-  /// 已具备即点即播条件。
+  /// 目录就绪即可选；[isInstantPlayable] 额外保证已预取可播媒体。
+  bool get isReady => status.index <= SourceProbeStatus.playable.index;
   bool get isInstantPlayable => status == SourceProbeStatus.direct;
 }
 
+/// Candidates that resolved to the same media route.
 class DirectSourceGroup {
   const DirectSourceGroup({required this.key, required this.origins});
 
   final String key;
   final List<SourceProbeState> origins;
-  SourceProbeStatus get status => primary.status;
 
   SourceProbeState get primary => origins.first;
+  SourceProbeStatus get status => primary.status;
   bool get isReady => primary.isReady;
   bool get isInstantPlayable => primary.isInstantPlayable;
 }
 
-/// 视频源搜索与切换逻辑控制器
+/// Searches every enabled source for one title, ranks the results, and probes
+/// candidates until one is playable (automatic matching) or for the switcher.
 class VideoSourceSearchController extends ChangeNotifier {
+  VideoSourceSearchController({
+    this.seedData,
+    String? title,
+    this.autoMatchMode = false,
+    int targetEpisodeIndex = 0,
+    this.onMatchFound,
+    this.onMatchFailed,
+  }) : title = _resolveTitle(title, seedData),
+       _episode = targetEpisodeIndex < 0 ? 0 : targetEpisodeIndex {
+    _aliasKey = _bgmId != null ? 'bgm:$_bgmId' : 'title:${_norm(this.title)}';
+    manualAliases = MatchMemoryService.readAliases(
+      _aliasKey,
+      fallbackKey: 'title:${_norm(this.title)}',
+    );
+  }
+
+  /// Hands a finished detail-page search to the player.
   static VideoSourceSearchController? globalCached;
 
   static void cacheGlobal(VideoSourceSearchController controller) {
@@ -82,37 +94,41 @@ class VideoSourceSearchController extends ChangeNotifier {
   static bool isGlobalCached(VideoSourceSearchController controller) =>
       identical(globalCached, controller);
 
-  /// The global slot only transfers a completed search from detail to player.
-  /// Once consumed, the player owns and disposes the controller.
-  static VideoSourceSearchController takeSharedFor({
-    Map<String, dynamic>? seedData,
-    String? title,
-  }) {
-    return takeCachedFor(seedData: seedData, title: title) ??
-        VideoSourceSearchController(seedData: seedData, title: title);
-  }
-
+  /// Takes the cached search for this title; once taken, the caller owns it.
   static VideoSourceSearchController? takeCachedFor({
     Map<String, dynamic>? seedData,
     String? title,
   }) {
     final cached = globalCached;
     globalCached = null;
-    if (cached?.title == resolveTitle(title: title, seedData: seedData)) {
-      return cached;
-    }
+    if (cached?.title == _resolveTitle(title, seedData)) return cached;
     cached?.dispose();
     return null;
   }
 
-  static String resolveTitle({String? title, Map<String, dynamic>? seedData}) {
+  static String _resolveTitle(String? title, Map<String, dynamic>? seedData) {
     final explicit = title?.trim();
-    if (explicit != null && explicit.isNotEmpty) return explicit;
-    return seedData?['title']?.toString().trim() ?? '';
+    return explicit != null && explicit.isNotEmpty
+        ? explicit
+        : seedData?['title']?.toString().trim() ?? '';
   }
+
+  static const _engine = SourceMatchEngine();
+  static const _manualMaxLines = 4;
+  static const _maxResults = 100;
+  static const _maxResultsPerSource = 20;
+  static const _maxSwitchProbes = 4;
 
   final String title;
   final Map<String, dynamic>? seedData;
+  final bool autoMatchMode;
+  final int _episode;
+  final ValueChanged<PlaybackRequest>? onMatchFound;
+  final VoidCallback? onMatchFailed;
+  final SourceAdapterService _repository = sourceRepository;
+
+  late final int? _bgmId = toInt(seedData?['bgmId']);
+  late final String _aliasKey;
   late final Map<String, dynamic> _seedMetadata = {
     for (final key in const [
       'bgmId',
@@ -121,149 +137,119 @@ class VideoSourceSearchController extends ChangeNotifier {
       'bgmImageUrl',
       'logoUrl',
     ])
-      if (seedData?[key] case final value?) key: value,
+      key: ?seedData?[key],
   };
-  final bool autoMatchMode;
-  final int targetEpisodeIndex;
-  final ValueChanged<PlaybackRequest>? onMatchFound;
-  final VoidCallback? onMatchFailed;
 
-  bool isSearching = false;
   List<String> manualAliases = const [];
-  late final List<String> automaticAliases;
+  late final List<String> automaticAliases = _buildAutoAliases();
   final Set<String> activeAutoAliases = {};
 
-  Iterable<SourceSearchResult> get results => _results.values;
-  int resultCountFor(String source) => _sourceCounts[source] ?? 0;
-  Set<String> get progressingSources => _progressing;
-  Set<String> get finishedSources => _finished;
-  List<String> get searchErrors => _errors;
-
-  final _adapter = sourceRepository;
-  final _engine = const SourceMatchEngine();
   final _results = <String, SourceSearchResult>{};
+  final _scores = <String, SourceMatchScore>{};
   final _sourceCounts = <String, int>{};
   final _errors = <String>[];
-  final _finished = <String>{};
   final _progressing = <String>{};
+  int _finished = 0;
+  SourceMatchContext? _matchContext;
 
-  /// 已解析的完整播放数据（含在途请求去重）；有界 LRU，避免长时间搜索堆积。
-  final _resolved = RequestCache<String, PlaybackRequest>(limit: 32);
+  /// Bounded LRU of loaded catalogs; also shares in-flight loads.
+  final _catalogs = RequestCache<String, PlaybackRequest>(limit: 32);
   final _probes = <String, SourceProbeState>{};
   (int, int)? _probeSelection;
-  final _rankCache = <String, SourceMatchScore>{};
-  SourceMatchContext? _matchContext;
-  (SourceMatchContext, int, int, int, String?)? _switchKey;
-  List<SourceProbeState> _switchCandidates = const [];
-  List<DirectSourceGroup>? _switchGroups;
+  Object? _groupsKey;
+  List<SourceProbeState> _ranked = const [];
+  List<DirectSourceGroup>? _groups;
+
+  ProbeScheduler<SourceSearchResult>? _autoProbes;
   final _autoProbesBySource = <String, int>{};
-  int _autoProbesTotal = 0;
-  Timer? _deadlineTimer;
-  ProbeScheduler<SourceSearchResult>? _probeScheduler;
-  DateTime? _autoMatchStartedAt;
-  Completer<void>? _autoMatchGate;
+  int _autoProbeCount = 0;
+  Timer? _deadline;
+  Completer<void>? _autoDone;
 
-  /// 最近一次自动匹配耗时（认领或失败），供调试/对比。
-  Duration? lastAutoMatchDuration;
-
-  static const _manualMaxLines = 4;
-
-  late final String _aliasKey;
+  SourceOperation _operation = SourceOperation();
   int _runId = 0;
-  SourceOperation _sourceOperation = SourceOperation();
+  bool _searching = false;
   bool _disposed = false;
   bool _userSelected = false;
-  bool _autoMatched = false;
+  bool _matched = false;
+
+  bool get isSearching => _searching;
+  bool get isDisposed => _disposed;
+  bool get hasMatched => _matched;
+  Iterable<SourceSearchResult> get results => _results.values;
+  bool hasResult(SourceSearchResult item) =>
+      identical(_results[item.key], item);
+  int resultCountFor(String source) => _sourceCounts[source] ?? 0;
+  Set<String> get progressingSources => _progressing;
+  int get finishedCount => _finished;
+  List<String> get searchErrors => _errors;
+
+  @protected
+  Duration get candidateTimeout => const Duration(seconds: 15);
+
+  @protected
+  Duration get raceTimeout => const Duration(seconds: 5);
+
+  bool get _autoSettled => _autoDone?.isCompleted ?? false;
+
+  SourceMatchContext get _context => _matchContext ??= SourceMatchContext(
+    primaryTitle: title,
+    manualAliases: manualAliases,
+    automaticAliases: automaticAliases,
+    // v0 eps is the declared episode count; total_episodes includes specials.
+    bgmEpisodeCount:
+        (seedData?['bgmDetailData'] as Map<String, dynamic>?)?['eps'] as int?,
+  );
+
+  bool _alive(int runId) => !_disposed && runId == _runId;
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  /// A probe changed state: the switch grouping must be rebuilt.
+  void _changed() {
+    _groups = null;
+    _notify();
+  }
 
   void markUserSelected() {
     _userSelected = true;
-    if (autoMatchMode && isSearching) cancelSearch();
-  }
-
-  bool get isDisposed => _disposed;
-  bool get hasMatched => _autoMatched;
-
-  VideoSourceSearchController({
-    this.seedData,
-    String? title,
-    this.autoMatchMode = false,
-    this.targetEpisodeIndex = 0,
-    this.onMatchFound,
-    this.onMatchFailed,
-  }) : title = resolveTitle(title: title, seedData: seedData) {
-    _aliasKey = switch (seedData?['bgmId']?.toString().trim()) {
-      final String id when id.isNotEmpty => 'bgm:$id',
-      _ => 'title:${_norm(this.title)}',
-    };
-    manualAliases = _readManualAliases();
-    automaticAliases = _buildAutoAliases();
+    if (autoMatchMode && _searching) cancelSearch();
   }
 
   @override
   void dispose() {
     if (_disposed) return;
     _disposed = true;
-    if (identical(globalCached, this)) {
-      globalCached = null;
-    }
-    _sourceOperation.cancel();
-    _sourceOperation.close();
+    if (identical(globalCached, this)) globalCached = null;
     _runId++;
-    _cancelAutoDeadline();
-    _probeScheduler?.close();
-    _completeAutoMatch();
-    // 释放已解析的候选 / 播放数据；控制器在播放器侧仍被引用，但不再需要它们。
-    _releaseRetainedData();
+    _stopBackgroundWork();
+    _operation
+      ..cancel()
+      ..close();
+    _completeAuto();
+    _clearSession();
     super.dispose();
-  }
-
-  /// 清空一次搜索会话的全部派生数据。
-  void _releaseRetainedData() {
-    _switchKey = null;
-    _switchCandidates = const [];
-    _switchGroups = null;
-    _results.clear();
-    _sourceCounts.clear();
-    _errors.clear();
-    _finished.clear();
-    _progressing.clear();
-    _resolved.clear();
-    for (final probe in _probes.values) {
-      probe.operation?.cancel();
-    }
-    _probes.clear();
-    _probeSelection = null;
-    _rankCache.clear();
-    _matchContext = null;
-    _autoProbesBySource.clear();
-    _autoProbesTotal = 0;
   }
 
   List<String> _buildAutoAliases() {
     final pool = <String>{title};
     final detail = seedData?['bgmDetailData'] as Map<String, dynamic>?;
-    if (detail != null) {
-      for (final raw in [detail['name_cn'], detail['name']]) {
-        if (raw != null) {
-          pool.addAll(
-            raw
-                .toString()
-                .split(_reAliasSep)
-                .map((e) => e.trim())
-                .where((e) => e.isNotEmpty),
-          );
-        }
+    for (final raw in [detail?['name_cn'], detail?['name']]) {
+      if (raw == null) continue;
+      for (final part in raw.toString().split(_reAliasSep)) {
+        if (part.trim() case final alias when alias.isNotEmpty) pool.add(alias);
       }
     }
     final out = <String>[];
     final seen = {_norm(title)};
-    for (final c in pool) {
-      final clean = c
-          .replaceAll(_reBrackets, '')
-          .replaceAll(_reWhitespace, ' ')
-          .trim();
-      final base = extractBaseTitle(c);
-      for (final candidate in [c, clean, base]) {
+    for (final name in pool) {
+      for (final candidate in [
+        name,
+        name.replaceAll(_reBrackets, '').replaceAll(_reWhitespace, ' ').trim(),
+        extractBaseTitle(name),
+      ]) {
         if (candidate.isNotEmpty && seen.add(_norm(candidate))) {
           out.add(candidate);
           if (out.length >= 6) return out;
@@ -273,102 +259,75 @@ class VideoSourceSearchController extends ChangeNotifier {
     return out;
   }
 
-  List<String> _readManualAliases() {
-    final raw = MatchMemoryService.readAliases(
-      _aliasKey,
-      fallbackKey: 'title:${_norm(title)}',
-    );
-    final seen = {_norm(title)};
-    return [
-      for (final item in raw)
-        if (item.trim() case final String a
-            when a.isNotEmpty && seen.add(_norm(a)))
-          a,
-    ];
-  }
-
   Future<void> toggleAutoAlias(String alias) async {
-    if (_disposed || isSearching) return;
-    if (!activeAutoAliases.remove(alias)) {
-      activeAutoAliases.add(alias);
-    }
-    notifyListeners();
+    if (_disposed || _searching) return;
+    if (!activeAutoAliases.remove(alias)) activeAutoAliases.add(alias);
     await startSearch();
   }
 
   Future<bool> addManualAlias(String value) async {
-    if (_disposed || isSearching) return false;
-    List<String>? next;
-    final seen = {_norm(title), for (final a in manualAliases) _norm(a)};
-    for (final part in value.split(_reAliasSep)) {
-      final alias = part.trim();
-      if (alias.isNotEmpty && seen.add(_norm(alias))) {
-        (next ??= List.of(manualAliases)).add(alias);
-      }
-    }
-    if (next == null) return false;
-    manualAliases = next;
-    final runId = _runId;
-    notifyListeners();
-    await MatchMemoryService.saveAliases(_aliasKey, next);
-    if (_alive(runId)) await startSearch();
+    if (_disposed || _searching) return false;
+    final seen = {
+      _norm(title),
+      for (final alias in manualAliases) _norm(alias),
+    };
+    final added = [
+      for (final part in value.split(_reAliasSep))
+        if (part.trim() case final alias
+            when alias.isNotEmpty && seen.add(_norm(alias)))
+          alias,
+    ];
+    if (added.isEmpty) return false;
+    await _saveAliases([...manualAliases, ...added]);
     return true;
   }
 
   Future<void> removeManualAlias(String alias) async {
-    if (_disposed || isSearching) return;
-    final normalized = _norm(alias);
-    manualAliases = manualAliases.where((a) => _norm(a) != normalized).toList();
+    if (_disposed || _searching) return;
+    await _saveAliases([
+      for (final item in manualAliases)
+        if (item != alias) item,
+    ]);
+  }
+
+  Future<void> _saveAliases(List<String> aliases) async {
+    manualAliases = aliases;
     final runId = _runId;
     notifyListeners();
-    await MatchMemoryService.saveAliases(_aliasKey, manualAliases);
+    await MatchMemoryService.saveAliases(_aliasKey, aliases);
     if (_alive(runId)) await startSearch();
   }
 
+  /// Searches all sources. In automatic mode it returns once a candidate is
+  /// claimed, every source and probe has finished, or the hard deadline hits.
   Future<void> startSearch() async {
     if (_disposed) return;
-    _cancelAutoDeadline();
-    _completeAutoMatch();
-    _sourceOperation.cancel();
-    _sourceOperation.close();
-    _sourceOperation = SourceOperation();
+    _stopBackgroundWork();
+    _completeAuto();
     final runId = ++_runId;
-    final operation = _sourceOperation;
-    _autoMatched = false;
-    lastAutoMatchDuration = null;
-    _autoMatchStartedAt = autoMatchMode ? DateTime.now() : null;
-    final gate = autoMatchMode ? Completer<void>() : null;
-    _autoMatchGate = gate;
-    _releaseRetainedData();
-    _probeScheduler?.close();
-    final scheduler = _probeScheduler = autoMatchMode
+    _matched = false;
+    _clearSession();
+    final operation = _operation;
+    final scheduler = _autoProbes = autoMatchMode
         ? ProbeScheduler<SourceSearchResult>(
             concurrency: SourceMatchEngine.raceConcurrency,
             keyOf: (item) => item.key,
             run: (item) => _runAutoProbe(runId, item),
           )
         : null;
-    isSearching = true;
-    _emitProgress();
+    _searching = true;
+    _notify();
 
     try {
-      await operation.wait(_adapter.init());
+      await operation.wait(_repository.init());
     } catch (_) {
-      if (!_alive(runId) || operation.isCancelled) return;
+      if (!_alive(runId)) return;
       _errors.add('搜索初始化失败');
-      _stopBackgroundWork();
-      _completeAutoMatch();
-      isSearching = false;
-      _emitProgress();
-      if (_alive(runId) && autoMatchMode && !_userSelected) {
-        _recordAutoMatchDuration();
-        onMatchFailed?.call();
-      }
-      return;
+      return _finishRun(runId);
     }
     if (!_alive(runId)) return;
 
-    final memoryFuture = autoMatchMode ? _tryMemory(runId) : null;
+    final memory = autoMatchMode ? _tryMemory(runId) : null;
     final sources = [
       for (final source in sourceCatalog.quickSearchSources)
         (key: source.key, error: '${source.displayName} 搜索失败'),
@@ -380,208 +339,84 @@ class VideoSourceSearchController extends ChangeNotifier {
       // 站内源只用于手动列表，不参与自动匹配。
       if (!autoMatchMode) (key: 'internal', error: '站内搜索失败'),
     ];
-
-    // 自动匹配只搜主标题：最快的路径，别名回退已移除。
+    // Automatic matching searches only the primary title: the fastest path.
     final keywords = autoMatchMode
-        ? <String>[title]
-        : <String>[
+        ? [title]
+        : [
             title,
             ...manualAliases.take(3),
             ...automaticAliases.where(activeAutoAliases.contains).take(3),
           ];
-
     _progressing.addAll(sources.map((source) => source.key));
-
-    var nextSource = 0;
-    final concurrency = autoMatchMode
-        ? SourceMatchEngine.autoSearchConcurrency
-        : 8;
-    final searchFuture = Future.wait(
-      List.generate(sources.length.clamp(0, concurrency), (_) async {
-        while (nextSource < sources.length && !operation.isCancelled) {
-          final source = sources[nextSource++];
-          await _searchSource(
-            runId: runId,
-            operation: operation,
-            keywords: keywords,
-            sourceKey: source.key,
-            errorMsg: source.error,
-          );
-        }
-      }),
+    final search = runConcurrent(
+      sources.length,
+      autoMatchMode ? SourceMatchEngine.autoSearchConcurrency : 8,
+      (i) => _searchSource(runId, operation, keywords, sources[i]),
     );
 
-    if (!autoMatchMode) {
-      await searchFuture;
-      if (!_alive(runId)) return;
-      isSearching = false;
-      _emitProgress();
-      return;
-    }
-
-    _startAutoDeadline(runId);
-    unawaited(
-      _driveAutoMatch(
-        runId,
-        operation,
-        searchFuture,
-        memoryFuture,
-        scheduler!,
-      ).catchError((Object error, StackTrace _) {
-        if (kDebugMode) debugPrint('[AutoMatch] aborted: $error');
-        if (_alive(runId)) {
-          _stopBackgroundWork();
-          _completeAutoMatch();
-        }
-      }),
-    );
-
-    // gate 必在「认领 / 全源结束 / 硬截止」三者之一完成，不再傻等慢源。
-    await gate!.future;
-    if (!_alive(runId)) return;
-    isSearching = false;
-    _emitProgress();
-    if (_alive(runId) && !_autoMatched && !_userSelected) {
-      _recordAutoMatchDuration();
-      onMatchFailed?.call();
-    }
-  }
-
-  void _startAutoDeadline(int runId) {
-    _cancelAutoDeadline();
-    // 硬截止：停止后续探针并给出结论。这是自动匹配唯一的兜底计时器，
-    // 结果一到就探（first-ready）之外不再有任何补探轮次。
-    _deadlineTimer = Timer(SourceMatchEngine.hardDeadline, () {
-      if (!_alive(runId)) return;
-      _stopBackgroundWork();
-      _completeAutoMatch();
-    });
-  }
-
-  bool get _autoMatchSettled {
-    final gate = _autoMatchGate;
-    return gate != null && gate.isCompleted;
-  }
-
-  void _cancelAutoDeadline() {
-    _deadlineTimer?.cancel();
-    _deadlineTimer = null;
-  }
-
-  Future<void> _driveAutoMatch(
-    int runId,
-    SourceOperation operation,
-    Future<void> searchFuture,
-    Future<void>? memoryFuture,
-    ProbeScheduler<SourceSearchResult> scheduler,
-  ) async {
-    if (memoryFuture != null) await memoryFuture;
-    if (!_alive(runId)) return;
-    if (_autoMatched || _userSelected) {
-      _completeAutoMatch();
-      return;
-    }
-
-    try {
-      await operation.wait(searchFuture);
-      await operation.wait(scheduler.drained);
-      if (_alive(runId) && !_autoMatchSettled) {
-        _stopBackgroundWork();
-        _completeAutoMatch();
-      }
-    } catch (_) {
-      if (!operation.isCancelled) rethrow;
-    }
-  }
-
-  void _completeAutoMatch() {
-    final gate = _autoMatchGate;
-    if (gate != null && !gate.isCompleted) gate.complete();
-  }
-
-  void _recordAutoMatchDuration() {
-    final started = _autoMatchStartedAt;
-    if (started == null) return;
-    lastAutoMatchDuration = DateTime.now().difference(started);
-    if (kDebugMode) {
-      debugPrint(
-        '[AutoMatch] done matched=$_autoMatched '
-        'in ${lastAutoMatchDuration!.inMilliseconds}ms',
+    if (scheduler == null) {
+      await search;
+    } else {
+      final done = _autoDone = Completer<void>();
+      _deadline = Timer(
+        SourceMatchEngine.hardDeadline,
+        () => _settleAuto(runId),
       );
-    }
-  }
-
-  Future<void> _tryMemory(int runId) async {
-    final bgmId = toInt(seedData?['bgmId']);
-    final memory = MatchMemoryService.read(bgmId: bgmId, title: title);
-    if (memory == null) return;
-
-    final item = SourceSearchResult(
-      Series(
-        memory.seriesId,
-        memory.title?.isNotEmpty == true ? memory.title! : title,
-      ),
-      source: memory.source,
-      displayName: memory.sourceDisplayName ?? memory.source,
-    );
-
-    try {
-      // 记忆命中必须完整解析到可播媒体，避免「匹配成功却播不了」。
-      final probe = await ensureCandidatePlayable(
-        item,
-        episodeIndex: _ep,
-        preferredLine: 1,
-        raceMode: true,
+      unawaited(
+        () async {
+          try {
+            await memory;
+            await search;
+            await scheduler.drained;
+          } finally {
+            _settleAuto(runId);
+          }
+        }().catchError((Object e) {
+          debugPrint('[AutoMatch] aborted: $e');
+        }),
       );
-      if (!_alive(runId) || _autoMatched || _userSelected) return;
-      if (probe.isInstantPlayable && probe.data != null) {
-        _claimAutoMatch(runId, item, probe.data!);
-        return;
-      }
-    } catch (_) {}
-
-    if (!_alive(runId) || _autoMatched || _userSelected || _autoMatchSettled) {
-      return;
+      await done.future;
     }
-    try {
-      await MatchMemoryService.remove(bgmId: bgmId, title: title);
-    } catch (_) {}
+    _finishRun(runId);
   }
 
-  /// 原子认领自动匹配结果；成功后停止后续搜索/探针。
-  void _claimAutoMatch(
-    int runId,
-    SourceSearchResult item,
-    PlaybackRequest data,
-  ) {
-    if (!_alive(runId) || _autoMatched || _userSelected || _autoMatchSettled) {
-      return;
-    }
-    _autoMatched = true;
-    _stopBackgroundWork();
-    _recordAutoMatchDuration();
-    _completeAutoMatch();
-    onMatchFound?.call(data.copyWith());
-    unawaited(persistMatchMemory(item, data));
+  void _finishRun(int runId) {
+    if (!_alive(runId)) return;
+    _searching = false;
+    _notify();
+    if (autoMatchMode && !_matched && !_userSelected) onMatchFailed?.call();
   }
 
   void cancelSearch() {
     _runId++;
     _stopBackgroundWork();
-    _completeAutoMatch();
-    if (!_disposed) {
-      isSearching = false;
-      _progressing.clear();
-      _emitProgress();
-    }
+    _completeAuto();
+    if (_disposed) return;
+    _searching = false;
+    _notify();
   }
 
+  void _settleAuto(int runId) {
+    if (!_alive(runId) || _autoSettled) return;
+    _stopBackgroundWork();
+    _completeAuto();
+  }
+
+  void _completeAuto() {
+    final done = _autoDone;
+    if (done != null && !done.isCompleted) done.complete();
+  }
+
+  /// Cancels searches and probes; unfinished probes return to pending so a
+  /// manual pick can restart them.
   void _stopBackgroundWork() {
-    _sourceOperation.cancel();
-    _sourceOperation.close();
-    _sourceOperation = SourceOperation();
-    _cancelAutoDeadline();
-    _probeScheduler?.close();
+    _operation
+      ..cancel()
+      ..close();
+    _operation = SourceOperation();
+    _deadline?.cancel();
+    _deadline = null;
+    _autoProbes?.close();
     _progressing.clear();
     for (final probe in _probes.values) {
       if (probe.future == null && probe.status != SourceProbeStatus.resolving) {
@@ -589,25 +424,74 @@ class VideoSourceSearchController extends ChangeNotifier {
       }
       probe.future = null;
       if (probe.isInstantPlayable) continue;
-      if (probe.data == null) _resolved.remove(probe.item.key);
+      if (probe.data == null) _catalogs.remove(probe.item.key);
       probe.status = SourceProbeStatus.pending;
-      _switchGroups = null;
+      _groups = null;
     }
   }
 
-  bool _alive(int runId) => !_disposed && runId == _runId;
-
-  void _emitProgress() {
-    if (!_disposed) notifyListeners();
+  /// Drops every result and probe of the previous search.
+  void _clearSession() {
+    _results.clear();
+    _scores.clear();
+    _sourceCounts.clear();
+    _errors.clear();
+    _progressing.clear();
+    _finished = 0;
+    _matchContext = null;
+    _catalogs.clear();
+    _resetProbes();
+    _probeSelection = null;
+    _autoProbesBySource.clear();
+    _autoProbeCount = 0;
   }
 
-  Future<void> _searchSource({
-    required int runId,
-    required SourceOperation operation,
-    required List<String> keywords,
-    required String sourceKey,
-    required String errorMsg,
-  }) async {
+  void _resetProbes() {
+    for (final probe in _probes.values) {
+      probe._operation?.cancel();
+    }
+    _probes.clear();
+    _groupsKey = null;
+    _ranked = const [];
+    _groups = null;
+  }
+
+  Future<void> _tryMemory(int runId) async {
+    final memory = MatchMemoryService.read(bgmId: _bgmId, title: title);
+    if (memory == null) return;
+    final item = SourceSearchResult(
+      Series(memory.seriesId, memory.title ?? ''),
+      source: memory.source,
+      displayName: memory.sourceDisplayName ?? memory.source,
+    );
+    // A remembered match must still pass the current title check, so an old
+    // mismatch (or a record without a title) is confirmed by normal search.
+    if (_engine.score(item, _context).shouldProbeImmediately) {
+      try {
+        final probe = await _probeForPlayback(item, _episode);
+        if (probe.isInstantPlayable) return _claim(runId, item, probe.data!);
+      } catch (_) {}
+    }
+    if (_alive(runId) && !_matched && !_userSelected && !_autoSettled) {
+      await MatchMemoryService.remove(bgmId: _bgmId, title: title);
+    }
+  }
+
+  void _claim(int runId, SourceSearchResult item, PlaybackRequest data) {
+    if (!_alive(runId) || _matched || _userSelected || _autoSettled) return;
+    _matched = true;
+    _settleAuto(runId);
+    onMatchFound?.call(data);
+    unawaited(persistMatchMemory(item));
+  }
+
+  Future<void> _searchSource(
+    int runId,
+    SourceOperation operation,
+    List<String> keywords,
+    ({String key, String error}) source,
+  ) async {
+    if (operation.isCancelled) return;
     var failures = 0;
     final search = SourceOperation(
       parent: operation,
@@ -616,9 +500,13 @@ class VideoSourceSearchController extends ChangeNotifier {
     Future<List<SourceSearchResult>> load(String keyword) async {
       try {
         return await search.run(
-          () => sourceKey == 'internal'
+          () => source.key == 'internal'
               ? _loadInternal(keyword)
-              : _adapter.search(sourceKey, keyword, skipBgmEnhancement: true),
+              : _repository.search(
+                  source.key,
+                  keyword,
+                  skipBgmEnhancement: true,
+                ),
         );
       } catch (_) {
         failures++;
@@ -627,282 +515,211 @@ class VideoSourceSearchController extends ChangeNotifier {
     }
 
     try {
-      List<SourceSearchResult> rows;
-      if (keywords.length == 1) {
-        rows = await load(keywords.first);
-      } else {
-        final done = Completer<List<SourceSearchResult>>();
-        var remaining = 2;
-        for (var i = 0; i < 2; i++) {
-          unawaited(
-            load(keywords[i]).then((rows) {
-              if ((rows.isNotEmpty || --remaining == 0) && !done.isCompleted) {
-                done.complete(rows);
-              }
-            }),
-          );
-        }
-        rows = await done.future;
-      }
+      // The first two keywords race; the rest are tried only after both miss.
+      var rows = keywords.length == 1
+          ? await load(keywords.first)
+          : await _firstAccepted([
+              load(keywords[0]),
+              load(keywords[1]),
+            ], (rows) => rows.isNotEmpty);
       for (var i = 2; rows.isEmpty && i < keywords.length; i++) {
-        if (!_alive(runId) || operation.isCancelled || _autoMatchSettled) {
-          return;
-        }
         if (search.isCancelled) break;
         rows = await load(keywords[i]);
       }
       if (!_alive(runId) || operation.isCancelled) return;
-      if (rows.isNotEmpty) _appendResults(runId, sourceKey, rows);
-      _finishSource(
-        runId,
-        sourceKey,
-        error: rows.isEmpty && (search.timedOut || failures == keywords.length)
-            ? errorMsg
-            : null,
-      );
+      _appendResults(source.key, rows);
+      if (rows.isEmpty && (search.timedOut || failures == keywords.length)) {
+        _errors.add(source.error);
+      }
+      _progressing.remove(source.key);
+      _finished++;
+      _notify();
     } finally {
       // The first successful keyword owns the result; cancel its siblings.
-      search.cancel();
-      search.close();
+      search
+        ..cancel()
+        ..close();
     }
   }
 
-  Future<List<SourceSearchResult>> _loadInternal(String keyword) async {
-    final raw = await getSearch(keyword);
-    return [
-      for (final item in raw)
-        if (item['videos'] != null) SourceSearchResult.internal(item),
-    ];
-  }
+  static Future<List<SourceSearchResult>> _loadInternal(String keyword) async =>
+      [
+        for (final item in await getSearch(keyword))
+          if (item['videos'] != null) SourceSearchResult.internal(item),
+      ];
 
-  void _appendResults(
-    int runId,
-    String source,
-    Iterable<SourceSearchResult> rows,
-  ) {
-    if (!_alive(runId)) return;
-    final context = _syncContext();
-    final previousCount = _sourceCounts[source] ?? 0;
-    var count = previousCount;
-    final seen = <String>{};
+  void _appendResults(String source, List<SourceSearchResult> rows) {
+    final context = _context;
+    final before = _sourceCounts[source] ?? 0;
+    var count = before;
     SourceMatchScore? first;
     SourceMatchScore? second;
-
-    for (final data in rows) {
-      if (_results.length >= 100) break;
-      if (count >= 20) break;
-      final key = data.key;
-      if (_results.containsKey(key) || !seen.add(key)) continue;
-      if (data.source != 'internal') {
-        final score = _engine.score(data, context);
-        if (score.confidence < SourceMatchEngine.admissionConfidence) {
-          continue;
-        }
-        _rankCache[key] = score;
-        if (autoMatchMode && score.shouldProbeImmediately) {
-          // Only two probes per source can run; select them in one pass.
-          if (first == null || score.confidence > first.confidence) {
-            second = first;
-            first = score;
-          } else if (second == null || score.confidence > second.confidence) {
-            second = score;
-          }
+    for (final item in rows) {
+      if (_results.length >= _maxResults || count >= _maxResultsPerSource) {
+        break;
+      }
+      final key = item.key;
+      if (_results.containsKey(key)) continue;
+      final score = _engine.score(item, context);
+      if (item.source != 'internal' &&
+          score.confidence < SourceMatchEngine.admissionConfidence) {
+        continue;
+      }
+      _scores[key] = score;
+      _results[key] = item;
+      count++;
+      // Each source runs at most two probes; keep its two best in one pass.
+      if (autoMatchMode && score.shouldProbeImmediately) {
+        if (first == null || score.confidence > first.confidence) {
+          second = first;
+          first = score;
+        } else if (second == null || score.confidence > second.confidence) {
+          second = score;
         }
       }
-
-      _results[key] = data;
-      count++;
     }
-    if (count == previousCount) return;
+    if (count == before) return;
     _sourceCounts[source] = count;
-    _switchGroups = null;
+    _groups = null;
+    if (first != null) _enqueueAutoProbe(first.candidate);
+    if (second != null) _enqueueAutoProbe(second.candidate);
+  }
 
-    if (!_disposed) notifyListeners();
-
-    if (autoMatchMode && !_userSelected && !_autoMatched) {
-      if (first != null) _enqueueAutoProbe(runId, first.candidate);
-      if (second != null) _enqueueAutoProbe(runId, second.candidate);
+  void _enqueueAutoProbe(SourceSearchResult item) {
+    final scheduler = _autoProbes;
+    if (scheduler == null ||
+        scheduler.isClosed ||
+        _autoProbeCount >= SourceMatchEngine.maxAutoProbes) {
+      return;
     }
-  }
-
-  void _finishSource(int runId, String sourceKey, {String? error}) {
-    if (!_alive(runId)) return;
-    if (error != null) _errors.add(error);
-    _progressing.remove(sourceKey);
-    _finished.add(sourceKey);
-    _emitProgress();
-  }
-
-  void _enqueueAutoProbe(int runId, SourceSearchResult item) {
-    if (!_alive(runId) || _autoMatched || _userSelected) return;
-    if (_autoMatchSettled || _probeScheduler?.isClosed != false) return;
-    if (item.source == 'internal') return;
-    if (_autoProbesTotal >= SourceMatchEngine.maxAutoProbes) return;
-
     final used = _autoProbesBySource[item.source] ?? 0;
-    if (used >= SourceMatchEngine.raceProbesPerSource) return;
-
-    final score = _rankCache[item.key];
-    if (score != null && !score.shouldProbeImmediately) return;
-
-    if (!_probeScheduler!.add(item)) return;
+    if (used >= SourceMatchEngine.raceProbesPerSource || !scheduler.add(item)) {
+      return;
+    }
     _autoProbesBySource[item.source] = used + 1;
-    _autoProbesTotal++;
+    _autoProbeCount++;
   }
 
   Future<void> _runAutoProbe(int runId, SourceSearchResult item) async {
-    if (!_alive(runId) || _autoMatched || _userSelected || _autoMatchSettled) {
-      return;
-    }
     try {
-      final probe = await ensureCandidatePlayable(
-        item,
-        episodeIndex: _ep,
-        preferredLine: 1,
-        raceMode: true,
-      );
-      if (probe.isInstantPlayable) _claimAutoMatch(runId, item, probe.data!);
+      final probe = await _probeForPlayback(item, _episode);
+      if (probe.isInstantPlayable) _claim(runId, item, probe.data!);
     } catch (_) {
       // Cancellation of this run releases the scheduler slot.
     }
   }
 
+  Future<SourceProbeState> _probeForPlayback(
+    SourceSearchResult item,
+    int episode,
+  ) => ensureCandidatePlayable(
+    item,
+    episodeIndex: episode,
+    preferredLine: 1,
+    raceMode: true,
+  );
+
+  /// Player recovery: the best remaining confident candidate that plays.
   Future<PlaybackRequest?> findNextPlayableCandidate({
-    required Set<String> excludedKeys,
+    required Set<String> excludedSources,
     int? episodeIndex,
   }) async {
     final runId = _runId;
-    final ep = episodeIndex ?? _ep;
-    final context = _syncContext();
-
     final ranked = [
       for (final item in _results.values)
-        if (item.source != 'internal' &&
-            !excludedKeys.contains(item.key) &&
-            !excludedKeys.contains(item.source))
-          _rankCache[item.key] ??= _engine.score(item, context),
+        if (item.source != 'internal' && !excludedSources.contains(item.source))
+          if (_scores[item.key]! case final score
+              when score.shouldProbeImmediately)
+            score,
     ]..sort(SourceMatchEngine.compareScores);
-
-    for (final rankedItem in ranked) {
+    for (final score in ranked) {
       if (!_alive(runId)) return null;
-      final item = rankedItem.candidate;
       try {
-        final probe = await ensureCandidatePlayable(
-          item,
-          episodeIndex: ep,
-          preferredLine: 1,
-          raceMode: true,
+        final probe = await _probeForPlayback(
+          score.candidate,
+          episodeIndex ?? _episode,
         );
-        if (probe.isInstantPlayable && probe.data != null) {
-          unawaited(persistMatchMemory(item, probe.data!));
-          return probe.data!;
+        if (probe.isInstantPlayable) {
+          unawaited(persistMatchMemory(score.candidate));
+          return probe.data;
         }
       } catch (_) {}
     }
     return null;
   }
 
-  int get _ep => targetEpisodeIndex < 0 ? 0 : targetEpisodeIndex;
+  Future<void> persistMatchMemory(SourceSearchResult item) =>
+      MatchMemoryService.writeSuccess(
+        bgmId: _bgmId ?? item.series?.bgmId,
+        title: title,
+        source: item.source,
+        seriesId: item.id,
+        candidateTitle: item.title,
+        sourceDisplayName: item.displayName,
+      );
 
-  SourceMatchContext _syncContext() => _matchContext ??= SourceMatchContext(
-    primaryTitle: title,
-    manualAliases: manualAliases,
-    automaticAliases: automaticAliases,
-    // v0 eps is the declared episode count; total_episodes includes specials.
-    bgmEpisodeCount:
-        (seedData?['bgmDetailData'] as Map<String, dynamic>?)?['eps'] as int?,
-  );
-
-  Future<void> persistMatchMemory(
-    SourceSearchResult item,
-    PlaybackRequest data,
-  ) {
-    return MatchMemoryService.writeSuccess(
-      bgmId: toInt(seedData?['bgmId'] ?? data.metadata['bgmId']),
-      title: title,
-      source: item.source,
-      seriesId: item.id,
-      candidateTitle: item.title,
-      sourceDisplayName: item.displayName,
-    );
-  }
-
+  /// Results grouped by media route. Match scores are sorted only when the
+  /// candidates change; probe updates just re-bucket by status in O(n).
   List<DirectSourceGroup> getDirectSourceGroups({
     required int episodeIndex,
     required int preferredLine,
     String? currentSource,
   }) {
     if (_disposed) return const [];
-    final context = _syncContext();
-    final key = (
-      context,
-      episodeIndex,
-      preferredLine,
-      _results.length,
-      currentSource,
-    );
-    if (_switchKey != key) {
-      _switchGroups = null;
-      _switchCandidates =
+    final key = (episodeIndex, preferredLine, _results.length, currentSource);
+    if (_groupsKey != key) {
+      _ranked =
           [
             for (final item in _results.values)
               _probeFor(item, episodeIndex, preferredLine)
-                ..score = (_rankCache[item.key] ??= _engine.score(
-                  item,
-                  context,
-                )).scoreForCurrentSource(currentSource),
+                ..score = _scores[item.key]!.scoreForCurrentSource(
+                  currentSource,
+                ),
           ]..sort((a, b) {
-            final score = b.score.compareTo(a.score);
-            return score != 0 ? score : a.item.key.compareTo(b.item.key);
+            final byScore = b.score.compareTo(a.score);
+            return byScore != 0 ? byScore : a.item.key.compareTo(b.item.key);
           });
+      _groupsKey = key;
+      _groups = null;
     }
-    _switchKey = key;
-    final cached = _switchGroups;
-    if (cached != null) return cached;
-    // 匹配分只在候选/上下文变化时排序；探针更新按五种状态线性分桶。
-    final buckets = List.generate(5, (_) => <SourceProbeState>[]);
-    for (final candidate in _switchCandidates) {
-      buckets[_statusRank(candidate.status)].add(candidate);
-    }
-    final grouped = <String, List<SourceProbeState>>{};
-    for (final c in buckets.expand((bucket) => bucket)) {
-      final key = c.routeKey ?? 'candidate:${c.item.key}';
-      (grouped[key] ??= []).add(c);
-    }
-    return _switchGroups = [
-      for (final e in grouped.entries)
-        DirectSourceGroup(key: e.key, origins: e.value),
-    ];
+    return _groups ??= () {
+      final buckets = [
+        for (final _ in SourceProbeStatus.values) <SourceProbeState>[],
+      ];
+      for (final probe in _ranked) {
+        buckets[probe.status.index].add(probe);
+      }
+      final grouped = <String, List<SourceProbeState>>{};
+      for (final bucket in buckets) {
+        for (final probe in bucket) {
+          (grouped[probe.routeKey ?? 'candidate:${probe.item.key}'] ??= []).add(
+            probe,
+          );
+        }
+      }
+      return [
+        for (final entry in grouped.entries)
+          DirectSourceGroup(key: entry.key, origins: entry.value),
+      ];
+    }();
   }
 
+  /// Keeps up to [_maxSwitchProbes] switcher probes running.
   void startSwitchProbes(Iterable<SourceProbeState> candidates) {
     var active = candidates
         .where((c) => c.status == SourceProbeStatus.resolving)
         .length;
-    if (active >= 4) return;
-    for (final c in candidates) {
-      if (c.status == SourceProbeStatus.pending) {
-        unawaited(
-          ensureCandidatePlayable(
-            c.item,
-            episodeIndex: c.episodeIndex,
-            preferredLine: c.preferredLine,
-          ).then<void>((_) {}, onError: (Object _) {}),
-        );
-        if (++active >= 4) {
-          return;
-        }
-      }
+    for (final candidate in candidates) {
+      if (active >= _maxSwitchProbes) return;
+      if (candidate.status != SourceProbeStatus.pending) continue;
+      active++;
+      ensureCandidatePlayable(
+        candidate.item,
+        episodeIndex: candidate.episodeIndex,
+        preferredLine: candidate.preferredLine,
+      ).ignore();
     }
   }
-
-  int _statusRank(SourceProbeStatus s) => switch (s) {
-    SourceProbeStatus.direct => 0,
-    SourceProbeStatus.playable => 1,
-    SourceProbeStatus.resolving => 2,
-    SourceProbeStatus.pending => 3,
-    SourceProbeStatus.failed => 4,
-  };
 
   Future<SourceProbeState> ensureCandidatePlayable(
     SourceSearchResult item, {
@@ -913,189 +730,171 @@ class VideoSourceSearchController extends ChangeNotifier {
     if (_disposed) throw StateError('Search controller is disposed');
     final probe = _probeFor(item, episodeIndex, preferredLine);
     if (probe.isReady) return Future.value(probe);
-    return probe.future ??= _resolveProbe(probe, raceMode: raceMode);
+    return probe.future ??= _resolveProbe(probe, raceMode);
   }
 
+  /// Probes belong to one selection; changing it cancels the unfinished ones.
   SourceProbeState _probeFor(SourceSearchResult item, int episode, int line) {
-    final selection = (episode, line);
-    if (_probeSelection != selection) {
+    if (_probeSelection != (episode, line)) {
       for (final probe in _probes.values) {
-        probe.operation?.cancel();
         if (probe.future != null && probe.data == null) {
-          _resolved.remove(probe.item.key);
+          _catalogs.remove(probe.item.key);
         }
       }
-      _probes.clear();
-      _probeSelection = selection;
-      _switchKey = null;
-      _switchCandidates = const [];
-      _switchGroups = null;
+      _resetProbes();
+      _probeSelection = (episode, line);
     }
     return _probes.putIfAbsent(
       item.key,
-      () => SourceProbeState(
-        item: item,
-        episodeIndex: episode,
-        preferredLine: line,
-      ),
+      () => SourceProbeState(item, episode, line),
     )..item = item;
   }
 
-  @protected
-  Duration get candidateTimeout => const Duration(seconds: 15);
-
-  @protected
-  Duration get raceTimeout => const Duration(seconds: 5);
-
   Future<SourceProbeState> _resolveProbe(
-    SourceProbeState probe, {
-    required bool raceMode,
-  }) async {
-    final parent = _sourceOperation;
-    final operation = probe.operation = SourceOperation(
+    SourceProbeState probe,
+    bool raceMode,
+  ) async {
+    final parent = _operation;
+    final operation = probe._operation = SourceOperation(
       parent: parent,
       timeout: raceMode ? raceTimeout : candidateTimeout,
     );
     probe.status = SourceProbeStatus.resolving;
-    probe.error = null;
-    _switchGroups = null;
-    _emitProgress();
+    _changed();
     try {
-      await operation.run(() async {
-        final catalog = await resolveVideoData(probe.item);
-        SourceOperation.check();
-        final ep = probe.episodeIndex;
-        if (ep < 0 || ep >= catalog.episodes.length) {
-          throw StateError('未找到目标剧集');
-        }
-        final episode = catalog.episodes[ep];
-        final preferred = episode.lineAt(probe.preferredLine) != null
-            ? probe.preferredLine
-            : episode.availableLineIndexes.firstOrNull;
-        if (preferred == null) throw StateError('目标剧集无可播放线路');
-        final data = probe.data = catalog.copyWith(
-          episodeIndex: ep,
-          lineIndex: preferred,
-        );
-        if (catalog.source == 'internal') {
-          final token = episode.lineAt(preferred)!;
-          probe.routeKey = _routeKeyFor(catalog.source, token);
-          // Internal tokens can be resolved by the player's internal-source path.
-          if (MediaReadiness.isAcceptablePlaybackUrl(token)) {
-            data.storePrefetched(
-              episodeIndex: ep,
-              lineIndex: preferred,
-              episodeId: token,
-              url: token,
-              httpHeaders: const {},
-            );
-            probe.status = SourceProbeStatus.direct;
-          } else {
-            probe.status = SourceProbeStatus.playable;
-          }
-          return;
-        }
-
-        final lines = <(int, String)>[];
-        final seen = <String>{};
-        final limit = raceMode
-            ? SourceMatchEngine.maxLinesPerCandidate
-            : _manualMaxLines;
-        for (
-          var i = 0;
-          i <= episode.lines.length && lines.length < limit;
-          i++
-        ) {
-          final line = i == 0 ? preferred : i;
-          if (i != 0 && line == preferred) continue;
-          final token = episode.lineAt(line);
-          if (token != null && seen.add(token)) lines.add((line, token));
-        }
-        final mediaOperation = SourceOperation(parent: operation);
-        Object? lastError;
-        Future<bool> resolve((int, String) line) async {
-          try {
-            return await mediaOperation.run(() async {
-              final media = await resolveLineMedia(
-                sourceKey: catalog.source,
-                lineToken: line.$2,
-              );
-              SourceOperation.check();
-              if (!MediaReadiness.isAcceptablePlaybackUrl(media.url)) {
-                throw StateError('线路返回不可播放地址');
-              }
-              if (probe.isInstantPlayable) return false;
-              data.lineIndex = line.$1;
-              data.storePrefetched(
-                episodeIndex: ep,
-                lineIndex: line.$1,
-                episodeId: line.$2,
-                url: media.url,
-                httpHeaders: media.httpHeaders,
-              );
-              probe.routeKey = _routeKeyFor(catalog.source, line.$2);
-              probe.status = SourceProbeStatus.direct;
-              return true;
-            });
-          } catch (error) {
-            lastError = error;
-            return false;
-          }
-        }
-
-        try {
-          if (raceMode) {
-            final done = Completer<void>();
-            var remaining = lines.length;
-            for (final line in lines) {
-              unawaited(
-                resolve(line).then((matched) {
-                  if ((matched || --remaining == 0) && !done.isCompleted) {
-                    done.complete();
-                  }
-                }),
-              );
-            }
-            await operation.wait(done.future);
-          } else {
-            for (final line in lines) {
-              if (await resolve(line)) break;
-              SourceOperation.check();
-            }
-          }
-        } finally {
-          mediaOperation.cancel();
-          mediaOperation.close();
-        }
-        SourceOperation.check();
-        if (!probe.isInstantPlayable) throw lastError ?? StateError('无法解析播放地址');
-      });
-    } catch (error) {
+      await operation.run(() => _resolveMedia(probe, raceMode));
+    } catch (_) {
+      // Cancellation belongs to the caller; a timeout or failure marks the probe.
       if (parent.isCancelled ||
-          (!operation.timedOut && operation.isCancelled)) {
+          (operation.isCancelled && !operation.timedOut)) {
         rethrow;
       }
-      probe.status = SourceProbeStatus.failed;
-      probe.error = operation.timedOut ? '解析超时' : error.toString();
-      // Failed candidates must not retain catalogs beyond the bounded cache.
-      probe.data = null;
+      probe
+        ..status = SourceProbeStatus.failed
+        ..data = null;
     } finally {
-      operation.cancel();
-      operation.close();
-      if (identical(probe.operation, operation)) {
-        probe.operation = null;
-        probe.future = null;
-        if (identical(_probes[probe.item.key], probe)) {
-          _switchGroups = null;
-          _emitProgress();
-        }
+      operation
+        ..cancel()
+        ..close();
+      if (identical(probe._operation, operation)) {
+        probe
+          .._operation = null
+          ..future = null;
+        if (identical(_probes[probe.item.key], probe)) _changed();
       }
     }
     return probe;
   }
 
+  Future<void> _resolveMedia(SourceProbeState probe, bool raceMode) async {
+    final catalog = await resolveVideoData(probe.item);
+    SourceOperation.check();
+    final ep = probe.episodeIndex;
+    if (ep < 0 || ep >= catalog.episodes.length) {
+      throw StateError('未找到目标剧集');
+    }
+    final episode = catalog.episodes[ep];
+    final preferred = episode.lineAt(probe.preferredLine) != null
+        ? probe.preferredLine
+        : episode.availableLineIndexes.firstOrNull;
+    if (preferred == null) throw StateError('目标剧集无可播放线路');
+    final source = catalog.source;
+    final data = probe.data = catalog.copyWith(
+      episodeIndex: ep,
+      lineIndex: preferred,
+    );
+
+    if (source == 'internal') {
+      // The player resolves internal tokens itself.
+      final token = episode.lineAt(preferred)!;
+      probe.routeKey = _routeKey(source, token);
+      if (MediaReadiness.isAcceptablePlaybackUrl(token)) {
+        data.storePrefetched(
+          episodeIndex: ep,
+          lineIndex: preferred,
+          episodeId: token,
+          url: token,
+          httpHeaders: const {},
+        );
+        probe.status = SourceProbeStatus.direct;
+      } else {
+        probe.status = SourceProbeStatus.playable;
+      }
+      return;
+    }
+
+    // Preferred line first; a token shared by several lines is one route.
+    final limit = raceMode
+        ? SourceMatchEngine.maxLinesPerCandidate
+        : _manualMaxLines;
+    final lines = <(int, String)>[];
+    final seen = <String>{};
+    for (var i = 0; i <= episode.lines.length && lines.length < limit; i++) {
+      final line = i == 0 ? preferred : i;
+      if (i != 0 && line == preferred) continue;
+      if (episode.lineAt(line) case final token? when seen.add(token)) {
+        lines.add((line, token));
+      }
+    }
+
+    final lineOperation = SourceOperation(parent: SourceOperation.current);
+    Object? lastError;
+    Future<bool> resolve((int, String) line) async {
+      final (index, token) = line;
+      try {
+        return await lineOperation.run(() async {
+          final media = await resolveLineMedia(
+            sourceKey: source,
+            lineToken: token,
+          );
+          SourceOperation.check();
+          if (!MediaReadiness.isAcceptablePlaybackUrl(media.url)) {
+            throw StateError('线路返回不可播放地址');
+          }
+          if (probe.isInstantPlayable) return false;
+          data
+            ..lineIndex = index
+            ..storePrefetched(
+              episodeIndex: ep,
+              lineIndex: index,
+              episodeId: token,
+              url: media.url,
+              httpHeaders: media.httpHeaders,
+            );
+          probe
+            ..routeKey = _routeKey(source, token)
+            ..status = SourceProbeStatus.direct;
+          return true;
+        });
+      } catch (error) {
+        lastError = error;
+        return false;
+      }
+    }
+
+    try {
+      if (raceMode) {
+        await SourceOperation.current!.wait(
+          _firstAccepted([for (final line in lines) resolve(line)], (ok) => ok),
+        );
+      } else {
+        for (final line in lines) {
+          if (await resolve(line)) break;
+          SourceOperation.check();
+        }
+      }
+    } finally {
+      // The first playable line wins; its siblings stop here.
+      lineOperation
+        ..cancel()
+        ..close();
+    }
+    SourceOperation.check();
+    if (!probe.isInstantPlayable) throw lastError ?? StateError('无法解析播放地址');
+  }
+
   @protected
-  Future<({String url, Map<String, String> httpHeaders})> resolveLineMedia({
+  Future<PlaybackMedia> resolveLineMedia({
     required String sourceKey,
     required String lineToken,
   }) async {
@@ -1103,42 +902,26 @@ class VideoSourceSearchController extends ChangeNotifier {
     if (kind == MediaTokenKind.torrent) {
       return (url: lineToken, httpHeaders: const <String, String>{});
     }
-    final adapter = _adapter.adapterFor(sourceKey);
-    if (adapter == null) throw StateError('视频源不可用: $sourceKey');
-    if (kind == MediaTokenKind.directMedia) {
-      if (!await adapter.isPlaybackUrlReachable(lineToken)) {
-        throw StateError('媒体地址不可访问');
-      }
-      final headers = adapter.mediaValidationHeaders;
-      return (
-        url: lineToken,
-        httpHeaders: VideoUrlExtractor.isSignedCdnUrl(lineToken)
-            ? {
-                for (final entry in headers.entries)
-                  if (entry.key.toLowerCase() != 'referer')
-                    entry.key: entry.value,
-              }
-            : headers,
-      );
+    final adapter =
+        _repository.adapterFor(sourceKey) ??
+        (throw StateError('视频源不可用: $sourceKey'));
+    if (kind != MediaTokenKind.directMedia) {
+      return adapter.resolvePlaybackMedia(lineToken);
     }
-    return adapter.resolvePlaybackMedia(lineToken, maxAttempts: 1);
+    if (!await adapter.isPlaybackUrlReachable(lineToken)) {
+      throw StateError('媒体地址不可访问');
+    }
+    return (url: lineToken, httpHeaders: adapter.mediaHeadersFor(lineToken));
   }
 
-  String _routeKeyFor(String source, String token) =>
+  String _routeKey(String source, String token) =>
       MediaReadiness.classify(token) == MediaTokenKind.needsResolve
       ? '$source|$token'
       : token;
 
+  /// The candidate's catalog, loaded once per selection and shared by probes.
   Future<PlaybackRequest> resolveVideoData(SourceSearchResult item) =>
-      _resolved.get(item.key, () => _doResolveVideoData(item));
-
-  Future<PlaybackRequest> _doResolveVideoData(SourceSearchResult item) async {
-    final operation = SourceOperation(
-      parent: SourceOperation.current ?? _sourceOperation,
-      timeout: const Duration(seconds: 10),
-    );
-    try {
-      return await operation.run(() async {
+      _catalogs.get(item.key, () async {
         if (item.internalData case final data?) {
           return PlaybackRequest.fromMap(
             data,
@@ -1146,19 +929,29 @@ class VideoSourceSearchController extends ChangeNotifier {
             metadataUpdates: _seedMetadata,
           );
         }
-        final request = await _adapter.buildPlaybackRequest(item);
-        if (request == null) {
-          throw StateError(
-            'Source returned no playback catalog: ${item.source}',
-          );
-        }
-        return _seedMetadata.isEmpty
-            ? request
-            : request.copyWith(metadataUpdates: _seedMetadata);
+        return await _repository.buildPlaybackRequest(
+              item,
+              metadata: _seedMetadata,
+            ) ??
+            (throw StateError(
+              'Source returned no playback catalog: ${item.source}',
+            ));
       });
-    } finally {
-      operation.close();
-    }
-  }
+}
 
+/// The first result accepted by [test], or the last one when none is.
+/// [tasks] must not throw.
+Future<T> _firstAccepted<T>(List<Future<T>> tasks, bool Function(T) test) {
+  final done = Completer<T>();
+  var remaining = tasks.length;
+  for (final task in tasks) {
+    unawaited(
+      task.then((value) {
+        if ((test(value) || --remaining == 0) && !done.isCompleted) {
+          done.complete(value);
+        }
+      }),
+    );
+  }
+  return done.future;
 }

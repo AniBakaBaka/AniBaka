@@ -6,14 +6,13 @@ import 'dart:typed_data';
 import 'package:baka/models/ai_rule_authoring.dart';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/services/source/site_probe_service.dart';
-import 'package:baka/source/adapter_base.dart';
 import 'package:baka/source/engine/rule_validator.dart';
-import 'package:baka/source/pipeline_source_adapter.dart';
+import 'package:baka/source/source_adapter.dart';
 import 'package:dio/dio.dart';
 
 class RuleValidationRunner {
   bool _disposed = false;
-  final Set<PipelineSourceAdapter> _activeAdapters = {};
+  final Set<SourceAdapter> _activeAdapters = {};
 
   void dispose() {
     if (_disposed) return;
@@ -31,7 +30,7 @@ class RuleValidationRunner {
     String? preferredEpisodeId,
   }) async {
     if (_disposed) throw StateError('RuleValidationRunner is disposed');
-    PipelineSourceAdapter? adapter;
+    SourceAdapter? adapter;
     var stage = 'static';
     var seriesCount = 0;
     var lineCount = 0;
@@ -43,7 +42,7 @@ class RuleValidationRunner {
       if (!validation.isValid) {
         throw FormatException(validation.errors.join('；'));
       }
-      adapter = PipelineSourceAdapter(rule);
+      adapter = SourceAdapter(rule);
       _activeAdapters.add(adapter);
 
       stage = 'search';
@@ -86,7 +85,6 @@ class RuleValidationRunner {
       final resolved = await adapter.resolvePlaybackMedia(
         episodeToken,
         skipValidation: true,
-        maxAttempts: 1,
       );
       if (resolved.url.isEmpty) throw StateError('播放管线没有得到媒体地址');
       final prepared = await adapter.preparePlaybackMedia(resolved);

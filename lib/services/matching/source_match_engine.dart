@@ -9,7 +9,6 @@ class SourceMatchContext {
     this.manualAliases = const <String>[],
     this.automaticAliases = const <String>[],
     this.bgmEpisodeCount,
-    this.currentSource,
     int? querySeason,
   }) : _explicitSeason = querySeason;
 
@@ -17,7 +16,6 @@ class SourceMatchContext {
   final List<String> manualAliases;
   final List<String> automaticAliases;
   final int? bgmEpisodeCount;
-  final String? currentSource;
   final int? _explicitSeason;
 
   Iterable<String> get titles sync* {
@@ -52,14 +50,17 @@ class SourceMatchContext {
 }
 
 class SourceMatchScore {
-  const SourceMatchScore._(
+  SourceMatchScore._(
     this._baseConfidence, {
     required this.candidate,
-    required this.confidence,
     required this.titleSimilarity,
     required this.seasonConflict,
     required this.severeEpisodeConflict,
-  });
+  }) : confidence = _cap(
+         _baseConfidence,
+         seasonConflict,
+         severeEpisodeConflict,
+       );
 
   final SourceSearchResult candidate;
 
@@ -68,16 +69,24 @@ class SourceMatchScore {
   final double titleSimilarity;
   final bool seasonConflict;
   final bool severeEpisodeConflict;
-  // Before the current-source bonus and conflict caps. Keeping this value lets
-  // the switching UI reuse title/episode work without changing cap ordering.
+  // Before the conflict caps, so the switching UI can add its current-source
+  // bonus without redoing title/episode work or changing cap ordering.
   final double _baseConfidence;
 
-  int scoreForCurrentSource(String? currentSource) {
-    var value = _baseConfidence;
-    if (candidate.source == currentSource) value += 0.02;
-    if (seasonConflict) value = value.clamp(0.0, 0.28);
-    if (severeEpisodeConflict) value = value.clamp(0.0, 0.32);
-    return (value.clamp(0.0, 1.0) * 100).round();
+  int scoreForCurrentSource(String? currentSource) =>
+      (_cap(
+                _baseConfidence +
+                    (candidate.source == currentSource ? 0.02 : 0),
+                seasonConflict,
+                severeEpisodeConflict,
+              ) *
+              100)
+          .round();
+
+  static double _cap(double value, bool season, bool episode) {
+    if (season) value = value.clamp(0.0, 0.28);
+    if (episode) value = value.clamp(0.0, 0.32);
+    return value.clamp(0.0, 1.0);
   }
 
   /// 供 UI 展示的整数分。
@@ -197,15 +206,9 @@ class SourceMatchEngine {
       }
     }
 
-    final baseConfidence = confidence;
-    if (candidate.source == context.currentSource) confidence += 0.02;
-    if (seasonConflict) confidence = confidence.clamp(0.0, 0.28);
-    if (severeEpisodeConflict) confidence = confidence.clamp(0.0, 0.32);
-
     return SourceMatchScore._(
-      baseConfidence,
+      confidence,
       candidate: candidate,
-      confidence: confidence.clamp(0.0, 1.0),
       titleSimilarity: similarity,
       seasonConflict: seasonConflict,
       severeEpisodeConflict: severeEpisodeConflict,

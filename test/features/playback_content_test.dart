@@ -12,9 +12,8 @@ import 'package:baka/services/playback/history_repository.dart';
 import 'package:baka/services/playback/danmaku_controller.dart';
 import 'package:baka/services/playback/playback_content.dart';
 import 'package:baka/services/source/source_repository.dart';
-import 'package:baka/source/adapter_base.dart';
-import 'package:baka/source/models/series.dart';
-import 'package:baka/source/models/source.dart';
+import 'package:baka/source/models/source_rule.dart';
+import 'package:baka/source/source_adapter.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -46,39 +45,29 @@ http.Response _jsonResponse(Map<String, Object?> envelope) => http.Response(
   headers: const {'content-type': 'application/json; charset=utf-8'},
 );
 
-class _KeepAliveAdapter extends AdapterBase {
-  _KeepAliveAdapter() : super('keep-alive-test');
+class _KeepAliveAdapter extends SourceAdapter {
+  _KeepAliveAdapter()
+    : super(
+        const SourceRule(
+          id: 'keep-alive-test',
+          name: 'keep-alive-test',
+          baseUrl: 'https://example.com',
+        ),
+      );
 
   int starts = 0;
   int stops = 0;
   String? lastMediaUrl;
 
   @override
-  String get baseUrl => 'https://example.com';
-
-  @override
-  Future<String> getDownloadUrl(String episodeId) async => '';
-
-  @override
-  Future<({String url, Map<String, String> httpHeaders})> resolvePlaybackMedia(
+  Future<PlaybackMedia> resolvePlaybackMedia(
     String episodeId, {
+    bool forceRefresh = false,
     bool skipValidation = false,
-    int maxAttempts = 2,
-    Duration? reachTimeout,
   }) async => (
     url: episodeId == 'good' ? 'https://example.com/good.mp4' : '',
     httpHeaders: const <String, String>{},
   );
-
-  @override
-  Future<PlaybackCatalog> getPlaybackCatalog(String seriesId) async =>
-      PlaybackCatalog.empty;
-
-  @override
-  Future<List<Series>> search(
-    String query, {
-    bool enhanceWithBgm = true,
-  }) async => const [];
 
   @override
   Future<void> startPlaybackKeepAlive(String mediaUrl) async {

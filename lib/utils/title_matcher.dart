@@ -24,7 +24,7 @@ class TitleFingerprint {
     return keepTitleUnits(cleaned);
   }
 
-  /// 相似度 ∈ [0,1]；不构成子串关系的标题直接判 0。
+  /// 相似度 ∈ [0,1]；短标题必须完整匹配，其余标题允许子串关系。
   double similarityTo(TitleFingerprint other) {
     if (isEmpty || other.isEmpty) return 0;
     if (normalized == other.normalized) return 1;
@@ -34,6 +34,11 @@ class TitleFingerprint {
     final shorter = a.length <= b.length ? a : b;
     final longer = a.length > b.length ? a : b;
     if (!longer.contains(shorter)) return 0;
+
+    // 短名称只是另一部作品标题的一部分，不能据此确认作品身份。
+    // 例如「深海」与「深海危情」、「龙珠」与「龙珠超」。
+    // 常见发布标签已在 normalize 中去除，完整别名由调用方逐一比较。
+    if (shorter.length <= 4) return 0;
 
     // 一方含剧场版/季号而另一方不含时，子串关系不足以说明是同一部。
     final modMismatch = _hasModifier != other._hasModifier;

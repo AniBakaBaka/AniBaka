@@ -16,9 +16,6 @@ class RuleValidation {
 class RuleValidator {
   RuleValidator._();
 
-  /// 引擎认识的全部 op。
-  static final Set<String> knownOps = RuleLanguageSpec.knownOps;
-
   static RuleValidation validate(SourceRule rule) {
     final errors = <String>[];
     final warnings = <String>[];
@@ -66,7 +63,7 @@ class RuleValidator {
     for (var i = 0; i < steps.length; i++) {
       final step = steps[i];
       late final at = '$stage[$i] ${step.op}';
-      if (!knownOps.contains(step.op)) {
+      if (!RuleLanguageSpec.operations.containsKey(step.op)) {
         errors.add('$at: 未知 op');
         continue;
       }

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:baka/source/models/source_rule.dart';
-import 'package:baka/source/pipeline_source_adapter.dart';
+import 'package:baka/source/source_adapter.dart';
 import 'package:baka/source/runtime/source_operation.dart';
 import 'package:baka/source/runtime/request_scheduler.dart';
 import 'package:dio/dio.dart';
@@ -10,22 +10,21 @@ import '../support/ts_prefix_fixtures.dart';
 
 const _manifest =
     '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nsegment.ts\n#EXT-X-ENDLIST\n';
-PipelineSourceAdapter _adapter(String base, {bool redirects = false}) =>
-    PipelineSourceAdapter(
-      SourceRule(
-        id: 'lifecycle',
-        name: 'Lifecycle',
-        baseUrl: base,
-        directConnection: true,
-        play: [
-          PipelineStep('template', {
-            'value': '{episodeId:raw}',
-            'materializeHls': true,
-            'resolveMediaRedirects': redirects,
-          }),
-        ],
-      ),
-    );
+SourceAdapter _adapter(String base, {bool redirects = false}) => SourceAdapter(
+  SourceRule(
+    id: 'lifecycle',
+    name: 'Lifecycle',
+    baseUrl: base,
+    directConnection: true,
+    play: [
+      PipelineStep('template', {
+        'value': '{episodeId:raw}',
+        'materializeHls': true,
+        'resolveMediaRedirects': redirects,
+      }),
+    ],
+  ),
+);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -175,9 +174,8 @@ void main() {
         adapter.dispose();
         await server.close(force: true);
       });
-      final work = adapter.fetch(
-        '${adapter.baseUrl}/slow',
-        operation: operation,
+      final work = operation.run(
+        () => adapter.fetch('${adapter.baseUrl}/slow'),
       );
       final failure = expectLater(
         work,
@@ -233,7 +231,7 @@ void main() {
         }
         await response.close();
       });
-      final adapter = PipelineSourceAdapter(
+      final adapter = SourceAdapter(
         SourceRule(
           id: 'wrapped-ts',
           name: 'Wrapped TS',

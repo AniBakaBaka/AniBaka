@@ -564,7 +564,8 @@ class _PlayerPageState extends State<PlayerPage>
     _recovering = true;
     bool playing() => _opened && !ctr.core.value.failed;
     try {
-      final refreshKey = '${content.request.source}|${content.currentEpisodeId}';
+      final refreshKey =
+          '${content.request.source}|${content.currentEpisodeId}';
       if (content.isAdapter &&
           _castUrl.isNotEmpty &&
           _refreshedMediaKey != refreshKey) {
@@ -601,14 +602,13 @@ class _PlayerPageState extends State<PlayerPage>
         content.stopAdapterPlaybackKeepAlive();
       }
 
-      final search = _sourceSearch ??=
-          VideoSourceSearchController.takeSharedFor(
-            seedData: content.buildDetailData(),
-          );
+      final search = _sourceSearch ??= _newSourceSearch(
+        content.buildDetailData(),
+      );
       if (search.results.isEmpty) await search.startSearch();
       while (mounted) {
         final next = await search.findNextPlayableCandidate(
-          excludedKeys: _failedSources,
+          excludedSources: _failedSources,
           episodeIndex: content.currPlayIndex,
         );
         if (!mounted) return;
@@ -632,6 +632,12 @@ class _PlayerPageState extends State<PlayerPage>
       _recovering = false;
     }
   }
+
+  static VideoSourceSearchController _newSourceSearch(
+    Map<String, dynamic> seedData,
+  ) =>
+      VideoSourceSearchController.takeCachedFor(seedData: seedData) ??
+      VideoSourceSearchController(seedData: seedData);
 
   /// Search candidates are excluded by source key.
   void _markSourceFailed() {
@@ -742,8 +748,7 @@ class _PlayerPageState extends State<PlayerPage>
       currentEpisodeIndex: content.currPlayIndex,
       currentLineIndex: content.currUrl,
       currentSource: content.request.source,
-      searchController: _sourceSearch ??=
-          VideoSourceSearchController.takeSharedFor(seedData: seedData),
+      searchController: _sourceSearch ??= _newSourceSearch(seedData),
     );
     if (!mounted || selection == null) return;
     final line = selection.lineIndex ?? content.currUrl;

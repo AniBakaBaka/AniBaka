@@ -1,11 +1,22 @@
 import 'package:baka/models/playback_episode.dart';
-import 'package:baka/source/models/episode.dart';
 
+/// One parsed episode of a playback line.
+class Episode {
+  Episode(this.episodeId, this.episode, [this.episodeName]);
+
+  final String episodeId;
+  final int episode;
+  final String? episodeName;
+
+  String get name => episodeName ?? '第${episode + 1}集';
+}
+
+/// One playback line as produced by the parsers.
 class Source {
+  Source(this.episodes, [this.sourceName]);
+
   final List<Episode> episodes;
   final String? sourceName;
-
-  Source(this.episodes, [this.sourceName]);
 }
 
 /// Player-facing episode catalog shared by source search, matching and player
@@ -22,54 +33,43 @@ class PlaybackCatalog {
   bool get isEmpty => episodes.isEmpty;
 
   factory PlaybackCatalog.fromSources(List<Source> sources) {
-    if (sources.isEmpty) return empty;
-
     final slots = <int, _EpisodeSlot>{};
-    for (var sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
-      final source = sources[sourceIndex];
-      for (var i = 0; i < source.episodes.length; i++) {
-        final episode = source.episodes[i];
+    for (var line = 0; line < sources.length; line++) {
+      final episodes = sources[line].episodes;
+      for (var i = 0; i < episodes.length; i++) {
+        final episode = episodes[i];
         if (episode.episodeId.isEmpty) continue;
-        final index = episode.episode >= 0 ? episode.episode : i;
-        final slot = slots[index];
-        if (slot == null) {
-          slots[index] = _EpisodeSlot(
-            episode.name,
-            episode.episodeId,
-            sourceIndex,
-            sources.length,
-          );
-        } else {
-          slot.lines[sourceIndex] = episode.episodeId;
-          if (slot.titleSourceIndex == sourceIndex) slot.title = episode.name;
-        }
+        final slot = slots.putIfAbsent(
+          episode.episode >= 0 ? episode.episode : i,
+          () => _EpisodeSlot(line, sources.length),
+        );
+        slot.lines[line] = episode.episodeId;
+        // The line that introduced an episode owns its title.
+        if (slot.owner == line) slot.title = episode.name;
       }
     }
-
     if (slots.isEmpty) return empty;
     final indexes = slots.keys.toList()..sort();
     return PlaybackCatalog(
-      episodes: List<PlaybackEpisode>.generate(indexes.length, (i) {
-        final slot = slots[indexes[i]]!;
-        return PlaybackEpisode(title: slot.title, lines: slot.lines);
-      }, growable: false),
-      sourceNames: List<String>.generate(
-        sources.length,
-        (i) => sources[i].sourceName ?? '线路${i + 1}',
-        growable: false,
-      ),
+      episodes: [
+        for (final index in indexes)
+          PlaybackEpisode(
+            title: slots[index]!.title,
+            lines: slots[index]!.lines,
+          ),
+      ],
+      sourceNames: [
+        for (var i = 0; i < sources.length; i++)
+          sources[i].sourceName ?? '线路${i + 1}',
+      ],
     );
   }
 }
 
 class _EpisodeSlot {
-  _EpisodeSlot(this.title, String line, int sourceIndex, int sourceCount)
-    : titleSourceIndex = sourceIndex,
-      lines = List.filled(sourceCount, '') {
-    lines[sourceIndex] = line;
-  }
+  _EpisodeSlot(this.owner, int lineCount) : lines = List.filled(lineCount, '');
 
-  String title;
-  final int titleSourceIndex;
+  final int owner;
   final List<String> lines;
+  String title = '';
 }

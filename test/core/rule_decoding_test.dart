@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:baka/services/source/source_codec.dart';
-import 'package:baka/source/engine/anime_rule_ops.dart';
+import 'package:baka/source/engine/pipeline_interpreter.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -24,7 +24,7 @@ void main() {
       ({'data': {}}, 'data.url|data.missing', null),
     ]) {
       expect(
-        AnimeRuleOps.jsonPath(input, path),
+        PipelineInterpreter.jsonPath(input, path),
         expected,
         reason: '$input / $path',
       );
@@ -33,7 +33,10 @@ void main() {
 
   group('mapped base64', () {
     String decode(String text, Map<String, String> map) =>
-        AnimeRuleOps.decodeMappedBase64(base64.encode(utf8.encode(text)), map);
+        PipelineInterpreter.decodeMappedBase64(
+          base64.encode(utf8.encode(text)),
+          map,
+        );
     test(
       'longest token wins; unmatched Unicode and empty replacements survive',
       () {

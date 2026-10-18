@@ -126,6 +126,72 @@ void main() {
     });
 
     test(
+      'rejects other works containing a short title from search results',
+      () {
+        // Titles returned by the rule hub when searching for 深海.
+        for (final title in [
+          '深海危情',
+          '深海历险记',
+          '深海危情 动态漫画',
+          '二郎神之深海蛟龙',
+          '海绵宝宝：深海大冒险',
+          '猪猪侠之深海小英雄',
+          '军曹大电影2：深海的公主是也',
+          '深海鱼',
+        ]) {
+          final score = engine.score(
+            candidate(title, title, episodes: 1),
+            SourceMatchContext(primaryTitle: '深海', bgmEpisodeCount: 1),
+          );
+          expect(
+            score.confidence,
+            lessThan(SourceMatchEngine.admissionConfidence),
+            reason: title,
+          );
+          expect(score.shouldProbeImmediately, isFalse, reason: title);
+        }
+      },
+    );
+
+    test('keeps exact short titles, release tags and explicit aliases', () {
+      for (final title in ['深海', '深海【国语】', '深海 (1080p)']) {
+        final score = engine.score(
+          candidate(title, title, episodes: 1),
+          SourceMatchContext(primaryTitle: '深海', bgmEpisodeCount: 1),
+        );
+        expect(score.shouldProbeImmediately, isTrue, reason: title);
+      }
+      final alias = engine.score(
+        candidate('alias', 'Deep Sea', episodes: 1),
+        SourceMatchContext(primaryTitle: '深海', manualAliases: ['Deep Sea']),
+      );
+      expect(alias.shouldProbeImmediately, isTrue);
+    });
+
+    test(
+      'rejects short substrings in either direction and in Latin titles',
+      () {
+        for (final (query, title) in [
+          ('深海危情', '深海'),
+          ('龙珠', '龙珠超'),
+          ('AIR', 'FAIRY'),
+          ('K', 'K-ON!'),
+        ]) {
+          final score = engine.score(
+            candidate(title, title, episodes: 12),
+            SourceMatchContext(primaryTitle: query, bgmEpisodeCount: 12),
+          );
+          expect(
+            score.confidence,
+            lessThan(SourceMatchEngine.admissionConfidence),
+            reason: '$query -> $title',
+          );
+          expect(score.shouldProbeImmediately, isFalse);
+        }
+      },
+    );
+
+    test(
       'rejects season and severe episode conflicts from the probe queue',
       () {
         final season = engine.score(
@@ -264,8 +330,7 @@ void main() {
           expect(scheduler.add(job), isTrue);
         }
         expect(started, [1, 2]);
-        expect(scheduler.activeCount, 2);
-        expect(scheduler.queuedCount, 3);
+        expect(scheduler.isBusy, isTrue);
 
         gates[1]!.complete();
         await Future<void>.delayed(Duration.zero);
@@ -280,8 +345,6 @@ void main() {
         gates[5]!.complete();
         await scheduler.drained;
         expect(scheduler.isBusy, isFalse);
-        expect(scheduler.activeCount, 0);
-        expect(scheduler.queuedCount, 0);
       });
 
       test('accepts each key once per run', () async {
@@ -294,8 +357,8 @@ void main() {
 
         expect(scheduler.add('a'), isTrue);
         expect(scheduler.add('a'), isFalse);
-        expect(scheduler.contains('a'), isTrue);
         await scheduler.drained;
+        expect(scheduler.add('a'), isFalse);
         expect(runs, ['a']);
       });
 

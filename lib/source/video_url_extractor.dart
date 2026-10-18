@@ -200,12 +200,12 @@ class VideoUrlExtractor {
     '&quot;': '"',
   };
 
-  static String normalizeUrlText(String text) {
+  static String _normalizeUrlText(String text) {
     if (!text.contains(r'\') && !text.contains('&')) return text;
     return text.replaceAllMapped(_escapePattern, (m) => _escapeMap[m[0]]!);
   }
 
-  static String? tryBase64Decode(String value) {
+  static String? _tryBase64Decode(String value) {
     try {
       return utf8.decode(base64.decode(base64.normalize(value)));
     } catch (_) {
@@ -213,11 +213,11 @@ class VideoUrlExtractor {
     }
   }
 
-  static String? decodeEncodedVideoUrl(String encoded) {
+  static String? _decodeEncodedVideoUrl(String encoded) {
     try {
       var text = encoded;
       if (text.contains('%')) text = Uri.decodeComponent(text);
-      final decoded = tryBase64Decode(text);
+      final decoded = _tryBase64Decode(text);
       if (decoded != null) {
         return decoded.contains('%') ? Uri.decodeComponent(decoded) : decoded;
       }
@@ -230,10 +230,10 @@ class VideoUrlExtractor {
   /// Extract the best video direct-link from page content.
   /// m3u8 is preferred; otherwise first playable URL wins.
   static String extractBest(String content, String pageUrl) {
-    final searchSpace = normalizeUrlText(content);
+    final searchSpace = _normalizeUrlText(content);
 
     for (final match in _encodedPattern.allMatches(searchSpace)) {
-      final decoded = decodeEncodedVideoUrl(match.group(1) ?? '');
+      final decoded = _decodeEncodedVideoUrl(match.group(1) ?? '');
       if (decoded != null && isPlayable(decoded)) {
         return toAbsolute(decoded, pageUrl);
       }
@@ -287,7 +287,7 @@ class VideoUrlExtractor {
           continue;
         }
         if (isPlayable(decoded)) return decoded;
-        final nested = decodeEncodedVideoUrl(decoded);
+        final nested = _decodeEncodedVideoUrl(decoded);
         if (nested != null && isPlayable(nested)) return nested;
       }
     } catch (_) {}
@@ -316,7 +316,7 @@ class VideoUrlExtractor {
     bool preserveMagnet = false,
   }) {
     if (url.isEmpty) return '';
-    var text = normalizeUrlText(url).trim();
+    var text = _normalizeUrlText(url).trim();
     if (text.isEmpty || text.startsWith('blob:')) return '';
     if (preserveMagnet && text.startsWith('magnet:')) return text;
     if (text.startsWith('url=')) text = text.substring(4);

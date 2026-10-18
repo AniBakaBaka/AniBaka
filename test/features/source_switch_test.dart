@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:baka/instance.dart';
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/models/playback_request.dart';
+import 'package:baka/services/matching/match_memory_service.dart';
 import 'package:baka/services/source/source_repository.dart';
 import 'package:baka/source/models/series.dart';
 import 'package:baka/source/models/source_search_result.dart';
@@ -81,10 +82,10 @@ void main() {
   test('transfers the latest detail controller to the player', () {
     final first = VideoSourceSearchController(title: 'Example');
     final next = VideoSourceSearchController(title: 'Other');
-    VideoSourceSearchController.cacheGlobal('Example', first);
-    VideoSourceSearchController.cacheGlobal('Other', next);
+    VideoSourceSearchController.cacheGlobal(first);
+    VideoSourceSearchController.cacheGlobal(next);
     expect(first.isDisposed, isTrue);
-    final taken = VideoSourceSearchController.takeSharedFor(title: 'Other');
+    final taken = VideoSourceSearchController.takeCachedFor(title: 'Other')!;
     addTearDown(taken.dispose);
     expect(taken, same(next));
     expect(VideoSourceSearchController.globalCached, isNull);
@@ -131,7 +132,7 @@ void main() {
     controller.pending['slow']!.complete('https://fixture.test/late.mp4');
     await Future<void>.delayed(Duration.zero);
     expect(probe.status, SourceProbeStatus.failed);
-    expect(probe.data!.prefetched, isNull);
+    expect(probe.data, isNull);
   });
 
   test('first ready line cancels siblings and deduplicates tokens', () async {
@@ -438,6 +439,122 @@ void main() {
     expect(controller.progressingSources, isEmpty);
   });
 
+  test('short-title search only probes the actual work', () async {
+    repository.searcher = (source, _) async => [
+      SourceSearchResult(
+        Series('other', '深海鱼'),
+        source: source,
+        displayName: source,
+      ),
+      SourceSearchResult(
+        Series('exact', '深海'),
+        source: source,
+        displayName: source,
+      ),
+      SourceSearchResult(
+        Series('adventure', '深海历险记'),
+        source: source,
+        displayName: source,
+      ),
+    ];
+    repository.catalogFor = (item) => catalog([
+      [item.id],
+    ]);
+    final matches = <PlaybackRequest>[];
+    final controller = _Controller(
+      title: '深海',
+      autoMatch: true,
+      onMatch: matches.add,
+    );
+    addTearDown(controller.dispose);
+    addTearDown(() => MatchMemoryService.remove(title: '深海'));
+
+    await controller.startSearch();
+
+    expect(controller.results.map((item) => item.id), ['exact']);
+    expect(controller.calls, ['exact']);
+    expect(matches.single.prefetched!.episodeId, 'exact');
+  });
+
+  test('does not reuse a playable but unrelated remembered match', () async {
+    for (final rememberedTitle in ['深海鱼', 'Totally Different Show', null]) {
+      await MatchMemoryService.writeSuccess(
+        title: '深海',
+        bgmId: 999001,
+        source: 'test',
+        seriesId: 'wrong-memory',
+        candidateTitle: rememberedTitle,
+      );
+      final matches = <PlaybackRequest>[];
+      var failures = 0;
+      final controller = _Controller(
+        title: '深海',
+        seedData: {'bgmId': 999001},
+        autoMatch: true,
+        onMatch: matches.add,
+        onMatchFailed: () => failures++,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.startSearch();
+
+      expect(matches, isEmpty, reason: rememberedTitle);
+      expect(controller.calls, isEmpty);
+      expect(failures, 1);
+      expect(MatchMemoryService.read(title: '深海', bgmId: 999001), isNull);
+    }
+  });
+
+  test(
+    'still reuses an exact remembered match after title validation',
+    () async {
+      await MatchMemoryService.writeSuccess(
+        title: '深海',
+        bgmId: 999002,
+        source: 'test',
+        seriesId: 'correct-memory',
+        candidateTitle: '深海【国语】',
+      );
+      repository.catalogFor = (item) => catalog([
+        [item.id],
+      ]);
+      final matches = <PlaybackRequest>[];
+      final controller = _Controller(
+        title: '深海',
+        seedData: {'bgmId': 999002},
+        autoMatch: true,
+        onMatch: matches.add,
+      );
+      addTearDown(controller.dispose);
+      addTearDown(() => MatchMemoryService.remove(title: '深海', bgmId: 999002));
+
+      await controller.startSearch();
+
+      expect(controller.calls, ['correct-memory']);
+      expect(matches.single.prefetched!.episodeId, 'correct-memory');
+    },
+  );
+
+  test('automatic fallback never switches to a low-confidence work', () async {
+    repository.searcher = (source, _) async => [
+      SourceSearchResult(
+        Series('wrong', 'Example Unrelated Story'),
+        source: source,
+        displayName: source,
+      ),
+    ];
+    final controller = _Controller();
+    addTearDown(controller.dispose);
+    await controller.startSearch();
+
+    expect(controller.results, hasLength(1));
+    expect(
+      await controller.findNextPlayableCandidate(excludedSources: {}),
+      isNull,
+    );
+    expect(repository.loads, 0);
+  });
+
   test('manual selection cancels automatic work before it can claim', () async {
     repository.data = catalog([
       ['slow'],
@@ -505,7 +622,7 @@ class _Repository extends SourceAdapterService {
   @override
   Future<PlaybackRequest?> buildPlaybackRequest(
     SourceSearchResult item, {
-    SourceOperation? operation,
+    Map<String, dynamic> metadata = const {},
   }) async {
     loads++;
     catalogOperation = SourceOperation.current!;
@@ -518,7 +635,6 @@ class _Repository extends SourceAdapterService {
   Future<List<SourceSearchResult>> search(
     String sourceKey,
     String query, {
-    SourceOperation? operation,
     String fallbackDescription = '',
     bool skipBgmEnhancement = false,
   }) {
@@ -530,9 +646,12 @@ class _Repository extends SourceAdapterService {
 class _Controller extends VideoSourceSearchController {
   _Controller({
     this.timeout = const Duration(seconds: 15),
+    String title = 'Example',
+    super.seedData,
     bool autoMatch = false,
     void Function(PlaybackRequest)? onMatch,
-  }) : super(title: 'Example', autoMatchMode: autoMatch, onMatchFound: onMatch);
+    super.onMatchFailed,
+  }) : super(title: title, autoMatchMode: autoMatch, onMatchFound: onMatch);
   final Duration timeout;
   final pending = <String, Completer<String>>{};
   final calls = <String>[];

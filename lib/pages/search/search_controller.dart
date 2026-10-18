@@ -249,26 +249,28 @@ class AnimeSearchController {
       ),
     ];
     final results = <Map<String, dynamic>>[];
-    var next = 0;
     bool isActive() => !_disposed && task.wanted && !task.operation.isCancelled;
 
-    Future<void> worker() async {
-      while (next < sources.length && isActive()) {
-        final source = sources[next++];
+    await runConcurrent(
+      sources.length,
+      SourceMatchEngine.autoSearchConcurrency,
+      (index) async {
+        if (!isActive()) return;
+        final source = sources[index];
         final operation = SourceOperation(
           parent: task.operation,
           timeout: SourceMatchEngine.sourceSearchBudget,
         );
         try {
-          final items = await _sourceAdapterService.search(
-            source,
-            task.key.query,
-            operation: operation,
-            fallbackDescription: noDescriptionText,
-            skipBgmEnhancement: true,
+          final items = await operation.run(
+            () => _sourceAdapterService.search(
+              source,
+              task.key.query,
+              fallbackDescription: noDescriptionText,
+              skipBgmEnhancement: true,
+            ),
           );
-          if (!isActive()) return;
-          if (items.isNotEmpty) {
+          if (isActive() && items.isNotEmpty) {
             results.addAll(items.map((result) => result.toLegacyMap()));
             _results.publish(results);
           }
@@ -278,17 +280,8 @@ class AnimeSearchController {
           operation.cancel();
           operation.close();
         }
-      }
-    }
-
-    await Future.wait([
-      for (
-        var i = 0;
-        i < sources.length && i < SourceMatchEngine.autoSearchConcurrency;
-        i++
-      )
-        worker(),
-    ]);
+      },
+    );
     return isActive() ? results : const [];
   }
 

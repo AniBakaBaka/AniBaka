@@ -122,22 +122,6 @@ class RequestScheduler {
     _pump();
   }
 
-  /// 提交一个受调度的异步任务（acquire → task → release 的便捷封装）。
-  Future<T> run<T>(
-    Future<T> Function() task, {
-    required String host,
-    RequestPriority priority = RequestPriority.search,
-    RequestCancelToken? cancelToken,
-  }) async {
-    await acquire(host, priority: priority, cancelToken: cancelToken);
-    try {
-      cancelToken?.throwIfCancelled();
-      return await task();
-    } finally {
-      release(host);
-    }
-  }
-
   int _seq = 0;
 
   void _pump() {

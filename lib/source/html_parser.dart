@@ -3,7 +3,6 @@ import 'package:html/dom.dart' show Document, Element;
 import 'package:html/parser.dart' as html_parser;
 import 'package:xpath_selector_html_parser/xpath_selector_html_parser.dart';
 import 'package:baka/source/models/series.dart';
-import 'package:baka/source/models/episode.dart';
 import 'package:baka/source/models/source.dart';
 import 'package:baka/source/video_url_extractor.dart';
 

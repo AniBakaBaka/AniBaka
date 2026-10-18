@@ -7,6 +7,7 @@ import 'package:test/test.dart';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/services/source/source_codec.dart';
 import 'package:baka/source/engine/rule_validator.dart';
+import 'package:baka/source/source_registry.dart';
 import 'package:baka/source/store/bundled_rule_store.dart';
 
 void main() {
@@ -32,8 +33,10 @@ void main() {
         Map<String, dynamic>.from(decoded as Map),
       ).rule;
       expect(
-        BundledRuleStore.builtinAssets[rule.id],
-        file.path.replaceAll(r'\', '/'),
+        AdapterRegistry.isBuiltinSource(rule.id) &&
+            BundledRuleStore.assetFor(rule.id) ==
+                file.path.replaceAll(r'\', '/'),
+        isTrue,
         reason: '$name registry mismatch',
       );
       expect(rule.baseUrl, isNotEmpty, reason: '$name missing baseUrl');
@@ -55,13 +58,11 @@ void main() {
         jsonDecode(File(BundledRuleStore.indexAsset).readAsStringSync()) as Map;
     expect(index['format'], 'anx-rulehub/2');
     final entries = (index['entries'] as List).cast<Map>();
-    expect(
-      entries.map((entry) => entry['key']).toSet(),
-      BundledRuleStore.builtinAssets.keys.toSet(),
-    );
-    expect(entries.length, BundledRuleStore.builtinAssets.length);
+    final keys = AdapterRegistry.builtinSources.map((source) => source.key);
+    expect(entries.map((entry) => entry['key']).toSet(), keys.toSet());
+    expect(entries.length, keys.length);
     for (final entry in entries) {
-      final path = BundledRuleStore.builtinAssets[entry['key']]!;
+      final path = BundledRuleStore.assetFor(entry['key'] as String);
       expect(path, 'assets/rules/${entry['ref']}');
       final body = File(path).readAsStringSync().replaceAll('\r\n', '\n');
       expect(

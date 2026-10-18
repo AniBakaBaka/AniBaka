@@ -9,7 +9,7 @@ import 'package:baka/source/engine/pipeline_interpreter.dart';
 import 'package:baka/source/engine/recipes.dart';
 import 'package:baka/source/engine/rule_validator.dart';
 import 'package:baka/source/models/source_rule.dart';
-import 'package:baka/source/pipeline_source_adapter.dart';
+import 'package:baka/source/source_adapter.dart';
 import 'package:baka/source/runtime/request_scheduler.dart';
 import 'package:crypto/crypto.dart';
 import 'package:encrypt/encrypt.dart' as encrypt;
@@ -32,7 +32,6 @@ class FakeHost implements PipelineHost {
     Object? body,
     String? referer,
     String? contentType,
-    SourceOperation? operation,
     RequestPriority priority = RequestPriority.search,
   }) async {
     fetched.add(url);
@@ -66,7 +65,6 @@ class VerifyCheckHost extends FakeHost {
     Object? body,
     String? referer,
     String? contentType,
-    SourceOperation? operation,
     RequestPriority priority = RequestPriority.search,
   }) async {
     fetched.add(url);
@@ -590,9 +588,9 @@ void main() {
     final changed = config.copyWith(enabled: false, updatedAt: DateTime(2026));
     final renamed = changed.copyWith(name: 'Renamed');
     expect(() => renamed.rule.play.clear(), throwsUnsupportedError);
-    final replacement = <PipelineStep>[const PipelineStep('follow', {})];
-    final replaced = config.rule.copyWith(play: replacement);
-    replacement.clear();
+    final replaced = config.rule.copyWith(
+      play: const [PipelineStep('follow', {})],
+    );
     expect(replaced.play.single.op, 'follow');
     expect(config.rule.play.single.branches.single.single.op, 'template');
     final restored = CustomSourceConfig.fromJson(
@@ -1598,7 +1596,7 @@ void main() {
       expect(rule.directConnection, isTrue);
       expect(rule.copyWith().directConnection, isTrue);
       expect(rule.toJson()['directConnection'], isTrue);
-      expect(PipelineSourceAdapter(rule).useSystemProxy, isFalse);
+      expect(SourceAdapter(rule).useSystemProxy, isFalse);
     });
   });
 
@@ -1844,16 +1842,17 @@ void main() {
     test('cancelled delay never enters following fetch or fallback', () async {
       final host = FakeHost({});
       final operation = SourceOperation();
-      final work = interpreter.runSearch(
-        _pipelineRule(
-          search: const [
-            PipelineStep('delay', {'ms': 10000}),
-            PipelineStep('fetch', {'url': '/obsolete'}),
-          ],
+      final work = operation.run(
+        () => interpreter.runSearch(
+          _pipelineRule(
+            search: const [
+              PipelineStep('delay', {'ms': 10000}),
+              PipelineStep('fetch', {'url': '/obsolete'}),
+            ],
+          ),
+          host,
+          'query',
         ),
-        host,
-        'query',
-        operation: operation,
       );
       final failure = expectLater(
         work,

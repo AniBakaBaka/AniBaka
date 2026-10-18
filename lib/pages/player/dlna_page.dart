@@ -309,74 +309,67 @@ class DlnaCastPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final portrait = isBottomPlayerPanel(context);
-    final theme = playerPanelTheme(
-      Theme.of(context),
-      bottom: true,
-      compact: isCompactPlayerPanel(context) && !portrait,
-    );
+    final theme = Theme.of(context);
     final media = MediaQuery.of(context);
     final height = portrait
         ? (media.size.height - media.padding.top - media.size.width * 9 / 16)
               .clamp(0.0, media.size.height * 0.74)
         : (media.size.height - media.padding.top) * 0.9;
 
-    return Theme(
-      data: theme,
-      child: Material(
-        color: theme.colorScheme.surfaceContainerLow,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-        clipBehavior: Clip.antiAlias,
-        child: SizedBox(
-          height: height,
-          child: SafeArea(
-            top: false,
-            child: Column(
-              children: [
-                SizedBox(
-                  height: 24,
-                  child: Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.onSurfaceVariant.withValues(
-                          alpha: 0.4,
-                        ),
-                        borderRadius: BorderRadius.circular(2),
+    return Material(
+      color: theme.colorScheme.surfaceContainerLow,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        height: height,
+        child: SafeArea(
+          top: false,
+          child: Column(
+            children: [
+              SizedBox(
+                height: 24,
+                child: Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.onSurfaceVariant.withValues(
+                        alpha: 0.4,
                       ),
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 12, 12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '投屏',
-                          style: theme.textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 12, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '投屏',
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                      IconButton.filledTonal(
-                        tooltip: '收起投屏面板',
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close_rounded),
-                      ),
-                    ],
-                  ),
+                    ),
+                    IconButton.filledTonal(
+                      tooltip: '收起投屏面板',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
                 ),
-                Expanded(
-                  child: ListenableBuilder(
-                    listenable: controller,
-                    builder: (context, _) => controller.connected
-                        ? _buildControls(theme)
-                        : _buildDevices(theme),
-                  ),
+              ),
+              Expanded(
+                child: ListenableBuilder(
+                  listenable: controller,
+                  builder: (context, _) => controller.connected
+                      ? _buildControls(theme)
+                      : _buildDevices(theme),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

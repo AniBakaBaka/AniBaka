@@ -2,7 +2,6 @@ import 'package:baka/source/engine/rule_language_spec.dart';
 import 'package:html/dom.dart';
 import 'package:html/parser.dart' as html_parser;
 
-import 'package:baka/source/models/episode.dart';
 import 'package:baka/source/models/series.dart';
 import 'package:baka/source/models/source.dart';
 

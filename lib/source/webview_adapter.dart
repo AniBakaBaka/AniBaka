@@ -708,17 +708,15 @@ class WebViewAdapter {
     return s;
   }
 
+  /// Polls until a URL is found; the task deadline ends the loop.
   static Future<String?> _pollSniffedUrl(
     Future<dynamic> Function(String js) exec,
     bool Function() cancelled,
-    Duration timeout,
     bool followEmbeddedPlayer,
   ) async {
-    final watch = Stopwatch()..start();
-    final timeoutMicros = timeout.inMicroseconds;
     var followedEmbeddedPlayer = false;
     var intervalMs = 250;
-    while (!cancelled() && watch.elapsedMicroseconds < timeoutMicros) {
+    while (!cancelled()) {
       try {
         final url = _cleanJsResult(await exec(_snifferPollScript));
         if (url == _snifferMissing) {
@@ -752,18 +750,15 @@ class WebViewAdapter {
     caseSensitive: false,
   );
 
+  /// Polls until the page is ready; the task deadline ends the loop.
   static Future<(String, String)> _pollPageContent(
     Future<dynamic> Function(String js) exec,
     bool Function() cancelled, {
-    required Duration timeout,
     required Duration settleDelay,
     bool Function(String html)? isReady,
   }) async {
-    final watch = Stopwatch()..start();
-    final timeoutMicros = timeout.inMicroseconds;
-
     var settled = settleDelay == Duration.zero;
-    while (!cancelled() && watch.elapsedMicroseconds < timeoutMicros) {
+    while (!cancelled()) {
       try {
         // Explicit readiness can succeed before slow subresources finish loading.
         // Without it, wait for the target document's load event.
@@ -817,12 +812,8 @@ class WebViewAdapter {
     sniff: true,
     cookieHeader: cookieHeader,
     taskScope: taskScope,
-    poll: (exec, cancelled) => _pollSniffedUrl(
-      exec,
-      cancelled,
-      const Duration(seconds: 58),
-      followEmbeddedPlayer,
-    ),
+    poll: (exec, cancelled) =>
+        _pollSniffedUrl(exec, cancelled, followEmbeddedPlayer),
     onTimeout: () => null,
     onCancelled: () => null,
   );
@@ -845,7 +836,6 @@ class WebViewAdapter {
     poll: (exec, cancelled) => _pollPageContent(
       exec,
       cancelled,
-      timeout: timeout,
       settleDelay: settleDelay,
       isReady: isReady,
     ),

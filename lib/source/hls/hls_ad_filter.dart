@@ -33,8 +33,8 @@ class HlsAdFilterOutcome {
 
 /// 清单里的一个分片：从属于自己的标签行（`#EXTINF`、可能还有
 /// `#EXT-X-DISCONTINUITY` 等）到 URI 行的行号区间。
-class HlsPlaylistSegment {
-  const HlsPlaylistSegment({
+class _Segment {
+  const _Segment({
     required this.firstLine,
     required this.lastLine,
     required this.duration,
@@ -56,15 +56,15 @@ class HlsPlaylistSegment {
 }
 
 /// 解析成「行 + 分片」的清单模型，便于按分片删除整段行。
-class HlsPlaylist {
-  const HlsPlaylist({required this.lines, required this.segments});
+class _Playlist {
+  const _Playlist({required this.lines, required this.segments});
 
   final List<String> lines;
-  final List<HlsPlaylistSegment> segments;
+  final List<_Segment> segments;
 
-  static HlsPlaylist parse(String text, Uri baseUri) {
+  static _Playlist parse(String text, Uri baseUri) {
     final lines = text.replaceAll('\r\n', '\n').split('\n');
-    final segments = <HlsPlaylistSegment>[];
+    final segments = <_Segment>[];
 
     int? blockStart;
     var duration = 0.0;
@@ -92,7 +92,7 @@ class HlsPlaylist {
         uri = Uri.parse(trimmed);
       }
       segments.add(
-        HlsPlaylistSegment(
+        _Segment(
           firstLine: start,
           lastLine: i,
           duration: duration,
@@ -105,7 +105,7 @@ class HlsPlaylist {
       discontinuity = false;
     }
 
-    return HlsPlaylist(lines: lines, segments: segments);
+    return _Playlist(lines: lines, segments: segments);
   }
 
   /// 能归属到某个分片的标签。清单级标签（`#EXT-X-TARGETDURATION`、
@@ -180,7 +180,7 @@ abstract final class HlsAdFilter {
         detail: '加密、初始化段或字节范围清单保持原样',
       );
     }
-    final playlist = HlsPlaylist.parse(manifest, manifestUri);
+    final playlist = _Playlist.parse(manifest, manifestUri);
     final segments = playlist.segments;
     final groups = playlist.groups();
     final totalSeconds = segments.fold<double>(
@@ -205,19 +205,17 @@ abstract final class HlsAdFilter {
       segments[index].uri,
       () => _safeProbe(probe, segments[index].uri),
     );
-    final heads = await _mapConcurrent(groups.length, concurrency, (i) async {
+    final heads = List<HlsVideoFingerprint?>.filled(groups.length, null);
+    await runConcurrent(groups.length, concurrency, (i) async {
       final group = groups[i];
-      final head = await fingerprintAt(group.first);
-      if (head != null) return head;
       // 不因一次组首超时漏掉整组；最多补探中间和末尾两片。
       for (final index in {
+        group.first,
         group.first + (group.end - group.first) ~/ 2,
         group.end - 1,
       }) {
-        final fallback = await fingerprintAt(index);
-        if (fallback != null) return fallback;
+        if ((heads[i] = await fingerprintAt(index)) != null) return;
       }
-      return null;
     });
 
     // 按组时长加权投票，取多数指纹作为正片指纹。
@@ -251,10 +249,11 @@ abstract final class HlsAdFilter {
         drop.add(group.first);
         continue;
       }
-      final fingerprints = await _mapConcurrent(
+      final fingerprints = List<HlsVideoFingerprint?>.filled(count, null);
+      await runConcurrent(
         count,
         concurrency,
-        (i) => fingerprintAt(group.first + i),
+        (i) async => fingerprints[i] = await fingerprintAt(group.first + i),
       );
       for (var k = 0; k < count; k++) {
         final fingerprint = fingerprints[k];
@@ -361,29 +360,5 @@ abstract final class HlsAdFilter {
       SourceOperation.check();
       return null;
     }
-  }
-
-  /// 固定并发地映射，保持请求顺序无关但数量可控。
-  static Future<List<T?>> _mapConcurrent<T>(
-    int length,
-    int concurrency,
-    Future<T?> Function(int index) action,
-  ) async {
-    final results = List<T?>.filled(length, null);
-    if (length == 0) return results;
-    var next = 0;
-    Future<void> worker() async {
-      while (true) {
-        final index = next++;
-        if (index >= length) return;
-        results[index] = await action(index);
-      }
-    }
-
-    final workers = concurrency < 1 ? 1 : concurrency;
-    await Future.wait([
-      for (var i = 0; i < workers && i < length; i++) worker(),
-    ]);
-    return results;
   }
 }
