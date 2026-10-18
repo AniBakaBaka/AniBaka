@@ -46,15 +46,20 @@ class ScheduleWeek {
     required this.days,
     required this.stale,
     required this.checkedAt,
+    this.timingUnavailable = false,
+    this.calendarUnavailable = false,
   });
   final List<List<ScheduleEntry>> days;
   final bool stale;
-  final DateTime checkedAt;
+  final DateTime? checkedAt;
+  final bool timingUnavailable;
+  final bool calendarUnavailable;
 
   factory ScheduleWeek.merge({
     required DateTime monday,
     required List<List<Map>> calendar,
-    required Map<String, dynamic> timetable,
+    Map<String, dynamic>? timetable,
+    bool calendarUnavailable = false,
   }) {
     final dates = List.generate(7, (day) => monday.add(Duration(days: day)));
     final dateKeys = List.generate(
@@ -69,7 +74,8 @@ class ScheduleWeek {
     final records = <String, ({Map post, int? sourceOffset})>{};
     final sites = <(String, String, String), Map>{};
     final scheduledIds = <int>{};
-    for (final record in (timetable['items'] as List).cast<Map>()) {
+    for (final record
+        in (timetable?['items'] as List? ?? const []).cast<Map>()) {
       final key = record['key'] as String;
       final item = record['item'] as Map;
       final id = record['bgm_id'] as int?;
@@ -95,7 +101,7 @@ class ScheduleWeek {
       }
     }
 
-    final events = (timetable['events'] as List).cast<Map>();
+    final events = (timetable?['events'] as List? ?? const []).cast<Map>();
     final platformEvents = <(String, String), List<Map>>{};
     for (final event in events) {
       if (event['kind'] == 'platform') {
@@ -104,7 +110,7 @@ class ScheduleWeek {
             .add(event);
       }
     }
-    final meta = timetable['site_meta'] as Map;
+    final meta = timetable?['site_meta'] as Map? ?? const {};
     // API events are already ordered by timestamp; retain that order directly.
     for (final event in events) {
       if (event['kind'] != 'broadcast') continue;
@@ -169,11 +175,15 @@ class ScheduleWeek {
         );
       }
     }
-    final source = timetable['source'] as Map;
+    final source = timetable?['source'] as Map?;
     return ScheduleWeek(
       days: days,
-      stale: source['stale'] as bool,
-      checkedAt: DateTime.parse(source['checked_at'] as String),
+      timingUnavailable: timetable == null,
+      calendarUnavailable: calendarUnavailable,
+      stale: source?['stale'] as bool? ?? false,
+      checkedAt: timetable == null
+          ? null
+          : DateTime.parse(source!['checked_at'] as String),
     );
   }
 }

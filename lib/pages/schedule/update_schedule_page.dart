@@ -266,7 +266,9 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
                                       bottomInset + 24,
                                     ),
                                     child: Text(
-                                      '排期数据：bangumi-data · 放送时间不代表片源已更新',
+                                      _week!.timingUnavailable
+                                          ? '日历数据：Bangumi · 放送时间待确认'
+                                          : '排期数据：bangumi-data · 放送时间不代表片源已更新',
                                       textAlign: TextAlign.center,
                                       style: theme.textTheme.bodySmall
                                           ?.copyWith(
@@ -292,8 +294,14 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
     );
   }
 
-  String? get _notice =>
-      _error ?? (_week?.stale == true ? '排期数据较旧，请以官方公告为准' : null);
+  String? get _notice {
+    if (_error != null) return _error;
+    final week = _week;
+    if (week == null) return null;
+    if (week.timingUnavailable) return '放送时间暂不可用，正在显示番剧日历';
+    if (week.calendarUnavailable) return '番剧日历暂不可用，正在显示放送排期';
+    return week.stale ? '排期数据较旧，请以官方公告为准' : null;
+  }
 
   Widget _buildNotice(ThemeData theme, String notice) => Padding(
     padding: const EdgeInsets.only(left: 16, right: 6),
@@ -588,10 +596,10 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
               const Text(
                 '集数与标题按 Bangumi 章节的播出日期匹配；时间未知的番剧按日历日期匹配。过去日期无匹配时显示“未查到当日章节”，不会按周数推算集数。平台可能存在地区限制。',
               ),
-              if (_week != null) ...[
+              if (_week?.checkedAt != null) ...[
                 const SizedBox(height: 12),
                 Text(
-                  '排期最近检查：${scheduleDate(_week!.checkedAt.toUtc().add(const Duration(hours: 8)))}',
+                  '排期最近检查：${scheduleDate(_week!.checkedAt!.toUtc().add(const Duration(hours: 8)))}',
                 ),
               ],
               const SizedBox(height: 12),

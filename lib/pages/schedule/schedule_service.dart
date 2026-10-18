@@ -1,5 +1,6 @@
 import 'package:baka/api/anime_schedule.dart';
 import 'package:baka/api/bgm.dart';
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/models/anime_schedule.dart';
 import 'package:baka/utils/json_values.dart';
 
@@ -11,14 +12,45 @@ class ScheduleService {
     _labels.clear();
     _refresh = force;
     final (timetable, calendar) = await (
-      getAnimeSchedule(monday),
-      getBgmCalendar(force: force),
+      _loadSource('放送排期', () => getAnimeSchedule(monday)),
+      _loadSource('番剧日历', () => getBgmCalendar(force: force)),
     ).wait;
-    return ScheduleWeek.merge(
-      monday: monday,
-      calendar: calendar,
-      timetable: timetable,
-    );
+    if (timetable == null && calendar == null) {
+      throw StateError('暂时无法获取更新时间表');
+    }
+    if (timetable != null) {
+      try {
+        return ScheduleWeek.merge(
+          monday: monday,
+          calendar: calendar ?? List.generate(7, (_) => <Map>[]),
+          timetable: timetable,
+          calendarUnavailable: calendar == null,
+        );
+      } catch (error, stackTrace) {
+        AppLogger.instance.warning(
+          '放送排期解析失败',
+          tag: 'Schedule',
+          error: error,
+          stackTrace: stackTrace,
+        );
+        if (calendar == null) rethrow;
+      }
+    }
+    return ScheduleWeek.merge(monday: monday, calendar: calendar!);
+  }
+
+  Future<T?> _loadSource<T>(String name, Future<T> Function() load) async {
+    try {
+      return await load();
+    } catch (error, stackTrace) {
+      AppLogger.instance.warning(
+        '$name加载失败',
+        tag: 'Schedule',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return null;
+    }
   }
 
   /// 只保留本周章节文案；章节原始数据、分页和并发请求由 BGM API 共用。
