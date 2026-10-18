@@ -110,6 +110,7 @@ class _PlayerPageState extends State<PlayerPage>
   bool _wasPlaying = false;
   bool _fullscreen = false;
   bool _darkTheme = false;
+  bool _updatingFollow = false;
 
   bool get _hidden => contentFilter.value && _content.isNsfw;
   bool get _hasNext => _content.currPlayIndex + 1 < _content.videoList.length;
@@ -131,6 +132,7 @@ class _PlayerPageState extends State<PlayerPage>
     ctr.setMediaInfo(_content.currentMediaInfo);
     ctr.core.addListener(_onCoreChanged);
     ctr.onHlsAdFilterChanged = _reloadHlsFilter;
+    unawaited(_loadFollowState());
     if (!_content.isLocalSource &&
         (widget.autoMatch || _content.needsSourceMatch)) {
       _startAutoMatch();
@@ -791,12 +793,25 @@ class _PlayerPageState extends State<PlayerPage>
 
   void _showSettings() => PlayerSettingsPage.show(context, ctr);
 
+  Future<void> _loadFollowState() async {
+    try {
+      await _content.refreshCollection();
+      if (mounted) _followed.value = _content.isFollow();
+    } catch (error) {
+      debugPrint('读取追番状态失败: $error');
+    }
+  }
+
   Future<void> _toggleFollow() async {
+    if (_updatingFollow) return;
+    _updatingFollow = true;
     try {
       await _content.toggleFollow();
-      _followed.value = _content.isFollow();
+      if (mounted) _followed.value = _content.isFollow();
     } catch (e) {
-      showSnackBar(e.toString(), isError: true);
+      if (mounted) showSnackBar(e.toString(), isError: true);
+    } finally {
+      _updatingFollow = false;
     }
   }
 

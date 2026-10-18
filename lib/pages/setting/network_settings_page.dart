@@ -52,10 +52,7 @@ class _NetworkSettingsPageState extends State<NetworkSettingsPage> {
                 '所选 DoH 服务商仍可看到查询域名；仅开启 DoH 无法隐藏 HTTPS 握手中的域名。',
               ),
               value: _doh,
-              onChanged: (v) => setState(() {
-                _doh = v;
-                _ech &= v;
-              }),
+              onChanged: (v) => setState(() => _doh = v),
             ),
             SwitchListTile(
               secondary: const Icon(Icons.enhanced_encryption_outlined),
@@ -63,18 +60,15 @@ class _NetworkSettingsPageState extends State<NetworkSettingsPage> {
               subtitle: const Text(
                 '加密 HTTPS 握手中的真实域名（SNI），进一步减少访问目标的泄露。'
                 '需要目标站点支持并发布 ECH 配置，无法隐藏目标 IP 地址。'
-                '开启时会同时开启 DoH；关闭 DoH 也会关闭 ECH。',
+                '可单独开启；仅开启 ECH 时，通过下方服务查询 ECH 配置，IP 地址仍使用系统 DNS 解析。',
               ),
               value: _ech,
-              onChanged: (v) => setState(() {
-                _ech = v;
-                _doh |= v;
-              }),
+              onChanged: (v) => setState(() => _ech = v),
             ),
           ],
         ),
         SettingsSection(
-          title: 'DoH 服务',
+          title: 'DoH / ECH 配置查询服务',
           children: [
             Padding(
               padding: const EdgeInsets.all(16),
@@ -115,7 +109,7 @@ class _NetworkSettingsPageState extends State<NetworkSettingsPage> {
               icon: Icons.sync_problem_outlined,
               title: '连接失败时的行为',
               subtitle:
-                  '普通公网域名的 DoH 查询失败时，请求会报错，不会回退到系统 DNS；本机及局域网名称仍使用本地解析。'
+                  '开启 DoH 后，普通公网域名查询失败时，请求会报错，不会回退到系统 DNS；本机及局域网名称仍使用本地解析。'
                   '未发布 ECH 配置的站点使用普通 HTTPS；已获取配置但 ECH 握手失败时，请求会报错。',
             ),
             SettingsTile(

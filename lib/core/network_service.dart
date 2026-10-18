@@ -20,17 +20,21 @@ class NetworkService {
   static void initialize(SharedPreferences preferences) {
     close();
     settings = NetworkSettings.load(preferences);
-    if (!settings.dohEnabled) return;
+    if (!settings.dohEnabled && !settings.echEnabled) return;
     // Explicitly remove the global DNS hook to avoid recursive DoH queries.
     final bootstrap = SystemProxyService.createHttpClient()
       ..connectionFactory = null
       ..badCertificateCallback = null
       ..connectionTimeout = const Duration(seconds: 8);
-    resolver = DohResolver(
-      client: IOClient(bootstrap),
-      endpoint: settings.endpoint,
-    );
-    SystemProxyService.connectionFactory = _connect;
+    resolver = settings.dohEnabled
+        ? DohResolver(client: IOClient(bootstrap), endpoint: settings.endpoint)
+        : _EchDiscoveryResolver(
+            client: IOClient(bootstrap),
+            endpoint: settings.endpoint,
+          );
+    if (settings.dohEnabled) {
+      SystemProxyService.connectionFactory = _connect;
+    }
   }
 
   static void close() {
@@ -44,9 +48,42 @@ class NetworkService {
     Uri uri,
     String? proxyHost,
     int? proxyPort,
-  ) =>
-      resolver?.connect(uri, proxyHost, proxyPort) ??
-      Socket.startConnect(proxyHost ?? uri.host, proxyPort ?? uri.port);
+  ) async {
+    final task =
+        await (resolver?.connect(uri, proxyHost, proxyPort) ??
+            Socket.startConnect(proxyHost ?? uri.host, proxyPort ?? uri.port));
+    // HttpClient uses a custom connection factory's socket as-is. Direct HTTPS
+    // therefore needs TLS here; proxy CONNECT tunnels are secured by HttpClient.
+    if (uri.scheme != 'https' || proxyHost != null) return task;
+
+    Socket? raw;
+    SecureSocket? secure;
+    var cancelled = false;
+    final socket = () async {
+      raw = await task.socket;
+      if (cancelled) {
+        raw!.destroy();
+        throw const SocketException('Connection cancelled');
+      }
+      try {
+        secure = await SecureSocket.secure(raw!, host: uri.host);
+        if (cancelled) {
+          secure!.destroy();
+          throw const SocketException('Connection cancelled');
+        }
+        return secure!;
+      } catch (_) {
+        raw!.destroy();
+        rethrow;
+      }
+    }();
+    return ConnectionTask.fromSocket(socket, () {
+      cancelled = true;
+      task.cancel();
+      raw?.destroy();
+      secure?.destroy();
+    });
+  }
 
   static http.Client createClient({
     bool useSystemProxy = true,
@@ -81,4 +118,14 @@ class NetworkService {
 
   static Dio createDio([BaseOptions? options]) =>
       Dio(options)..httpClientAdapter = createDioAdapter();
+}
+
+/// ECH still needs HTTPS DNS records, but its address routing is independent
+/// from the application's DoH switch.
+class _EchDiscoveryResolver extends DohResolver {
+  _EchDiscoveryResolver({required super.client, required super.endpoint});
+
+  @override
+  Future<List<InternetAddress>> lookup(String host) =>
+      InternetAddress.lookup(host);
 }

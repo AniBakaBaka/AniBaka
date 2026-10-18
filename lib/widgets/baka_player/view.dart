@@ -544,35 +544,42 @@ class _BakaPlayerState extends State<BakaPlayer> {
       top: 25,
       right: 15,
       bottom: 15,
-      child: Focus(
-        focusNode: _playerFocusNode,
-        autofocus: true,
-        onKeyEvent: (node, event) => _handleKeyEvent(event),
-        child: GestureDetector(
-          onTap: controller.toggleControls,
-          onDoubleTapDown: (details) {
-            _handleDoubleTap(
-              details.localPosition.dx,
-              MediaQuery.sizeOf(context).width,
-            );
-          },
-          onLongPressStart: (_) => controller.setDoubleSpeed(true),
-          onLongPressMoveUpdate: (details) =>
-              controller.updateDoubleSpeedOffset(details.offsetFromOrigin.dx),
-          onLongPressEnd: (_) => controller.setDoubleSpeed(false),
-          onLongPressCancel: () => controller.setDoubleSpeed(false),
-          onHorizontalDragStart: _handleHorizontalDragStart,
-          onHorizontalDragUpdate: _handleHorizontalDragUpdate,
-          onHorizontalDragEnd: (_) {
-            final target = controller.timeline.value.previewPosition;
-            controller.endSeekPreview();
-            controller.seek(target);
-          },
-          onHorizontalDragCancel: controller.endSeekPreview,
-          onVerticalDragStart: _handleVerticalDragStart,
-          onVerticalDragUpdate: _handleVerticalDragUpdate,
-          onVerticalDragEnd: (_) => _endVerticalDrag(),
-          onVerticalDragCancel: _endVerticalDrag,
+      child: ValueSelector<PlayerOverlayState, bool>(
+        valueListenable: controller.overlay,
+        select: (state) => state.controlsLocked,
+        builder: (context, locked) => AbsorbPointer(
+          absorbing: locked,
+          child: Focus(
+            focusNode: _playerFocusNode,
+            autofocus: true,
+            onKeyEvent: (node, event) => _handleKeyEvent(event),
+            child: GestureDetector(
+              onTap: controller.toggleControls,
+              onDoubleTapDown: (details) {
+                _handleDoubleTap(
+                  details.localPosition.dx,
+                  MediaQuery.sizeOf(context).width,
+                );
+              },
+              onLongPressStart: (_) => controller.setDoubleSpeed(true),
+              onLongPressMoveUpdate: (details) => controller
+                  .updateDoubleSpeedOffset(details.offsetFromOrigin.dx),
+              onLongPressEnd: (_) => controller.setDoubleSpeed(false),
+              onLongPressCancel: () => controller.setDoubleSpeed(false),
+              onHorizontalDragStart: _handleHorizontalDragStart,
+              onHorizontalDragUpdate: _handleHorizontalDragUpdate,
+              onHorizontalDragEnd: (_) {
+                final target = controller.timeline.value.previewPosition;
+                controller.endSeekPreview();
+                controller.seek(target);
+              },
+              onHorizontalDragCancel: controller.endSeekPreview,
+              onVerticalDragStart: _handleVerticalDragStart,
+              onVerticalDragUpdate: _handleVerticalDragUpdate,
+              onVerticalDragEnd: (_) => _endVerticalDrag(),
+              onVerticalDragCancel: _endVerticalDrag,
+            ),
+          ),
         ),
       ),
     );
@@ -1374,16 +1381,22 @@ class _BakaPlayerState extends State<BakaPlayer> {
       builder: (context, state) {
         final (showControls, isLocked) = state;
         return Visibility(
-          visible: showControls,
+          visible: showControls || isLocked,
           child: Align(
             alignment: Alignment.centerLeft,
-            child: FractionalTranslation(
-              translation: const Offset(1, 0.0),
-              child: SizedBox(
-                width: 34,
-                height: 34,
-                child: IconButton(
-                  padding: EdgeInsets.zero,
+            child: SafeArea(
+              top: false,
+              right: false,
+              bottom: false,
+              minimum: const EdgeInsets.only(left: 24),
+              child: PlatformTooltip(
+                message: isLocked ? '解锁屏幕' : '锁定屏幕',
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: Colors.black54,
+                    minimumSize: const Size(48, 48),
+                  ),
                   onPressed: () =>
                       widget.controller.setControlsLocked(!isLocked),
                   icon: Icon(
@@ -1391,6 +1404,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
                     size: 24,
                     color: Colors.white,
                   ),
+                  label: Text(isLocked ? '解锁' : '锁定'),
                 ),
               ),
             ),

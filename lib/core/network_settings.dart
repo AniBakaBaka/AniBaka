@@ -35,12 +35,11 @@ class NetworkSettings {
   static NetworkSettings load(SharedPreferences preferences) {
     try {
       final data = jsonDecode(preferences.getString(storageKey) ?? '{}');
-      final ech = data['ech'] == true;
       final endpoint = data['endpoint'] as String? ?? defaultEndpoint;
       validateEndpoint(endpoint);
       return NetworkSettings(
-        dohEnabled: data['doh'] == true || ech,
-        echEnabled: ech,
+        dohEnabled: data['doh'] == true,
+        echEnabled: data['ech'] == true,
         dohEndpoint: endpoint,
       );
     } catch (_) {
@@ -50,9 +49,6 @@ class NetworkSettings {
 
   Future<void> save(SharedPreferences preferences) async {
     final uri = endpoint;
-    if (echEnabled && !dohEnabled) {
-      throw const FormatException('ECH 需要同时开启 DoH');
-    }
     final saved = await preferences.setString(
       storageKey,
       jsonEncode({

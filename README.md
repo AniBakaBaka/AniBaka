@@ -164,8 +164,10 @@ fvm flutter test
 
 ## 隐私与网络请求
 
-可在「设置 → 网络设置」启用 DoH 与 ECH，保存后重启应用生效，默认关闭。
-DoH 使用 RFC 8484 DNS 消息格式，默认端点为 `https://1.1.1.1/dns-query`，
+可在「设置 → 网络设置」分别启用 DoH 与 ECH，保存后重启应用生效，默认关闭。
+DoH 使用 RFC 8484 DNS 消息格式，默认端点为 `https://1.1.1.1/dns-query`。
+仅开启 ECH 时，通过该服务查询 HTTPS 记录中的 ECH 配置，IP 地址仍使用系统 DNS 解析；
+同时开启 DoH 时，IP 地址也通过该服务解析。未发布 ECH 配置的站点继续使用普通 HTTPS。
 
 通用实现维护于组织的
 [ech_http](https://github.com/AniBakaBaka/ech_http)，保留

@@ -105,6 +105,7 @@ class PlaybackContent {
   Future<BgmInfo>? _bgmInfoFuture;
   Future<void>? _bgmDetailFuture;
   AnimeCollection? collection;
+  int _collectionRevision = 0;
 
   AdapterBase? _playbackKeepAliveAdapter;
   int _playbackKeepAliveGeneration = 0;
@@ -684,19 +685,29 @@ class PlaybackContent {
   bool isFollow() =>
       CollectionStatus.fromValue(collection?.status) == CollectionStatus.doing;
 
-  Future<void> toggleFollow() async {
+  Future<void> refreshCollection() async {
+    if (isLocalSource || _disposed) return;
+    final revision = ++_collectionRevision;
     final bgmId = (await ensureBgmInfo()).subjectId;
     final postId = validPostId;
-    collection = bgmId != null
-        ? await collections.getByBgmId(bgmId)
-        : postId != null
-        ? await collections.getByPostId(postId)
-        : null;
+    if (_disposed || revision != _collectionRevision) return;
+    var current = bgmId != null ? await collections.getByBgmId(bgmId) : null;
+    if (current == null && postId != null) {
+      current = await collections.getByPostId(postId);
+    }
+    // An initial read must not overwrite a newer follow/unfollow operation.
+    if (!_disposed && revision == _collectionRevision) collection = current;
+  }
+
+  Future<void> toggleFollow() async {
+    await refreshCollection();
+    if (_disposed) return;
 
     if (isFollow()) {
       final current = collection!;
-      final bgmId = current.bgmId ?? bgmInfo.subjectId;
       final postId = current.postId ?? validPostId;
+      final bgmId =
+          current.bgmId ?? (postId == null ? bgmInfo.subjectId : null);
       final success = bgmId != null
           ? await collections.deleteByBgmId(bgmId)
           : postId != null
