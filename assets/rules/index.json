@@ -91,7 +91,7 @@
       "key": "girigirilove",
       "title": "GirigiriLove",
       "by": "anibaka",
-      "rev": 4,
+      "rev": 5,
       "intro": "GirigiriLove动漫视频源，源网址ani.girigirilove.com",
       "site": "https://ani.girigirilove.com/",
       "badge": "https://ani.girigirilove.com/upload/anime.girigirilove.com_.png",
@@ -102,13 +102,13 @@
       ],
       "ref": "girigirilove.json",
       "engine": "anx-rule/2",
-      "sha256": "5b83ff42c47145f3cb2c7c6ae8839e8b6a8cac35a4f61a681d84892e6b602b16"
+      "sha256": "5fe19b18276b8f2be1933a2d38a046386c11bc69c3d9649a8b02db764d263ef6"
     },
     {
       "key": "girigirilove_beta",
       "title": "GirigiriLove Beta",
       "by": "anibaka",
-      "rev": 1,
+      "rev": 2,
       "intro": "GirigiriLove Beta 动漫源，支持搜索、多线路分集和直连播放。",
       "site": "https://beta.girigirilove.com/",
       "badge": "https://beta.girigirilove.com/brand/icon.png",
@@ -118,7 +118,7 @@
       ],
       "ref": "girigirilove_beta.json",
       "engine": "anx-rule/2",
-      "sha256": "3e9c4b6fb230a9164945574ef3c47d50c70fd5a462cbbec78064a7b07b45f113"
+      "sha256": "f2920531c39157c953cf94d9289651a01d216166d4ea24df3da98c0f86c0f70b"
     },
     {
       "key": "ios_mifun",

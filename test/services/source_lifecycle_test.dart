@@ -10,7 +10,11 @@ import '../support/ts_prefix_fixtures.dart';
 
 const _manifest =
     '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nsegment.ts\n#EXT-X-ENDLIST\n';
-SourceAdapter _adapter(String base, {bool redirects = false}) => SourceAdapter(
+SourceAdapter _adapter(
+  String base, {
+  bool redirects = false,
+  bool proxyMedia = false,
+}) => SourceAdapter(
   SourceRule(
     id: 'lifecycle',
     name: 'Lifecycle',
@@ -19,7 +23,8 @@ SourceAdapter _adapter(String base, {bool redirects = false}) => SourceAdapter(
     play: [
       PipelineStep('template', {
         'value': '{episodeId:raw}',
-        'materializeHls': true,
+        'materializeHls': !proxyMedia,
+        'proxyMedia': proxyMedia,
         'resolveMediaRedirects': redirects,
       }),
     ],
@@ -33,6 +38,79 @@ void main() {
     HttpOverrides.global = null;
     addTearDown(() => HttpOverrides.global = previous);
   });
+
+  test(
+    'proxied files stream on demand and retain Range, HEAD and headers',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final base = 'http://127.0.0.1:${server.port}';
+      final requests = <({String method, String? range, String? referer})>[];
+      server.listen((request) async {
+        requests.add((
+          method: request.method,
+          range: request.headers.value('range'),
+          referer: request.headers.value('referer'),
+        ));
+        final response = request.response;
+        response.headers
+          ..contentType = ContentType('video', 'mp4')
+          ..set('accept-ranges', 'bytes');
+        if (request.headers.value('range') == 'bytes=2-5') {
+          response.statusCode = 206;
+          response.headers.set('content-range', 'bytes 2-5/10');
+          response.contentLength = 4;
+          response.add([2, 3, 4, 5]);
+        } else {
+          response.contentLength = 10;
+          if (request.method != 'HEAD') {
+            response.add(List.generate(10, (i) => i));
+          }
+        }
+        await response.close();
+      });
+      final adapter = _adapter(base, proxyMedia: true);
+      final dio = Dio();
+      addTearDown(() async {
+        adapter.dispose();
+        dio.close(force: true);
+        await server.close(force: true);
+      });
+      final media = await adapter.preparePlaybackMedia((
+        url: '$base/episode.mp4',
+        httpHeaders: {'Referer': '$base/player/'},
+      ));
+      expect(requests, isEmpty);
+      expect(media.httpHeaders, isEmpty);
+
+      final head = await dio.head<void>(media.url);
+      expect(head.headers.value('content-length'), '10');
+      final part = await dio.get<List<int>>(
+        media.url,
+        options: Options(
+          headers: {'Range': 'bytes=2-5'},
+          responseType: ResponseType.bytes,
+        ),
+      );
+      expect(part.statusCode, 206);
+      expect(part.headers.value('content-range'), 'bytes 2-5/10');
+      expect(part.headers.value('content-type'), 'video/mp4');
+      expect(part.data, [2, 3, 4, 5]);
+      expect(requests.map((r) => r.method), ['HEAD', 'GET']);
+      expect(requests.last.range, 'bytes=2-5');
+      expect(requests.every((r) => r.referer == '$base/player/'), isTrue);
+
+      final next = await adapter.preparePlaybackMedia((
+        url: '$base/next.mp4',
+        httpHeaders: const {},
+      ));
+      await expectLater(
+        dio.head<void>(media.url),
+        throwsA(isA<DioException>()),
+      );
+      adapter.dispose();
+      await expectLater(dio.head<void>(next.url), throwsA(isA<DioException>()));
+    },
+  );
 
   test('late A cannot replace B proxy or its media headers', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -53,7 +131,7 @@ void main() {
         await request.response.close();
       } catch (_) {}
     });
-    final adapter = _adapter(base);
+    final adapter = _adapter(base, proxyMedia: true);
     final dio = Dio();
     addTearDown(() async {
       adapter.dispose();

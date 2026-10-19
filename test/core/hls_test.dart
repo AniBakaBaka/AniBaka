@@ -3,9 +3,12 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:baka/source/hls/hls_ad_filter.dart';
 import 'package:baka/source/hls/hls_ts_prefix.dart';
-import 'package:baka/source/hls/hls_master_playlist.dart';
+import 'package:baka/source/hls/hls_playlist.dart';
 import 'package:baka/source/hls/mpeg_ts_fingerprint.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:crypto/crypto.dart';
+import 'package:baka/source/runtime/source_operation.dart';
+import 'package:baka/source/runtime/request_scheduler.dart';
 import '../support/ts_prefix_fixtures.dart';
 
 /// 正片指纹：1920x816、level 4.0、High profile。
@@ -147,7 +150,7 @@ void main() {
     test(
       'short and unknown responses pass through without truncation',
       () async {
-        for (final size in [0, 16, HlsTsPrefix.probeBytes * 2]) {
+        for (final size in [0, 16, MpegTsFingerprint.probeBytes * 2]) {
           final bytes = Uint8List(size);
           final output = await HlsTsPrefix.strip(
             Stream.value(bytes),
@@ -161,7 +164,7 @@ void main() {
     test(
       'stops probing at the limit and streams later chunks unchanged',
       () async {
-        final prefix = Uint8List(HlsTsPrefix.probeBytes);
+        final prefix = Uint8List(MpegTsFingerprint.probeBytes);
         final stream = HlsTsPrefix.strip(
           Stream.fromIterable([prefix, contentPrefixBytes]),
           onTransportStream: (_) => fail('must not search the entire segment'),
@@ -184,6 +187,108 @@ void main() {
   });
 
   group('ad filtering', () {
+    test(
+      'suspect groups share all probe slots and reuse their heads',
+      () async {
+        final playlist = HlsPlaylist.parse(
+          _build([
+            _contentBlock(20),
+            _adBlock(3),
+            _contentBlock(20),
+            _adBlock(3),
+            _contentBlock(20),
+          ]),
+          _manifestUri,
+        );
+        final calls = <Uri, int>{};
+        final held = <Completer<HlsVideoFingerprint?>>[];
+        var holding = true;
+        final filtering = HlsAdFilter.apply(
+          playlist,
+          probe: (uri) async {
+            calls.update(uri, (count) => count + 1, ifAbsent: () => 1);
+            final name = uri.pathSegments.last;
+            if (!name.startsWith('ad')) return _content;
+            if (!holding || name == 'ad_20.ts' || name == 'ad_43.ts') {
+              return _ad;
+            }
+            final pending = Completer<HlsVideoFingerprint?>();
+            held.add(pending);
+            return pending.future;
+          },
+        );
+        await Future<void>.delayed(Duration.zero);
+        try {
+          expect(held, hasLength(4));
+        } finally {
+          holding = false;
+          for (final pending in held) {
+            pending.complete(_ad);
+          }
+        }
+        final outcome = await filtering;
+        expect(outcome.removedSegments, 6);
+        expect(calls.values, everyElement(1));
+        expect(calls, hasLength(9)); // Five heads, four confirmations.
+      },
+    );
+
+    test(
+      'unknown group heads are retained without serial replacement probes',
+      () async {
+        final playlist = HlsPlaylist.parse(
+          _build([_contentBlock(20), _adBlock(3), _contentBlock(20)]),
+          _manifestUri,
+        );
+        final calls = <Uri>[];
+        final outcome = await HlsAdFilter.apply(
+          playlist,
+          probe: (uri) async {
+            calls.add(uri);
+            return uri.pathSegments.last.startsWith('ad') ? null : _content;
+          },
+        );
+        expect(outcome.changed, isFalse);
+        expect(calls, hasLength(3));
+        expect(identical(playlist.render(), playlist.body), isTrue);
+      },
+    );
+
+    test(
+      'cancelled filtering does not start queued probes or change the playlist',
+      () async {
+        final playlist = HlsPlaylist.parse(
+          _build([for (var i = 0; i < 10; i++) _contentBlock()]),
+          _manifestUri,
+        );
+        final operation = SourceOperation();
+        addTearDown(operation.close);
+        var calls = 0;
+        final release = Completer<HlsVideoFingerprint?>();
+        final filtering = operation.run(
+          () => HlsAdFilter.apply(
+            playlist,
+            probe: (_) {
+              calls++;
+              return release.future;
+            },
+          ),
+        );
+        final failed = expectLater(
+          filtering,
+          throwsA(isA<RequestCancelledException>()),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(calls, 4);
+        operation.cancel();
+        release.complete(_content);
+        await failed;
+        await Future<void>.delayed(Duration.zero);
+        expect(calls, 4);
+        expect(playlist.removed, isNull);
+      },
+    );
+
     test('删除整组异编码分片，保留其余分片与清单结构', () async {
       final manifest = _build([
         _contentBlock(),
@@ -196,25 +301,29 @@ void main() {
       expect(_segmentsOf(manifest), 28);
       expect(_discontinuitiesOf(manifest), 6);
 
-      final outcome = await HlsAdFilter.apply(
-        manifest: manifest,
-        manifestUri: _manifestUri,
-        probe: _probe(),
-      );
+      final playlist = HlsPlaylist.parse(manifest, _manifestUri);
+
+      final outcome = await HlsAdFilter.apply(playlist, probe: _probe());
 
       expect(outcome.changed, isTrue);
       expect(outcome.removedSegments, 3);
       expect(outcome.removedSeconds, closeTo(12, 1e-9));
+      expect(
+        outcome.timelineKey,
+        'hls:${sha256.convert(utf8.encode(jsonEncode([
+          for (var i = 0; i < 28; i++) [4000, i >= 10 && i < 13],
+        ])))}',
+      );
       expect(outcome.detail, contains('1920x816/L40/P100'));
-      expect(outcome.manifest, isNot(contains('ad_')));
-      expect(_segmentsOf(outcome.manifest), 25);
+      expect(playlist.render(), isNot(contains('ad_')));
+      expect(_segmentsOf(playlist.render()), 25);
       // 广告组的 discontinuity 标记随整组一起删除，不留空标记。
-      expect(_discontinuitiesOf(outcome.manifest), 5);
-      expect(outcome.manifest, startsWith('#EXTM3U'));
-      expect(outcome.manifest, contains('#EXT-X-ENDLIST'));
+      expect(_discontinuitiesOf(playlist.render()), 5);
+      expect(playlist.render(), startsWith('#EXTM3U'));
+      expect(playlist.render(), contains('#EXT-X-ENDLIST'));
 
       // 剩余的 EXTINF 与 URI 仍一一对应。
-      final lines = outcome.manifest.split('\n');
+      final lines = playlist.render().split('\n');
       for (var i = 0; i < lines.length; i++) {
         if (!lines[i].startsWith('#EXTINF:')) continue;
         expect(lines[i + 1].endsWith('.ts'), isTrue);
@@ -228,14 +337,12 @@ void main() {
         _contentBlock(),
       ]);
 
-      final outcome = await HlsAdFilter.apply(
-        manifest: manifest,
-        manifestUri: _manifestUri,
-        probe: _probe(),
-      );
+      final playlist = HlsPlaylist.parse(manifest, _manifestUri);
+
+      final outcome = await HlsAdFilter.apply(playlist, probe: _probe());
 
       expect(outcome.changed, isFalse);
-      expect(outcome.manifest, manifest);
+      expect(identical(playlist.render(), manifest), isTrue);
       expect(outcome.detail, contains('未发现异编码片段'));
     });
 
@@ -247,14 +354,12 @@ void main() {
         ...List.generate(6, (_) => _contentBlock()),
       ]);
 
-      final outcome = await HlsAdFilter.apply(
-        manifest: manifest,
-        manifestUri: _manifestUri,
-        probe: _probe(),
-      );
+      final playlist = HlsPlaylist.parse(manifest, _manifestUri);
+
+      final outcome = await HlsAdFilter.apply(playlist, probe: _probe());
 
       expect(outcome.changed, isFalse);
-      expect(outcome.manifest, manifest);
+      expect(playlist.render(), manifest);
       expect(outcome.detail, contains('超过 60s 上限'));
     });
 
@@ -266,15 +371,13 @@ void main() {
         _contentBlock(5),
       ]);
 
-      final outcome = await HlsAdFilter.apply(
-        manifest: manifest,
-        manifestUri: _manifestUri,
-        probe: _probe(),
-      );
+      final playlist = HlsPlaylist.parse(manifest, _manifestUri);
+
+      final outcome = await HlsAdFilter.apply(playlist, probe: _probe());
 
       expect(outcome.changed, isFalse);
-      expect(outcome.manifest, manifest);
-      expect(outcome.manifest, contains('content_20.ts'));
+      expect(playlist.render(), manifest);
+      expect(playlist.render(), contains('content_20.ts'));
       expect(outcome.detail, contains('15% 上限'));
     });
 
@@ -286,14 +389,12 @@ void main() {
         _contentBlock(3),
       ]);
 
-      final outcome = await HlsAdFilter.apply(
-        manifest: manifest,
-        manifestUri: _manifestUri,
-        probe: _probe(),
-      );
+      final playlist = HlsPlaylist.parse(manifest, _manifestUri);
+
+      final outcome = await HlsAdFilter.apply(playlist, probe: _probe());
 
       expect(outcome.changed, isFalse);
-      expect(outcome.manifest, manifest);
+      expect(playlist.render(), manifest);
       expect(outcome.detail, contains('15% 上限'));
     });
 
@@ -306,19 +407,20 @@ void main() {
         _contentBlock(),
       ]);
 
+      final playlist = HlsPlaylist.parse(manifest, _manifestUri);
+
       final outcome = await HlsAdFilter.apply(
-        manifest: manifest,
-        manifestUri: _manifestUri,
+        playlist,
         probe: _probe(nullFor: {'ad_11.ts'}),
       );
 
       expect(outcome.changed, isTrue);
       expect(outcome.removedSegments, 2);
-      expect(outcome.manifest, contains('ad_11.ts'));
-      expect(outcome.manifest, isNot(contains('ad_10.ts')));
-      expect(outcome.manifest, isNot(contains('ad_12.ts')));
+      expect(playlist.render(), contains('ad_11.ts'));
+      expect(playlist.render(), isNot(contains('ad_10.ts')));
+      expect(playlist.render(), isNot(contains('ad_12.ts')));
       expect(
-        outcome.manifest,
+        playlist.render(),
         contains('#EXT-X-DISCONTINUITY\n#EXTINF:4.000,\nad_11.ts'),
       );
     });
@@ -327,9 +429,10 @@ void main() {
       final manifest = _build([_contentBlock(2)]);
       var probes = 0;
 
+      final playlist = HlsPlaylist.parse(manifest, _manifestUri);
+
       final outcome = await HlsAdFilter.apply(
-        manifest: manifest,
-        manifestUri: _manifestUri,
+        playlist,
         probe: (uri) async {
           probes++;
           return _content;
@@ -355,17 +458,15 @@ void main() {
                 '#EXT-X-DISCONTINUITY\n#EXTINF:4.000,\nad_0.ts',
           );
 
-      final outcome = await HlsAdFilter.apply(
-        manifest: manifest,
-        manifestUri: _manifestUri,
-        probe: _probe(),
-      );
+      final playlist = HlsPlaylist.parse(manifest, _manifestUri);
+
+      final outcome = await HlsAdFilter.apply(playlist, probe: _probe());
 
       expect(outcome.changed, isFalse);
-      expect(outcome.manifest, manifest);
-      expect(outcome.manifest, contains('#EXT-X-KEY:METHOD=AES-128'));
-      expect(outcome.manifest, contains('#EXT-X-TARGETDURATION:8'));
-      expect(outcome.manifest, contains('ad_'));
+      expect(playlist.render(), manifest);
+      expect(playlist.render(), contains('#EXT-X-KEY:METHOD=AES-128'));
+      expect(playlist.render(), contains('#EXT-X-TARGETDURATION:8'));
+      expect(playlist.render(), contains('ad_'));
     });
   });
 
@@ -392,15 +493,16 @@ void main() {
                 : '$tag\n#EXT-X-DISCONTINUITY',
           );
           var probes = 0;
+          final playlist = HlsPlaylist.parse(manifest, _manifestUri);
           final outcome = await HlsAdFilter.apply(
-            manifest: manifest,
-            manifestUri: _manifestUri,
+            playlist,
             probe: (_) async {
               probes++;
               return _content;
             },
           );
-          expect(outcome.manifest, manifest);
+          expect(outcome.changed, isFalse);
+          expect(playlist.render(), manifest);
           expect(probes, 0);
         },
       );
@@ -413,41 +515,26 @@ void main() {
       _contentBlock(),
       _contentBlock(),
     ]).replaceFirst('#EXTM3U', '#EXTM3U\n#EXT-X-DISCONTINUITY-SEQUENCE:8');
-    final outcome = await HlsAdFilter.apply(
-      manifest: manifest,
-      manifestUri: _manifestUri,
-      probe: _probe(),
-    );
+    final playlist = HlsPlaylist.parse(manifest, _manifestUri);
+    final outcome = await HlsAdFilter.apply(playlist, probe: _probe());
     expect(outcome.changed, isTrue);
-    expect(outcome.manifest, contains('#EXT-X-DISCONTINUITY-SEQUENCE:8'));
+    expect(playlist.render(), contains('#EXT-X-DISCONTINUITY-SEQUENCE:8'));
   });
 
   group('master playlists', () {
-    test('解析变体：地址按主清单地址解析，属性缺失不致命', () {
-      final variants = HlsMasterPlaylist.variants(
-        _multiVariant,
-        _baseUri,
-      ).toList();
-
-      // I-FRAME 变体不算在内。
-      expect(variants, hasLength(3));
-      expect(variants.map((variant) => variant.uri.toString()), [
-        'https://vip.example/20260906/35899/360p/index.m3u8',
-        'https://vip.example/20260906/35899/1080p/index.m3u8',
-        'https://vip.example/20260906/35899/540p/index.m3u8',
-      ]);
-      expect(variants[0].bandwidth, 400000);
-      expect(variants[0].resolution, '640x360');
-      expect(variants[2].resolution, isNull);
-      expect(variants[2].bandwidth, 900000);
-    });
-
     test('选定变体取最高 BANDWIDTH', () {
-      final selected = HlsMasterPlaylist.selectVariant(_multiVariant, _baseUri);
+      final playlist = HlsPlaylist.parse(_multiVariant, _baseUri);
+      final selected = playlist.variant;
 
+      expect(playlist.isMaster, isTrue);
+      expect(playlist.segments, isEmpty);
       expect(selected, isNotNull);
-      expect(selected!.uri.toString(), endsWith('1080p/index.m3u8'));
-      expect(selected.label, '1920x816@2000kbps');
+      expect(
+        selected!.uri.toString(),
+        'https://vip.example/20260906/35899/1080p/index.m3u8',
+      );
+      expect(selected.resolution, '1920x816');
+      expect(selected.bandwidth, 2000000);
     });
 
     test('BANDWIDTH is distinct from AVERAGE-BANDWIDTH', () {
@@ -458,7 +545,7 @@ void main() {
           '#EXT-X-STREAM-INF:BANDWIDTH=1000000\n'
           'low.m3u8\n';
       expect(
-        HlsMasterPlaylist.selectVariant(manifest, _baseUri)!.uri.path,
+        HlsPlaylist.parse(manifest, _baseUri).variant!.uri.path,
         endsWith('/high.m3u8'),
       );
     });
@@ -469,30 +556,89 @@ void main() {
           '#EXT-X-STREAM-INF:BANDWIDTH=2000000\n'
           '#EXT-X-STREAM-INF:BANDWIDTH=1000000\n'
           'low.m3u8\n';
-      final selected = HlsMasterPlaylist.selectVariant(manifest, _baseUri)!;
+      final selected = HlsPlaylist.parse(manifest, _baseUri).variant!;
       expect(selected.bandwidth, 1000000);
-      expect(HlsMasterPlaylist.variants(manifest, _baseUri), hasLength(1));
     });
 
     test('带独立音轨的清单不接管，返回 null', () {
-      expect(
-        HlsMasterPlaylist.hasAlternativeRenditions(_withAudioRendition),
-        isTrue,
-      );
-      expect(
-        HlsMasterPlaylist.selectVariant(_withAudioRendition, _baseUri),
-        isNull,
-      );
+      expect(HlsPlaylist.parse(_withAudioRendition, _baseUri).variant, isNull);
     });
 
     test('没有变体时返回 null', () {
-      expect(HlsMasterPlaylist.selectVariant(_mediaPlaylist, _baseUri), isNull);
+      final playlist = HlsPlaylist.parse(_mediaPlaylist, _baseUri);
+      expect(playlist.variant, isNull);
+      expect(playlist.isMaster, isFalse);
     });
   });
 
+  test(
+    'CRLF filtering preserves tags, URI attributes and retained boundaries',
+    () async {
+      final body = _build([
+        _contentBlock(20),
+        _adBlock(3),
+        _contentBlock(20),
+      ]).replaceAll('\n', '\r\n');
+      final playlist = HlsPlaylist.parse(body, _manifestUri);
+      final outcome = await HlsAdFilter.apply(playlist, probe: _probe());
+      expect(outcome.removedSegments, 3);
+      expect(
+        playlist.render(),
+        body.replaceFirst(
+          '#EXT-X-DISCONTINUITY\r\n#EXTINF:4.000,\r\nad_20.ts\r\n'
+              '#EXTINF:4.000,\r\nad_21.ts\r\n#EXTINF:4.000,\r\nad_22.ts\r\n',
+          '',
+        ),
+      );
+      final encrypted = HlsPlaylist.parse(
+        '#EXTM3U\r\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\r\n'
+        '#EXT-X-MAP:URI="init.mp4"\r\n#EXTINF:4,\r\nsegment.ts\r\n#EXT-X-ENDLIST\r\n',
+        _manifestUri,
+      );
+      final resources = <({Uri uri, bool segment})>[];
+      final rendered = encrypted.render(
+        rewrite: (uri, segment) {
+          resources.add((uri: uri, segment: segment));
+          return 'http://localhost/${resources.length}';
+        },
+      );
+      expect(resources.map((r) => r.segment), [false, false, true]);
+      expect(resources.map((r) => r.uri.toString()), [
+        'https://cdn.example/hls/key.bin',
+        'https://cdn.example/hls/init.mp4',
+        'https://cdn.example/hls/segment.ts',
+      ]);
+      expect(rendered, contains('URI="http://localhost/1"\r\n'));
+      expect(rendered, contains('http://localhost/3\r\n#EXT-X-ENDLIST'));
+    },
+  );
+
   group('TS fingerprints', () {
+    test('growing prefixes decode across arbitrary chunk boundaries', () {
+      for (final fixture in [contentPrefixBytes, adPrefixBytes]) {
+        final expected = MpegTsFingerprint().read(fixture);
+        for (final step in [1, 17, 187, 188, 189]) {
+          final reader = MpegTsFingerprint();
+          HlsVideoFingerprint? result;
+          for (var end = step; end < fixture.length; end += step) {
+            result = reader.read(Uint8List.sublistView(fixture, 0, end));
+            if (result != null) break;
+          }
+          expect(result ?? reader.read(fixture), expected);
+        }
+      }
+    });
+
+    test('TS alignment needs three sync bytes, not three complete packets', () {
+      final prefix = Uint8List(MpegTsFingerprint.packetSize * 2 + 1);
+      for (var i = 0; i < prefix.length; i += MpegTsFingerprint.packetSize) {
+        prefix[i] = 0x47;
+      }
+      expect(MpegTsFingerprint.findPacketStart(prefix), 0);
+    });
+
     test('正片前缀读出 1920x816 / level 4.0 / High profile', () {
-      final fingerprint = MpegTsFingerprint.read(contentPrefixBytes);
+      final fingerprint = MpegTsFingerprint().read(contentPrefixBytes);
 
       expect(fingerprint, isNotNull);
       expect(fingerprint!.width, 1920);
@@ -503,7 +649,7 @@ void main() {
     });
 
     test('广告前缀读出 1920x1080 / level 5.0（已扣除 frame cropping）', () {
-      final fingerprint = MpegTsFingerprint.read(adPrefixBytes);
+      final fingerprint = MpegTsFingerprint().read(adPrefixBytes);
 
       expect(fingerprint, isNotNull);
       expect(fingerprint!.width, 1920);
@@ -514,27 +660,27 @@ void main() {
     });
 
     test('正片与广告互不匹配', () {
-      final content = MpegTsFingerprint.read(contentPrefixBytes);
-      final ad = MpegTsFingerprint.read(adPrefixBytes);
+      final content = MpegTsFingerprint().read(contentPrefixBytes);
+      final ad = MpegTsFingerprint().read(adPrefixBytes);
 
-      expect(content!.matches(ad!), isFalse);
-      expect(content.matches(content), isTrue);
+      expect(content == ad, isFalse);
+      expect(content == content, isTrue);
       expect(content, isNot(equals(ad)));
     });
 
     test('前缀被截断、非 TS 内容或空输入都返回 null', () {
-      expect(MpegTsFingerprint.read(Uint8List(0)), isNull);
+      expect(MpegTsFingerprint().read(Uint8List(0)), isNull);
       expect(
-        MpegTsFingerprint.read(Uint8List.fromList(List<int>.filled(4096, 0))),
+        MpegTsFingerprint().read(Uint8List.fromList(List<int>.filled(4096, 0))),
         isNull,
       );
       expect(
-        MpegTsFingerprint.read(Uint8List.fromList(utf8.encode('plain text'))),
+        MpegTsFingerprint().read(Uint8List.fromList(utf8.encode('plain text'))),
         isNull,
       );
       // 512 字节还读不到 SPS，应放弃而不是猜。
       expect(
-        MpegTsFingerprint.read(
+        MpegTsFingerprint().read(
           Uint8List.sublistView(contentPrefixBytes, 0, 512),
         ),
         isNull,

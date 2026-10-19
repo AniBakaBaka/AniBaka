@@ -46,21 +46,17 @@ class _NetworkSettingsPageState extends State<NetworkSettingsPage> {
           children: [
             SwitchListTile(
               secondary: const Icon(Icons.dns_outlined),
-              title: const Text('DNS over HTTPS（DoH）'),
-              subtitle: const Text(
-                '通过 HTTPS 加密“域名转 IP 地址”的 DNS 查询，减少查询途中被窃听或篡改的风险。'
-                '所选 DoH 服务商仍可看到查询域名；仅开启 DoH 无法隐藏 HTTPS 握手中的域名。',
-              ),
+              title: const Text('加密 DNS（DoH）'),
+              subtitle: const Text('加密 DNS 查询，减少被监听和篡改的风险。'),
               value: _doh,
               onChanged: (v) => setState(() => _doh = v),
             ),
             SwitchListTile(
               secondary: const Icon(Icons.enhanced_encryption_outlined),
-              title: const Text('Encrypted Client Hello（ECH）'),
+              title: const Text('加密客户端问候（ECH）'),
               subtitle: const Text(
-                '加密 HTTPS 握手中的真实域名（SNI），进一步减少访问目标的泄露。'
-                '需要目标站点支持并发布 ECH 配置，无法隐藏目标 IP 地址。'
-                '可单独开启；仅开启 ECH 时，通过下方服务查询 ECH 配置，IP 地址仍使用系统 DNS 解析。',
+                '加密连接时发送的域名信息，保护访问隐私。'
+                '需要网站支持，可单独开启，搭配 DoH 使用效果更好。',
               ),
               value: _ech,
               onChanged: (v) => setState(() => _ech = v),
@@ -68,7 +64,7 @@ class _NetworkSettingsPageState extends State<NetworkSettingsPage> {
           ],
         ),
         SettingsSection(
-          title: 'DoH / ECH 配置查询服务',
+          title: 'DNS 服务',
           children: [
             Padding(
               padding: const EdgeInsets.all(16),
@@ -79,7 +75,7 @@ class _NetworkSettingsPageState extends State<NetworkSettingsPage> {
                 decoration: const InputDecoration(
                   labelText: 'DoH 服务地址',
                   hintText: NetworkSettings.defaultEndpoint,
-                  helperText: '填写完整的 HTTPS 地址，服务需支持标准 DoH 查询（RFC 8484）。',
+                  helperText: '填写支持 DoH 的 HTTPS 地址，DoH 和 ECH 均使用此服务。',
                   helperMaxLines: 3,
                   border: OutlineInputBorder(),
                 ),
@@ -95,10 +91,8 @@ class _NetworkSettingsPageState extends State<NetworkSettingsPage> {
             ),
             const SettingsTile(
               icon: Icons.info_outline_rounded,
-              title: '默认服务与首次连接',
-              subtitle:
-                  '默认使用 Cloudflare（1.1.1.1）的 IP 地址端点，避免首次连接时解析 DoH 服务域名。'
-                  '自定义域名端点及代理服务器地址仍可能通过系统 DNS 解析。',
+              title: '默认 DNS 服务',
+              subtitle: '默认使用 Cloudflare（1.1.1.1），也可填写其他 DoH 服务地址。',
             ),
           ],
         ),
@@ -107,17 +101,17 @@ class _NetworkSettingsPageState extends State<NetworkSettingsPage> {
           children: [
             SettingsTile(
               icon: Icons.sync_problem_outlined,
-              title: '连接失败时的行为',
+              title: '无法联网时',
               subtitle:
-                  '开启 DoH 后，普通公网域名查询失败时，请求会报错，不会回退到系统 DNS；本机及局域网名称仍使用本地解析。'
-                  '未发布 ECH 配置的站点使用普通 HTTPS；已获取配置但 ECH 握手失败时，请求会报错。',
+                  '如果开启后无法联网，可尝试更换 DNS 服务，或关闭相关选项后保存并重启。'
+                  '不支持 ECH 的网站仍使用普通 HTTPS 连接。',
             ),
             SettingsTile(
               icon: Icons.restart_alt_rounded,
               title: '保存并重启后生效',
               subtitle:
-                  '适用于应用接口、搜索源、图片及下载等内置网络请求。'
-                  'WebView、播放器原生直连及 BT 的 UDP / Peer 连接不受此设置控制。',
+                  '适用于应用内的数据加载、搜索、图片及下载。'
+                  '内置网页、部分视频播放和 BT 连接不受此设置影响。',
             ),
           ],
         ),

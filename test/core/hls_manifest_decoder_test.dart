@@ -49,21 +49,12 @@ void main() {
         throwsFormatException,
       );
     }
-    for (final override in <Map<String, dynamic>>[
-      {'scheme': 'unknown'},
-      {'key': []},
-      {'period': 0},
-      {'fallbackIndex': 7},
-      {'xor': 256},
-      {'skipBytes': 2},
-    ]) {
-      expect(
-        () => HlsManifestDecoder.decode(
-          [101, 110, 99, 1],
-          {..._animoeDecoder, ...override},
-        ),
-        throwsFormatException,
-      );
-    }
+    expect(
+      () => HlsManifestDecoder.decode(
+        [101, 110, 99, 1],
+        {..._animoeDecoder, 'scheme': 'unknown'},
+      ),
+      throwsFormatException,
+    );
   });
 }

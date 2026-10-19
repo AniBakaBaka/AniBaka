@@ -59,6 +59,9 @@ Supported operations:
 $ops
 
 Stage flags are optional booleans on play-stage steps (branch steps included):
+- proxyMedia: stream HTTP media through the app's network client, preserving
+  the source's proxy/DoH/ECH policy as well as Range and HEAD requests for files.
+  Also enables materializeHls for complete VOD media playlists.
 - materializeHls: serve a complete VOD HLS manifest through the app, so segment
   requests keep the rule's Referer/Cookie headers.
 - stripHlsTsPrefix: remove an image/junk prefix before MPEG-TS packets in HLS

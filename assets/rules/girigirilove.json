@@ -54,7 +54,8 @@
   "useWebview": true,
   "play": [
     {
-      "op": "follow"
+      "op": "follow",
+      "proxyMedia": true
     },
     {
       "op": "first",

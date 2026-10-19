@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 
 import 'package:baka/api/bgm.dart';
 import 'package:baka/core/network_service.dart';
+import 'package:baka/core/system_proxy.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/services/playback/playback_settings.dart';
 import 'package:baka/source/engine/pipeline_host.dart';
@@ -17,7 +18,7 @@ import 'package:baka/source/engine/pipeline_interpreter.dart';
 import 'package:baka/source/engine/recipes.dart';
 import 'package:baka/source/hls/hls_ad_filter.dart';
 import 'package:baka/source/hls/hls_manifest_decoder.dart';
-import 'package:baka/source/hls/hls_master_playlist.dart';
+import 'package:baka/source/hls/hls_playlist.dart';
 import 'package:baka/source/hls/hls_proxy.dart';
 import 'package:baka/source/hls/mpeg_ts_fingerprint.dart';
 import 'package:baka/source/models/series.dart';
@@ -54,10 +55,6 @@ class SourceAdapter implements PipelineHost {
   static const _rejectTtl = Duration(minutes: 8);
   static const _cacheLimit = 128;
 
-  /// HLS fingerprinting only needs PAT/PMT and the first SPS.
-  static const int _segmentPrefixBytes = 16 * 1024;
-  static const Duration _segmentProbeTimeout = Duration(seconds: 8);
-
   final SourceRule rule;
   String get name => rule.name;
   String get baseUrl => rule.baseUrl;
@@ -70,6 +67,7 @@ class SourceAdapter implements PipelineHost {
   bool get hasActiveOperations => _activeOperations > 0;
   VoidCallback? onIdle;
   Dio? _dio;
+  Dio? _dioDirect;
 
   final _urlCache = <String, ({String url, int expiresAt})>{};
   final _pendingUrls = <String, Object>{};
@@ -123,10 +121,20 @@ class SourceAdapter implements PipelineHost {
       : headers;
 
   Dio get dio {
-    if (_disposed) throw const RequestCancelledException();
-    SourceOperation.check();
     final existing = _dio;
     if (existing != null) return existing;
+    return _dio = _buildDio(useSystemProxy: useSystemProxy);
+  }
+
+  Dio get _directDio {
+    final existing = _dioDirect;
+    if (existing != null) return existing;
+    return _dioDirect = _buildDio(useSystemProxy: false);
+  }
+
+  Dio _buildDio({required bool useSystemProxy}) {
+    if (_disposed) throw const RequestCancelledException();
+    SourceOperation.check();
     final dio =
         Dio(
             BaseOptions(
@@ -152,8 +160,12 @@ class SourceAdapter implements PipelineHost {
       RetryInterceptor(dio),
       CookieManager(_cookieJar),
     ]);
-    return _dio = dio;
+    return dio;
   }
+
+  /// Whether [uri] leaves through a configured proxy for this rule.
+  bool _proxied(Uri uri) =>
+      useSystemProxy && SystemProxyService.findProxy(uri) != 'DIRECT';
 
   /// Scopes work to this adapter: disposing it cancels the work, and the
   /// repository keeps an adapter alive while work is active.
@@ -184,6 +196,8 @@ class SourceAdapter implements PipelineHost {
     _reachCache.clear();
     _dio?.close(force: true);
     _dio = null;
+    _dioDirect?.close(force: true);
+    _dioDirect = null;
   }
 
   Future<List<Series>> search(String query, {bool enhanceWithBgm = true}) =>
@@ -381,6 +395,23 @@ class SourceAdapter implements PipelineHost {
     String url,
     Map<String, String> headers,
   ) async {
+    final verdict = await _probeOn(
+      useSystemProxy ? _probeDio : _probeDirectDio,
+      url,
+      headers,
+    );
+    if (verdict != MediaReachability.rejected) return verdict;
+    final uri = Uri.tryParse(url);
+    if (uri == null || !_proxied(uri)) return verdict;
+    // A proxied exit may be refused while the media is reachable directly.
+    return _probeOn(_probeDirectDio, url, headers);
+  }
+
+  Future<MediaReachability> _probeOn(
+    Dio client,
+    String url,
+    Map<String, String> headers,
+  ) async {
     final timeout = Duration(
       milliseconds: rule.mediaValidationTimeoutMs > 0
           ? rule.mediaValidationTimeoutMs
@@ -390,7 +421,7 @@ class SourceAdapter implements PipelineHost {
     );
     try {
       if (VideoUrlExtractor.isHlsUrl(url)) {
-        final response = await _probeRequest(url, timeout, {
+        final response = await _probeRequest(client, url, timeout, {
           ...headers,
           'Range': 'bytes=0-2047',
           'Accept': 'application/vnd.apple.mpegurl,application/x-mpegURL,*/*',
@@ -402,11 +433,17 @@ class SourceAdapter implements PipelineHost {
         return _rejection(url, response.status, response.contentType);
       }
       // HEAD fails fast; servers that refuse it get one ranged GET.
-      var response = await _probeRequest(url, timeout, headers, method: 'HEAD');
+      var response = await _probeRequest(
+        client,
+        url,
+        timeout,
+        headers,
+        method: 'HEAD',
+      );
       if (!_isOk(response.status) &&
           (response.status == HttpStatus.methodNotAllowed ||
               _rejectedStatuses.contains(response.status))) {
-        response = await _probeRequest(url, timeout, {
+        response = await _probeRequest(client, url, timeout, {
           ...headers,
           'Range': 'bytes=0-0',
         });
@@ -452,6 +489,7 @@ class SourceAdapter implements PipelineHost {
 
   Future<({int status, String? contentType, String body, bool truncated})>
   _probeRequest(
+    Dio client,
     String url,
     Duration timeout,
     Map<String, String> headers, {
@@ -465,7 +503,7 @@ class SourceAdapter implements PipelineHost {
     );
     try {
       return await () async {
-        final response = await (useSystemProxy ? _probeDio : _probeDirectDio)
+        final response = await client
             .request<ResponseBody>(
               url,
               cancelToken: cancel,
@@ -730,13 +768,27 @@ class SourceAdapter implements PipelineHost {
       )).resolveMedia(media.url, headers: media.httpHeaders);
       SourceOperation.check();
     }
-    if (!VideoUrlExtractor.isHlsUrl(prepared.url)) return prepared;
+    final manifestUri = Uri.tryParse(prepared.url);
+    if (!VideoUrlExtractor.isHlsUrl(prepared.url)) {
+      if (!_features.proxiesMedia ||
+          manifestUri == null ||
+          (manifestUri.scheme != 'http' && manifestUri.scheme != 'https')) {
+        return prepared;
+      }
+      return _installPlaybackProxy(
+        await HlsProxy.startMedia(
+          manifestUri,
+          headers: prepared.httpHeaders,
+          fetch: _fetchPlaybackTarget,
+        ),
+        generation,
+      );
+    }
 
     final filtersAds =
         filterHlsAds ??
         PlaybackSettingsService.getFilterHlsAdsOverride() ??
         _features.filtersHlsAds;
-    final manifestUri = Uri.tryParse(prepared.url);
     if ((!_features.materializesHls && !filtersAds) ||
         manifestUri == null ||
         !manifestUri.hasScheme) {
@@ -757,73 +809,40 @@ class SourceAdapter implements PipelineHost {
     try {
       return await budget.run(() async {
         var playlist = await _fetchPlaylist(manifestUri, headers);
-        if (!playlist.fetchable) {
-          return skip(
-            'HLS 清单不完整 (HTTP ${playlist.status}, ${playlist.body.length} chars)',
-            'HLS 去广告未生效：清单读取失败（HTTP ${playlist.status}）',
-          );
-        }
         // Encrypted masters also need a decoded, materialized media variant.
-        if (HlsMasterPlaylist.isMaster(playlist.body)) {
+        if (playlist.isMaster) {
           if (!filtersAds && _features.hlsManifestDecode == null) {
             return skip('HLS 主清单不做物化（未开启 filterHlsAds）');
           }
-          final variant = HlsMasterPlaylist.selectVariant(
-            playlist.body,
-            playlist.uri,
-          );
+          final variant = playlist.variant;
           if (variant == null) {
             return skip('HLS 主清单无法选定单一变体', 'HLS 去广告未生效：不支持此多码率清单');
           }
           playlist = await _fetchPlaylist(variant.uri, headers);
-          if (!playlist.fetchable) {
-            onStatus?.call('HLS 去广告未生效：分片清单读取失败（HTTP ${playlist.status}）');
-            return skip('HLS 变体清单不完整 (HTTP ${playlist.status})');
-          }
-          debugPrint('${rule.id}: HLS 主清单选定变体 ${variant.label}');
+          debugPrint(
+            '${rule.id}: HLS 主清单选定变体 ${variant.resolution}@${variant.bandwidth ~/ 1000}kbps',
+          );
         }
-        if (!playlist.body.contains('#EXT-X-ENDLIST')) {
+        if (!playlist.isVod) {
           return skip('直播清单无 #EXT-X-ENDLIST', 'HLS 去广告未生效：仅支持完整点播清单');
         }
 
-        var body = playlist.body;
         HlsAdFilterOutcome? outcome;
         if (filtersAds) {
           outcome = await HlsAdFilter.apply(
-            manifest: body,
-            manifestUri: playlist.uri,
+            playlist,
             probe: (segment) => _readSegmentFingerprint(segment, headers),
           );
           debugPrint('${rule.id}: HLS 去广告 ${outcome.detail}');
-          body = outcome.manifest;
         }
 
         final proxy = await HlsProxy.start(
-          body,
-          playlist.uri,
+          playlist,
           headers: headers,
           stripTsPrefix: _features.stripsHlsTsPrefix,
-          fetch: (uri, method, headers) => dio.requestUri<ResponseBody>(
-            uri,
-            options: Options(
-              method: method,
-              headers: headers,
-              responseType: ResponseType.stream,
-              validateStatus: (_) => true,
-              extra: const {
-                SchedulerInterceptor.priorityKey: RequestPriority.play,
-              },
-            ),
-          ),
+          fetch: _fetchPlaybackTarget,
         );
-        if (generation != _hlsGeneration ||
-            SourceOperation.current!.isCancelled) {
-          await proxy.close();
-          throw const RequestCancelledException();
-        }
-        final previous = _hlsProxy;
-        _hlsProxy = proxy;
-        unawaited(previous?.close());
+        final proxied = await _installPlaybackProxy(proxy, generation);
 
         if (outcome != null) {
           onStatus?.call(
@@ -834,9 +853,9 @@ class SourceAdapter implements PipelineHost {
           );
         }
         onTimelinePrepared?.call(outcome?.timelineKey ?? 'original');
-        return (url: proxy.url, httpHeaders: const <String, String>{});
+        return proxied;
       });
-    } catch (error) {
+    } on Exception catch (error) {
       preparation.token.throwIfCancelled();
       return skip(
         'HLS manifest materialization failed: $error',
@@ -847,79 +866,163 @@ class SourceAdapter implements PipelineHost {
     }
   }
 
+  /// Media fetches that would leave through a configured proxy get one retry
+  /// over a direct connection: the proxy's exit can be refused by the CDN
+  /// (e.g. region-blocked) while the player itself connects directly.
+  Future<Response<ResponseBody>> _fetchPlaybackTarget(
+    Uri uri,
+    String method,
+    Map<String, String> headers,
+  ) async {
+    try {
+      final response = await _playbackTargetRequest(
+        dio,
+        uri,
+        method,
+        headers,
+      );
+      final status = response.statusCode;
+      if (status != null && status < 400 || !_proxied(uri)) {
+        return response;
+      }
+      // Drop the refused body before retrying so its slot is released.
+      await response.data?.stream
+          .listen(null, onError: (Object _) {})
+          .cancel();
+      return _playbackTargetRequest(_directDio, uri, method, headers);
+    } on DioException {
+      if (!_proxied(uri)) rethrow;
+      return _playbackTargetRequest(_directDio, uri, method, headers);
+    }
+  }
+
+  static Future<Response<ResponseBody>> _playbackTargetRequest(
+    Dio client,
+    Uri uri,
+    String method,
+    Map<String, String> headers,
+  ) => client.requestUri<ResponseBody>(
+    uri,
+    options: Options(
+      method: method,
+      headers: headers,
+      responseType: ResponseType.stream,
+      validateStatus: (_) => true,
+      extra: const {SchedulerInterceptor.priorityKey: RequestPriority.play},
+    ),
+  );
+
+  Future<PlaybackMedia> _installPlaybackProxy(
+    HlsProxy proxy,
+    int generation,
+  ) async {
+    if (generation != _hlsGeneration || SourceOperation.current!.isCancelled) {
+      await proxy.close();
+      throw const RequestCancelledException();
+    }
+    final previous = _hlsProxy;
+    _hlsProxy = proxy;
+    unawaited(previous?.close());
+    return (url: proxy.url, httpHeaders: const <String, String>{});
+  }
+
   /// The manifest may redirect; segments resolve against the final URI.
-  Future<({String body, Uri uri, int status, bool fetchable})> _fetchPlaylist(
+  Future<HlsPlaylist> _fetchPlaylist(
     Uri uri,
     Map<String, String> headers,
   ) async {
     final decoder = _features.hlsManifestDecode;
-    final response = await dio.getUri<Object>(
-      uri,
-      options: Options(
-        headers: headers,
-        responseType: decoder == null ? ResponseType.plain : ResponseType.bytes,
-        validateStatus: (_) => true,
-        extra: const {SchedulerInterceptor.priorityKey: RequestPriority.play},
-      ),
-    );
+    Response<Object> response;
+    try {
+      response = await _playlistRequest(dio, uri, headers, decoder);
+    } on DioException {
+      if (!_proxied(uri)) rethrow;
+      response = await _playlistRequest(_directDio, uri, headers, decoder);
+    }
     final data = response.data;
     final body = decoder == null
-        ? data as String? ?? ''
-        : HlsManifestDecoder.decode(data as List<int>? ?? const [], decoder);
-    final status = response.statusCode ?? 0;
-    return (
-      body: body,
-      uri: response.realUri,
-      status: status,
-      fetchable: status >= 200 && status < 300 && body.startsWith('#EXTM3U'),
-    );
+        ? data as String
+        : HlsManifestDecoder.decode(data as List<int>, decoder);
+    return HlsPlaylist.parse(body, response.realUri);
   }
 
-  /// Reads only a segment prefix for [HlsAdFilter]; any failure is `null`,
-  /// which the filter treats as matching the main content.
+  Future<Response<Object>> _playlistRequest(
+    Dio client,
+    Uri uri,
+    Map<String, String> headers,
+    Map<String, dynamic>? decoder,
+  ) => client.getUri<Object>(
+    uri,
+    options: Options(
+      headers: headers,
+      responseType: decoder == null ? ResponseType.plain : ResponseType.bytes,
+      validateStatus: (status) => status != null && _isOk(status),
+      extra: const {
+        SchedulerInterceptor.priorityKey: RequestPriority.play,
+        RetryInterceptor.skipRetryKey: true,
+      },
+    ),
+  );
+
+  /// Stops the request as soon as PAT/PMT and SPS identify the video.
   Future<HlsVideoFingerprint?> _readSegmentFingerprint(
+    Uri segment,
+    Map<String, String> headers,
+  ) async {
+    try {
+      return await _readSegmentFingerprintOn(dio, segment, headers);
+    } on DioException {
+      SourceOperation.check();
+      if (!_proxied(segment)) return null;
+      return _readSegmentFingerprintOn(_directDio, segment, headers);
+    }
+  }
+
+  Future<HlsVideoFingerprint?> _readSegmentFingerprintOn(
+    Dio client,
     Uri segment,
     Map<String, String> headers,
   ) async {
     final cancel = CancelToken();
     try {
-      return await () async {
-        final response = await dio.requestUri<ResponseBody>(
-          segment,
-          cancelToken: cancel,
-          options: Options(
-            headers: {
-              ...headers,
-              HttpHeaders.rangeHeader: 'bytes=0-${_segmentPrefixBytes - 1}',
-            },
-            responseType: ResponseType.stream,
-            validateStatus: (_) => true,
-            extra: const {
-              SchedulerInterceptor.priorityKey: RequestPriority.play,
-            },
-          ),
-        );
-        final stream = response.data?.stream;
-        if (!_isOk(response.statusCode ?? 0) || stream == null) return null;
-        final prefix = Uint8List(_segmentPrefixBytes);
-        var length = 0;
-        try {
-          await for (final chunk in stream) {
-            final count = chunk.length < prefix.length - length
-                ? chunk.length
-                : prefix.length - length;
-            prefix.setRange(length, length + count, chunk);
-            length += count;
-            // Servers that ignore Range must not load the whole segment.
-            if (length == prefix.length) break;
-          }
-        } catch (_) {
-          // An aborted stream still leaves a usable prefix.
+      final response = await client.requestUri<ResponseBody>(
+        segment,
+        cancelToken: cancel,
+        options: Options(
+          headers: {
+            ...headers,
+            HttpHeaders.rangeHeader:
+                'bytes=0-${MpegTsFingerprint.probeBytes - 1}',
+          },
+          responseType: ResponseType.stream,
+          validateStatus: (status) => status != null && _isOk(status),
+          extra: const {
+            SchedulerInterceptor.priorityKey: RequestPriority.play,
+            RetryInterceptor.skipRetryKey: true,
+          },
+        ),
+      );
+      Uint8List? prefix;
+      final reader = MpegTsFingerprint();
+      var length = 0;
+      await for (final chunk in response.data!.stream) {
+        final remaining = MpegTsFingerprint.probeBytes - length;
+        final count = chunk.length < remaining ? chunk.length : remaining;
+        Uint8List bytes;
+        if (prefix == null) {
+          bytes = Uint8List.sublistView(chunk, 0, count);
+        } else {
+          prefix.setRange(length, length + count, chunk);
+          bytes = Uint8List.sublistView(prefix, 0, length + count);
         }
-        SourceOperation.check();
-        return MpegTsFingerprint.read(Uint8List.sublistView(prefix, 0, length));
-      }().timeout(_segmentProbeTimeout, onTimeout: () => null);
-    } catch (_) {
+        length += count;
+        final fingerprint = reader.read(bytes);
+        if (fingerprint != null || length == MpegTsFingerprint.probeBytes) {
+          return fingerprint;
+        }
+        prefix ??= Uint8List(MpegTsFingerprint.probeBytes)
+          ..setRange(0, length, bytes);
+      }
       return null;
     } finally {
       cancel.cancel('HLS 指纹探测结束');
@@ -1054,6 +1157,7 @@ class _PlayFeatures {
   bool usesCookies = false;
   bool validatesWithCookies = false;
   bool materializesHls = false;
+  bool proxiesMedia = false;
   bool stripsHlsTsPrefix = false;
   bool filtersHlsAds = false;
   bool resolvesMediaRedirects = false;
@@ -1071,7 +1175,9 @@ class _PlayFeatures {
       usesCookies |= anime1 || step.flag('cookieSession');
       validatesWithCookies |= step.flag('validateWithCookies');
       stripsHlsTsPrefix |= step.flag('stripHlsTsPrefix');
-      materializesHls |= stripsHlsTsPrefix || step.flag('materializeHls');
+      proxiesMedia |= step.flag('proxyMedia');
+      materializesHls |=
+          proxiesMedia || stripsHlsTsPrefix || step.flag('materializeHls');
       if (step.params['hlsManifestDecode'] case final Map decoder
           when hlsManifestDecode == null) {
         hlsManifestDecode = decoder.cast<String, dynamic>();

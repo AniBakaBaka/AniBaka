@@ -51,7 +51,8 @@
   ],
   "play": [
     {
-      "op": "videoUrl"
+      "op": "videoUrl",
+      "proxyMedia": true
     }
   ]
 }

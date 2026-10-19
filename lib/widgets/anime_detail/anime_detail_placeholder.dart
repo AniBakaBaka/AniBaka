@@ -513,15 +513,26 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                   },
                   body: Container(
                     color: surfaceColor,
-                    child: TabBarView(
-                      physics: const BouncingScrollPhysics(),
-                      children: [
-                        for (final tab in tabs)
-                          Builder(
-                            key: PageStorageKey((_postId, _subjectId, tab.$1)),
-                            builder: tab.$2,
-                          ),
-                      ],
+                    // Kept-alive tabs share NestedScrollView's inner controller.
+                    // Desktop automatic scrollbars require a single position.
+                    child: ScrollConfiguration(
+                      behavior: ScrollConfiguration.of(
+                        context,
+                      ).copyWith(scrollbars: false),
+                      child: TabBarView(
+                        physics: const BouncingScrollPhysics(),
+                        children: [
+                          for (final tab in tabs)
+                            Builder(
+                              key: PageStorageKey((
+                                _postId,
+                                _subjectId,
+                                tab.$1,
+                              )),
+                              builder: tab.$2,
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),

@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+import 'package:baka/source/hls/hls_playlist.dart';
 import 'package:baka/source/hls/hls_ts_prefix.dart';
 import 'package:baka/source/runtime/source_operation.dart';
 
@@ -15,9 +15,8 @@ typedef HlsTargetFetch =
       Map<String, String> headers,
     );
 
-/// Loopback server for one materialized VOD manifest. Segments, keys and init
-/// maps are forwarded through [HlsTargetFetch], so playback keeps the rule's
-/// headers, cookies and proxy policy.
+/// Loopback server for a materialized VOD manifest or a ranged media file.
+/// Requests use [HlsTargetFetch], keeping the rule's headers and network policy.
 class HlsProxy {
   HlsProxy._(
     this._server,
@@ -35,8 +34,6 @@ class HlsProxy {
       ),
     );
   }
-
-  static final RegExp _uriAttribute = RegExp(r'URI="([^"]+)"');
 
   static const _forwardedRequestHeaders = [
     HttpHeaders.rangeHeader,
@@ -66,7 +63,7 @@ class HlsProxy {
 
   final HttpServer _server;
   final String _secret;
-  final String _manifest;
+  final String? _manifest;
   final List<({Uri uri, bool isSegment})> _targets;
   final Map<String, String> _headers;
   final HlsTargetFetch _fetch;
@@ -76,11 +73,26 @@ class HlsProxy {
   Future<void>? _closing;
 
   String get url =>
-      'http://${_server.address.address}:${_server.port}/$_secret/manifest.m3u8';
+      'http://${_server.address.address}:${_server.port}/$_secret/'
+      '${_manifest == null ? 'media/0' : 'manifest.m3u8'}';
+
+  /// Forward a file without downloading it first; Range and HEAD stay intact.
+  static Future<HlsProxy> startMedia(
+    Uri uri, {
+    required Map<String, String> headers,
+    required HlsTargetFetch fetch,
+  }) async => HlsProxy._(
+    await HttpServer.bind(InternetAddress.loopbackIPv4, 0),
+    DateTime.now().microsecondsSinceEpoch.toRadixString(36),
+    null,
+    [(uri: uri, isSegment: false)],
+    headers,
+    fetch,
+    false,
+  );
 
   static Future<HlsProxy> start(
-    String body,
-    Uri manifestUri, {
+    HlsPlaylist playlist, {
     required Map<String, String> headers,
     required bool stripTsPrefix,
     required HlsTargetFetch fetch,
@@ -90,37 +102,24 @@ class HlsProxy {
       final secret = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
       final base =
           'http://${server.address.address}:${server.port}/$secret/media/';
-      final targets = <({Uri uri, bool isSegment}), int>{};
-      String proxied(Uri uri, {required bool isSegment}) =>
-          '$base${targets.putIfAbsent((uri: uri, isSegment: isSegment), () => targets.length).toRadixString(36)}';
+      final targets = <({Uri uri, bool isSegment})>[];
+      final ids = <({Uri uri, bool isSegment}), int>{};
+      String proxied(Uri uri, bool isSegment) {
+        final target = (uri: uri, isSegment: isSegment);
+        final id = ids.putIfAbsent(target, () {
+          final id = targets.length;
+          targets.add(target);
+          return id;
+        });
+        return '$base${id.toRadixString(36)}';
+      }
 
-      final manifest = StringBuffer();
-      var first = true;
-      for (final line in LineSplitter.split(body)) {
-        if (!first) manifest.write('\n');
-        first = false;
-        final trimmed = line.trim();
-        if (trimmed.isEmpty) continue;
-        manifest.write(
-          trimmed.startsWith('#')
-              ? line.replaceAllMapped(
-                  _uriAttribute,
-                  (m) =>
-                      'URI="${proxied(manifestUri.resolve(m.group(1)!), isSegment: false)}"',
-                )
-              : proxied(manifestUri.resolve(trimmed), isSegment: true),
-        );
-      }
-      if (body.endsWith('\n') || body.endsWith('\r')) manifest.write('\n');
-      final text = manifest.toString();
-      if (!text.contains('#EXTM3U') || !text.contains('#EXT-X-ENDLIST')) {
-        throw const FormatException('incomplete VOD manifest');
-      }
+      final text = playlist.render(rewrite: proxied);
       return HlsProxy._(
         server,
         secret,
         text,
-        targets.keys.toList(growable: false),
+        targets,
         headers,
         fetch,
         stripTsPrefix,
@@ -150,7 +149,8 @@ class HlsProxy {
     final response = request.response;
     try {
       final path = request.uri.pathSegments;
-      if (path.length == 2 &&
+      if (_manifest != null &&
+          path.length == 2 &&
           path[0] == _secret &&
           path[1] == 'manifest.m3u8') {
         response.headers
@@ -176,15 +176,17 @@ class HlsProxy {
       final target = _targets[id];
       final strip = _stripTsPrefix && target.isSegment;
       final headers = Map<String, String>.of(_headers);
-      for (final name in _forwardedRequestHeaders) {
+      if (strip) {
         // Prefix removal changes byte offsets and validators. A full 200 body
         // is valid for a Range request; keys and init maps keep normal ranges.
-        if (strip) {
-          headers.removeWhere((key, _) => key.toLowerCase() == name);
-          continue;
+        headers.removeWhere(
+          (key, _) => _forwardedRequestHeaders.contains(key.toLowerCase()),
+        );
+      } else {
+        for (final name in _forwardedRequestHeaders) {
+          final value = request.headers.value(name);
+          if (value != null) headers[name] = value;
         }
-        final value = request.headers.value(name);
-        if (value != null && value.isNotEmpty) headers[name] = value;
       }
       final isHead = request.method == 'HEAD';
       final remote = await _fetch(target.uri, isHead ? 'HEAD' : 'GET', headers);

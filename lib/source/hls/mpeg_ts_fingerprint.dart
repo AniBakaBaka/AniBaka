@@ -24,13 +24,6 @@ class HlsVideoFingerprint {
   /// H.264 `profile_idc`，如 100 = High。
   final int profileIdc;
 
-  /// 四个参数全等即视为同一次编码。
-  bool matches(HlsVideoFingerprint other) =>
-      width == other.width &&
-      height == other.height &&
-      levelIdc == other.levelIdc &&
-      profileIdc == other.profileIdc;
-
   @override
   String toString() => '${width}x$height/L$levelIdc/P$profileIdc';
 
@@ -51,15 +44,13 @@ class HlsVideoFingerprint {
 /// 只依赖分片开头的少量字节：PAT/PMT 通常在头几个包内，首个 SPS 一般也在
 /// 前几 KB。实测 dytt-tvs / jimxtc 的分片里 PMT 在第 376 字节、首个 SPS 起始码
 /// 在 601–1375 字节之间，16 KB 前缀足够。fMP4（EXT-X-MAP）不在此实现范围内。
-abstract final class MpegTsFingerprint {
+class MpegTsFingerprint {
   static const int packetSize = 188;
+  static const int probeBytes = 16 * 1024;
   static const int _syncByte = 0x47;
 
   /// 视频流类型：H.264。
   static const int _streamTypeH264 = 0x1B;
-
-  /// SPS 的 NAL 单元类型。
-  static const int _nalTypeSps = 7;
 
   /// 使用扩展 `seq_parameter_set_data` 语法的 profile。
   static const Set<int> _extendedProfiles = {
@@ -78,22 +69,80 @@ abstract final class MpegTsFingerprint {
     135,
   };
 
-  /// 解析 [bytes]（分片前缀），失败返回 null。
-  static HlsVideoFingerprint? read(Uint8List bytes) {
-    if (bytes.length < packetSize * 2) return null;
-    final start = findPacketStart(bytes);
-    if (start == null) return null;
-    final videoPid = _videoPid(bytes, start);
-    if (videoPid == null) return null;
-    final sps = _firstNalOfType(bytes, start, videoPid, _nalTypeSps);
-    if (sps == null) return null;
-    return _parseSps(sps);
+  int _offset = 0;
+  bool _synced = false;
+  int _pmtPid = -1;
+  int _videoPid = -1;
+  int _zeros = 0;
+  bool _nalHeader = false;
+  bool _collecting = false;
+  final _sps = <int>[];
+  HlsVideoFingerprint? _fingerprint;
+
+  /// Accepts a growing prefix. Packets already consumed are never read again.
+  HlsVideoFingerprint? read(Uint8List bytes) {
+    if (_fingerprint != null) return _fingerprint;
+    if (!_synced) {
+      final start = findPacketStart(bytes, from: _offset);
+      if (start == null) {
+        _offset = bytes.length > packetSize * 2
+            ? bytes.length - packetSize * 2
+            : 0;
+        return null;
+      }
+      _offset = start;
+      _synced = true;
+    }
+    while (_offset + packetSize <= bytes.length) {
+      final offset = _offset;
+      _offset += packetSize;
+      if (bytes[offset] != _syncByte) return null;
+      final pid = ((bytes[offset + 1] & 0x1F) << 8) | bytes[offset + 2];
+      if (pid != 0 && pid != _pmtPid && pid != _videoPid) continue;
+      final afc = (bytes[offset + 3] >> 4) & 3;
+      if (afc == 0 || afc == 2) continue;
+      var p = offset + 4;
+      if (afc == 3) p += 1 + bytes[p];
+      final end = offset + packetSize;
+      if (p >= end) continue;
+      final pusi = (bytes[offset + 1] & 0x40) != 0;
+      if (pid == _videoPid) {
+        // PSI uses a pointer field; video PES uses its own optional header.
+        if (pusi && p + 9 <= end) p += 9 + bytes[p + 8];
+        _fingerprint = _readSps(bytes, p, end);
+        if (_fingerprint != null) return _fingerprint;
+        continue;
+      }
+      if (!pusi) continue;
+      p += 1 + bytes[p];
+      if (p + 8 > end) continue;
+      final sectionEnd =
+          p + 3 + (((bytes[p + 1] & 15) << 8) | bytes[p + 2]) - 4;
+      final limit = sectionEnd < end ? sectionEnd : end;
+      if (pid == 0 && bytes[p] == 0) {
+        for (var program = p + 8; program + 4 <= limit; program += 4) {
+          if (bytes[program] == 0 && bytes[program + 1] == 0) continue;
+          _pmtPid = ((bytes[program + 2] & 31) << 8) | bytes[program + 3];
+          break;
+        }
+      } else if (pid == _pmtPid && bytes[p] == 2 && p + 12 <= limit) {
+        var stream = p + 12 + (((bytes[p + 10] & 15) << 8) | bytes[p + 11]);
+        while (stream + 5 <= limit) {
+          if (bytes[stream] == _streamTypeH264) {
+            _videoPid = ((bytes[stream + 1] & 31) << 8) | bytes[stream + 2];
+            break;
+          }
+          stream += 5 + (((bytes[stream + 3] & 15) << 8) | bytes[stream + 4]);
+        }
+      }
+    }
+    return null;
   }
 
   /// 找到连续三个同步字节对齐的位置，避开少数播放器在流前塞入的杂字节。
-  static int? findPacketStart(Uint8List bytes) {
-    final limit = bytes.length - packetSize * 3;
-    for (var offset = 0; offset <= limit; offset++) {
+  static int? findPacketStart(Uint8List bytes, {int from = 0}) {
+    final limit = bytes.length - packetSize * 2;
+    for (var offset = from; offset < limit; offset++) {
       if (bytes[offset] != _syncByte) continue;
       if (bytes[offset + packetSize] != _syncByte) continue;
       if (bytes[offset + packetSize * 2] != _syncByte) continue;
@@ -102,121 +151,32 @@ abstract final class MpegTsFingerprint {
     return null;
   }
 
-  /// 该包的净荷；`null` 表示这个包没有净荷。
-  static Uint8List? _payload(Uint8List bytes, int offset) {
-    final pusi = (bytes[offset + 1] & 0x40) != 0;
-    final afc = (bytes[offset + 3] >> 4) & 0x03;
-    if (afc == 0 || afc == 2) return null;
-    var p = offset + 4;
-    if (afc == 3) p += 1 + bytes[offset + 4];
-    if (p >= offset + packetSize) return null;
-    var payload = Uint8List.sublistView(bytes, p, offset + packetSize);
-    if (pusi) {
-      final pointer = payload[0];
-      final skip = 1 + pointer;
-      if (skip >= payload.length) return null;
-      payload = Uint8List.sublistView(payload, skip);
-    }
-    return payload;
-  }
-
-  static int _pid(Uint8List bytes, int offset) =>
-      ((bytes[offset + 1] & 0x1F) << 8) | bytes[offset + 2];
-
-  /// 取某个 PID 上第一个带净荷的包。
-  static Uint8List? _payloadOf(Uint8List bytes, int start, int pid) {
-    for (
-      var offset = start;
-      offset + packetSize <= bytes.length;
-      offset += packetSize
-    ) {
-      if (bytes[offset] != _syncByte) break;
-      if (_pid(bytes, offset) != pid) continue;
-      final payload = _payload(bytes, offset);
-      if (payload != null) return payload;
-    }
-    return null;
-  }
-
-  /// 从 PAT → PMT 找到 H.264 视频流的 PID。
-  static int? _videoPid(Uint8List bytes, int start) {
-    final pat = _payloadOf(bytes, start, 0);
-    if (pat == null || pat.length < 8 || pat[0] != 0x00) return null;
-    final sectionLength = ((pat[1] & 0x0F) << 8) | pat[2];
-    if (sectionLength < 9) return null;
-    final patEnd = 3 + sectionLength - 4;
-    int? pmtPid;
-    for (var p = 8; p + 4 <= patEnd && p + 4 <= pat.length; p += 4) {
-      final program = (pat[p] << 8) | pat[p + 1];
-      if (program == 0) continue; // network PID
-      pmtPid = ((pat[p + 2] & 0x1F) << 8) | pat[p + 3];
-      break;
-    }
-    if (pmtPid == null) return null;
-
-    final pmt = _payloadOf(bytes, start, pmtPid);
-    if (pmt == null || pmt.length < 12 || pmt[0] != 0x02) return null;
-    final pmtLength = ((pmt[1] & 0x0F) << 8) | pmt[2];
-    if (pmtLength < 13) return null;
-    final pmtEnd = 3 + pmtLength - 4;
-    var p = 12 + (((pmt[10] & 0x0F) << 8) | pmt[11]);
-    while (p + 5 <= pmtEnd && p + 5 <= pmt.length) {
-      final streamType = pmt[p];
-      final pid = ((pmt[p + 1] & 0x1F) << 8) | pmt[p + 2];
-      if (streamType == _streamTypeH264) return pid;
-      p += 5 + (((pmt[p + 3] & 0x0F) << 8) | pmt[p + 4]);
-    }
-    return null;
-  }
-
-  /// 拼接该 PID 的净荷并在其中找第一个指定类型的 NAL 单元。
-  ///
-  /// PES 头（`00 00 01 E0`）不会与 SPS 的起始码混淆，所以无需拆 PES 头。
-  static Uint8List? _firstNalOfType(
-    Uint8List bytes,
-    int start,
-    int pid,
-    int nalType,
-  ) {
-    final es = BytesBuilder(copy: false);
-    for (
-      var offset = start;
-      offset + packetSize <= bytes.length;
-      offset += packetSize
-    ) {
-      if (bytes[offset] != _syncByte) break;
-      if (_pid(bytes, offset) != pid) continue;
-      final payload = _payload(bytes, offset);
-      if (payload != null) es.add(payload);
-    }
-    final data = es.toBytes();
-    for (var i = 0; i + 4 < data.length; i++) {
-      if (data[i] != 0 || data[i + 1] != 0) continue;
-      int header;
-      if (data[i + 2] == 1) {
-        header = i + 3;
-      } else if (data[i + 2] == 0 && data[i + 3] == 1) {
-        header = i + 4;
-      } else {
-        continue;
-      }
-      if (header >= data.length) continue;
-      if ((data[header] & 0x1F) != nalType) continue;
-      var end = data.length;
-      for (var j = header + 1; j + 3 < data.length; j++) {
-        if (data[j] != 0 || data[j + 1] != 0) continue;
-        if (data[j + 2] == 1 || (data[j + 2] == 0 && data[j + 3] == 1)) {
-          end = j;
-          break;
+  HlsVideoFingerprint? _readSps(Uint8List bytes, int start, int end) {
+    for (var i = start; i < end; i++) {
+      final byte = bytes[i];
+      if (byte == 1 && _zeros >= 2) {
+        if (_collecting) {
+          _sps.length -= _zeros;
+          final result = _parseSps(_sps);
+          if (result != null) return result;
+          _sps.clear();
         }
+        _collecting = false;
+        _nalHeader = true;
+      } else if (_nalHeader) {
+        _collecting = (byte & 31) == 7;
+        _nalHeader = false;
+        if (_collecting) _sps.add(byte);
+      } else if (_collecting) {
+        _sps.add(byte);
       }
-      return Uint8List.sublistView(data, header, end);
+      _zeros = byte == 0 ? _zeros + 1 : 0;
     }
     return null;
   }
 
   /// 去掉防竞争字节（`00 00 03` → `00 00`）。
-  static Uint8List _unescape(Uint8List nal) {
+  static Uint8List _unescape(List<int> nal) {
     final out = Uint8List(nal.length);
     var n = 0;
     var zeros = 0;
@@ -234,7 +194,7 @@ abstract final class MpegTsFingerprint {
   /// 读 SPS：宽高 + frame cropping + level_idc。
   ///
   /// [nal] 从 NAL 头字节（`0x67`）开始，因此先跳过 1 字节头。
-  static HlsVideoFingerprint? _parseSps(Uint8List nal) {
+  static HlsVideoFingerprint? _parseSps(List<int> nal) {
     final reader = _BitReader(_unescape(nal));
     try {
       reader.readBits(8); // NAL 头：forbidden_zero_bit/nal_ref_idc/nal_unit_type
@@ -308,7 +268,7 @@ abstract final class MpegTsFingerprint {
         levelIdc: levelIdc,
         profileIdc: profileIdc,
       );
-    } catch (_) {
+    } on StateError {
       return null;
     }
   }

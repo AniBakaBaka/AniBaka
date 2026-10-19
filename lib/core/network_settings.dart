@@ -27,7 +27,9 @@ class NetworkSettings {
         uri.userInfo.isNotEmpty ||
         uri.hasFragment ||
         uri.queryParameters.containsKey('dns')) {
-      throw const FormatException('请输入有效的 HTTPS DoH 地址，不能包含账号、片段或 dns 参数');
+      throw const FormatException(
+        '请输入有效的 DoH 服务地址，例如 https://1.1.1.1/dns-query',
+      );
     }
     return uri;
   }

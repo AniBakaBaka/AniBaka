@@ -48,9 +48,8 @@ class BgmSubjectInfo {
     name: trimmed(data['name']),
     nameCn: trimmed(data['name_cn']),
     summary: trimmed(data['summary']),
-    imageUrl: trimmed((data['images'] as Map<String, dynamic>)['large']),
-    score: ((data['rating'] as Map<String, dynamic>)['score'] as num)
-        .toDouble(),
+    imageUrl: trimmed((data['images'] as Map?)?['large']),
+    score: BgmUtils.extractScore(data['rating'] as Map?),
   );
 }
 
@@ -89,8 +88,10 @@ List<Map<String, dynamic>> convertBgmSubjectsToAppFormat(
     final title = nameCn ?? name;
     if (title == null) continue;
 
-    final imageUrl = (subject['images'] as Map)['large'] as String;
-    final rating = subject['rating'] as Map;
+    // Calendar subjects can have no cover or rating yet. Keep the entry;
+    // cards already handle a missing image and an unrated score.
+    final imageUrl = trimmed((subject['images'] as Map?)?['large']) ?? '';
+    final rating = subject['rating'] as Map?;
     final converted = <String, dynamic>{
       if (!compact) 'id': id,
       'title': title,
@@ -104,7 +105,7 @@ List<Map<String, dynamic>> convertBgmSubjectsToAppFormat(
       'bgmId': id,
       'nsfw': subject['nsfw'] == true,
       'score': BgmUtils.extractScore(rating) ?? 0.0,
-      if (!compact) 'rank': rating['rank'] as int,
+      if (!compact) 'rank': toInt(rating?['rank']) ?? 0,
       if (!compact) 'summary': trimmed(subject['summary']) ?? '',
       if (!compact) 'eps': subject['eps'] ?? subject['total_episodes'] ?? 0,
       'source': 'bgm',
