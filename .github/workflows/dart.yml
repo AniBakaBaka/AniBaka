@@ -390,7 +390,7 @@ jobs:
 
       - name: Verify Windows native assets
         shell: pwsh
-        run: ./.github/scripts/tests/verify-windows-native-assets-test.ps1
+        run: ./.github/scripts/verify-windows-native-assets.ps1
 
       - name: Stage unsigned Windows artifacts
         id: windows_release_meta
