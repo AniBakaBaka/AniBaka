@@ -32,8 +32,15 @@ Future<List<dynamic>> getDanmu(
   });
   final response = await apiTransport.getJson<Map<String, dynamic>>(
     uri.toString(),
+    // The service bounds lookup work to 10s; leave room for the network/body.
+    timeout: const Duration(seconds: 15),
     abortTrigger: abortTrigger,
     notifyOnError: false,
   );
-  return response['data'] as List<dynamic>;
+  if (response['retryable'] == true || response['imported'] == true) {
+    throw ApiException(response['message'] as String? ?? '弹幕暂时不可用，请重试');
+  }
+  final data = response['data'];
+  if (data is! List) throw const FormatException('弹幕响应缺少有效 data');
+  return data;
 }

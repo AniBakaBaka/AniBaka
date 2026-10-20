@@ -216,12 +216,12 @@ void main() {
         await tester.tap(find.text('Gamma'));
         await tester.pump();
         episodes['91001']!.complete(
-          http.Response('{"data":[{"sort":1},{"sort":2}]}', 200),
+          http.Response('{"total":2,"data":[{"sort":1},{"sort":2}]}', 200),
         );
         await tester.pump();
         expect(find.text('01'), findsNothing);
         episodes['91002']!.complete(
-          http.Response('{"data":[{"sort":3}]}', 200),
+          http.Response('{"total":1,"data":[{"sort":3}]}', 200),
         );
         await tester.pump();
         await tester.pump();
@@ -237,11 +237,17 @@ void main() {
         await tester.tap(find.text('02'));
         await tester.pump();
         loads['2']!.complete(
-          http.Response('[{"m":"latest","p":"1,1,16777215"}]', 200),
+          http.Response(
+            '{"success":true,"data":[{"m":"latest","p":"1,1,16777215"}]}',
+            200,
+          ),
         );
         await tester.pump();
         loads['1']!.complete(
-          http.Response('[{"m":"stale","p":"1,1,16777215"}]', 200),
+          http.Response(
+            '{"success":true,"data":[{"m":"stale","p":"1,1,16777215"}]}',
+            200,
+          ),
         );
         await tester.pumpAndSettle();
         expect(controller.items.single.text, 'latest');

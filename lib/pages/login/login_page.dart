@@ -15,6 +15,7 @@ import 'package:baka/pages/setting/bangumi_sync_page.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/common/scale_button.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
+import 'package:baka/pages/login/account_security_page.dart';
 
 /// 登录 / 注册页面
 class Login extends StatefulWidget {
@@ -26,20 +27,17 @@ class Login extends StatefulWidget {
 
 class LoginState extends State<Login> {
   static const _accessTokenUrl = 'https://next.bgm.tv/demo/access-token';
-  final _service = LoginService(
-    Get.find<AccountSession>(),
-    Get.find<ApiTransport>(),
-  );
+  final _service = LoginService();
   final _bangumi = bangumiSession;
   final _formKey = GlobalKey<FormState>();
 
   final _nameController = TextEditingController();
   final _pwdController = TextEditingController();
   final _qqController = TextEditingController();
+  final _confirmController = TextEditingController();
 
   bool _isRegister = false;
   bool _submitting = false;
-  bool _obscurePassword = true;
   bool _bangumiBusy = false;
 
   @override
@@ -48,6 +46,7 @@ class LoginState extends State<Login> {
     _nameController.dispose();
     _pwdController.dispose();
     _qqController.dispose();
+    _confirmController.dispose();
     super.dispose();
   }
 
@@ -55,6 +54,8 @@ class LoginState extends State<Login> {
     if (_isRegister == isRegister || _submitting) return;
     HapticFeedback.lightImpact();
     setState(() => _isRegister = isRegister);
+    _pwdController.clear();
+    _confirmController.clear();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _formKey.currentState?.reset();
     });
@@ -241,6 +242,19 @@ class LoginState extends State<Login> {
                         _buildFormFields(theme, reduceMotion),
                         const SizedBox(height: 28),
                         _buildSubmitButton(theme),
+                        if (!_isRegister)
+                          TextButton(
+                            onPressed: _submitting
+                                ? null
+                                : () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute<void>(
+                                      builder: (_) =>
+                                          const PasswordRecoveryPage(),
+                                    ),
+                                  ),
+                            child: const Text('忘记密码？'),
+                          ),
                       ],
                       const SizedBox(height: 24),
                       _buildOrDivider(theme),
@@ -653,12 +667,14 @@ class LoginState extends State<Login> {
                     enabled: !_submitting,
                     decoration: _inputDecoration(
                       theme,
-                      hintText: '请填写 QQ 号',
+                      hintText: 'QQ 号（可选）',
                       prefixIcon: Icons.badge_outlined,
                     ),
                     validator: (v) =>
-                        _isRegister && (v == null || v.trim().isEmpty)
-                        ? '请填写 QQ 号'
+                        _isRegister &&
+                            (v?.trim().isNotEmpty ?? false) &&
+                            !LoginService.qqPattern.hasMatch(v!.trim())
+                        ? '请填写有效的 QQ 号'
                         : null,
                   ),
                 )
@@ -671,37 +687,45 @@ class LoginState extends State<Login> {
           autofillHints: const [AutofillHints.username],
           decoration: _inputDecoration(
             theme,
-            hintText: _isRegister ? '用户名' : '用户名或 QQ',
+            hintText: _isRegister ? '用户名' : '用户名 / QQ / 邮箱',
             prefixIcon: Icons.person_outline,
           ),
           validator: (v) => (v == null || v.trim().isEmpty) ? '请填写用户名' : null,
         ),
         const SizedBox(height: 14),
-        TextFormField(
+        AccountPasswordField(
           controller: _pwdController,
-          obscureText: _obscurePassword,
-          textInputAction: TextInputAction.done,
+          label: '密码',
+          current: !_isRegister,
           enabled: !_submitting,
-          autofillHints: const [AutofillHints.password],
-          onFieldSubmitted: (_) => _submit(),
+          onSubmitted: _isRegister ? null : _submit,
           decoration: _inputDecoration(
             theme,
             hintText: '密码',
             prefixIcon: Icons.lock_outline,
-            suffixIcon: IconButton(
-              icon: Icon(
-                _obscurePassword
-                    ? Icons.visibility_outlined
-                    : Icons.visibility_off_outlined,
-                size: 20,
-              ),
-              tooltip: _obscurePassword ? '显示密码' : '隐藏密码',
-              onPressed: () =>
-                  setState(() => _obscurePassword = !_obscurePassword),
-            ),
           ),
-          validator: (v) => (v == null || v.trim().isEmpty) ? '请填写密码' : null,
         ),
+        if (_isRegister) ...[
+          const SizedBox(height: 14),
+          AccountPasswordField(
+            controller: _confirmController,
+            label: '确认密码',
+            decoration: _inputDecoration(
+              theme,
+              hintText: '确认密码',
+              prefixIcon: Icons.lock_outline,
+            ),
+            enabled: !_submitting,
+            onSubmitted: _submit,
+            validator: (value) =>
+                value != _pwdController.text ? '两次密码输入不一致' : null,
+          ),
+          const SizedBox(height: 14),
+          Text(
+            '注册无需绑定邮箱。填写 QQ 后可直接通过对应 QQ 邮箱找回密码，无需再次绑定；其他邮箱可稍后在账户安全中添加。',
+            style: theme.textTheme.bodySmall,
+          ),
+        ],
       ],
     );
   }

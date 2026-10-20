@@ -1,4 +1,3 @@
-import 'package:baka/source/models/source_search_result.dart';
 import 'package:baka/utils/format_utils.dart';
 import 'package:baka/models/playback_request.dart';
 import 'package:baka/models/bgm.dart';
@@ -56,14 +55,11 @@ class VideoSourceSearchSheet extends StatefulWidget {
 }
 
 class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
-  static const _identityKeys = ['seriesId', 'seriesUrl', 'id', 'url'];
-
   late final VideoSourceSearchController _controller;
   late final bool _ownsController;
   String _selectedFilter = 'all';
-  late List<({String key, String label, IconData icon})> _sources;
 
-  late final Set<String> _currentIds;
+  late final String? _currentId;
   late final String _title;
   late final String _cover;
   late final String? _scoreText;
@@ -90,12 +86,10 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     _scoreText = score != null && score > 0 ? score.toStringAsFixed(1) : null;
     final rating = (seed['bgmDetailData'] as Map?)?['rating'] as Map?;
     _scoreCount = toInt(rating?['total']);
-
-    _currentIds = {
-      for (final key in _identityKeys)
-        if (seed[key]?.toString().trim() case final String v when v.isNotEmpty)
-          v,
-    };
+    _currentId = trimmed(
+      (seed['seriesId'] ?? seed['seriesUrl'] ?? seed['id'] ?? seed['url'])
+          ?.toString(),
+    );
 
     _ownsController = widget.searchController == null;
     _controller =
@@ -104,19 +98,6 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
           seedData: seed,
           targetEpisodeIndex: widget.currentEpisodeIndex,
         );
-
-    _sources = _readSources();
-
-    sourceRepository.init().then<void>(
-      (_) {
-        if (!mounted) return;
-        setState(() {
-          _sources = _readSources();
-        });
-      },
-      // 搜索初始化失败由 controller 的搜索状态和错误横幅报告。
-      onError: (Object _, StackTrace _) {},
-    );
 
     if (_controller.results.isEmpty && !_controller.isSearching) {
       _controller.startSearch();
@@ -182,55 +163,36 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
       _visibleRoutes = _routes;
       return;
     }
-    final routes = <DirectSourceGroup>[];
-    for (final group in _routes) {
-      if (group.origins.length == 1) {
-        if (group.primary.item.source == _selectedFilter) routes.add(group);
-        continue;
-      }
-      List<SourceProbeState>? origins;
-      for (final origin in group.origins) {
-        if (origin.item.source == _selectedFilter) {
-          (origins ??= []).add(origin);
-        }
-      }
-      if (origins != null) {
-        routes.add(
+    _visibleRoutes = [
+      for (final group in _routes)
+        if ([
+              for (final origin in group.origins)
+                if (origin.item.source == _selectedFilter) origin,
+            ]
+            case final origins when origins.isNotEmpty)
           origins.length == group.origins.length
               ? group
               : DirectSourceGroup(key: group.key, origins: origins),
-        );
-      }
-    }
-    _visibleRoutes = routes;
+    ];
   }
 
-  bool _matchesCurrent(SourceProbeState origin) {
-    if (_currentIds.isEmpty ||
-        origin.item.source != widget.currentSource ||
-        (origin.resolvedLineIndex ?? origin.preferredLine) !=
-            widget.currentLineIndex) {
-      return false;
-    }
-    return _currentIds.contains(origin.item.id);
-  }
+  bool _matchesCurrent(SourceProbeState origin) =>
+      _currentId != null &&
+      origin.item.source == widget.currentSource &&
+      (origin.resolvedLineIndex ?? origin.preferredLine) ==
+          widget.currentLineIndex &&
+      origin.item.id == _currentId;
 
   Future<void> _selectBest() async {
-    if (_isSelecting) {
-      return;
-    }
+    if (_isSelecting) return;
     DirectSourceGroup? fallback;
     for (final g in _routes) {
-      if (g.isReady) {
-        return _selectRoute(g);
-      }
+      if (g.isReady) return _selectRoute(g);
       if (fallback == null && g.status != SourceProbeStatus.failed) {
         fallback = g;
       }
     }
-    if (fallback != null) {
-      return _selectRoute(fallback);
-    }
+    if (fallback != null) return _selectRoute(fallback);
     _message('暂时没有可用线路');
   }
 
@@ -361,7 +323,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
           child: ListenableBuilder(
             listenable: _controller,
             builder: (context, _) {
-              // Controller progress and layout changes reuse the route snapshot.
+              final sources = _readSources();
               _refreshRoutes();
               return CustomScrollView(
                 controller: scrollController,
@@ -386,15 +348,31 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
                           _buildHeaderCard(isDark, colors.primary),
                           _buildErrorBanner(isDark),
                           const SizedBox(height: 12),
-                          _buildProgressSection(colors.primary),
+                          _buildProgressSection(
+                            colors.primary,
+                            sources.length - 1,
+                          ),
                           const SizedBox(height: 8),
-                          _buildFilterChips(),
+                          _buildFilterChips(sources),
                           const SizedBox(height: 12),
                         ],
                       ),
                     ),
                   ),
-                  _buildResultList(isDark),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                    sliver: _visibleRoutes.isEmpty
+                        ? SliverToBoxAdapter(child: _buildEmptyState(isDark))
+                        : SliverList.builder(
+                            itemCount: _visibleRoutes.length,
+                            itemBuilder: (context, index) => _buildRouteTile(
+                              index,
+                              _visibleRoutes[index],
+                              isDark,
+                              colors,
+                            ),
+                          ),
+                  ),
                 ],
               );
             },
@@ -664,10 +642,9 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     );
   }
 
-  Widget _buildProgressSection(Color primary) {
+  Widget _buildProgressSection(Color primary, int total) {
     final searching = _controller.isSearching;
     final completed = _controller.finishedCount;
-    final total = _sources.length - 1;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -707,7 +684,7 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
         ),
         if (searching)
           LinearProgressIndicator(
-            value: completed == 0 ? null : completed / total,
+            value: completed == 0 || total <= 0 ? null : completed / total,
             minHeight: 2,
             borderRadius: BorderRadius.circular(2),
           ),
@@ -715,14 +692,16 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     );
   }
 
-  Widget _buildFilterChips() => SizedBox(
+  Widget _buildFilterChips(
+    List<({String key, String label, IconData icon})> sources,
+  ) => SizedBox(
     height: 40,
     child: ListView.separated(
       scrollDirection: Axis.horizontal,
-      itemCount: _sources.length,
+      itemCount: sources.length,
       separatorBuilder: (_, _) => const SizedBox(width: 6),
       itemBuilder: (context, index) {
-        final source = _sources[index];
+        final source = sources[index];
         final key = source.key;
         final count = key == 'all'
             ? _controller.results.length
@@ -746,77 +725,58 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
     ),
   );
 
-  Widget _buildResultList(bool isDark) {
-    final colors = Theme.of(context).colorScheme;
-    final routes = _visibleRoutes;
-    return SliverPadding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-      sliver: routes.isEmpty
-          ? SliverToBoxAdapter(
-              child: _buildEmptyMessage(
-                _controller.isSearching ? '正在搜索视频源…' : '未找到匹配的视频源',
-                isDark,
-                isLoading: _controller.isSearching,
-              ),
+  Widget _buildEmptyState(bool isDark) {
+    final isLoading = _controller.isSearching;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.05)
+            : Colors.black.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          if (isLoading)
+            const SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
             )
-          : SliverList.builder(
-              itemCount: routes.length,
-              itemBuilder: (context, index) =>
-                  _buildRouteTile(index, routes[index], isDark, colors),
+          else
+            Icon(
+              Icons.search_off_rounded,
+              size: 36,
+              color: isDark ? Colors.white38 : Colors.black38,
             ),
+          const SizedBox(height: 12),
+          Text(
+            isLoading ? '正在搜索视频源…' : '未找到匹配的视频源',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white70 : Colors.black87,
+            ),
+          ),
+          if (!isLoading) ...[
+            const SizedBox(height: 14),
+            ElevatedButton.icon(
+              onPressed: _controller.startSearch,
+              icon: const Icon(Icons.refresh_rounded, size: 15),
+              label: const Text('重新搜索', style: TextStyle(fontSize: 12)),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                minimumSize: const Size(80, 32),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
-
-  Widget _buildEmptyMessage(
-    String message,
-    bool isDarkMode, {
-    bool isLoading = false,
-  }) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-    decoration: BoxDecoration(
-      color: isDarkMode
-          ? Colors.white.withValues(alpha: 0.05)
-          : Colors.black.withValues(alpha: 0.03),
-      borderRadius: BorderRadius.circular(16),
-    ),
-    child: Column(
-      children: [
-        if (isLoading)
-          const SizedBox(
-            width: 28,
-            height: 28,
-            child: CircularProgressIndicator(strokeWidth: 2.5),
-          )
-        else
-          Icon(
-            Icons.search_off_rounded,
-            size: 36,
-            color: isDarkMode ? Colors.white38 : Colors.black38,
-          ),
-        const SizedBox(height: 12),
-        Text(
-          message,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: isDarkMode ? Colors.white70 : Colors.black87,
-          ),
-        ),
-        if (!isLoading) ...[
-          const SizedBox(height: 14),
-          ElevatedButton.icon(
-            onPressed: _controller.startSearch,
-            icon: const Icon(Icons.refresh_rounded, size: 15),
-            label: const Text('重新搜索', style: TextStyle(fontSize: 12)),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              minimumSize: const Size(80, 32),
-            ),
-          ),
-        ],
-      ],
-    ),
-  );
 
   Widget _buildRouteTile(
     int index,
@@ -941,9 +901,10 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
                             color: colors.secondary,
                             isDark: isDark,
                           ),
-                          if (item.episodeInfo case final info?)
+                          if (item.episodeCount case final int count
+                              when count > 0)
                             _chipBadge(
-                              label: info,
+                              label: '约 $count 集',
                               color: colors.secondary,
                               isDark: isDark,
                             ),
@@ -953,9 +914,10 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
                               color: colors.secondary,
                               isDark: isDark,
                             ),
-                          if (item.updateInfo case final info?)
+                          if (item.internalData?['time'] case final String time
+                              when time.isNotEmpty)
                             _chipBadge(
-                              label: info,
+                              label: '更新时间 ${formatDate(time)}',
                               color: colors.secondary,
                               isDark: isDark,
                             ),
@@ -1087,15 +1049,4 @@ class _VideoSourceSearchSheetState extends State<VideoSourceSearchSheet> {
       ],
     ),
   );
-}
-
-extension _SearchPresentation on SourceSearchResult {
-  String? get episodeInfo => switch (episodeCount) {
-    final int count when count > 0 => '约 $count 集',
-    _ => null,
-  };
-  String? get updateInfo {
-    final time = internalData?['time'] as String?;
-    return time == null || time.isEmpty ? null : '更新时间 ${formatDate(time)}';
-  }
 }

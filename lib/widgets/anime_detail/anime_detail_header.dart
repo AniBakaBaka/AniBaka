@@ -11,25 +11,16 @@ import 'package:baka/widgets/anime_detail/score_distribution_chart.dart';
 import 'package:baka/widgets/common/scale_button.dart';
 
 class AnimeDetailHeader extends StatelessWidget {
-  /// 直接消费详情模型，避免调用方把 title/alias/score/tags 等字段再拆一遍。
   final AnimeDetailViewData detail;
-  final String? updateTime;
-  final String? category;
-  final Object heroTag;
-  final bool enableCoverEffects;
   final ValueListenable<AnimeCollection?> collection;
   final VoidCallback onCollectionTap;
   final VoidCallback onSearchTap;
 
   const AnimeDetailHeader({
     required this.detail,
-    required this.heroTag,
     required this.collection,
     required this.onCollectionTap,
     required this.onSearchTap,
-    this.enableCoverEffects = true,
-    this.updateTime,
-    this.category,
     super.key,
   });
 
@@ -40,39 +31,48 @@ class AnimeDetailHeader extends StatelessWidget {
     final alias = detail.alias;
     final score = detail.score;
     final scoreCount = detail.scoreCount;
-    final imageUrl = detail.coverUrl;
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth > 800;
         final coverWidth = isWide ? 270.0 : 130.0;
         final coverHeight = isWide ? 378.0 : 182.0;
         final hasScore = score != null && score > 0;
-        final cover = _CoverImage(
-          imageUrl: imageUrl,
-          heroTag: heroTag,
-          isDark: isDark,
-          enableEffects: enableCoverEffects,
-          width: coverWidth,
-          height: coverHeight,
-        );
-        // 标签：优先完整分类 genres；桌面限高区域展示，移动端限数量。
-        final categoryTags = detail.genres.isNotEmpty
-            ? detail.genres
-            : detail.tags;
-        final tagList = _TagsWrap(
-          tags: categoryTags,
-          updateTime: updateTime,
-          category: category,
-          isDark: isDark,
-          // 移动端最多 5 个（另含更新时间/分类 pill 时仍截断 tags 本身）
-          limit: isWide ? null : 5,
-        );
+        final cover = _buildCover(isDark, coverWidth, coverHeight);
+        final tagList = _buildTags(isDark, limit: isWide ? null : 5);
         final collectionButton = ValueListenableBuilder<AnimeCollection?>(
           valueListenable: collection,
-          builder: (context, value, _) =>
-              _CollectionButton(collection: value, onTap: onCollectionTap),
+          builder: (context, value, _) {
+            final status = value != null
+                ? CollectionStatus.fromValue(value.status)
+                : null;
+            if (status != null) {
+              final visual = collectionStatusVisuals[status]!;
+              return _buildActionButton(
+                icon: visual.$2,
+                label: status.label,
+                bgColor: visual.$1.withValues(alpha: isDark ? 0.15 : 0.1),
+                textColor: visual.$1,
+                onTap: onCollectionTap,
+                animated: true,
+              );
+            }
+            return _buildActionButton(
+              icon: Icons.add_rounded,
+              label: '追番',
+              bgColor: isDark ? Colors.white : Colors.black,
+              textColor: isDark ? Colors.black : Colors.white,
+              onTap: onCollectionTap,
+              animated: true,
+            );
+          },
         );
-        final searchButton = _SearchSourceButton(onTap: onSearchTap);
+        final searchButton = _buildActionButton(
+          icon: Icons.play_arrow_rounded,
+          label: '开始观看',
+          bgColor: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+          textColor: isDark ? Colors.white : Colors.black,
+          onTap: onSearchTap,
+        );
         final actionsRow = Row(
           children: [
             isWide
@@ -86,7 +86,6 @@ class AnimeDetailHeader extends StatelessWidget {
         );
 
         if (isWide) {
-          // 宽屏：封面 | 标题+限高标签；右下角 柱形图 + 分数/排名
           return SizedBox(
             height: coverHeight,
             child: Row(
@@ -133,7 +132,7 @@ class AnimeDetailHeader extends StatelessWidget {
                         children: [
                           actionsRow,
                           const Spacer(),
-                          _DesktopScoreCorner(detail: detail, isDark: isDark),
+                          _buildDesktopScoreCorner(isDark),
                         ],
                       ),
                     ],
@@ -144,45 +143,79 @@ class AnimeDetailHeader extends StatelessWidget {
           );
         }
 
-        final text = SizedBox(
-          height: coverHeight,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildTitleOrLogo(title, detail.logoUrl, false, isDark),
-              if (alias.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  alias,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    height: 1.3,
-                    color: isDark ? Colors.white54 : const Color(0xFF8E8E93),
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-              const Spacer(),
-              if (hasScore)
-                _ScoreRow(score: score, scoreCount: scoreCount, isDark: isDark),
-            ],
-          ),
-        );
-        final intro = Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            cover,
-            const SizedBox(width: 20),
-            Expanded(child: text),
-          ],
-        );
-
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            intro,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                cover,
+                const SizedBox(width: 20),
+                Expanded(
+                  child: SizedBox(
+                    height: coverHeight,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildTitleOrLogo(title, detail.logoUrl, false, isDark),
+                        if (alias.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            alias,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              height: 1.3,
+                              color: isDark
+                                  ? Colors.white54
+                                  : const Color(0xFF8E8E93),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                        const Spacer(),
+                        if (hasScore)
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.baseline,
+                            textBaseline: TextBaseline.alphabetic,
+                            children: [
+                              Text(
+                                score.toStringAsFixed(1),
+                                style: TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: -0.5,
+                                  color: isDark ? Colors.white : Colors.black,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              const Icon(
+                                Icons.star_rounded,
+                                size: 16,
+                                color: Color(0xFFFF9500),
+                              ),
+                              if (scoreCount > 0) ...[
+                                const SizedBox(width: 8),
+                                Text(
+                                  '$scoreCount 人评价',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: isDark
+                                        ? Colors.white38
+                                        : const Color(0xFF8E8E93),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 24),
             tagList,
             const SizedBox(height: 24),
@@ -211,44 +244,23 @@ class AnimeDetailHeader extends StatelessWidget {
       maxLines: isWide ? 2 : 3,
       overflow: TextOverflow.ellipsis,
     );
-    if (logoUrl.isNotEmpty) {
-      return Container(
-        height: isWide ? 85 : 55,
+    if (logoUrl.isEmpty) return fallback;
+    return Container(
+      height: isWide ? 85 : 55,
+      alignment: Alignment.centerLeft,
+      child: CachedNetworkImage(
+        key: ValueKey(logoUrl),
+        imageUrl: logoUrl,
+        memCacheHeight: 170,
+        fit: BoxFit.contain,
         alignment: Alignment.centerLeft,
-        child: CachedNetworkImage(
-          key: ValueKey(logoUrl),
-          imageUrl: logoUrl,
-          memCacheHeight: 170,
-          fit: BoxFit.contain,
-          alignment: Alignment.centerLeft,
-          errorWidget: (context, url, error) => fallback,
-        ),
-      );
-    }
-
-    return fallback;
+        errorWidget: (_, _, _) => fallback,
+      ),
+    );
   }
-}
 
-class _CoverImage extends StatelessWidget {
-  final String imageUrl;
-  final Object heroTag;
-  final bool isDark;
-  final bool enableEffects;
-  final double width;
-  final double height;
-
-  const _CoverImage({
-    required this.imageUrl,
-    required this.heroTag,
-    required this.isDark,
-    required this.enableEffects,
-    this.width = 130,
-    this.height = 182,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildCover(bool isDark, double width, double height) {
+    final imageUrl = detail.coverUrl;
     late final fallback = ColoredBox(
       color: isDark
           ? Colors.white.withValues(alpha: 0.06)
@@ -263,7 +275,7 @@ class _CoverImage extends StatelessWidget {
     );
 
     return Hero(
-      tag: heroTag,
+      tag: detail.heroTag,
       child: Container(
         width: width,
         height: height,
@@ -275,15 +287,13 @@ class _CoverImage extends StatelessWidget {
                 : Colors.black.withValues(alpha: 0.04),
             width: 0.5,
           ),
-          boxShadow: enableEffects
-              ? [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.16),
-                    blurRadius: 18,
-                    offset: const Offset(0, 8),
-                  ),
-                ]
-              : null,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.16),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
         ),
         child: ClipRRect(
           borderRadius: const BorderRadius.all(Radius.circular(11.5)),
@@ -295,74 +305,16 @@ class _CoverImage extends StatelessWidget {
                   useOldImageOnUrlChange: true,
                   fadeInDuration: Duration.zero,
                   fadeOutDuration: Duration.zero,
-                  // The mobile cover already fits the card's 300 px decode.
-                  // Do not decode the same AVIF again at 260 px after entry.
-                  // Only the larger desktop cover needs an upgrade.
-                  memCacheWidth: enableEffects && width > 150
-                      ? (width * 2).round()
-                      : 300,
-                  placeholder: (context, url) => fallback,
-                  errorWidget: (context, url, error) => fallback,
+                  memCacheWidth: width > 150 ? (width * 2).round() : 300,
+                  placeholder: (_, _) => fallback,
+                  errorWidget: (_, _, _) => fallback,
                 ),
         ),
       ),
     );
   }
-}
 
-class _ScoreRow extends StatelessWidget {
-  final double score;
-  final int scoreCount;
-  final bool isDark;
-
-  const _ScoreRow({
-    required this.score,
-    required this.scoreCount,
-    required this.isDark,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.baseline,
-      textBaseline: TextBaseline.alphabetic,
-      children: [
-        Text(
-          score.toStringAsFixed(1),
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w900,
-            letterSpacing: -0.5,
-            color: isDark ? Colors.white : Colors.black,
-          ),
-        ),
-        const SizedBox(width: 4),
-        const Icon(Icons.star_rounded, size: 16, color: Color(0xFFFF9500)),
-        if (scoreCount > 0) ...[
-          const SizedBox(width: 8),
-          Text(
-            '$scoreCount 人评价',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: isDark ? Colors.white38 : const Color(0xFF8E8E93),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-/// 桌面右下角：柱形图 + 分数 / 排名（并排）。
-class _DesktopScoreCorner extends StatelessWidget {
-  const _DesktopScoreCorner({required this.detail, required this.isDark});
-
-  final AnimeDetailViewData detail;
-  final bool isDark;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildDesktopScoreCorner(bool isDark) {
     final score = detail.score;
     final scoreCount = detail.scoreCount;
     final rank = detail.rank;
@@ -403,9 +355,9 @@ class _DesktopScoreCorner extends StatelessWidget {
                 const SizedBox(height: 6),
                 Text(
                   hasRank
-                      ? scoreCount > 0
+                      ? (scoreCount > 0
                             ? '#$rank · $scoreCount 人评价'
-                            : '#$rank'
+                            : '#$rank')
                       : '$scoreCount 人评价',
                   style: TextStyle(
                     fontSize: 12,
@@ -429,40 +381,23 @@ class _DesktopScoreCorner extends StatelessWidget {
       ],
     );
   }
-}
 
-class _TagsWrap extends StatelessWidget {
-  final List<String> tags;
-  final String? updateTime;
-  final String? category;
-  final bool isDark;
-
-  /// `null` = 展示全部；否则截断并显示 +N。
-  final int? limit;
-
-  const _TagsWrap({
-    required this.tags,
-    required this.isDark,
-    this.updateTime,
-    this.category,
-    this.limit = 3,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final limited = limit;
-    final shownCount = limited == null || limited > tags.length
+  Widget _buildTags(bool isDark, {int? limit}) {
+    final tags = detail.genres.isNotEmpty ? detail.genres : detail.tags;
+    final shownCount = limit == null || limit > tags.length
         ? tags.length
-        : limited;
+        : limit;
     final overflow = tags.length - shownCount;
-    final trimmedCategory = category?.trim();
-    late final decoration = BoxDecoration(
+    final updateTime = detail.updateTime;
+    final category = detail.category;
+
+    final decoration = BoxDecoration(
       color: isDark
           ? Colors.white.withValues(alpha: 0.08)
           : const Color(0xFFF2F2F7),
       borderRadius: const BorderRadius.all(Radius.circular(6)),
     );
-    late final style = TextStyle(
+    final style = TextStyle(
       fontSize: 11,
       fontWeight: FontWeight.w600,
       letterSpacing: 0.2,
@@ -475,123 +410,56 @@ class _TagsWrap extends StatelessWidget {
     );
 
     final allPills = <Widget>[
-      if (updateTime != null && updateTime!.trim().isNotEmpty)
-        buildPill('更新于 ${formatDate(updateTime!)}'),
-      if (trimmedCategory != null && trimmedCategory.isNotEmpty)
-        buildPill(trimmedCategory),
+      if (updateTime != null) buildPill('更新于 ${formatDate(updateTime)}'),
+      if (category != null) buildPill(category),
       for (var i = 0; i < shownCount; i++) buildPill(tags[i]),
       if (overflow > 0) buildPill('+$overflow'),
     ];
-
     if (allPills.isEmpty) return const SizedBox.shrink();
-
     return Wrap(spacing: 6, runSpacing: 6, children: allPills);
   }
-}
 
-class _CollectionButton extends StatelessWidget {
-  final AnimeCollection? collection;
-  final VoidCallback onTap;
-
-  const _CollectionButton({required this.collection, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final status = collection != null
-        ? CollectionStatus.fromValue(collection!.status)
-        : null;
-
-    final Color bgColor;
-    final Color textColor;
-    final String label;
-    final IconData icon;
-
-    if (status != null) {
-      final visual = collectionStatusVisuals[status]!;
-      bgColor = visual.$1.withValues(alpha: isDark ? 0.15 : 0.1);
-      textColor = visual.$1;
-      label = status.label;
-      icon = visual.$2;
-    } else {
-      bgColor = isDark ? Colors.white : Colors.black;
-      textColor = isDark ? Colors.black : Colors.white;
-      label = '追番';
-      icon = Icons.add_rounded;
-    }
-
-    return ScaleButton(
-      onTap: () {
-        HapticFeedback.lightImpact();
-        onTap();
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        height: 44,
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: const BorderRadius.all(Radius.circular(12)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 18, color: textColor),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.5,
-                color: textColor,
-              ),
-            ),
-          ],
-        ),
-      ),
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required Color bgColor,
+    required Color textColor,
+    required VoidCallback onTap,
+    bool animated = false,
+  }) {
+    final decoration = BoxDecoration(
+      color: bgColor,
+      borderRadius: const BorderRadius.all(Radius.circular(12)),
     );
-  }
-}
-
-class _SearchSourceButton extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _SearchSourceButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7);
-    final textColor = isDark ? Colors.white : Colors.black;
-
+    final content = Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(icon, size: 18, color: textColor),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.5,
+            color: textColor,
+          ),
+        ),
+      ],
+    );
     return ScaleButton(
       onTap: () {
         HapticFeedback.lightImpact();
         onTap();
       },
-      child: Container(
-        height: 44,
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: const BorderRadius.all(Radius.circular(12)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.play_arrow_rounded, size: 20, color: textColor),
-            const SizedBox(width: 4),
-            Text(
-              '开始观看',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.5,
-                color: textColor,
-              ),
-            ),
-          ],
-        ),
-      ),
+      child: animated
+          ? AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              height: 44,
+              decoration: decoration,
+              child: content,
+            )
+          : Container(height: 44, decoration: decoration, child: content),
     );
   }
 }

@@ -4,11 +4,28 @@ import 'package:baka/utils/reg_utils.dart';
 import 'package:baka/utils/title_matcher.dart';
 
 class BgmInfo {
-  final double? score;
   final int? subjectId;
+  final double? score;
   final String? imageUrl;
+  final bool nsfw;
+  final String? name;
+  final String? nameCn;
+  final String? summary;
 
-  const BgmInfo({this.score, this.subjectId, this.imageUrl});
+  const BgmInfo({
+    this.score,
+    this.subjectId,
+    this.imageUrl,
+    this.nsfw = false,
+    this.name,
+    this.nameCn,
+    this.summary,
+  });
+
+  String get displayTitle => nameCn ?? name ?? '';
+
+  List<String> get searchTitles => buildSearchTitles([nameCn, name]);
+
   factory BgmInfo.fromData(Map data) {
     final detail = data['bgmDetailData'] as Map?;
     return BgmInfo(
@@ -19,30 +36,8 @@ class BgmInfo {
       imageUrl: _readBgmImageUrl(data),
     );
   }
-}
 
-class BgmSubjectInfo {
-  final int subjectId;
-  final bool nsfw;
-  final String? name;
-  final String? nameCn;
-  final String? summary;
-  final String? imageUrl;
-  final double? score;
-
-  late final List<String> searchTitles = buildSearchTitles([nameCn, name]);
-
-  BgmSubjectInfo({
-    required this.subjectId,
-    this.nsfw = false,
-    this.name,
-    this.nameCn,
-    this.summary,
-    this.imageUrl,
-    this.score,
-  });
-
-  factory BgmSubjectInfo.fromJson(Map<String, dynamic> data) => BgmSubjectInfo(
+  factory BgmInfo.fromJson(Map<String, dynamic> data) => BgmInfo(
     subjectId: data['id'] as int,
     nsfw: data['nsfw'] == true,
     name: trimmed(data['name']),

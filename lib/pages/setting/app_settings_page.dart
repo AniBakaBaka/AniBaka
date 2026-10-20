@@ -16,6 +16,7 @@ import 'package:baka/instance.dart';
 import 'package:baka/pages/mine/mine_profile.dart';
 import 'package:baka/pages/setting/ai_rule_settings_page.dart';
 import 'package:baka/pages/setting/bangumi_sync_page.dart';
+import 'package:baka/pages/login/account_security_page.dart';
 import 'package:baka/pages/setting/labs_settings_page.dart';
 import 'package:baka/pages/setting/network_settings_page.dart';
 import 'package:baka/pages/setting/playback_settings_page.dart';
@@ -105,11 +106,24 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
 
   Future<void> _editUser(String title, String field) async {
     final value = await showAppInputDialog(context, title: title);
-    if (value == null || value.isEmpty) return;
-    final result = await LoginService(
-      _session,
-      apiTransport,
-    ).updateUser(_session.user.value, field, value);
+    if (value == null || (value.isEmpty && field != 'qq')) return;
+    var currentPassword = '';
+    if (field == 'qq' && value.trim() != _session.user.value.qq) {
+      if (!mounted) return;
+      final password = await showAppInputDialog(
+        context,
+        title: '修改 QQ 需验证当前密码',
+        obscureText: true,
+      );
+      if (password == null || password.isEmpty) return;
+      currentPassword = password;
+    }
+    final result = await LoginService(_session, apiTransport).updateUser(
+      _session.user.value,
+      field,
+      value,
+      currentPassword: currentPassword,
+    );
     showSnackBar(result.message, isError: !result.success);
     if (result.user case final user?) await _session.saveUser(user);
   }
@@ -166,12 +180,14 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                   value: user.sign,
                   onTap: () => _editUser('修改签名', 'sign'),
                 ),
-                if (user.hasPassword)
-                  SettingsTile(
-                    icon: Icons.lock_outline_rounded,
-                    title: '修改密码',
-                    onTap: () => _editUser('修改密码', 'pwd'),
-                  ),
+                SettingsTile(
+                  icon: Icons.verified_user_outlined,
+                  title: '账户安全',
+                  value: user.recoveryEmail.isNotEmpty
+                      ? user.recoveryEmail
+                      : '修改密码 · 可选绑定邮箱',
+                  onTap: () => _push(const AccountSecurityPage()),
+                ),
               ] else
                 SettingsTile(
                   icon: Icons.account_circle_outlined,

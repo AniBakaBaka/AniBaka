@@ -79,6 +79,7 @@ class _AnimeCommentsTabState extends State<AnimeCommentsTab>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
         if (notification.depth == 0 &&
@@ -91,74 +92,57 @@ class _AnimeCommentsTabState extends State<AnimeCommentsTab>
       },
       child: CustomScrollView(
         key: PageStorageKey(widget.subjectId),
-        slivers: _buildCommentsSlivers(context),
-      ),
-    );
-  }
-
-  List<Widget> _buildCommentsSlivers(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    if (_isCommentsLoading && _comments.isEmpty) {
-      return [
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(4, 16, 4, 0),
-          sliver: SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) => _loadingComment(isDark),
-              childCount: 5,
-            ),
-          ),
-        ),
-      ];
-    }
-    if (_comments.isEmpty && !_failed) {
-      return [
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(4, 24, 4, 0),
-          sliver: SliverToBoxAdapter(
-            child: Center(
-              child: Text(
-                '暂无评论',
-                style: TextStyle(
-                  color: isDark ? Colors.white60 : Colors.black54,
+        slivers: [
+          if (_isCommentsLoading && _comments.isEmpty)
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(4, 16, 4, 0),
+              sliver: SliverList.builder(
+                itemCount: 5,
+                itemBuilder: (_, _) => _loadingComment(isDark),
+              ),
+            )
+          else if (_comments.isEmpty && !_failed)
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(4, 24, 4, 0),
+              sliver: SliverToBoxAdapter(
+                child: Center(
+                  child: Text(
+                    '暂无评论',
+                    style: TextStyle(
+                      color: isDark ? Colors.white60 : Colors.black54,
+                    ),
+                  ),
                 ),
               ),
+            )
+          else ...[
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+              sliver: SliverList.builder(
+                itemCount: _comments.length + (_hasMoreComments ? 1 : 0),
+                itemBuilder: (context, index) {
+                  if (index >= _comments.length) {
+                    return _isCommentsLoading
+                        ? _loadingComment(isDark)
+                        : Center(
+                            child: TextButton(
+                              onPressed: _fetchComments,
+                              child: Text(_failed ? '加载失败，点击重试' : '加载更多'),
+                            ),
+                          );
+                  }
+                  return _CommentItem(
+                    comment: _comments[index],
+                    isDark: isDark,
+                  );
+                },
+              ),
             ),
-          ),
-        ),
-      ];
-    }
-
-    return [
-      SliverPadding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-        sliver: TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0, end: 1),
-          duration: MediaQuery.disableAnimationsOf(context)
-              ? Duration.zero
-              : const Duration(milliseconds: 180),
-          builder: (context, value, child) =>
-              SliverOpacity(opacity: value, sliver: child!),
-          child: SliverList(
-            delegate: SliverChildBuilderDelegate((context, index) {
-              if (index >= _comments.length) {
-                return _isCommentsLoading
-                    ? _loadingComment(isDark)
-                    : Center(
-                        child: TextButton(
-                          onPressed: _fetchComments,
-                          child: Text(_failed ? '加载失败，点击重试' : '加载更多'),
-                        ),
-                      );
-              }
-              return _CommentItem(comment: _comments[index], isDark: isDark);
-            }, childCount: _comments.length + (_hasMoreComments ? 1 : 0)),
-          ),
-        ),
+            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+          ],
+        ],
       ),
-      const SliverToBoxAdapter(child: SizedBox(height: 16)),
-    ];
+    );
   }
 
   Widget _loadingComment(bool isDark) => AppSkeletonizer(
@@ -178,7 +162,6 @@ class _AnimeCommentsTabState extends State<AnimeCommentsTab>
   );
 }
 
-/// SliverList 只创建可见区域及缓存范围内的评论。
 class _CommentItem extends StatelessWidget {
   final Map<String, dynamic> comment;
   final bool isDark;
@@ -197,6 +180,14 @@ class _CommentItem extends StatelessWidget {
     final timeStr = updatedAt > 0
         ? DateTime.fromMillisecondsSinceEpoch(updatedAt * 1000).toRelativeTime()
         : '';
+    final avatarPlaceholder = Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white12 : Colors.black12,
+        shape: BoxShape.circle,
+      ),
+    );
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -219,15 +210,15 @@ class _CommentItem extends StatelessWidget {
             children: [
               ClipOval(
                 child: avatarUrl.isEmpty
-                    ? _avatarPlaceholder
+                    ? avatarPlaceholder
                     : CachedNetworkImage(
                         imageUrl: avatarUrl,
                         memCacheWidth: 80,
                         width: 32,
                         height: 32,
                         fit: BoxFit.cover,
-                        placeholder: (_, _) => _avatarPlaceholder,
-                        errorWidget: (_, _, _) => _avatarPlaceholder,
+                        placeholder: (_, _) => avatarPlaceholder,
+                        errorWidget: (_, _, _) => avatarPlaceholder,
                       ),
               ),
               const SizedBox(width: 10),
@@ -256,7 +247,40 @@ class _CommentItem extends StatelessWidget {
                   ],
                 ),
               ),
-              if (rate > 0) _buildRateBadge(rate),
+              if (rate > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: Colors.amber.withValues(alpha: 0.3),
+                      width: 0.8,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.star_rounded,
+                        color: Colors.amber,
+                        size: 12,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        '$rate',
+                        style: const TextStyle(
+                          color: Colors.amber,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
             ],
           ),
           if (content.isNotEmpty) ...[
@@ -270,44 +294,6 @@ class _CommentItem extends StatelessWidget {
               ),
             ),
           ],
-        ],
-      ),
-    );
-  }
-
-  Widget get _avatarPlaceholder => Container(
-    width: 32,
-    height: 32,
-    decoration: BoxDecoration(
-      color: isDark ? Colors.white12 : Colors.black12,
-      shape: BoxShape.circle,
-    ),
-  );
-
-  Widget _buildRateBadge(int rate) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: Colors.amber.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: Colors.amber.withValues(alpha: 0.3),
-          width: 0.8,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.star_rounded, color: Colors.amber, size: 12),
-          const SizedBox(width: 2),
-          Text(
-            rate.toString(),
-            style: const TextStyle(
-              color: Colors.amber,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
         ],
       ),
     );

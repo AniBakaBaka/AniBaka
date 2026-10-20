@@ -28,7 +28,7 @@ class AccountSession {
   int generation = 0;
   bool closed = false;
   Future<bool>? _refresh;
-  Future<void> _writes = Future.value();
+  Future<void>? _writes;
   bool get isLoggedIn => user.value.isLoggedIn;
   bool get expiresSoon =>
       _expiresAt != null &&
@@ -100,7 +100,7 @@ class AccountSession {
       'token_expires_in': null,
       'userinfo': token.isEmpty ? null : jsonEncode(user.value.toJson()),
     };
-    return _writes = _writes.catchError((Object _) {}).then((_) async {
+    Future<void> write() async {
       for (final entry in values.entries) {
         if (entry.value == null) {
           await preferences.remove(entry.key);
@@ -108,13 +108,22 @@ class AccountSession {
           await preferences.setString(entry.key, entry.value!);
         }
       }
-    });
+    }
+
+    final previous = _writes;
+    late final Future<void> current;
+    return _writes = current = (previous == null
+            ? write()
+            : previous.catchError((Object _) {}).then((_) => write()))
+        .whenComplete(() {
+          if (identical(_writes, current)) _writes = null;
+        });
   }
 
-  Future<void> flush() => _writes;
+  Future<void> flush() => _writes ?? Future.value();
   Future<void> close() {
     closed = true;
     generation++;
-    return _writes;
+    return _writes ?? Future.value();
   }
 }

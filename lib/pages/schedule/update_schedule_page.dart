@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:baka/api/bgm.dart';
+import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/app/navigation.dart';
 import 'package:baka/app_state.dart';
 import 'package:baka/core/content_filter.dart';
@@ -698,7 +698,7 @@ class _ScheduleRowState extends State<_ScheduleRow> {
     final entry = widget.entry;
     final coverUrl =
         resolveCoverImage(entry.post) ??
-        (entry.bgmId == null ? null : bgmSubjectImageUrl(entry.bgmId!));
+        (entry.bgmId == null ? null : BgmUtils.bgmCoverProxyUrl(entry.bgmId!));
     final heroTag = 'schedule/${entry.key}';
     final coverWidth = widget.compact ? 60.0 : 80.0;
     void open() {

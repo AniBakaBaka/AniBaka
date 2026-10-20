@@ -1,4 +1,4 @@
-import 'package:baka/models/bgm.dart';
+import 'package:baka/services/playback/playback_content.dart';
 import 'package:baka/theme.dart';
 import 'package:baka/utils/json_values.dart';
 import 'package:flutter/material.dart';
@@ -10,50 +10,28 @@ import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/services/playback/danmaku_controller.dart';
 import 'package:baka/widgets/danmaku/danmaku_list_sheet.dart';
 import 'package:baka/widgets/player/bgm_follow_pill.dart';
-import 'package:baka/services/torrent/torrent_service.dart';
 import 'package:baka/widgets/player/download_indicators.dart';
 
 class WindowsEpisodeList extends StatefulWidget {
   const WindowsEpisodeList({
-    required this.videoList,
-    required this.currentIndex,
+    required this.content,
     required this.onEpisodeSelected,
-    required this.currUrl,
     required this.onUrlChanged,
     super.key,
-    this.title,
-    this.bgmInfo = const BgmInfo(),
     this.followNotifier,
     this.onFollowPressed,
-    this.sourceName,
-    this.lineName,
     this.onSourceTap,
     this.isSearching = false,
     this.danmakuController,
     this.onDownloadPressed,
-    this.sourceNames,
-    this.bgmEpisodes = const [],
-    this.fallbackCoverUrl,
-    this.torrent,
   });
 
-  final List<PlaybackEpisode> videoList;
-  final int currentIndex;
+  final PlaybackContent content;
   final ValueChanged<int> onEpisodeSelected;
   final ValueChanged<int> onUrlChanged;
   final VoidCallback? onDownloadPressed;
-  final int currUrl;
-  final List<String>? sourceNames;
-  final List<Map<String, dynamic>> bgmEpisodes;
-  final String? fallbackCoverUrl;
-  final TorrentService? torrent;
-
-  final String? title;
-  final BgmInfo bgmInfo;
   final ValueNotifier<bool>? followNotifier;
   final VoidCallback? onFollowPressed;
-  final String? sourceName;
-  final String? lineName;
   final VoidCallback? onSourceTap;
   final bool isSearching;
   final DanmakuController? danmakuController;
@@ -68,15 +46,7 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
   bool _ascending = true;
   bool _isGridView = false;
   bool _isEpisodesExpanded = true;
-  String _searchText = '';
-  // No index array is needed for an unfiltered list. Reverse is a view mapping.
   List<int>? _filteredList;
-
-  @override
-  void initState() {
-    super.initState();
-    _searchController.addListener(_onSearchChanged);
-  }
 
   @override
   void dispose() {
@@ -88,68 +58,75 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
   @override
   void didUpdateWidget(WindowsEpisodeList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.videoList, widget.videoList)) {
-      _filteredList = _buildFilteredList();
-    }
-  }
-
-  void _onSearchChanged() {
-    if (_searchText == _searchController.text) return;
-    setState(() {
-      final previousQuery = _searchText.trim().toLowerCase();
-      _searchText = _searchController.text;
-      if (previousQuery != _searchText.trim().toLowerCase()) {
-        _filteredList = _buildFilteredList();
-      }
-    });
+    if (_filteredList != null) _filteredList = _buildFilteredList();
   }
 
   List<int>? _buildFilteredList() {
-    if (_searchText.trim().isEmpty) return null;
+    final query = _searchController.text;
+    if (query.trim().isEmpty) return null;
     return PlaybackEpisodeCatalog.filterIndexes(
-      widget.videoList,
-      searchQuery: _searchText,
+      widget.content.videoList,
+      searchQuery: query,
       ascending: true,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final primaryColor = theme.colorScheme.primary;
-    final source = trimmed(widget.sourceName) ?? '切换播放源';
-    final line = trimmed(widget.lineName);
+    final content = widget.content;
+    final videoList = content.videoList;
+    final currentIndex = content.currPlayIndex;
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final source = trimmed(content.sourceName) ?? '切换播放源';
+    final line = trimmed(content.lineName);
     final danmaku = widget.danmakuController;
-    final itemCount = _filteredList?.length ?? widget.videoList.length;
+    final itemCount = _filteredList?.length ?? videoList.length;
     final episodes = SliverChildBuilderDelegate(
       (context, index) {
         final position = _ascending ? index : itemCount - 1 - index;
         final i = _filteredList?[position] ?? position;
-        final item = widget.videoList[i];
+        final item = videoList[i];
+        final isPlaying = i == currentIndex;
         if (_isGridView) {
-          return _WindowsEpisodeGridItem(
-            isPlaying: i == widget.currentIndex,
-            title: item.title,
-            primaryColor: primaryColor,
-            onTap: () => widget.onEpisodeSelected(i),
+          return Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            child: InkWell(
+              onTap: () => widget.onEpisodeSelected(i),
+              borderRadius: BorderRadius.circular(6),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOutCubic,
+                decoration: BoxDecoration(
+                  color: isPlaying
+                      ? primaryColor.withValues(alpha: 0.18)
+                      : const Color(0xFF1B1B1F),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: isPlaying
+                        ? primaryColor.withValues(alpha: 0.6)
+                        : Colors.white10,
+                    width: 0.8,
+                  ),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                alignment: Alignment.center,
+                child: Text(
+                  item.title,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontWeight: isPlaying ? FontWeight.bold : FontWeight.w500,
+                    fontSize: 12.5,
+                    color: isPlaying ? primaryColor : Colors.white70,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
           );
         }
-        return _WindowsEpisodeListItem(
-          key: ValueKey((widget.bgmInfo.subjectId, i)),
-          index: i,
-          item: item,
-          isPlaying: i == widget.currentIndex,
-          bgmId: widget.bgmInfo.subjectId,
-          bgmEpisode: i < widget.bgmEpisodes.length
-              ? widget.bgmEpisodes[i]
-              : null,
-          fallbackCoverUrl: widget.fallbackCoverUrl,
-          currUrl: widget.currUrl,
-          sourceNames: widget.sourceNames,
-          primaryColor: primaryColor,
-          onEpisodeSelected: widget.onEpisodeSelected,
-          onUrlChanged: widget.onUrlChanged,
-        );
+        return _buildEpisodeRow(context, i, item, isPlaying, primaryColor);
       },
       childCount: itemCount,
       addAutomaticKeepAlives: false,
@@ -189,26 +166,21 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                     : () => DanmakuListSheet.show(
                         context,
                         danmaku,
-                        defaultTitle: widget.title,
-                        defaultEpisode: widget.currentIndex + 1,
+                        defaultTitle: content.title,
+                        defaultEpisode: currentIndex + 1,
                       ),
                 child: danmaku == null
                     ? const Text('未开启', style: TextStyle(color: Colors.white54))
                     : ListenableBuilder(
                         listenable: danmaku,
-                        builder: (context, _) => Text(
-                          danmaku.items.isEmpty
-                              ? '暂无关联弹幕'
-                              : '${danmaku.items.length} 条弹幕',
-                        ),
+                        builder: (context, _) => Text(danmaku.loadStatus),
                       ),
               ),
               const SizedBox(height: 12),
-              if (widget.torrent case final torrent?)
-                BtProgressIndicator(
-                  torrent: torrent,
-                  padding: const EdgeInsets.only(bottom: 12),
-                ),
+              BtProgressIndicator(
+                torrent: content.torrent,
+                padding: const EdgeInsets.only(bottom: 12),
+              ),
               _buildEpisodeHeaderSection(),
               const SizedBox(height: 6),
             ],
@@ -250,7 +222,8 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
   }
 
   Widget _buildAnimeHeader() {
-    final title = widget.title?.trim() ?? '';
+    final content = widget.content;
+    final title = content.title.trim();
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(2, 4, 2, 0),
@@ -277,7 +250,7 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
               valueListenable: widget.followNotifier!,
               builder: (context, isFollowed, _) => BgmFollowPill(
                 title: title,
-                bgmInfo: widget.bgmInfo,
+                bgmInfo: content.bgmInfo,
                 isFollowed: isFollowed,
                 onFollowPressed: widget.onFollowPressed!,
               ),
@@ -320,7 +293,6 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
               const SizedBox(width: 10),
               Expanded(
                 child: DefaultTextStyle(
-                  // DefaultTextStyle 会替换环境默认文字样式，全局字体要显式继承。
                   style: context.withAppFont(
                     const TextStyle(
                       fontSize: 13,
@@ -380,7 +352,7 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  '(${widget.videoList.length}话)',
+                  '(${widget.content.videoList.length}话)',
                   style: const TextStyle(fontSize: 11.5, color: Colors.white54),
                 ),
                 const Spacer(),
@@ -405,6 +377,8 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                   ),
                   child: TextField(
                     controller: _searchController,
+                    onChanged: (_) =>
+                        setState(() => _filteredList = _buildFilteredList()),
                     textAlignVertical: TextAlignVertical.center,
                     decoration: InputDecoration(
                       isDense: true,
@@ -429,7 +403,10 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                                 color: Colors.white54,
                                 size: 14,
                               ),
-                              onPressed: _searchController.clear,
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() => _filteredList = null);
+                              },
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(
                                 minWidth: 28,
@@ -456,9 +433,7 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                 icon: _ascending
                     ? Icons.arrow_upward_rounded
                     : Icons.arrow_downward_rounded,
-                onPressed: () => setState(() {
-                  _ascending = !_ascending;
-                }),
+                onPressed: () => setState(() => _ascending = !_ascending),
                 tooltip: _ascending ? '升序' : '降序',
               ),
               if (widget.onDownloadPressed != null)
@@ -491,68 +466,54 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
       ),
     );
   }
-}
 
-class _WindowsEpisodeListItem extends StatefulWidget {
-  final int index;
-  final PlaybackEpisode item;
-  final bool isPlaying;
-  final int? bgmId;
-  final Map<String, dynamic>? bgmEpisode;
-  final String? fallbackCoverUrl;
-  final int currUrl;
-  final List<String>? sourceNames;
-  final Color primaryColor;
-  final ValueChanged<int> onEpisodeSelected;
-  final ValueChanged<int> onUrlChanged;
+  Widget _buildEpisodeRow(
+    BuildContext context,
+    int index,
+    PlaybackEpisode item,
+    bool isPlaying,
+    Color primaryColor,
+  ) {
+    final content = widget.content;
+    final bgmId = content.bgmInfo.subjectId;
+    final stillFuture = bgmId != null && bgmId > 0
+        ? AniBakaApi.getEpisodeStills(
+            bgmId: bgmId,
+            season: 1,
+            episode: index + 1,
+          )
+        : null;
+    if (stillFuture == null) {
+      return _buildEpisodeRowContent(index, item, isPlaying, primaryColor, null);
+    }
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: stillFuture,
+      builder: (context, snapshot) => _buildEpisodeRowContent(
+        index,
+        item,
+        isPlaying,
+        primaryColor,
+        snapshot.data,
+      ),
+    );
+  }
 
-  const _WindowsEpisodeListItem({
-    required this.index,
-    required this.item,
-    required this.isPlaying,
-    required this.bgmId,
-    required this.bgmEpisode,
-    required this.fallbackCoverUrl,
-    required this.currUrl,
-    required this.sourceNames,
-    required this.primaryColor,
-    required this.onEpisodeSelected,
-    required this.onUrlChanged,
-    super.key,
-  });
-
-  @override
-  State<_WindowsEpisodeListItem> createState() =>
-      _WindowsEpisodeListItemState();
-}
-
-class _WindowsEpisodeListItemState extends State<_WindowsEpisodeListItem> {
-  // The key includes subject and episode; a mounted row owns one request.
-  late final _still = widget.bgmId != null && widget.bgmId! > 0
-      ? AniBakaApi.getEpisodeStills(
-          bgmId: widget.bgmId,
-          season: 1,
-          episode: widget.index + 1,
-        )
-      : null;
-
-  @override
-  Widget build(BuildContext context) => _still == null
-      ? _buildItemContent(context, null)
-      : FutureBuilder<Map<String, dynamic>?>(
-          future: _still,
-          builder: (context, snapshot) =>
-              _buildItemContent(context, snapshot.data),
-        );
-
-  Widget _buildItemContent(BuildContext context, Map<String, dynamic>? still) {
-    final index = widget.index;
-    final item = widget.item;
-    final episode = widget.bgmEpisode;
+  Widget _buildEpisodeRowContent(
+    int index,
+    PlaybackEpisode item,
+    bool isPlaying,
+    Color primaryColor,
+    Map<String, dynamic>? still,
+  ) {
+    final content = widget.content;
+    final episode = index < content.bgmEpisodes.length
+        ? content.bgmEpisodes[index]
+        : null;
+    final stillName = trimmed(still?['name']);
     final name = episode != null
         ? trimmed(episode['name_cn']) ?? trimmed(episode['name']) ?? item.title
-        : trimmed(still?['name']) ?? item.title.trim();
-    final rawTitle = episode == null && trimmed(still?['name']) == null;
+        : stillName ?? item.title.trim();
+    final rawTitle = episode == null && stillName == null;
     final title =
         name.startsWith('S') ||
             name.startsWith('第') ||
@@ -563,21 +524,18 @@ class _WindowsEpisodeListItemState extends State<_WindowsEpisodeListItem> {
         trimmed(episode?['airdate']) ?? trimmed(still?['air_date']) ?? '';
     final overview =
         trimmed(still?['overview']) ?? trimmed(episode?['desc']) ?? '暂无本集剧情简介';
-    var stillUrl =
-        trimmed(still?['still_thumb']) ?? trimmed(still?['still_url']);
-    final stills = still?['stills'];
-    if (stillUrl == null && stills is List) {
-      for (final image in stills) {
-        if (image is! Map) continue;
-        stillUrl = trimmed(image['thumbnail']) ?? trimmed(image['url']);
-        if (stillUrl != null) break;
-      }
-    }
-    final isPlaying = widget.isPlaying;
-    final primaryColor = widget.primaryColor;
+    final stillUrl =
+        trimmed(still?['still_thumb']) ??
+        trimmed(still?['still_url']) ??
+        content.coverImageUrl ??
+        '';
     final lineCount = item.availableLineIndexes.length;
+    const placeholder = Center(
+      child: Icon(Icons.movie_outlined, size: 22, color: Colors.white24),
+    );
 
     return AnimatedContainer(
+      key: ValueKey((content.bgmInfo.subjectId, index)),
       duration: const Duration(milliseconds: 160),
       curve: Curves.easeOutCubic,
       margin: const EdgeInsets.only(bottom: 8),
@@ -605,8 +563,45 @@ class _WindowsEpisodeListItemState extends State<_WindowsEpisodeListItem> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildCoverThumbnail(
-                      stillUrl ?? widget.fallbackCoverUrl ?? '',
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        width: 126,
+                        height: 71,
+                        color: const Color(0xFF1E1E22),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            if (stillUrl.isNotEmpty)
+                              CachedNetworkImage(
+                                memCacheWidth: 260,
+                                imageUrl: stillUrl,
+                                fit: BoxFit.cover,
+                                fadeInDuration: const Duration(
+                                  milliseconds: 150,
+                                ),
+                                fadeOutDuration: const Duration(
+                                  milliseconds: 150,
+                                ),
+                                placeholder: (_, _) => placeholder,
+                                errorWidget: (_, _, _) => placeholder,
+                              )
+                            else
+                              placeholder,
+                            if (isPlaying)
+                              ColoredBox(
+                                color: Colors.black45,
+                                child: Center(
+                                  child: Icon(
+                                    Icons.play_circle_fill_rounded,
+                                    color: primaryColor,
+                                    size: 24,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -699,113 +694,13 @@ class _WindowsEpisodeListItemState extends State<_WindowsEpisodeListItem> {
                   ),
                   WindowsLineSelector(
                     availableLineIndexes: item.availableLineIndexes,
-                    currUrl: widget.currUrl,
+                    currUrl: content.currUrl,
                     onUrlChanged: widget.onUrlChanged,
-                    sourceNames: widget.sourceNames,
+                    sourceNames: content.sourceNames,
                   ),
                 ],
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCoverThumbnail(String stillUrl) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        width: 126,
-        height: 71,
-        color: const Color(0xFF1E1E22),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (stillUrl.isNotEmpty)
-              CachedNetworkImage(
-                memCacheWidth: 260,
-                imageUrl: stillUrl,
-                fit: BoxFit.cover,
-                fadeInDuration: const Duration(milliseconds: 150),
-                fadeOutDuration: const Duration(milliseconds: 150),
-                placeholder: (_, _) => _placeholderIcon(),
-                errorWidget: (_, _, _) => _placeholderIcon(),
-              )
-            else
-              _placeholderIcon(),
-            if (widget.isPlaying)
-              Container(
-                color: Colors.black45,
-                child: Center(
-                  child: Icon(
-                    Icons.play_circle_fill_rounded,
-                    color: widget.primaryColor,
-                    size: 24,
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _placeholderIcon() {
-    return const Center(
-      child: Icon(Icons.movie_outlined, size: 22, color: Colors.white24),
-    );
-  }
-}
-
-class _WindowsEpisodeGridItem extends StatelessWidget {
-  final bool isPlaying;
-  final String title;
-  final Color primaryColor;
-  final VoidCallback onTap;
-
-  const _WindowsEpisodeGridItem({
-    required this.isPlaying,
-    required this.title,
-    required this.primaryColor,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(6),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          curve: Curves.easeOutCubic,
-          decoration: BoxDecoration(
-            color: isPlaying
-                ? primaryColor.withValues(alpha: 0.18)
-                : const Color(0xFF1B1B1F),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(
-              color: isPlaying
-                  ? primaryColor.withValues(alpha: 0.6)
-                  : Colors.white10,
-              width: 0.8,
-            ),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-          alignment: Alignment.center,
-          child: Text(
-            title,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontWeight: isPlaying ? FontWeight.bold : FontWeight.w500,
-              fontSize: 12.5,
-              color: isPlaying ? primaryColor : Colors.white70,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
           ),
         ),
       ),

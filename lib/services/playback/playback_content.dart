@@ -646,7 +646,10 @@ class PlaybackContent {
     }
   }
 
-  Future<List<DanmakuItem>> fetchDanmakuData(int episodeIndex) async {
+  Future<List<DanmakuItem>> fetchDanmakuData(
+    int episodeIndex, {
+    Future<void>? abortTrigger,
+  }) async {
     final lifetime = _lifetime;
     if (isLocalSource) {
       return DanmakuController.loadLocal(
@@ -671,7 +674,9 @@ class PlaybackContent {
         subjectId: bgmId,
         episodeIndex: episodeIndex + 1,
         titles: searchTitles,
-        abortTrigger: abort.future,
+        abortTrigger: abortTrigger == null
+            ? abort.future
+            : Future.any([abort.future, abortTrigger]),
       );
     } finally {
       detach();

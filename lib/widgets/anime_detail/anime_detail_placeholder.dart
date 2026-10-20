@@ -12,7 +12,6 @@ import 'package:baka/models/collection.dart';
 import 'package:baka/models/playback_request.dart';
 import 'package:baka/services/collection/collection_repository.dart';
 import 'package:baka/utils/toast_utils.dart';
-import 'package:baka/widgets/anime/post_card.dart';
 import 'package:baka/app/navigation.dart';
 
 import 'dart:async';
@@ -39,25 +38,6 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   int _loadGeneration = 0;
   int _collectionRevision = 0;
 
-  Animation<double>? _routeAnimation;
-  ModalRoute<dynamic>? _route;
-  bool _initialRouteTransitionFinished = false;
-  bool _detailPending = false;
-
-  bool get _canPublishInitialUpdates =>
-      _route == null ||
-      (_route!.isCurrent &&
-          !_route!.offstage &&
-          (_routeAnimation == null || _routeAnimation!.isCompleted));
-
-  void _publishInitialUpdates() {
-    _initialRouteTransitionFinished = true;
-    if (_detailPending) {
-      _rebuildDetail();
-      _detailPending = false;
-    }
-  }
-
   final _collection = ValueNotifier<AnimeCollection?>(null);
   bool _isStatusUpdating = false;
 
@@ -68,7 +48,6 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
 
   int? get _subjectId => _bgmInfo.subjectId;
   int? get _postId => toInt(widget.data['id']);
-
   int? get _validPostId => AnimeCollection.postIdFrom(widget.data);
 
   void _rebuildDetail() {
@@ -89,36 +68,16 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   @override
   void didUpdateWidget(covariant AnimeDetailPlaceholder oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (identical(oldWidget.data, widget.data)) return;
-    final bgmInfo = BgmInfo.fromData(widget.data);
-    final oldBgmId = BgmInfo.fromData(oldWidget.data).subjectId;
-    if (_postId != toInt(oldWidget.data['id']) ||
-        bgmInfo.subjectId != oldBgmId ||
-        (_validPostId == null &&
-            bgmInfo.subjectId == null &&
-            oldWidget.data['title'] != widget.data['title'])) {
-      _initializeData(bgmInfo);
-      return;
+    if (!identical(oldWidget.data, widget.data)) {
+      _initializeData(BgmInfo.fromData(widget.data));
     }
-    _bgmInfo = BgmInfo(
-      subjectId: bgmInfo.subjectId ?? _subjectId,
-      score: bgmInfo.score ?? _bgmInfo.score,
-      imageUrl: bgmInfo.imageUrl ?? _bgmInfo.imageUrl,
-    );
-    _detailData =
-        widget.data['bgmDetailData'] as Map<String, dynamic>? ?? _detailData;
-    _rebuildDetail();
   }
 
   void _initializeData(BgmInfo bgmInfo) {
     _loadGeneration++;
     _collectionRevision = 0;
-    _detailPending = false;
     _collection.value = null;
     _isStatusUpdating = false;
-    // Hydrate from the API-owned cache before constructing the first frame.
-    // A warm request still returns a Future; queuing its .then callback behind
-    // the transition would incorrectly animate default content for 320 ms.
     final subjectId = bgmInfo.subjectId;
     _anibakaData = subjectId == null
         ? null
@@ -133,42 +92,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final route = _route = ModalRoute.of(context);
-    final animation = route?.animation;
-    if (!identical(animation, _routeAnimation)) {
-      _routeAnimation?.removeStatusListener(_handleRouteAnimationStatus);
-      _routeAnimation = animation;
-      animation?.addStatusListener(_handleRouteAnimationStatus);
-    }
-    // Navigator temporarily reports a completed animation while laying the
-    // destination out offstage. That is not the end of the visible transition.
-    if (_canPublishInitialUpdates) _publishInitialUpdates();
-  }
-
-  void _handleRouteAnimationStatus(AnimationStatus status) {
-    if (status != AnimationStatus.completed ||
-        !_canPublishInitialUpdates ||
-        (_initialRouteTransitionFinished && !_detailPending) ||
-        !mounted) {
-      return;
-    }
-    setState(_publishInitialUpdates);
-  }
-
-  void _refreshDetail() {
-    if (_initialRouteTransitionFinished && _canPublishInitialUpdates) {
-      setState(_rebuildDetail);
-    } else {
-      // Build one view model from the latest responses when the route settles.
-      _detailPending = true;
-    }
-  }
-
-  @override
   void dispose() {
-    _routeAnimation?.removeStatusListener(_handleRouteAnimationStatus);
     _collection.dispose();
     super.dispose();
   }
@@ -192,68 +116,72 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   Future<void> _loadInitialData(int generation) async {
     var resolved = _bgmInfo;
     final collectionRevision = _collectionRevision;
-    // Phase 1: 解析 bgmId（若未知）
     if (_subjectId == null) {
       try {
         resolved = await resolveBgmFromData(widget.data);
         if (!mounted || generation != _loadGeneration) return;
-        _bgmInfo = resolved;
-        _refreshDetail();
+        setState(() {
+          _bgmInfo = resolved;
+          _rebuildDetail();
+        });
       } catch (e) {
         debugPrint('解析bgmId失败: $e');
       }
     }
 
-    // Subject resolution is available to requests even while its UI update is
-    // queued until the transition settles.
     if (!mounted || generation != _loadGeneration) return;
     final bgmId = resolved.subjectId;
     if (bgmId == null) return;
 
-    // Phase 2: 并发启动所有请求，各自独立更新 UI
-    // AniBaka 自有 API（含 overview）。空响应或失败时保持无数据，页面回落到
-    // BGM 简介与封面。
     if (_anibakaData == null) {
-      AniBakaApi.getAnimeDetail(bgmId)
-          .then((data) {
-            if (!mounted || generation != _loadGeneration || data == null) {
+      unawaited(
+        AniBakaApi.getAnimeDetail(bgmId)
+            .then((data) {
+              if (!mounted || generation != _loadGeneration || data == null) {
+                return;
+              }
+              setState(() {
+                _anibakaData = data;
+                _rebuildDetail();
+              });
+            })
+            .catchError((Object e) {
+              debugPrint('获取 AniBaka 详情失败: $e');
+            }),
+      );
+    }
+
+    if (_detailData == null) {
+      unawaited(
+        getBgmSubject(bgmId)
+            .then((data) {
+              if (!mounted || generation != _loadGeneration) return;
+              setState(() {
+                _detailData = data;
+                _rebuildDetail();
+              });
+            })
+            .catchError((Object e) {
+              debugPrint('获取 BGM 条目失败: $e');
+            }),
+      );
+    }
+
+    unawaited(
+      collections
+          .getByBgmId(bgmId)
+          .then((collection) {
+            if (!mounted ||
+                generation != _loadGeneration ||
+                collectionRevision != _collectionRevision) {
               return;
             }
-            _anibakaData = data;
-            _refreshDetail();
+            _collection.value = collection;
           })
           .catchError((Object e) {
-            debugPrint('获取 AniBaka 详情失败: $e');
-          });
-    }
-
-    // BGM 主条目；角色数据只在用户打开角色页时请求。
-    if (_detailData == null) {
-      getBgmSubject(bgmId)
-          .then((data) {
-            if (!mounted || generation != _loadGeneration) return;
-            _detailData = data;
-            _refreshDetail();
-          })
-          .catchError((Object e) {
-            debugPrint('获取 BGM 条目失败: $e');
-          });
-    }
-
-    // Phase 3: 收藏状态独立加载
-    collections
-        .getByBgmId(bgmId)
-        .then((collection) {
-          if (!mounted ||
-              generation != _loadGeneration ||
-              collectionRevision != _collectionRevision) {
-            return;
-          }
-          _collection.value = collection;
-        })
-        .catchError((Object e) {
-          debugPrint('获取收藏状态失败: $e');
-        });
+            debugPrint('获取收藏状态失败: $e');
+          }),
+    );
   }
 
   Future<void> _updateCollectionStatus(CollectionStatus? status) async {
@@ -358,67 +286,168 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: contentFilter,
-    builder: (context, _) => _buildPage(context),
-  );
+    builder: (context, _) {
+      if (contentFilter.value && _detail.nsfw) {
+        return Scaffold(
+          appBar: AppBar(),
+          body: const Center(child: Text('已隐藏 NSFW 内容')),
+        );
+      }
+      final isWide = MediaQuery.sizeOf(context).width > 800;
+      final theme = Theme.of(context);
+      final platform = theme.platform;
+      final useBackdrop =
+          isWide &&
+          (platform == TargetPlatform.windows ||
+              platform == TargetPlatform.macOS ||
+              platform == TargetPlatform.linux);
+      final tabs = _buildTabs(isWide);
+      final surfaceColor = theme.scaffoldBackgroundColor;
 
-  Widget _buildPage(BuildContext context) {
-    if (contentFilter.value && _detail.nsfw) {
       return Scaffold(
-        appBar: AppBar(),
-        body: const Center(child: Text('已隐藏 NSFW 内容')),
-      );
-    }
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: _isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
-        child: _buildContent(),
-      ),
-    );
-  }
-
-  Widget _buildContent() {
-    final isWide = MediaQuery.sizeOf(context).width > 800;
-    final theme = Theme.of(context);
-    final platform = theme.platform;
-    final useBackdrop =
-        isWide &&
-        (platform == TargetPlatform.windows ||
-            platform == TargetPlatform.macOS ||
-            platform == TargetPlatform.linux);
-    final tabs = _buildTabs(isWide);
-    final surfaceColor = theme.scaffoldBackgroundColor;
-
-    return Stack(
-      children: [
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          height: isWide ? 560 : 420,
+        backgroundColor: surfaceColor,
+        body: AnnotatedRegion<SystemUiOverlayStyle>(
+          value: _isDark
+              ? SystemUiOverlayStyle.light
+              : SystemUiOverlayStyle.dark,
           child: Stack(
-            fit: StackFit.expand,
             children: [
-              AnimeDetailBackground(
-                coverUrl: _detail.coverUrl,
-                backgroundUrl: useBackdrop
-                    ? _detail.backgroundUrl
-                    : _detail.coverUrl,
-                loadBackground: useBackdrop && _initialRouteTransitionFinished,
-                cacheWidth: isWide ? 1280 : 720,
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: isWide ? 560 : 420,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    AnimeDetailBackground(
+                      url: useBackdrop
+                          ? _detail.backgroundUrl
+                          : _detail.coverUrl,
+                      cacheWidth: isWide ? 1280 : 300,
+                    ),
+                    Positioned.fill(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              surfaceColor.withValues(alpha: 0.2),
+                              surfaceColor.withValues(alpha: 0.8),
+                              surfaceColor,
+                            ],
+                            stops: const [0.0, 0.5, 1.0],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              Positioned.fill(
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        surfaceColor.withValues(alpha: 0.2),
-                        surfaceColor.withValues(alpha: 0.8),
-                        surfaceColor,
-                      ],
-                      stops: const [0.0, 0.5, 1.0],
+              SafeArea(
+                bottom: false,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1200),
+                    child: DefaultTabController(
+                      length: tabs.length,
+                      child: NestedScrollView(
+                        physics: const BouncingScrollPhysics(
+                          parent: AlwaysScrollableScrollPhysics(),
+                        ),
+                        headerSliverBuilder: (context, innerBoxIsScrolled) {
+                          final tabBar = TabBar(
+                            isScrollable: true,
+                            tabAlignment: TabAlignment.start,
+                            labelColor: _textColor,
+                            unselectedLabelColor: _subtitleColor,
+                            indicatorColor: _textColor,
+                            indicatorWeight: 3,
+                            indicatorPadding: const EdgeInsets.only(top: 44),
+                            labelPadding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 12,
+                            ),
+                            labelStyle: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0,
+                            ),
+                            unselectedLabelStyle: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0,
+                            ),
+                            dividerColor: Colors.transparent,
+                            splashFactory: NoSplash.splashFactory,
+                            overlayColor: const WidgetStatePropertyAll(
+                              Colors.transparent,
+                            ),
+                            tabs: [for (final tab in tabs) Tab(text: tab.$1)],
+                          );
+
+                          return [
+                            SliverAppBar(
+                              backgroundColor: Colors.transparent,
+                              elevation: 0,
+                              pinned: false,
+                              foregroundColor: Colors.white,
+                              title: Text(
+                                _detail.title,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 18,
+                                  letterSpacing: -0.5,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                            SliverPadding(
+                              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                              sliver: SliverToBoxAdapter(
+                                child: AnimeDetailHeader(
+                                  detail: _detail,
+                                  collection: _collection,
+                                  onCollectionTap: _handleCollectionTap,
+                                  onSearchTap: _startWatching,
+                                ),
+                              ),
+                            ),
+                            SliverPersistentHeader(
+                              pinned: true,
+                              delegate: _TabBarDelegate(
+                                tabBar: tabBar,
+                                backgroundColor: surfaceColor,
+                                borderColor: _dividerColor,
+                                isWide: isWide,
+                              ),
+                            ),
+                          ];
+                        },
+                        body: ColoredBox(
+                          color: surfaceColor,
+                          child: ScrollConfiguration(
+                            behavior: ScrollConfiguration.of(
+                              context,
+                            ).copyWith(scrollbars: false),
+                            child: TabBarView(
+                              physics: const BouncingScrollPhysics(),
+                              children: [
+                                for (final tab in tabs)
+                                  Builder(
+                                    key: PageStorageKey((
+                                      _postId,
+                                      _subjectId,
+                                      tab.$1,
+                                    )),
+                                    builder: tab.$2,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -426,123 +455,9 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
             ],
           ),
         ),
-
-        SafeArea(
-          bottom: false,
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1200),
-              child: DefaultTabController(
-                length: tabs.length,
-                child: NestedScrollView(
-                  physics: const BouncingScrollPhysics(
-                    parent: AlwaysScrollableScrollPhysics(),
-                  ),
-                  headerSliverBuilder: (context, innerBoxIsScrolled) {
-                    final tabBar = TabBar(
-                      isScrollable: true,
-                      tabAlignment: TabAlignment.start,
-                      labelColor: _textColor,
-                      unselectedLabelColor: _subtitleColor,
-                      indicatorColor: _textColor,
-                      indicatorWeight: 3,
-                      indicatorPadding: const EdgeInsets.only(top: 44),
-                      labelPadding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 12,
-                      ),
-                      labelStyle: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0,
-                      ),
-                      unselectedLabelStyle: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0,
-                      ),
-                      dividerColor: Colors.transparent,
-                      splashFactory: NoSplash.splashFactory,
-                      overlayColor: const WidgetStatePropertyAll(
-                        Colors.transparent,
-                      ),
-                      tabs: [for (final tab in tabs) Tab(text: tab.$1)],
-                    );
-
-                    return [
-                      SliverAppBar(
-                        backgroundColor: Colors.transparent,
-                        elevation: 0,
-                        pinned: false,
-                        foregroundColor: Colors.white,
-                        title: Text(
-                          _detail.title,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 18,
-                            letterSpacing: -0.5,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                        sliver: SliverToBoxAdapter(
-                          child: AnimeDetailHeader(
-                            detail: _detail,
-                            updateTime: widget.data['time'] as String?,
-                            category: widget.data['sort'] as String?,
-                            heroTag: coverHeroTag(widget.data),
-                            enableCoverEffects: _initialRouteTransitionFinished,
-                            collection: _collection,
-                            onCollectionTap: _handleCollectionTap,
-                            onSearchTap: _startWatching,
-                          ),
-                        ),
-                      ),
-                      SliverPersistentHeader(
-                        pinned: true,
-                        delegate: _TabBarDelegate(
-                          tabBar: tabBar,
-                          backgroundColor: surfaceColor,
-                          borderColor: _dividerColor,
-                          isWide: isWide,
-                        ),
-                      ),
-                    ];
-                  },
-                  body: Container(
-                    color: surfaceColor,
-                    // Kept-alive tabs share NestedScrollView's inner controller.
-                    // Desktop automatic scrollbars require a single position.
-                    child: ScrollConfiguration(
-                      behavior: ScrollConfiguration.of(
-                        context,
-                      ).copyWith(scrollbars: false),
-                      child: TabBarView(
-                        physics: const BouncingScrollPhysics(),
-                        children: [
-                          for (final tab in tabs)
-                            Builder(
-                              key: PageStorageKey((
-                                _postId,
-                                _subjectId,
-                                tab.$1,
-                              )),
-                              builder: tab.$2,
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+      );
+    },
+  );
 
   List<(String title, WidgetBuilder builder)> _buildTabs(bool isWide) {
     final tabs = <(String title, WidgetBuilder builder)>[

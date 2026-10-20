@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:baka/api/playback.dart';
@@ -107,33 +108,22 @@ class DanmakuController extends ChangeNotifier {
       return cached;
     }
 
-    for (final title in titles) {
-      if (title.isEmpty) continue;
-      try {
-        final raw = await getDanmu(
-          subjectId,
-          episodeIndex,
-          title,
-          abortTrigger: abortTrigger,
-        );
-        if (raw.isNotEmpty) {
-          final items = _decodeItems(raw);
-          if (items.isNotEmpty) {
-            cacheItems(cacheKey, items);
-            return items;
-          }
-        }
-      } on http.RequestAbortedException {
-        rethrow;
-      } catch (e) {
-        debugPrint('获取弹幕失败 ($title): $e');
-        // Another title only helps when a successful lookup has no matches.
-        // Retrying the same service after a connection/protocol failure can
-        // otherwise multiply the request timeout by the number of aliases.
-        return const [];
-      }
-    }
-    return const [];
+    // The service resolves this Bangumi identity and tries its aliases itself.
+    // Repeating the entire lookup per client alias multiplies its latency.
+    final title = titles
+        .map((title) => title.trim())
+        .where((title) => title.isNotEmpty)
+        .firstOrNull;
+    if (title == null) return const [];
+    final raw = await getDanmu(
+      subjectId,
+      episodeIndex,
+      title,
+      abortTrigger: abortTrigger,
+    );
+    final items = _decodeItems(raw);
+    if (items.isNotEmpty) cacheItems(cacheKey, items);
+    return items;
   }
 
   /// 快速高效单趟解码弹幕 JSON
@@ -180,9 +170,11 @@ class DanmakuController extends ChangeNotifier {
 
       int colorVal = 0xFFFFFF;
       if (second >= 0) {
-        // Local files use time,type,color; online records add size before color.
+        // Local: time,type,color. Dandanplay: time,type,color,userId.
+        // Bilibili-compatible sources add font size before color (5+ fields).
         final third = params.indexOf(',', second + 1);
-        final start = third < 0 ? second + 1 : third + 1;
+        final fourth = third < 0 ? -1 : params.indexOf(',', third + 1);
+        final start = fourth < 0 ? second + 1 : third + 1;
         final end = params.indexOf(',', start);
         colorVal =
             int.tryParse(params.substring(start, end < 0 ? null : end)) ??
@@ -280,6 +272,51 @@ class DanmakuController extends ChangeNotifier {
   }
 
   List<DanmakuItem> _items = const [];
+  int _loadRevision = 0;
+  bool _disposed = false;
+  bool _loading = false;
+  Completer<void>? _loadAbort;
+
+  bool get loading => _loading;
+  String get loadStatus => loading ? '正在加载弹幕…' : '${items.length} 条弹幕';
+
+  /// Discard results after a media replacement, manual association or disposal.
+  /// Background failures stay quiet and do not interrupt playback.
+  Future<bool> load(
+    Future<List<DanmakuItem>> Function(Future<void> abortTrigger) fetch,
+  ) async {
+    if (_disposed) return false;
+    _loadAbort?.complete();
+    final abort = _loadAbort = Completer<void>();
+    final revision = ++_loadRevision;
+    _loading = true;
+    notifyListeners();
+    try {
+      final items = await fetch(abort.future);
+      if (_disposed || revision != _loadRevision) return false;
+      _loadAbort = null;
+      _loading = false;
+      _publishItems(items);
+      return true;
+    } catch (error) {
+      if (_disposed || revision != _loadRevision) return false;
+      _loadAbort = null;
+      _loading = false;
+      if (error is! http.RequestAbortedException) {
+        debugPrint('获取弹幕失败: $error');
+      }
+      notifyListeners();
+      return false;
+    }
+  }
+
+  void _clearLoad() {
+    _loadAbort?.complete();
+    _loadAbort = null;
+    _loadRevision++;
+    _loading = false;
+  }
+
   DanmakuOption _option = DanmakuOption(
     fontSize: DanmakuOption.defaultFontSize,
   );
@@ -311,6 +348,11 @@ class DanmakuController extends ChangeNotifier {
   }
 
   void setItems(List<DanmakuItem> items) {
+    _clearLoad();
+    _publishItems(items);
+  }
+
+  void _publishItems(List<DanmakuItem> items) {
     _items = items;
     for (final listener in _listeners) {
       listener.onDanmakuItemsChanged();
@@ -357,6 +399,7 @@ class DanmakuController extends ChangeNotifier {
   }
 
   void reset() {
+    _clearLoad();
     _items = const [];
     final position = _lastPosition;
     final adjustedPosition = position == null
@@ -407,6 +450,8 @@ class DanmakuController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _clearLoad();
     _listeners = const [];
     _items = const [];
     _blockWords = const [];

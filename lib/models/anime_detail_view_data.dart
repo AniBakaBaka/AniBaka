@@ -2,6 +2,7 @@ import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/utils/json_values.dart';
 import 'package:baka/utils/bgm_utils.dart';
+import 'package:baka/widgets/anime/post_card.dart';
 
 class AnimeDetailViewData {
   const AnimeDetailViewData._({
@@ -12,6 +13,7 @@ class AnimeDetailViewData {
     required this.summary,
     required this.coverUrl,
     required this.logoUrl,
+    required this.heroTag,
     required this.tags,
     required this.genres,
     required this.infobox,
@@ -23,6 +25,8 @@ class AnimeDetailViewData {
     required this.collectCount,
     required this.doingCount,
     required this.wishCount,
+    this.updateTime,
+    this.category,
     this.score,
     this.rank,
     this.airDate,
@@ -40,6 +44,9 @@ class AnimeDetailViewData {
   final String summary;
   final String coverUrl;
   final String logoUrl;
+  final Object heroTag;
+  final String? updateTime;
+  final String? category;
   final List<String> tags;
   final List<String> genres;
   final List<Map<String, dynamic>> infobox;
@@ -159,6 +166,9 @@ class AnimeDetailViewData {
           '暂无简介',
       coverUrl: cover,
       logoUrl: resolveLogoUrl(anibaka),
+      heroTag: coverHeroTag(source),
+      updateTime: trimmed(source['time'] as String?),
+      category: trimmed(source['sort'] as String?),
       tags: rawTags.toList(growable: false),
       genres: genres,
       infobox: infobox,

@@ -515,10 +515,9 @@ class _PlayerPageState extends State<PlayerPage>
       }
       if (resumeAt == null) {
         final episode = content.currPlayIndex;
-        final items = await content.fetchDanmakuData(episode);
-        if (!_isStale(id) && episode == content.currPlayIndex) {
-          _danmaku.setItems(items);
-        }
+        await _danmaku.load(
+          (abort) => content.fetchDanmakuData(episode, abortTrigger: abort),
+        );
       }
     } catch (error) {
       if (_isStale(id) || SourceOperation.current?.isCancelled == true) return;

@@ -12,65 +12,6 @@ import 'package:http/http.dart' as http;
 
 const _bangumiApiBase = 'https://api.bgm.tv';
 
-/// OAuth can span browser/app switches. A failed request must not discard the
-/// whole login, while cancellation and terminal authentication errors still do.
-Future<T> _waitForOAuth<T>(
-  Uri uri,
-  Future<T?> Function(Future<void> abort) read, {
-  required Duration timeout,
-  required String timeoutMessage,
-  Future<void>? abortTrigger,
-}) async {
-  final abort = Completer<void>();
-  var timedOut = false;
-  void stop() {
-    if (!abort.isCompleted) abort.complete();
-  }
-
-  final timer = Timer(timeout, () {
-    timedOut = true;
-    stop();
-  });
-  abortTrigger?.then((_) => stop());
-  final cancelled = abort.future.then<T?>(
-    (_) => throw http.RequestAbortedException(uri),
-  );
-  try {
-    while (!abort.isCompleted) {
-      try {
-        final result = await Future.any([read(abort.future), cancelled]);
-        if (abort.isCompleted) break;
-        if (result != null) return result;
-      } catch (error) {
-        if (error is http.RequestAbortedException) rethrow;
-        final status = switch (error) {
-          ApiException() => error.statusCode,
-          BangumiSyncException() => error.statusCode,
-          _ => null,
-        };
-        if (error is! TimeoutException &&
-            error is! SocketException &&
-            error is! http.ClientException &&
-            status != 408 &&
-            status != 429 &&
-            !(status != null && status >= 500 && status <= 599)) {
-          rethrow;
-        }
-      }
-      await Future.any([
-        Future<void>.delayed(const Duration(seconds: 2)),
-        abort.future,
-      ]);
-    }
-    throw http.RequestAbortedException(uri);
-  } on http.RequestAbortedException {
-    if (timedOut) throw TimeoutException(timeoutMessage, timeout);
-    rethrow;
-  } finally {
-    timer.cancel();
-  }
-}
-
 class BangumiSyncException implements Exception {
   const BangumiSyncException(this.message, {this.statusCode});
 
@@ -92,20 +33,14 @@ class BangumiAccount {
   final String nickname;
   final String? avatarUrl;
 
-  factory BangumiAccount.fromJson(Map<String, dynamic> json) {
-    final avatar = json['avatar'];
-    String? avatarUrl;
-    if (avatar is Map) {
-      avatarUrl = avatar['large']?.toString();
-    } else {
-      avatarUrl = json['avatar_url']?.toString();
-    }
-    return BangumiAccount(
-      username: json['username']?.toString() ?? '',
-      nickname: json['nickname']?.toString() ?? '',
-      avatarUrl: avatarUrl,
-    );
-  }
+  factory BangumiAccount.fromJson(Map<String, dynamic> json) => BangumiAccount(
+    username: json['username'] as String? ?? '',
+    nickname: json['nickname'] as String? ?? '',
+    avatarUrl: switch (json['avatar']) {
+      final Map avatar => avatar['large'] as String?,
+      _ => json['avatar_url'] as String?,
+    },
+  );
 
   Map<String, dynamic> toJson() => {
     'username': username,
@@ -145,8 +80,8 @@ class BangumiOAuthBroker {
       const {},
       abortTrigger: abortTrigger,
     );
-    final authorizationUrl = data['authorization_url']?.toString() ?? '';
-    final state = data['state']?.toString() ?? '';
+    final authorizationUrl = data['authorization_url'] as String? ?? '';
+    final state = data['state'] as String? ?? '';
     if (authorizationUrl.isEmpty || state.isEmpty) {
       throw const BangumiSyncException('AniBaka 未返回有效的 Bangumi 登录地址');
     }
@@ -157,25 +92,44 @@ class BangumiOAuthBroker {
     String state, {
     Future<void>? abortTrigger,
     Duration timeout = const Duration(minutes: 10),
-  }) {
+  }) async {
     final uri = Uri.parse(
       '${ApiConfig.host}/api/v1/bangumi/oauth/status',
     ).replace(queryParameters: {'state': state});
-    return _waitForOAuth(
-      uri,
-      (abort) async {
+    final abort = Completer<void>();
+    var timedOut = false;
+    void stop() {
+      if (!abort.isCompleted) abort.complete();
+    }
+
+    final timer = Timer(timeout, () {
+      timedOut = true;
+      stop();
+    });
+    abortTrigger?.then((_) => stop());
+    try {
+      while (!abort.isCompleted) {
         final root = await apiTransport.getJson<Map<String, dynamic>>(
           uri.toString(),
           notifyOnError: false,
-          abortTrigger: abort,
+          abortTrigger: abort.future,
         );
         final data = _parseBrokerResponse(root);
-        return data['status'] == 'complete' ? _tokenFromJson(data) : null;
-      },
-      abortTrigger: abortTrigger,
-      timeout: timeout,
-      timeoutMessage: '等待 AniBaka 授权结果超时，请检查网络后重试',
-    );
+        if (data['status'] == 'complete') return _tokenFromJson(data);
+        await Future.any([
+          Future<void>.delayed(const Duration(seconds: 2)),
+          abort.future,
+        ]);
+      }
+      throw http.RequestAbortedException(uri);
+    } on http.RequestAbortedException {
+      if (timedOut) {
+        throw TimeoutException('等待 AniBaka 授权结果超时，请检查网络后重试', timeout);
+      }
+      rethrow;
+    } finally {
+      timer.cancel();
+    }
   }
 
   Future<void> acknowledge(String state) async {
@@ -218,35 +172,14 @@ class BangumiOAuthBroker {
   }
 
   static BangumiOAuthToken _tokenFromJson(Map<String, dynamic> json) {
-    final accessToken = json['access_token']?.toString() ?? '';
+    final accessToken = json['access_token'] as String? ?? '';
     if (accessToken.isEmpty) {
       throw const BangumiSyncException('Bangumi 登录未返回有效令牌');
     }
     return BangumiOAuthToken(
       accessToken: accessToken,
-      refreshToken: json['refresh_token']?.toString() ?? '',
+      refreshToken: json['refresh_token'] as String? ?? '',
       expiresIn: toInt(json['expires_in']) ?? 604800,
-    );
-  }
-}
-
-class _BangumiEpisodeRecord {
-  const _BangumiEpisodeRecord({
-    required this.id,
-    required this.collectionType,
-    required this.sort,
-  });
-
-  final int id;
-  final int collectionType;
-  final double sort;
-
-  factory _BangumiEpisodeRecord.fromJson(Map<String, dynamic> json) {
-    final episode = json['episode'] as Map<String, dynamic>;
-    return _BangumiEpisodeRecord(
-      id: episode['id'] as int,
-      collectionType: json['type'] as int,
-      sort: (episode['sort'] as num).toDouble(),
     );
   }
 }
@@ -264,17 +197,7 @@ class BangumiApi {
   Future<BangumiAccount> getMe(
     String token, {
     Future<void>? abortTrigger,
-    bool retryForOAuth = false,
   }) async {
-    if (retryForOAuth) {
-      return _waitForOAuth(
-        Uri.parse('$_bangumiApiBase/v0/me'),
-        (abort) => getMe(token, abortTrigger: abort),
-        abortTrigger: abortTrigger,
-        timeout: const Duration(minutes: 2),
-        timeoutMessage: '读取 Bangumi 账号超时，请检查网络后重试',
-      );
-    }
     final json = await _request<Map<String, dynamic>>(
       'GET',
       '/v0/me',
@@ -305,31 +228,21 @@ class BangumiApi {
     const limit = 100;
     var offset = 0;
     var total = 1;
+    final encodedUser = Uri.encodeComponent(username);
     final result = <AnimeCollection>[];
 
     while (offset < total) {
-      final path = Uri(
-        path: '/v0/users/$username/collections',
-        queryParameters: {
-          'subject_type': '2',
-          'limit': '$limit',
-          'offset': '$offset',
-        },
-      ).toString();
       final page = await _request<Map<String, dynamic>>(
         'GET',
-        path,
+        '/v0/users/$encodedUser/collections?subject_type=2&limit=$limit&offset=$offset',
         token: token,
       );
       total = page['total'] as int;
-      final items = page['data'] as List? ?? const [];
-      for (final item in items) {
-        final record = AnimeCollection.fromBangumi(
-          item as Map<String, dynamic>,
-        );
-        if ((record.bgmId ?? 0) > 0) result.add(record);
-      }
+      final items = page['data'] as List;
       if (items.isEmpty) break;
+      for (final item in items) {
+        result.add(AnimeCollection.fromBangumi(item as Map<String, dynamic>));
+      }
       offset += items.length;
     }
     return result;
@@ -357,33 +270,29 @@ class BangumiApi {
     int subjectId,
     int watched,
   ) async {
-    final path = Uri(
-      path: '/v0/users/-/collections/$subjectId/episodes',
-      queryParameters: const {'episode_type': '0', 'limit': '1000'},
-    ).toString();
     final page = await _request<Map<String, dynamic>>(
       'GET',
-      path,
+      '/v0/users/-/collections/$subjectId/episodes?episode_type=0&limit=1000',
       token: token,
     );
-    final episodes = <_BangumiEpisodeRecord>[];
-    for (final item in page['data'] as List? ?? const []) {
-      final episode = _BangumiEpisodeRecord.fromJson(
-        item as Map<String, dynamic>,
+    final episodes = (page['data'] as List).cast<Map<String, dynamic>>()
+      ..sort(
+        (a, b) => ((a['episode'] as Map)['sort'] as num).compareTo(
+          (b['episode'] as Map)['sort'] as num,
+        ),
       );
-      if (episode.id > 0) episodes.add(episode);
-    }
-    episodes.sort((a, b) => a.sort.compareTo(b.sort));
 
     final watchedCount = watched.clamp(0, episodes.length);
     final doneIds = <int>[];
     final resetIds = <int>[];
     for (var index = 0; index < episodes.length; index++) {
-      final episode = episodes[index];
+      final item = episodes[index];
+      final type = item['type'] as int;
+      final id = (item['episode'] as Map)['id'] as int;
       if (index < watchedCount) {
-        if (episode.collectionType != 2) doneIds.add(episode.id);
-      } else if (episode.collectionType == 2) {
-        resetIds.add(episode.id);
+        if (type != 2) doneIds.add(id);
+      } else if (type == 2) {
+        resetIds.add(id);
       }
     }
     if (doneIds.isNotEmpty) {

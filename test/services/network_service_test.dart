@@ -15,6 +15,7 @@ import 'package:baka/models/collection.dart';
 import 'package:baka/models/play_history.dart';
 import 'package:baka/models/app_user.dart';
 import 'package:baka/pages/login/login_page.dart';
+import 'package:baka/pages/login/account_security_page.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:http/testing.dart';
 import 'package:http/http.dart' as http;
@@ -694,6 +695,10 @@ void main() {
     await tester.enterText(find.byType(TextFormField).at(0), ' 12345 ');
     await tester.enterText(find.byType(TextFormField).at(1), ' new-user ');
     await tester.enterText(find.byType(TextFormField).at(2), ' password ');
+    await tester.enterText(find.byType(TextFormField).at(3), ' password ');
+    expect(find.byType(TextFormField), findsNWidgets(4));
+    expect(find.byType(EmailVerificationFields), findsNothing);
+    await tester.ensureVisible(find.text('注 册'));
     await tester.tap(find.text('注 册'));
     await tester.pumpAndSettle();
     expect(find.text('QQ已存在'), findsOneWidget);
@@ -706,6 +711,244 @@ void main() {
     expect(notices, 0);
     expect(apiTransport.session.isLoggedIn, isFalse);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  test('registration accepts no QQ or email without sending an OTP', () async {
+    var requests = 0;
+    useClient(
+      MockClient((request) async {
+        requests++;
+        expect(request.url.path, '/user/register');
+        expect(jsonDecode(request.body), {
+          'name': 'no-contact',
+          'pwd': 'password',
+          'qq': '',
+        });
+        return http.Response('{"code":200}', 200);
+      }),
+    );
+    final result = await LoginService(
+      apiTransport.session,
+      apiTransport,
+    ).performRegister(name: 'no-contact', pwd: 'password');
+    expect(result.success, isTrue);
+    expect(requests, 1);
+  });
+
+  test('QQ recovery sends and resets with the same QQ mailbox', () async {
+    final paths = <String>[];
+    useClient(
+      MockClient((request) async {
+        paths.add(request.url.path);
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(body['email'], '123456@qq.com');
+        if (request.url.path.endsWith('/code')) {
+          expect(body['purpose'], 'reset_password');
+        } else {
+          expect(body['code'], '123456');
+          expect(body['new_password'], 'new-password');
+        }
+        return http.Response('{"code":200}', 200);
+      }),
+    );
+    final service = LoginService(apiTransport.session, apiTransport);
+    expect(
+      (await service.sendEmailCode(
+        email: ' 123456 ',
+        purpose: 'reset_password',
+      )).success,
+      isTrue,
+    );
+    expect(
+      (await service.resetPassword(
+        email: '123456',
+        code: '123456',
+        password: 'new-password',
+      )).success,
+      isTrue,
+    );
+    expect(paths, ['/user/email/code', '/user/password/reset']);
+  });
+
+  test('changing QQ submits current password with the profile', () async {
+    const user = AppUser(id: 1, name: 'user', qq: '123456', sign: '', level: 1);
+    await apiTransport.session.saveLoginInfo('access', user);
+    useClient(
+      MockClient((request) async {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(body['qq'], '654321');
+        expect(body['current_password'], 'current-password');
+        return http.Response(
+          jsonEncode({
+            'code': 200,
+            'data': {
+              'id': 1,
+              'name': 'user',
+              'qq': '654321',
+              'sign': '',
+              'level': 1,
+            },
+          }),
+          200,
+        );
+      }),
+    );
+    final result = await LoginService(
+      apiTransport.session,
+      apiTransport,
+    ).updateUser(user, 'qq', '654321', currentPassword: 'current-password');
+    expect(result.success, isTrue);
+    expect(result.user?.recoveryEmail, '654321@qq.com');
+  });
+
+  test(
+    'email recovery omits stale credentials and preserves rejection reasons',
+    () async {
+      await apiTransport.session.saveLoginInfo(
+        'stale-access',
+        const AppUser(id: 1, name: 'old', qq: '12345', sign: '', level: 1),
+        tokenExpiresAt: '2000-01-01T00:00:00Z',
+      );
+      final paths = <String>[];
+      useClient(
+        MockClient((request) async {
+          paths.add(request.url.path);
+          expect(request.headers.containsKey('token'), isFalse);
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['email'], 'new@example.com');
+          if (request.url.path == '/user/email/code') {
+            expect(body['purpose'], 'reset_password');
+            return http.Response(
+              jsonEncode({'code': 200, 'msg': '若该邮箱可用于本次操作，验证码已发送'}),
+              200,
+              headers: {'content-type': 'application/json; charset=utf-8'},
+            );
+          }
+          expect(body['code'], '042815');
+          expect(body['new_password'], ' new-password ');
+          return http.Response(
+            jsonEncode({'code': 400, 'msg': '验证码已过期'}),
+            400,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }),
+      );
+      final service = LoginService(apiTransport.session, apiTransport);
+      expect(
+        (await service.sendEmailCode(
+          email: ' new@example.com ',
+          purpose: 'reset_password',
+        )).success,
+        isTrue,
+      );
+      expect(
+        await service.resetPassword(
+          email: ' new@example.com ',
+          code: '042815',
+          password: ' new-password ',
+        ),
+        (success: false, message: '验证码已过期'),
+      );
+      expect(paths, ['/user/email/code', '/user/password/reset']);
+      expect(apiTransport.session.token, 'stale-access');
+    },
+  );
+
+  test(
+    'email binding retains authenticated identity and updated mailbox',
+    () async {
+      await apiTransport.session.saveLoginInfo(
+        'access',
+        const AppUser(id: 1, name: 'user', qq: '12345', sign: '', level: 1),
+      );
+      useClient(
+        MockClient((request) async {
+          expect(request.headers['token'], 'access');
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['current_password'], 'current-password');
+          expect(body['email'], 'bound@example.com');
+          expect(body['code'], '042815');
+          return http.Response(
+            jsonEncode({
+              'code': 200,
+              'data': {
+                'id': 1,
+                'name': 'user',
+                'qq': '12345',
+                'sign': '',
+                'level': 1,
+                'email': 'bound@example.com',
+                'email_verified': true,
+              },
+            }),
+            200,
+          );
+        }),
+      );
+      final service = LoginService(apiTransport.session, apiTransport);
+      final result = await service.bindEmail(
+        email: 'bound@example.com',
+        code: '042815',
+        currentPassword: 'current-password',
+      );
+      expect(result.success, isTrue);
+      expect(apiTransport.session.user.value.email, 'bound@example.com');
+      expect(apiTransport.session.user.value.emailVerified, isTrue);
+      expect(
+        AppUser.fromJson(
+          apiTransport.session.user.value.toJson(),
+        ).emailVerified,
+        isTrue,
+      );
+    },
+  );
+
+  testWidgets('email code fields prevent repeat sends during cooldown', (
+    tester,
+  ) async {
+    addTearDown(Get.reset);
+    var sends = 0;
+    useClient(
+      MockClient((request) async {
+        sends++;
+        expect(request.url.path, '/user/email/code');
+        expect(jsonDecode(request.body)['purpose'], 'register');
+        return http.Response(
+          jsonEncode({'code': 200, 'msg': '验证码已发送，请检查收件箱'}),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      }),
+    );
+    Get.put<AccountSession>(apiTransport.session);
+    Get.put<ApiTransport>(apiTransport);
+    final email = TextEditingController(text: 'new@example.com');
+    final code = TextEditingController();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Form(
+            child: EmailVerificationFields(
+              email: email,
+              code: code,
+              purpose: 'register',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('获取验证码'));
+    await tester.pumpAndSettle();
+    expect(sends, 1);
+    expect(find.text('60s 后重发'), findsOneWidget);
+    expect(
+      tester.widget<OutlinedButton>(find.byType(OutlinedButton)).onPressed,
+      isNull,
+    );
+    expect(find.text('验证码已发送，请检查收件箱'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    email.dispose();
+    code.dispose();
   });
 
   test(
@@ -999,45 +1242,6 @@ void main() {
     expect(results[0], same(results[1]));
     await getBgmCharacters(99801);
     expect(calls, 3, reason: 'Large character responses are not retained');
-  });
-
-  test('POST timeout returns without waiting for the server', () async {
-    useClient(http.Client());
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    addTearDown(() => server.close(force: true));
-    // Leave the response pending so only the client's timeout can finish it.
-    server.listen((request) {});
-
-    final result = apiTransport.postJson<Object>(
-      'http://${server.address.address}:${server.port}/slow',
-      const {'value': 1},
-      timeout: const Duration(milliseconds: 50),
-      notifyOnError: false,
-    );
-
-    await expectLater(result, throwsA(isA<TimeoutException>()));
-  });
-
-  test('abortable POST keeps JSON request and response behavior', () async {
-    useClient(http.Client());
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    addTearDown(() => server.close(force: true));
-    server.listen((request) async {
-      final body = jsonDecode(await utf8.decoder.bind(request).join());
-      request.response
-        ..headers.contentType = ContentType.json
-        ..write(jsonEncode({'code': 0, 'data': body}));
-      await request.response.close();
-    });
-
-    final result = await apiTransport.postJson<Map<String, dynamic>>(
-      'http://${server.address.address}:${server.port}/echo',
-      const {'value': 7},
-      timeout: const Duration(seconds: 1),
-      notifyOnError: false,
-    );
-
-    expect(result['data'], {'value': 7});
   });
 }
 

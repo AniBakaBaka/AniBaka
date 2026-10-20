@@ -51,11 +51,11 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
   late bool _showSearch;
   bool _isSearching = false;
   String? _searchError;
-  List<BgmSubjectInfo> _searchResults = const [];
-  BgmSubjectInfo? _selectedSubject;
+  List<BgmInfo> _searchResults = const [];
+  BgmInfo? _selectedSubject;
   Future<List<int>>? _episodes;
-  (int, int)? _loadingEpisode;
-  BgmSubjectInfo? _matchedSubject;
+  (int?, int)? _loadingEpisode;
+  BgmInfo? _matchedSubject;
   int? _matchedEpisode;
   int _searchRequest = 0;
   int _loadRequest = 0;
@@ -103,12 +103,12 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
     }
   }
 
-  void _selectSubject(BgmSubjectInfo subject) {
+  void _selectSubject(BgmInfo subject) {
     if (_selectedSubject?.subjectId == subject.subjectId) return;
     setState(() {
       _selectedSubject = subject;
       // The API already caches and deduplicates episode requests.
-      _episodes = getBgmEpisodes(subject.subjectId).then(
+      _episodes = getBgmEpisodes(subject.subjectId!).then(
         (episodes) => [
           for (final episode in episodes)
             if ((episode['sort'] as num) > 0) (episode['sort'] as num).round(),
@@ -117,14 +117,14 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
     });
   }
 
-  Future<void> _loadDanmaku(BgmSubjectInfo subject, int episode) async {
+  Future<void> _loadDanmaku(BgmInfo subject, int episode) async {
     final selection = (subject.subjectId, episode);
     if (_loadingEpisode == selection) return;
     final request = ++_loadRequest;
     setState(() => _loadingEpisode = selection);
     try {
       final items = await DanmakuController.fetchDanmaku(
-        subjectId: subject.subjectId,
+        subjectId: subject.subjectId!,
         episodeIndex: episode,
         titles: subject.searchTitles,
       );
@@ -144,7 +144,7 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
     } catch (e) {
       if (!mounted || request != _loadRequest) return;
       setState(() => _loadingEpisode = null);
-      showSnackBar('关联失败: $e');
+      debugPrint('关联弹幕失败: $e');
     }
   }
 
@@ -210,9 +210,16 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
             const SizedBox(height: 8),
             ListenableBuilder(
               listenable: widget.controller,
-              builder: (context, _) => Text(
-                'dandanplay · ${widget.controller.items.length} 条弹幕',
-                style: const TextStyle(color: _muted, fontSize: 14),
+              builder: (context, _) => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.controller.loadStatus,
+                    style: const TextStyle(color: _muted, fontSize: 14),
+                  ),
+                  if (widget.controller.loading)
+                    const LinearProgressIndicator(semanticsLabel: '正在加载弹幕'),
+                ],
               ),
             ),
             const Divider(height: 40, color: Color(0xFF384452)),
@@ -489,7 +496,7 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
   }
 
   Widget _buildEpisodeButton(
-    BgmSubjectInfo subject,
+    BgmInfo subject,
     int episode,
     double width,
   ) {

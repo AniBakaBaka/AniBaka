@@ -12,7 +12,6 @@ import 'package:baka/widgets/comment/comment_widget.dart';
 import 'package:baka/services/playback/danmaku_controller.dart';
 import 'package:baka/widgets/platform/windows/windows_episode_list.dart';
 import 'package:baka/widgets/platform/windows/windows_title_bar.dart';
-import 'package:baka/widgets/player/player_tab.dart';
 
 class WindowsPlayerLayout extends StatefulWidget {
   final PlaybackContent content;
@@ -60,21 +59,10 @@ class WindowsPlayerLayout extends StatefulWidget {
   State<WindowsPlayerLayout> createState() => _WindowsPlayerLayoutState();
 }
 
-class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout>
-    with SingleTickerProviderStateMixin {
+class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
   bool _showSidebar = true;
-  late final _sidebarTabs = TabController(
-    length: 2,
-    vsync: this,
-    animationDuration: Duration.zero,
-  );
+  int _tabIndex = 0;
   bool _isFullScreen = false;
-
-  @override
-  void dispose() {
-    _sidebarTabs.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -392,47 +380,53 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout>
       ),
       child: Column(
         children: [
-          ListenableBuilder(
-            listenable: _sidebarTabs,
-            builder: (context, _) => _buildSidebarTabs(),
-          ),
-          Expanded(
-            child: TabBarView(
-              controller: _sidebarTabs,
-              physics: const NeverScrollableScrollPhysics(),
+          Container(
+            margin: const EdgeInsets.fromLTRB(14, 38, 14, 8),
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              color: const Color(0xFF202024),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
               children: [
-                PlayerTab(child: _buildPlaylistTab()),
-                _buildCommentTab(),
+                Expanded(
+                  child: _buildTabButton(
+                    index: 0,
+                    icon: Icons.info_outline_rounded,
+                    title: '简介',
+                  ),
+                ),
+                Expanded(
+                  child: _buildTabButton(
+                    index: 1,
+                    icon: Icons.chat_bubble_outline_rounded,
+                    title: '互动评论',
+                  ),
+                ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSidebarTabs() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(14, 38, 14, 8),
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: const Color(0xFF202024),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
           Expanded(
-            child: _buildTabButton(
-              index: 0,
-              icon: Icons.info_outline_rounded,
-              title: '简介',
-            ),
-          ),
-          Expanded(
-            child: _buildTabButton(
-              index: 1,
-              icon: Icons.chat_bubble_outline_rounded,
-              title: '互动评论',
+            child: IndexedStack(
+              index: _tabIndex,
+              children: [
+                Padding(
+                  key: const ValueKey('intro_tab'),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: WindowsEpisodeList(
+                    content: widget.content,
+                    onEpisodeSelected: widget.onEpisodeChanged,
+                    onDownloadPressed: widget.onDownloadPressed,
+                    onUrlChanged: widget.onUrlChanged,
+                    followNotifier: widget.followNotifier,
+                    onFollowPressed: widget.onFollowPressed,
+                    onSourceTap: widget.onSourceTap,
+                    isSearching: widget.isSearching,
+                    danmakuController: widget.danmakuController,
+                  ),
+                ),
+                _buildCommentTab(),
+              ],
             ),
           ),
         ],
@@ -445,12 +439,12 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout>
     required IconData icon,
     required String title,
   }) {
-    final isSelected = _sidebarTabs.index == index;
+    final isSelected = _tabIndex == index;
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(6),
       child: InkWell(
-        onTap: () => _sidebarTabs.animateTo(index),
+        onTap: () => setState(() => _tabIndex = index),
         borderRadius: BorderRadius.circular(6),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
@@ -481,36 +475,6 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout>
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildPlaylistTab() {
-    final content = widget.content;
-
-    return Padding(
-      key: const ValueKey('intro_tab'),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: WindowsEpisodeList(
-        torrent: content.torrent,
-        videoList: content.videoList,
-        currentIndex: content.currPlayIndex,
-        onEpisodeSelected: widget.onEpisodeChanged,
-        onDownloadPressed: widget.onDownloadPressed,
-        onUrlChanged: widget.onUrlChanged,
-        currUrl: content.currUrl,
-        sourceNames: content.sourceNames,
-        bgmEpisodes: content.bgmEpisodes,
-        fallbackCoverUrl: content.coverImageUrl,
-        title: content.title,
-        bgmInfo: content.bgmInfo,
-        followNotifier: widget.followNotifier,
-        onFollowPressed: widget.onFollowPressed,
-        sourceName: content.sourceName,
-        lineName: content.lineName,
-        onSourceTap: widget.onSourceTap,
-        isSearching: widget.isSearching,
-        danmakuController: widget.danmakuController,
       ),
     );
   }

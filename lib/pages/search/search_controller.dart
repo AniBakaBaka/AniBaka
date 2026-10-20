@@ -209,12 +209,13 @@ class AnimeSearchController {
       if (_disposed || !task.wanted) return const [];
       return List.generate(subjects.length, (index) {
         final subject = subjects[index];
-        final cover = BgmUtils.bgmCoverProxyUrl(subject.subjectId);
+        final id = subject.subjectId!;
+        final cover = BgmUtils.bgmCoverProxyUrl(id);
         return <String, dynamic>{
           'source': 'bgm',
-          'title': subject.nameCn?.isNotEmpty == true
-              ? subject.nameCn
-              : subject.name ?? '未知标题',
+          'title': subject.displayTitle.isNotEmpty
+              ? subject.displayTitle
+              : '未知标题',
           'subtitle':
               subject.nameCn?.isNotEmpty == true &&
                   subject.name?.isNotEmpty == true &&
@@ -223,9 +224,9 @@ class AnimeSearchController {
               : subject.summary ?? noDescriptionText,
           'content': cover,
           'bgmImageUrl': cover,
-          'bgmId': subject.subjectId,
+          'bgmId': id,
           'nsfw': subject.nsfw,
-          '_heroTag': 'bgm_cover_${subject.subjectId}',
+          '_heroTag': 'bgm_cover_$id',
           if (subject.score != null) 'score': subject.score,
         };
       });

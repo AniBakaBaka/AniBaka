@@ -30,30 +30,20 @@ class ScoreDistributionChart extends StatelessWidget {
 
     return Semantics(
       label: '评分分布柱形图',
-      child: Column(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          // One paint transform for the chart; no per-bar layout animations.
-          TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: 1),
-            duration: MediaQuery.disableAnimationsOf(context)
-                ? Duration.zero
-                : const Duration(milliseconds: 280),
-            curve: Curves.easeOutCubic,
-            builder: (context, value, child) => Transform.scale(
-              scaleY: value,
-              alignment: Alignment.bottomCenter,
-              child: child,
-            ),
-            child: SizedBox(
-              height: 72,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  for (var i = 0; i < 10; i++) ...[
-                    if (i > 0) const SizedBox(width: 5),
-                    PlatformTooltip(
+          for (var i = 0; i < 10; i++) ...[
+            if (i > 0) const SizedBox(width: 5),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  height: 72,
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: PlatformTooltip(
                       message: '${i + 1} 分 · ${counts[i]} 人',
                       child: Container(
                         width: 14,
@@ -67,28 +57,20 @@ class ScoreDistributionChart extends StatelessWidget {
                         ),
                       ),
                     ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var i = 1; i <= 10; i++) ...[
-                if (i > 1) const SizedBox(width: 5),
+                  ),
+                ),
+                const SizedBox(height: 6),
                 SizedBox(
                   width: 14,
                   child: Text(
-                    '$i',
+                    '${i + 1}',
                     textAlign: TextAlign.center,
                     style: labelStyle,
                   ),
                 ),
               ],
-            ],
-          ),
+            ),
+          ],
         ],
       ),
     );

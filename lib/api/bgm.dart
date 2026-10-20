@@ -43,7 +43,7 @@ final _episodeCommentsCache = RequestCache<int, List<Map<String, dynamic>>>(
   limit: 8,
   ttl: _bgmCacheTtl,
 );
-final _searchCache = RequestCache<String, List<BgmSubjectInfo>>(
+final _searchCache = RequestCache<String, List<BgmInfo>>(
   limit: 64,
   ttl: _bgmCacheTtl,
 );
@@ -65,10 +65,6 @@ Future<Map<String, dynamic>> getBgmSubject(
     notifyOnError: notifyOnError,
   ),
 );
-
-/// Bangumi's image endpoint redirects to the cover without loading subject JSON.
-String bgmSubjectImageUrl(int subjectId) =>
-    '$_bgmApiBase/v0/subjects/$subjectId/image?type=large';
 
 Future<Map<String, dynamic>> getBgmEpisode(int episodeId) => apiTransport
     .getJson<Map<String, dynamic>>('$_bgmApiBase/v0/episodes/$episodeId');
@@ -243,98 +239,65 @@ final TtlCache _scoreCache = TtlCache(
 Future<BgmInfo> resolveBgmFromData(Map data) async {
   final existing = BgmInfo.fromData(data);
   if (existing.subjectId != null) return existing;
-
-  final title = (data['title'] as String? ?? '')
-      .replaceAll(_spaces, ' ')
-      .trim();
-  final normalized = keepTitleUnits(extractBaseTitle(title));
-  if (normalized.isEmpty) return const BgmInfo();
-  final season = extractSeason(title);
-  final cacheKey = season == null
-      ? 'bgm_score_$normalized'
-      : 'bgm_score_$normalized#season:$season';
-  final cached = _scoreCache.read(cacheKey) as Map?;
-  if (cached != null) {
-    return BgmInfo(
-      score: toDouble(cached['score']),
-      subjectId: toInt(cached['subjectId']),
-      imageUrl: cached['imageUrl'] as String?,
-    );
-  }
-
-  final subject = await resolveBgmSubject(title: title);
-  if (subject == null) return const BgmInfo();
-  final info = BgmInfo(
-    score: subject.score,
-    subjectId: subject.subjectId,
-    imageUrl: subject.imageUrl,
-  );
-  await _scoreCache.write(cacheKey, {
-    'score': info.score,
-    'subjectId': info.subjectId,
-    'imageUrl': info.imageUrl,
-  });
-  return info;
+  return await resolveBgmSubject(title: data['title'] as String? ?? '') ??
+      const BgmInfo();
 }
 
-Future<List<BgmSubjectInfo>> searchBgmSubjects(String keyword) {
+Future<List<BgmInfo>> searchBgmSubjects(String keyword) {
   final clean = keyword.replaceAll(_spaces, ' ').trim();
   if (keepTitleUnits(clean).isEmpty) {
     return SynchronousFuture(const []);
   }
   return _searchCache.get(clean, () async {
     final items = await searchBgm(keyword: clean, limit: 10, sort: 'match');
-    return List<BgmSubjectInfo>.generate(
+    return List<BgmInfo>.generate(
       items.length,
-      (index) => BgmSubjectInfo.fromJson(items[index]),
+      (index) => BgmInfo.fromJson(items[index]),
       growable: false,
     );
   });
 }
 
-/// 按主线剧集顺序查找评论接口所需的 BGM episode id。
-Future<({int? episodeId, String name})?> resolveBgmEpisodeByIndex(
-  int subjectId,
-  int episodeIndex,
-) async {
-  if (subjectId <= 0 || episodeIndex < 0) return null;
-
-  final rawEpisodes = await getBgmEpisodes(subjectId);
-  if (episodeIndex >= rawEpisodes.length) return null;
-
-  final episode = rawEpisodes[episodeIndex];
-  return (
-    episodeId: toInt(episode['id']),
-    name: trimmed(episode['name_cn']) ?? trimmed(episode['name']) ?? '',
-  );
-}
-
 /// 按标题搜索条目标识；已知 ID 的调用方直接读取 getBgmSubject。
 ///
 /// 搜索结果本身已含 `score / id / images`，无需再回源拉取整个条目。
-Future<BgmSubjectInfo?> resolveBgmSubject({required String title}) async {
+Future<BgmInfo?> resolveBgmSubject({required String title}) async {
   final clean = title.replaceAll(_spaces, ' ').trim();
-  if (clean.isEmpty) return null;
+  final normalized = keepTitleUnits(extractBaseTitle(clean));
+  if (normalized.isEmpty) return null;
 
-  // 标题变体彼此独立，并发发出后再统一打分，省掉串行往返。
+  final querySeason = extractSeason(clean);
+  final cacheKey = querySeason == null
+      ? 'bgm_score_$normalized'
+      : 'bgm_score_$normalized#season:$querySeason';
+  if (_scoreCache.read(cacheKey) case final Map cached) {
+    return BgmInfo(
+      score: toDouble(cached['score']),
+      subjectId: toInt(cached['subjectId']),
+      imageUrl: cached['imageUrl'] as String?,
+      summary: cached['summary'] as String?,
+    );
+  }
+
   final batches = await Future.wait(
     buildSearchTitles([clean]).map(searchBgmSubjects),
   );
 
   final query = TitleFingerprint(clean);
-  final querySeason = extractSeason(clean);
-  BgmSubjectInfo? best;
+  final seen = <int>{};
+  BgmInfo? best;
   var bestScore = 0.0;
 
   for (final subjects in batches) {
     for (final subject in subjects) {
-      var score = 0.0;
-      for (final candidate in subject.searchTitles) {
-        final similarity = TitleFingerprint(candidate).similarityTo(query);
-        if (similarity > score) score = similarity;
-      }
+      final id = subject.subjectId;
+      if (id == null || !seen.add(id)) continue;
+      var score = _titleSimilarity(query, subject.nameCn);
+      final nameScore = _titleSimilarity(query, subject.name);
+      if (nameScore > score) score = nameScore;
+
       if (querySeason != null) {
-        final season = extractSeason(subject.nameCn ?? subject.name ?? '');
+        final season = extractSeason(subject.displayTitle);
         if (season != null && season != querySeason) continue;
         if (season == querySeason) score += 0.4;
       }
@@ -344,5 +307,22 @@ Future<BgmSubjectInfo?> resolveBgmSubject({required String title}) async {
       }
     }
   }
+  if (best != null) {
+    await _scoreCache.write(cacheKey, {
+      'score': best.score,
+      'subjectId': best.subjectId,
+      'imageUrl': best.imageUrl,
+      'summary': best.summary,
+    });
+  }
   return best;
+}
+
+double _titleSimilarity(TitleFingerprint query, String? candidate) {
+  if (candidate == null || candidate.isEmpty) return 0;
+  final score = TitleFingerprint(candidate).similarityTo(query);
+  final base = extractBaseTitle(candidate);
+  if (base == candidate) return score;
+  final baseScore = TitleFingerprint(base).similarityTo(query);
+  return baseScore > score ? baseScore : score;
 }

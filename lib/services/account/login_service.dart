@@ -2,77 +2,79 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:baka/api/api_config.dart';
 import 'package:baka/core/account_session.dart';
 import 'package:baka/core/api_transport.dart';
-import 'package:baka/api/api_config.dart';
 import 'package:baka/models/app_user.dart';
 import 'package:baka/models/token_response.dart';
-import 'package:flutter/foundation.dart';
+import 'package:get/get.dart' hide ContextExtensionss;
 import 'package:http/http.dart' as http;
 
 class LoginService {
-  LoginService(this.session, this.client);
+  LoginService([AccountSession? session, ApiTransport? client])
+    : session = session ?? Get.find<AccountSession>(),
+      client = client ?? Get.find<ApiTransport>();
+
+  static final qqPattern = AppUser.qqPattern;
+  static final emailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+  static final codePattern = RegExp(r'^\d{6}$');
 
   final AccountSession session;
   final ApiTransport client;
 
-  /// 执行登录流程
+  static String normalizeRecoveryAddress(String value) {
+    final address = value.trim().toLowerCase();
+    return qqPattern.hasMatch(address) ? '$address@qq.com' : address;
+  }
+
+  static bool isValidEmail(String value) => emailPattern.hasMatch(value.trim());
+
+  static bool isValidRecoveryAddress(String value) =>
+      emailPattern.hasMatch(normalizeRecoveryAddress(value));
+
+  static bool isValidCode(String value) => codePattern.hasMatch(value.trim());
+
+  static String? validatePassword(
+    String? value, {
+    String label = '密码',
+    bool requireLength = true,
+  }) {
+    if (value == null || value.isEmpty) return '请填写$label';
+    if (requireLength && value.runes.length < 8) return '密码至少需要 8 位';
+    return null;
+  }
+
   Future<({bool success, String message})> performLogin({
     required String name,
     required String pwd,
-  }) async {
-    try {
-      final res = await client.postJson<Map<String, dynamic>>(
-        '${ApiConfig.host}/user/login',
-        {'name': name.trim(), 'pwd': pwd, 'platform': 'app'},
-        notifyOnError: false,
-      );
-      if (res['code'] != 200) {
-        return (
-          success: false,
-          message: _responseMessage(res) ?? '登录失败，请检查账号密码',
-        );
-      }
+  }) => _accountAction(
+    '/user/login',
+    {'name': name.trim(), 'pwd': pwd, 'platform': 'app'},
+    '登录',
+    onSuccess: (res) => session.login(
+      TokenResponse.fromJson(res),
+      AppUser.fromJson(res['user'] as Map<String, dynamic>),
+    ),
+    successMessage: '登录成功',
+    defaultErrorMessage: '登录失败，请检查账号密码',
+  );
 
-      await session.login(
-        TokenResponse.fromJson(res),
-        AppUser.fromJson(res['user'] as Map<String, dynamic>),
-      );
-
-      return (success: true, message: '登录成功');
-    } catch (e) {
-      debugPrint('登录错误: $e');
-      return (success: false, message: _failureMessage(e, '登录'));
-    }
-  }
-
-  /// 执行注册流程
   Future<({bool success, String message})> performRegister({
     required String name,
     required String pwd,
-    required String qq,
-  }) async {
-    try {
-      final res = await client.postJson<Map<String, dynamic>>(
-        '${ApiConfig.host}/user/register',
-        {'name': name.trim(), 'pwd': pwd, 'qq': qq.trim()},
-        notifyOnError: false,
-      );
-      final bool ok = res['code'] == 200;
-      final String msg = _responseMessage(res) ?? (ok ? '注册成功' : '注册失败');
-
-      return (success: ok, message: msg);
-    } catch (e) {
-      debugPrint('注册错误: $e');
-      return (success: false, message: _failureMessage(e, '注册'));
-    }
-  }
+    String qq = '',
+  }) => _accountAction('/user/register', {
+    'name': name.trim(),
+    'pwd': pwd,
+    'qq': qq.trim(),
+  }, '注册');
 
   Future<({bool success, String message, AppUser? user})> updateUser(
     AppUser current,
     String field,
-    String value,
-  ) async {
+    String value, {
+    String currentPassword = '',
+  }) async {
     try {
       final result = await client
           .postJson<Map<String, dynamic>>('${ApiConfig.host}/user/register', {
@@ -82,6 +84,7 @@ class LoginService {
             'sign': field == 'sign' ? value : current.sign,
             'level': current.level,
             'pwd': field == 'pwd' ? value : '',
+            if (currentPassword.isNotEmpty) 'current_password': currentPassword,
           }, notifyOnError: false);
       if (result['code'] != 200) {
         return (
@@ -90,13 +93,123 @@ class LoginService {
           user: null,
         );
       }
-      final updated = AppUser.fromJson(
-        result['data'] as Map<String, dynamic>,
-        retainedPasswordMarker: current.passwordMarker ?? '',
-      );
+      final updated = AppUser.fromJson({
+        'email': current.email,
+        'email_verified': current.emailVerified,
+        ...result['data'] as Map<String, dynamic>,
+      }, retainedPasswordMarker: current.passwordMarker ?? '');
       return (success: true, message: '更新成功', user: updated);
     } catch (e) {
       return (success: false, message: _failureMessage(e, '更新'), user: null);
+    }
+  }
+
+  Future<({bool success, String message})> sendEmailCode({
+    required String email,
+    required String purpose,
+    String currentPassword = '',
+  }) => _accountAction('/user/email/code', {
+    'email': purpose == 'reset_password'
+        ? normalizeRecoveryAddress(email)
+        : email.trim(),
+    'purpose': purpose,
+    if (purpose == 'bind_email') 'current_password': currentPassword,
+  }, '发送验证码');
+
+  Future<({bool success, String message})> resetPassword({
+    required String email,
+    required String code,
+    required String password,
+  }) => _accountAction('/user/password/reset', {
+    'email': normalizeRecoveryAddress(email),
+    'code': code.trim(),
+    'new_password': password,
+  }, '重置密码');
+
+  Future<({bool success, String message})> sendPasswordChangeCode() {
+    final account = session.user.value;
+    if (!account.isLoggedIn || account.recoveryEmail.isEmpty) {
+      return Future.value((success: false, message: '请先绑定找回邮箱'));
+    }
+    return sendEmailCode(
+      email: account.recoveryEmail,
+      purpose: 'reset_password',
+    );
+  }
+
+  Future<({bool success, String message})> changePassword({
+    required String code,
+    required String password,
+  }) async {
+    final account = session.user.value;
+    if (!account.isLoggedIn || account.recoveryEmail.isEmpty) {
+      return (success: false, message: '请先绑定找回邮箱');
+    }
+    if (!isValidCode(code)) {
+      return (success: false, message: '请输入 6 位验证码');
+    }
+    if (password.runes.length < 8) {
+      return (success: false, message: '密码至少需要 8 位');
+    }
+    final result = await resetPassword(
+      email: account.recoveryEmail,
+      code: code,
+      password: password,
+    );
+    if (result.success) await session.logout();
+    return result;
+  }
+
+  Future<({bool success, String message})> bindEmail({
+    required String email,
+    required String code,
+    required String currentPassword,
+  }) => _accountAction(
+    '/user/email/bind',
+    {
+      'email': email.trim(),
+      'code': code.trim(),
+      'current_password': currentPassword,
+    },
+    '绑定邮箱',
+    onSuccess: (response) => session.saveUser(
+      AppUser.fromJson(
+        response['data'] as Map<String, dynamic>,
+        retainedPasswordMarker: session.user.value.passwordMarker,
+      ),
+    ),
+    successMessage: '邮箱已验证并绑定',
+  );
+
+  Future<({bool success, String message})> _accountAction(
+    String path,
+    Map<String, dynamic> body,
+    String action, {
+    FutureOr<void> Function(Map<String, dynamic> result)? onSuccess,
+    String? successMessage,
+    String? defaultErrorMessage,
+  }) async {
+    try {
+      final result = await client.postJson<Map<String, dynamic>>(
+        '${ApiConfig.host}$path',
+        body,
+        notifyOnError: false,
+      );
+      final code = result['code'];
+      if (code != 200 && code != 0) {
+        return (
+          success: false,
+          message:
+              _responseMessage(result) ?? defaultErrorMessage ?? '$action失败',
+        );
+      }
+      await onSuccess?.call(result);
+      return (
+        success: true,
+        message: successMessage ?? _responseMessage(result) ?? '$action成功',
+      );
+    } catch (error) {
+      return (success: false, message: _failureMessage(error, action));
     }
   }
 
@@ -108,8 +221,6 @@ class LoginService {
     return null;
   }
 
-  // These forms display their own result. HTTP rejections must retain the
-  // server's reason instead of also triggering the global network toast.
   static String _failureMessage(Object error, String action) {
     if (error is ApiException) {
       final body = error.responseBody;
@@ -121,7 +232,7 @@ class LoginService {
             if (message != null) return message;
           }
         } on FormatException {
-          // A gateway may return HTML or plain text instead of an API envelope.
+          // Non-JSON gateway response.
         }
       }
       final status = error.statusCode;

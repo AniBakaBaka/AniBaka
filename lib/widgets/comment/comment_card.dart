@@ -1,4 +1,6 @@
 import 'package:baka/core/api_transport.dart';
+import 'package:baka/core/content_visibility.dart';
+import 'package:baka/instance.dart';
 import 'package:baka/services/account/bangumi_session.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/utils/format_utils.dart';
@@ -23,6 +25,7 @@ class CommentTile extends StatelessWidget {
     required this.time,
     required this.content,
     this.badge,
+    this.trailing,
     this.replies,
     this.avatarPadding = 4,
     this.spacing = 14,
@@ -35,6 +38,7 @@ class CommentTile extends StatelessWidget {
   final String time;
   final Widget content;
   final Widget? badge;
+  final Widget? trailing;
   final Widget? replies;
   final double avatarPadding;
   final double spacing;
@@ -85,6 +89,7 @@ class CommentTile extends StatelessWidget {
                         ).textTheme.bodySmall?.color?.withValues(alpha: 0.4),
                       ),
                     ),
+                  if (trailing != null) ...[const Spacer(), trailing!],
                 ],
               ),
               const SizedBox(height: 4),
@@ -256,8 +261,22 @@ class CommentListState extends State<CommentList> {
   @override
   void initState() {
     super.initState();
+    contentVisibility.addListener(_onVisibilityChanged);
     if (widget.comments == null && widget.autoLoad) _loadComments();
   }
+
+  @override
+  void dispose() {
+    contentVisibility.removeListener(_onVisibilityChanged);
+    super.dispose();
+  }
+
+  void _onVisibilityChanged() => setState(() {});
+
+  // The comments API prepends the same global notice to every channel.
+  bool _isPinned(Map comment) => comment['id'] == -1 && comment['pid'] == 0;
+
+  String _pinnedId(Map comment) => 'pinned_comment_${host}_${comment['id']}';
 
   @override
   void didChangeDependencies() {
@@ -349,7 +368,17 @@ class CommentListState extends State<CommentList> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final comments = _effectiveComments;
+    final comments = _effectiveComments
+        ?.where(
+          (comment) =>
+              !_isPinned(comment) ||
+              !contentVisibility.isDismissed(
+                Instances.sp,
+                id: _pinnedId(comment),
+                content: comment['content']?.toString() ?? '',
+              ),
+        )
+        .toList(growable: false);
 
     Widget reveal(Widget child) => CommentLoadTransition(
       loading: comments == null,
@@ -366,6 +395,13 @@ class CommentListState extends State<CommentList> {
     }
 
     if (comments.isEmpty) {
+      if (_effectiveComments!.isNotEmpty) {
+        return reveal(
+          widget.asSliver
+              ? const SliverToBoxAdapter()
+              : const SizedBox.shrink(),
+        );
+      }
       final empty = Padding(
         padding: const EdgeInsets.symmetric(vertical: 64),
         child: Column(
@@ -398,6 +434,13 @@ class CommentListState extends State<CommentList> {
       markdownStyle: _markdownStyle,
       onTapLink: widget.onTapLink,
       onReply: sendComment,
+      onDismiss: _isPinned(comments[index])
+          ? () => contentVisibility.dismiss(
+              Instances.sp,
+              id: _pinnedId(comments[index]),
+              content: comments[index]['content']?.toString() ?? '',
+            )
+          : null,
     );
 
     Widget buildSeparator() => Padding(
@@ -477,6 +520,7 @@ class _CommentCard extends StatefulWidget {
     required this.markdownStyle,
     required this.onReply,
     this.onTapLink,
+    this.onDismiss,
     super.key,
   });
 
@@ -484,6 +528,7 @@ class _CommentCard extends StatefulWidget {
   final MarkdownStyleSheet markdownStyle;
   final Future<void> Function(String, int, String) onReply;
   final MarkdownTapLinkCallback? onTapLink;
+  final VoidCallback? onDismiss;
 
   @override
   State<_CommentCard> createState() => _CommentCardState();
@@ -585,6 +630,21 @@ class _CommentCardState extends State<_CommentCard> {
       name: comment['uname']?.toString() ?? '匿名',
       nameColor: nameColor,
       time: DateTime.parse(comment['time']).toEnDate(),
+      badge: widget.onDismiss == null
+          ? null
+          : Text(
+              '置顶',
+              style: TextStyle(fontSize: 11, color: theme.colorScheme.primary),
+            ),
+      trailing: widget.onDismiss == null
+          ? null
+          : IconButton(
+              tooltip: '关闭置顶评论，内容更新后再次显示',
+              onPressed: widget.onDismiss,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+              icon: Icon(Icons.close_rounded, size: 18, color: mutedColor),
+            ),
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

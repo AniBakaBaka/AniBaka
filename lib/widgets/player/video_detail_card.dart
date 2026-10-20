@@ -117,7 +117,6 @@ class VideoDetailCard extends StatelessWidget {
               ListenableBuilder(
                 listenable: danmakuController,
                 builder: (context, _) {
-                  final count = danmakuController.items.length;
                   return ScaleButton(
                     onTap: () => DanmakuListSheet.show(
                       context,
@@ -148,7 +147,9 @@ class VideoDetailCard extends StatelessWidget {
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            '弹幕 $count',
+                            danmakuController.loading
+                                ? '弹幕加载中'
+                                : '弹幕 ${danmakuController.items.length}',
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,

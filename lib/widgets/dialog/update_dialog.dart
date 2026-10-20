@@ -208,17 +208,17 @@ class _DownloadDialogState extends State<_DownloadDialog> {
   }
 }
 
-void showAnnouncementDialog({
+Future<bool> showAnnouncementDialog({
   required String content,
   required UpdateInfo updateInfo,
-}) {
+}) async {
   final context = Instances.currentContext;
-  if (context == null) return;
+  if (context == null) return false;
   final hasUpdate = updateInfo.hasUpdate;
   final forceUpdate = updateInfo.forceUpdate;
   var installing = false;
 
-  showDialog(
+  await showDialog<void>(
     barrierDismissible: !forceUpdate,
     context: context,
     builder: (BuildContext dialogContext) {
@@ -287,7 +287,9 @@ void showAnnouncementDialog({
                     ? _buildRichText(dialogContext, content)
                     : null),
           actions: AppDialogActions(
-            confirmText: hasUpdate ? (forceUpdate ? '立即更新' : '有新版本') : '知道了',
+            confirmText: hasUpdate
+                ? (forceUpdate ? '立即更新' : '有新版本')
+                : '关闭，内容更新后再提示',
             cancelText: hasUpdate && !forceUpdate ? '知道了' : null,
             isDestructive: forceUpdate,
             onConfirm: () async {
@@ -309,4 +311,5 @@ void showAnnouncementDialog({
       );
     },
   );
+  return true;
 }

@@ -77,86 +77,6 @@ class _NetImage extends StatelessWidget {
   }
 }
 
-/// 角色卡片（用于角色 Tab 的网格展示）
-class _CharacterCard extends StatelessWidget {
-  final Map<String, dynamic> character;
-  const _CharacterCard({required this.character});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? Colors.white : Colors.black87;
-    final name = character['name'] as String;
-    final role = character['relation'] as String;
-    final voiceActor = _voiceActorNames(character);
-    final images = character['images'] as Map<String, dynamic>?;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        AspectRatio(
-          aspectRatio: 3 / 4,
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: _NetImage(
-              url: images == null ? '' : images['large'] as String,
-              borderRadius: 12,
-              proxyWidth: 240,
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          name,
-          style: TextStyle(
-            color: textColor,
-            fontWeight: FontWeight.w600,
-            fontSize: 13,
-            height: 1.2,
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        if (role.isNotEmpty) ...[
-          const SizedBox(height: 4),
-          Text(
-            role,
-            style: TextStyle(
-              color: textColor.withValues(alpha: 0.6),
-              fontSize: 11,
-              height: 1.2,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-        if (voiceActor.isNotEmpty) ...[
-          const SizedBox(height: 4),
-          Text(
-            'CV: $voiceActor',
-            style: TextStyle(
-              color: textColor.withValues(alpha: 0.4),
-              fontSize: 10,
-              height: 1.2,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ],
-    );
-  }
-}
-
 /// 角色 Tab 的网格布局
 class CharactersSection extends StatefulWidget {
   final int subjectId;
@@ -187,6 +107,8 @@ class _CharactersSectionState extends State<CharactersSection>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: _characters,
       builder: (context, snapshot) {
@@ -232,6 +154,10 @@ class _CharactersSectionState extends State<CharactersSection>
               itemCount: characters.length,
               itemBuilder: (context, index) {
                 final character = characters[index];
+                final name = character['name'] as String;
+                final role = character['relation'] as String;
+                final voiceActor = _voiceActorNames(character);
+                final images = character['images'] as Map<String, dynamic>?;
                 return GestureDetector(
                   onTap: () {
                     HapticFeedback.selectionClick();
@@ -245,7 +171,73 @@ class _CharactersSectionState extends State<CharactersSection>
                     );
                   },
                   behavior: HitTestBehavior.opaque,
-                  child: _CharacterCard(character: character),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      AspectRatio(
+                        aspectRatio: 3 / 4,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(
+                                  alpha: isDark ? 0.3 : 0.08,
+                                ),
+                                blurRadius: 12,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: _NetImage(
+                            url: images == null
+                                ? ''
+                                : images['large'] as String,
+                            borderRadius: 12,
+                            proxyWidth: 240,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        name,
+                        style: TextStyle(
+                          color: textColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          height: 1.2,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (role.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          role,
+                          style: TextStyle(
+                            color: textColor.withValues(alpha: 0.6),
+                            fontSize: 11,
+                            height: 1.2,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                      if (voiceActor.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'CV: $voiceActor',
+                          style: TextStyle(
+                            color: textColor.withValues(alpha: 0.4),
+                            fontSize: 10,
+                            height: 1.2,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
                 );
               },
             );
@@ -257,42 +249,17 @@ class _CharactersSectionState extends State<CharactersSection>
 }
 
 /// 角色详情 + 评论底部弹窗
-class CharacterDetailSheet extends StatefulWidget {
+class CharacterDetailSheet extends StatelessWidget {
   final Map<String, dynamic> character;
 
   const CharacterDetailSheet({required this.character, super.key});
-
-  @override
-  State<CharacterDetailSheet> createState() => _CharacterDetailSheetState();
-}
-
-class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
-  late Future<Map<String, dynamic>> _info;
-  late Future<List<Map<String, dynamic>>> _comments;
-
-  @override
-  void initState() {
-    super.initState();
-    final id = widget.character['id'] as int;
-    _info = getBgmCharacterInfo(id);
-    _comments = getBgmCharacterComments(id);
-  }
-
-  @override
-  void didUpdateWidget(covariant CharacterDetailSheet oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final id = widget.character['id'] as int;
-    if (oldWidget.character['id'] != id) {
-      _info = getBgmCharacterInfo(id);
-      _comments = getBgmCharacterComments(id);
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final fgColor = isDark ? Colors.white : Colors.black;
     final textColor = isDark ? Colors.white : Colors.black87;
+    final id = character['id'] as int;
 
     return DraggableScrollableSheet(
       initialChildSize: 0.85,
@@ -323,22 +290,18 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
                 ),
               ),
               FutureBuilder<Map<String, dynamic>>(
-                key: ValueKey(widget.character['id']),
-                future: _info,
+                future: getBgmCharacterInfo(id),
                 builder: (context, snapshot) {
                   final info = snapshot.data;
                   final summary =
                       (info == null
-                              ? widget.character['summary'] as String? ?? ''
+                              ? character['summary'] as String? ?? ''
                               : info['summary'] as String)
                           .trim();
                   return SliverMainAxisGroup(
                     slivers: [
                       SliverToBoxAdapter(
-                        child: _CharHeader(
-                          relation: widget.character,
-                          info: info,
-                        ),
+                        child: _buildHeader(info, isDark, textColor),
                       ),
                       if (summary.isNotEmpty)
                         SliverToBoxAdapter(
@@ -388,7 +351,7 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
                 ),
               ),
               FutureBuilder<List<Map<String, dynamic>>>(
-                future: _comments,
+                future: getBgmCharacterComments(id),
                 builder: (context, snapshot) {
                   if (snapshot.connectionState != ConnectionState.done) {
                     return const SliverToBoxAdapter(
@@ -417,11 +380,12 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
                       ),
                     );
                   }
-                  return SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) =>
-                          _CharCommentItem(comment: comments[index]),
-                      childCount: math.min(comments.length, 50),
+                  return SliverList.builder(
+                    itemCount: math.min(comments.length, 50),
+                    itemBuilder: (context, index) => _buildCommentItem(
+                      comments[index],
+                      fgColor: fgColor,
+                      textColor: textColor,
                     ),
                   );
                 },
@@ -433,27 +397,20 @@ class _CharacterDetailSheetState extends State<CharacterDetailSheet> {
       },
     );
   }
-}
 
-/// 角色头部信息
-class _CharHeader extends StatelessWidget {
-  final Map<String, dynamic>? info;
-  final Map<String, dynamic> relation;
-  const _CharHeader({required this.info, required this.relation});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? Colors.white : Colors.black87;
-    final detail = info;
-    final name = (detail ?? relation)['name'] as String;
+  Widget _buildHeader(
+    Map<String, dynamic>? detail,
+    bool isDark,
+    Color textColor,
+  ) {
+    final name = (detail ?? character)['name'] as String;
     final nameCN = detail == null ? '' : detail['nameCN'] as String;
-    final role = relation['relation'] as String;
-    final voiceActor = _voiceActorNames(relation);
+    final role = character['relation'] as String;
+    final voiceActor = _voiceActorNames(character);
     final collects = detail == null ? 0 : detail['collects'] as int;
     final commentCount = detail == null ? 0 : detail['comment'] as int;
     final infoStr = detail == null ? '' : (detail['info'] as String).trim();
-    final images = (detail ?? relation)['images'] as Map<String, dynamic>?;
+    final images = (detail ?? character)['images'] as Map<String, dynamic>?;
     final imageUrl = images == null ? '' : images['large'] as String;
 
     return Padding(
@@ -568,42 +525,34 @@ class _CharHeader extends StatelessWidget {
     );
   }
 
-  Widget _badge(IconData icon, String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: color),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
+  Widget _badge(IconData icon, String label, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.1),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 13, color: color),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
           ),
-        ],
-      ),
-    );
-  }
-}
+        ),
+      ],
+    ),
+  );
 
-/// 角色评论项
-class _CharCommentItem extends StatelessWidget {
-  final Map<String, dynamic> comment;
-  const _CharCommentItem({required this.comment});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final fgColor = isDark ? Colors.white : Colors.black;
-    final textColor = isDark ? Colors.white : Colors.black87;
+  Widget _buildCommentItem(
+    Map<String, dynamic> comment, {
+    required Color fgColor,
+    required Color textColor,
+  }) {
     final user = comment['user'] as Map<String, dynamic>?;
     final nickname = user == null ? '匿名' : user['nickname'] as String;
     final content = comment['content'] as String;

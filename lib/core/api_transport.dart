@@ -34,7 +34,14 @@ class ApiTransport {
     final revision = session.generation;
     final origin = credentialOrigin().origin;
     final accountRequest = uri.origin == origin;
-    final auth = uri.path == '/user/login' || uri.path == '/user/refresh';
+    final auth =
+        uri.path == '/user/login' ||
+        uri.path == '/user/refresh' ||
+        uri.path == '/user/password/reset' ||
+        (uri.path == '/user/register' && data is Map && data['id'] == null) ||
+        (uri.path == '/user/email/code' &&
+            data is Map &&
+            data['purpose'] != 'bind_email');
     // Broker 401 can describe upstream Bangumi credentials, not our session.
     final upstreamAuth = uri.path.startsWith('/api/v1/bangumi/oauth/');
     final carriesCredentials =

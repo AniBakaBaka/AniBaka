@@ -33,6 +33,7 @@ class CollectionStatusSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final current = currentStatus;
 
     return Container(
       decoration: BoxDecoration(
@@ -45,7 +46,19 @@ class CollectionStatusSheet extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const _DragHandle(),
+              Padding(
+                padding: const EdgeInsets.only(top: 8, bottom: 4),
+                child: Container(
+                  width: 36,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.15)
+                        : Colors.black.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(2.5),
+                  ),
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
                 child: Row(
@@ -60,37 +73,68 @@ class CollectionStatusSheet extends StatelessWidget {
                       ),
                     ),
                     const Spacer(),
-                    if (currentStatus != null)
-                      _CurrentBadge(status: currentStatus!),
+                    if (current != null) _buildCurrentBadge(current),
                   ],
                 ),
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: LayoutBuilder(
-                  builder: (context, constraints) => Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      for (final status in CollectionStatus.values)
-                        _StatusChip(
-                          width: (constraints.maxWidth - 10) / 2,
-                          status: status,
-                          isSelected: currentStatus == status,
-                          onTap: () {
-                            HapticFeedback.selectionClick();
-                            onSelect(status);
-                          },
-                        ),
-                    ],
-                  ),
+                  builder: (context, constraints) {
+                    final chipWidth = (constraints.maxWidth - 10) / 2;
+                    return Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        for (final status in CollectionStatus.values)
+                          _buildStatusChip(
+                            status: status,
+                            width: chipWidth,
+                            isDark: isDark,
+                            isSelected: current == status,
+                          ),
+                      ],
+                    );
+                  },
                 ),
               ),
               if (onRemove != null) ...[
                 const SizedBox(height: 12),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: _RemoveButton(onTap: onRemove!),
+                  child: GestureDetector(
+                    onTap: () {
+                      HapticFeedback.heavyImpact();
+                      onRemove!();
+                    },
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF2C2C2E) : Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.delete_outline_rounded,
+                            size: 18,
+                            color: Color(0xFFFF3B30),
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            '取消收藏',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFFFF3B30),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ],
               const SizedBox(height: 16),
@@ -100,36 +144,8 @@ class CollectionStatusSheet extends StatelessWidget {
       ),
     );
   }
-}
 
-class _DragHandle extends StatelessWidget {
-  const _DragHandle();
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Padding(
-      padding: const EdgeInsets.only(top: 8, bottom: 4),
-      child: Container(
-        width: 36,
-        height: 5,
-        decoration: BoxDecoration(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.15)
-              : Colors.black.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(2.5),
-        ),
-      ),
-    );
-  }
-}
-
-class _CurrentBadge extends StatelessWidget {
-  final CollectionStatus status;
-  const _CurrentBadge({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildCurrentBadge(CollectionStatus status) {
     final (color, _, _) = collectionStatusVisuals[status]!;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -158,28 +174,19 @@ class _CurrentBadge extends StatelessWidget {
       ),
     );
   }
-}
 
-class _StatusChip extends StatelessWidget {
-  final double width;
-  final CollectionStatus status;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _StatusChip({
-    required this.width,
-    required this.status,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  Widget _buildStatusChip({
+    required CollectionStatus status,
+    required double width,
+    required bool isDark,
+    required bool isSelected,
+  }) {
     final (color, icon, desc) = collectionStatusVisuals[status]!;
-
     return GestureDetector(
-      onTap: onTap,
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onSelect(status);
+      },
       child: Container(
         width: width,
         padding: const EdgeInsets.all(12),
@@ -235,50 +242,6 @@ class _StatusChip extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _RemoveButton extends StatelessWidget {
-  final VoidCallback onTap;
-  const _RemoveButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.heavyImpact();
-        onTap();
-      },
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: Theme.of(context).brightness == Brightness.dark
-              ? const Color(0xFF2C2C2E)
-              : Colors.white,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.delete_outline_rounded,
-              size: 18,
-              color: Color(0xFFFF3B30),
-            ),
-            SizedBox(width: 8),
-            Text(
-              '取消收藏',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFFFF3B30),
               ),
             ),
           ],

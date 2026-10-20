@@ -472,27 +472,39 @@ class CIslandCommentWidgetState extends State<CIslandCommentWidget>
     }
   }
 
-  Future<_BgmSection> _loadBgmComments() async {
+  Future<Map<String, dynamic>?> _resolveEpisode() async {
     final subjectId = widget.bgmSubjectId;
     final episodeIndex = widget.episodeIndex;
-    final fallbackName = widget.episodeName ?? '';
-    if (subjectId == null || episodeIndex == null) {
-      return (episodeName: fallbackName, comments: const <_BgmComment>[]);
+    if (subjectId == null ||
+        subjectId <= 0 ||
+        episodeIndex == null ||
+        episodeIndex < 0) {
+      return null;
     }
+    final episodes = await getBgmEpisodes(subjectId);
+    return episodeIndex < episodes.length ? episodes[episodeIndex] : null;
+  }
 
+  Future<_BgmSection> _loadBgmComments() async {
+    final fallbackName = widget.episodeName ?? '';
     try {
-      final episode = await resolveBgmEpisodeByIndex(subjectId, episodeIndex);
-      if (episode?.episodeId == null) {
+      final episode = await _resolveEpisode();
+      final episodeId = toInt(episode?['id']);
+      if (episode == null || episodeId == null) {
         return (episodeName: fallbackName, comments: const <_BgmComment>[]);
       }
 
-      final values = await getBgmEpisodeComments(episode!.episodeId!);
+      final values = await getBgmEpisodeComments(episodeId);
       final comments = <_BgmComment>[];
       for (final value in values.take(30)) {
         final comment = _parseBgmComment(value);
         if (comment != null) comments.add(comment);
       }
-      return (episodeName: episode.name, comments: comments);
+      final name =
+          trimmed(episode['name_cn']) ??
+          trimmed(episode['name']) ??
+          fallbackName;
+      return (episodeName: name, comments: comments);
     } catch (error) {
       debugPrint('获取BGM剧集评论失败: $error');
       return (episodeName: fallbackName, comments: const <_BgmComment>[]);
@@ -525,8 +537,8 @@ class CIslandCommentWidgetState extends State<CIslandCommentWidget>
     if (!action || !mounted) return;
 
     try {
-      final episode = await resolveBgmEpisodeByIndex(subjectId, episodeIndex);
-      final episodeId = episode?.episodeId;
+      final episode = await _resolveEpisode();
+      final episodeId = toInt(episode?['id']);
       if (episodeId == null) {
         throw const BangumiSyncException('无法定位 Bangumi 剧集页面');
       }

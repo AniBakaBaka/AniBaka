@@ -2,16 +2,13 @@ import 'dart:io';
 
 import 'package:baka/api/post.dart';
 import 'package:baka/core/api_transport.dart';
+import 'package:baka/core/content_visibility.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/update_info.dart';
 import 'package:baka/widgets/dialog/update_dialog.dart';
 import 'package:flutter/foundation.dart';
 
-const _kLastCheckTimeKey = 'last_announcement_check_time';
-const _kLastShownDateKey = 'last_announcement_shown_date';
 const _kAnnouncementContentKey = 'last_announcement_content';
-
-String _todayString() => DateTime.now().toIso8601String().substring(0, 10);
 
 /// 按语义化版本比较，remote 比 local 新时返回 true。
 bool _isVersionNewer(String remoteVersion, String localVersion) {
@@ -46,6 +43,8 @@ bool _isVersionNewer(String remoteVersion, String localVersion) {
 }
 
 class VersionService {
+  static Future<void>? _checkTask;
+
   static String get _currentPlatform {
     if (Platform.isAndroid) return 'android';
     if (Platform.isIOS) return 'ios';
@@ -83,7 +82,10 @@ class VersionService {
     );
   }
 
-  static Future<void> checkAndShowUpdate() async {
+  static Future<void> checkAndShowUpdate() => _checkTask ??=
+      _checkAndShowUpdate().whenComplete(() => _checkTask = null);
+
+  static Future<void> _checkAndShowUpdate() async {
     UpdateInfo? updateInfo;
     try {
       updateInfo = await checkUpdateInfo();
@@ -93,20 +95,12 @@ class VersionService {
 
     String announcementContent = '';
     try {
-      final lastCheckTime = Instances.sp.getInt(_kLastCheckTimeKey) ?? 0;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if ((now - lastCheckTime) > 86400000) {
-        final announcement = await getPostDetail(1);
-        announcementContent = announcement['content'] as String? ?? '';
-        await Instances.sp.setInt(_kLastCheckTimeKey, now);
-        await Instances.sp.setString(
-          _kAnnouncementContentKey,
-          announcementContent,
-        );
-      } else {
-        announcementContent =
-            Instances.sp.getString(_kAnnouncementContentKey) ?? '';
-      }
+      final announcement = await getPostDetail(1);
+      announcementContent = announcement['content'] as String? ?? '';
+      await Instances.sp.setString(
+        _kAnnouncementContentKey,
+        announcementContent,
+      );
     } catch (e) {
       debugPrint('公告获取失败: $e');
       announcementContent =
@@ -115,24 +109,31 @@ class VersionService {
 
     final hasUpdate = updateInfo?.hasUpdate ?? false;
     final forceUpdate = updateInfo?.forceUpdate ?? false;
-    final todayStr = _todayString();
+    final announcementId = 'announcement_$host';
+    if (contentVisibility.isDismissed(
+      Instances.sp,
+      id: announcementId,
+      content: announcementContent,
+    )) {
+      announcementContent = '';
+    }
 
-    if (!forceUpdate &&
-        !hasUpdate &&
-        (announcementContent.isEmpty ||
-            Instances.sp.getString(_kLastShownDateKey) == todayStr)) {
+    if (!forceUpdate && !hasUpdate && announcementContent.isEmpty) {
       return;
     }
 
-    if (!forceUpdate) {
-      await Instances.sp.setString(_kLastShownDateKey, todayStr);
-    }
-
-    showAnnouncementDialog(
+    final shown = await showAnnouncementDialog(
       content: announcementContent,
       updateInfo:
           updateInfo ??
           UpdateInfo(hasUpdate: false, latestVersion: Instances.appVersion),
     );
+    if (shown && announcementContent.isNotEmpty) {
+      await contentVisibility.dismiss(
+        Instances.sp,
+        id: announcementId,
+        content: announcementContent,
+      );
+    }
   }
 }

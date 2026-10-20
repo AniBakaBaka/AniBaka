@@ -115,7 +115,6 @@ class BangumiSession {
       final user = await api.getMe(
         token.accessToken,
         abortTrigger: abort.future,
-        retryForOAuth: true,
       );
       ensureCurrent(revision);
       if (user.username.isEmpty) {

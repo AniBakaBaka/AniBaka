@@ -38,26 +38,23 @@ class _AnimeDetailRelatedSectionState extends State<AnimeDetailRelatedSection>
 
   static Future<List<Map<String, dynamic>>> _load(int subjectId) async {
     final response = await getBgmRelatedSubjects(subjectId);
-    final items = <Map<String, dynamic>>[];
-    for (final raw in response) {
-      if (raw['type'] != 2) continue;
-      final id = raw['id'] as int;
-      final nameCN = raw['name_cn'] as String;
-      final image = (raw['images'] as Map)['large'] as String;
-      final relation = raw['relation'] as String;
-      items.add({
-        'id': id,
-        'bgmId': id,
-        'nsfw': raw['nsfw'] == true,
-        'title': nameCN.isEmpty ? raw['name'] as String : nameCN,
-        'bgmImageUrl': image,
-        'sort': '番剧',
-        'tag': relation,
-        'info': relation,
-        'source': 'bgm',
-      });
-    }
-    return items;
+    return [
+      for (final raw in response)
+        if (raw['type'] == 2)
+          {
+            'id': raw['id'],
+            'bgmId': raw['id'],
+            'nsfw': raw['nsfw'] == true,
+            'title': (raw['name_cn'] as String).isEmpty
+                ? raw['name']
+                : raw['name_cn'],
+            'bgmImageUrl': (raw['images'] as Map)['large'],
+            'sort': '番剧',
+            'tag': raw['relation'],
+            'info': raw['relation'],
+            'source': 'bgm',
+          },
+    ];
   }
 
   @override
@@ -65,51 +62,47 @@ class _AnimeDetailRelatedSectionState extends State<AnimeDetailRelatedSection>
     super.build(context);
     return ListenableBuilder(
       listenable: contentFilter,
-      builder: (context, _) => _buildItems(),
-    );
-  }
-
-  Widget _buildItems() {
-    return FutureBuilder<List<Map<String, dynamic>>>(
-      future: _items,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.done &&
-            snapshot.hasError) {
-          return const Center(child: Text('相关动画加载失败'));
-        }
-        final loading = snapshot.connectionState != ConnectionState.done;
-        final items = contentFilter.visibleItems(
-          snapshot.data ?? const <Map<String, dynamic>>[],
-        );
-        if (!loading && items.isEmpty) {
-          return const Center(child: Text('暂无相关动画'));
-        }
-        return SizedBox(
-          height: 260,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: loading ? 5 : items.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 14),
-            itemBuilder: (context, index) {
-              final item = loading
-                  ? const <String, dynamic>{'title': '相关动画标题占位', 'image': ''}
-                  : items[index];
-              return SizedBox(
-                width: 140,
-                child: AppSkeletonizer(
-                  enabled: loading,
-                  child: PostCard(
-                    item,
-                    onTap: () {
-                      if (!loading) widget.onAnimeTap(item);
-                    },
+      builder: (context, _) => FutureBuilder<List<Map<String, dynamic>>>(
+        future: _items,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.done &&
+              snapshot.hasError) {
+            return const Center(child: Text('相关动画加载失败'));
+          }
+          final loading = snapshot.connectionState != ConnectionState.done;
+          final items = contentFilter.visibleItems(
+            snapshot.data ?? const <Map<String, dynamic>>[],
+          );
+          if (!loading && items.isEmpty) {
+            return const Center(child: Text('暂无相关动画'));
+          }
+          return SizedBox(
+            height: 260,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: loading ? 5 : items.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 14),
+              itemBuilder: (context, index) {
+                final item = loading
+                    ? const <String, dynamic>{'title': '相关动画标题占位', 'image': ''}
+                    : items[index];
+                return SizedBox(
+                  width: 140,
+                  child: AppSkeletonizer(
+                    enabled: loading,
+                    child: PostCard(
+                      item,
+                      onTap: () {
+                        if (!loading) widget.onAnimeTap(item);
+                      },
+                    ),
                   ),
-                ),
-              );
-            },
-          ),
-        );
-      },
+                );
+              },
+            ),
+          );
+        },
+      ),
     );
   }
 }
