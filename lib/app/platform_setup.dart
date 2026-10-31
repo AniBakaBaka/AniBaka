@@ -21,35 +21,32 @@ Future<void> configurePlatform() async {
           await platformChannel.invokeMethod<bool>('isTV') ?? false;
     } catch (error, stackTrace) {
       Instances.isTV = false;
-      AppLogger.instance.warning(
+      Log.w(
+        'Display',
         'Android TV detection failed; using phone behavior',
-        tag: 'Display',
-        error: error,
-        stackTrace: stackTrace,
+        error,
+        stackTrace,
       );
     }
 
     try {
       displayDiagnostics = await platformChannel
           .invokeMapMethod<String, dynamic>('getDisplayDiagnostics');
-      AppLogger.instance.info(
-        'Android display diagnostics: $displayDiagnostics',
-        tag: 'Display',
-      );
+      Log.i('Display', 'Android display diagnostics: $displayDiagnostics');
     } catch (error, stackTrace) {
-      AppLogger.instance.warning(
+      Log.w(
+        'Display',
         'Unable to read Android display diagnostics',
-        tag: 'Display',
-        error: error,
-        stackTrace: stackTrace,
+        error,
+        stackTrace,
       );
     }
 
     if (Instances.isTV) {
-      AppLogger.instance.info(
+      Log.i(
+        'Display',
         'TV rendering policy: system display mode, '
-        'impeller=${displayDiagnostics?['impellerEnabled']}',
-        tag: 'Display',
+            'impeller=${displayDiagnostics?['impellerEnabled']}',
       );
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
       SystemChrome.setPreferredOrientations(const [
@@ -62,16 +59,16 @@ Future<void> configurePlatform() async {
       // alternate frames on TV firmware with incomplete mode support.
       try {
         await FlutterDisplayMode.setHighRefreshRate();
-        AppLogger.instance.info(
+        Log.i(
+          'Display',
           'Android rendering policy: high refresh mode request completed',
-          tag: 'Display',
         );
       } catch (error, stackTrace) {
-        AppLogger.instance.warning(
+        Log.w(
+          'Display',
           'Android high refresh mode request failed',
-          tag: 'Display',
-          error: error,
-          stackTrace: stackTrace,
+          error,
+          stackTrace,
         );
       }
     }

@@ -17,27 +17,15 @@
       "url": "https://www.7sefun.top/vodsearch/-------------.html?wd={keyword}"
     },
     {
-      "op": "first",
-      "branches": [
-        [
-          {
-            "op": "jsonSeries",
-            "listPath": "list",
-            "idKey": "id",
-            "nameKey": "name",
-            "imageKey": "pic",
-            "urlKey": "url"
-          }
-        ],
-        [
-          {
-            "op": "searchList",
-            "selectors": [
-              "a.video-wrapper[href*=\"/voddetail/\"], .module-card-item, .module-poster-item, .module-search-item, .stui-vodlist__box, .stui-vodlist li, a[href*=\"/voddetail/\"], a[href*=\"/vod/detail/\"], a[href*=\"/detail/\"]"
-            ]
-          }
-        ]
-      ]
+      "op": "searchList",
+      "selectors": [
+        "a.video-wrapper[href^=\"/voddetail/\"]"
+      ],
+      "linkSelector": "",
+      "titleSelector": "img.videoimg",
+      "titleAttr": "alt",
+      "imageSelector": "img.videoimg",
+      "imageAttr": "src"
     }
   ],
   "detail": [
@@ -47,7 +35,7 @@
     {
       "op": "episodes",
       "listSelectors": [
-        ".vod-play-list-container, .module-play-list, .module-player-list, .stui-content__playlist, .anthology-list-box, .anthology-list-play, .playlist, .play-list, .play_list, .episode-list, #playlist, .episodes"
+        ".vod-play-list-container"
       ]
     }
   ],

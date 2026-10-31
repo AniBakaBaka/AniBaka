@@ -1,9 +1,10 @@
+import 'package:baka/core/app_logger.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
 import 'package:baka/api/post.dart';
-import 'package:baka/api/request_cache.dart';
+import 'package:baka/core/app_storage.dart';
 import 'package:baka/models/playback_request.dart';
 import 'package:baka/services/matching/match_memory_service.dart';
 import 'package:baka/services/matching/media_readiness.dart';
@@ -372,7 +373,7 @@ class VideoSourceSearchController extends ChangeNotifier {
             _settleAuto(runId);
           }
         }().catchError((Object e) {
-          debugPrint('[AutoMatch] aborted: $e');
+          Log.d('AutoMatch', 'aborted: $e');
         }),
       );
       await done.future;
@@ -908,10 +909,9 @@ class VideoSourceSearchController extends ChangeNotifier {
     if (kind != MediaTokenKind.directMedia) {
       return adapter.resolvePlaybackMedia(lineToken);
     }
-    if (!await adapter.isPlaybackUrlReachable(lineToken)) {
-      throw StateError('媒体地址不可访问');
-    }
-    return (url: lineToken, httpHeaders: adapter.mediaHeadersFor(lineToken));
+    final media = await adapter.resolveDirectMedia(lineToken);
+    if (media.url.isEmpty) throw StateError('媒体地址不可访问');
+    return media;
   }
 
   String _routeKey(String source, String token) =>

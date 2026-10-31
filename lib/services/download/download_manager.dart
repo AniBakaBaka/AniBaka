@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/utils/title_matcher.dart';
 import 'dart:async';
 import 'dart:io';
@@ -92,7 +93,7 @@ class DownloadService {
         }
       }
     } catch (e) {
-      if (kDebugMode) debugPrint('DownloadService load error: $e');
+      Log.e('Download', 'Task list load failed', e);
     }
   }
 
@@ -124,7 +125,7 @@ class DownloadService {
         tasks.map((task) => task.toJson()).toList(growable: false),
       );
     } catch (e) {
-      if (kDebugMode) debugPrint('DownloadService save error: $e');
+      Log.e('Download', 'Task list save failed', e);
     }
   }
 
@@ -325,9 +326,17 @@ class DownloadService {
         _waiting[task.id] = task;
       } else {
         task.status = DownloadStatus.failed;
+        Log.w(
+          'Download',
+          '${task.title} failed: ${e.requestOptions.uri.host}',
+          e,
+        );
       }
-    } catch (_) {
-      if (!cancelToken.isCancelled) task.status = DownloadStatus.failed;
+    } catch (error, stack) {
+      if (!cancelToken.isCancelled) {
+        task.status = DownloadStatus.failed;
+        Log.w('Download', '${task.title} failed', error, stack);
+      }
     } finally {
       run.token.cancel();
       if (task.status == DownloadStatus.downloading) {
@@ -604,7 +613,7 @@ class DownloadService {
           androidRelativePath: 'Movies',
         );
       } catch (e) {
-        if (kDebugMode) debugPrint('SaverGallery error: $e');
+        Log.w('Download', 'Save to gallery failed', e);
       }
     }
 
@@ -626,7 +635,7 @@ class DownloadService {
           task.danmakuPath = path;
         }
       } catch (e) {
-        if (kDebugMode) debugPrint('Danmaku fetch error: $e');
+        Log.w('Download', 'Danmaku fetch failed', e);
       }
     }
 
@@ -634,6 +643,7 @@ class DownloadService {
     task.status = DownloadStatus.completed;
     task.completedAt = DateTime.now();
     task.progress = 1.0;
+    Log.i('Download', 'Completed ${task.title}');
 
     if (!_closed) onCompleted?.call(task);
   }

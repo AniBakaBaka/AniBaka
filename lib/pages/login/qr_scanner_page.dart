@@ -8,7 +8,6 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart' hide ContextExtensionss;
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import 'package:baka/instance.dart';
 import 'package:baka/utils/toast_utils.dart';
 
 /// AniBaka 通用扫码页。
@@ -75,14 +74,8 @@ class _QrScannerPageState extends State<QrScannerPage> {
   Future<void> _sendTokenToTv(String url) async {
     setState(() => _isSending = true);
 
-    final token = Get.find<AccountSession>().token;
-    final refreshToken = Instances.sp.getString('refresh_token');
-    final storedExpiry = Instances.sp.getString('token_expires_at');
-    final tokenExpiresAt = storedExpiry == null
-        ? null
-        : DateTime.tryParse(storedExpiry)?.toUtc().toIso8601String();
-
-    if (token.isEmpty || !Get.find<AccountSession>().isLoggedIn) {
+    final session = Get.find<AccountSession>();
+    if (session.token.isEmpty || !session.isLoggedIn) {
       if (mounted) {
         showSnackBar('请先在手机端登录');
         Navigator.of(context).pop();
@@ -98,10 +91,8 @@ class _QrScannerPageState extends State<QrScannerPage> {
       request.headers.contentType = ContentType.json;
       request.write(
         jsonEncode({
-          'token': token,
-          if (refreshToken?.isNotEmpty == true) 'refresh_token': refreshToken,
-          'token_expires_at': ?tokenExpiresAt,
-          'user': Get.find<AccountSession>().user.value.toJson(),
+          ...session.credentials.toJson(),
+          'user': session.user.value.toJson(),
         }),
       );
       final response = await request.close().timeout(

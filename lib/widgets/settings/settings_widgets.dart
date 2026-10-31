@@ -248,6 +248,7 @@ class SettingsSliderTile extends StatelessWidget {
     this.min = 0,
     this.max = 1,
     this.divisions,
+    this.onChangeEnd,
     super.key,
   });
 
@@ -256,6 +257,7 @@ class SettingsSliderTile extends StatelessWidget {
   final double value;
   final String label;
   final ValueChanged<double>? onChanged;
+  final ValueChanged<double>? onChangeEnd;
   final double min;
   final double max;
   final int? divisions;
@@ -290,6 +292,7 @@ class SettingsSliderTile extends StatelessWidget {
                 divisions: divisions,
                 label: label,
                 onChanged: onChanged,
+                onChangeEnd: onChangeEnd,
               ),
             ),
           ),

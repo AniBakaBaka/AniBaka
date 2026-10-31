@@ -1,6 +1,6 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/api_transport.dart';
-import 'package:baka/core/content_visibility.dart';
-import 'package:baka/instance.dart';
+import 'package:baka/core/content_filter.dart';
 import 'package:baka/services/account/bangumi_session.dart';
 import 'package:baka/api/post.dart';
 import 'package:baka/utils/format_utils.dart';
@@ -331,7 +331,7 @@ class CommentListState extends State<CommentList> {
     try {
       result = await getComments(widget.pid, widget.size ?? 80);
     } catch (error) {
-      debugPrint('获取评论失败: $error');
+      Log.w('Comment', '获取评论失败: $error');
       result = [];
     }
 
@@ -373,9 +373,8 @@ class CommentListState extends State<CommentList> {
           (comment) =>
               !_isPinned(comment) ||
               !contentVisibility.isDismissed(
-                Instances.sp,
-                id: _pinnedId(comment),
-                content: comment['content']?.toString() ?? '',
+                _pinnedId(comment),
+                comment['content']?.toString() ?? '',
               ),
         )
         .toList(growable: false);
@@ -436,9 +435,8 @@ class CommentListState extends State<CommentList> {
       onReply: sendComment,
       onDismiss: _isPinned(comments[index])
           ? () => contentVisibility.dismiss(
-              Instances.sp,
-              id: _pinnedId(comments[index]),
-              content: comments[index]['content']?.toString() ?? '',
+              _pinnedId(comments[index]),
+              comments[index]['content']?.toString() ?? '',
             )
           : null,
     );

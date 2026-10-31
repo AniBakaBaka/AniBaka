@@ -166,7 +166,7 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
   void _log(String message) {
-    AppLogger.instance.info(message, tag: 'TvPlayer');
+    Log.i('TvPlayer', message);
   }
 
   void _togglePlayPause() {

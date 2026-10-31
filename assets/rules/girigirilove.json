@@ -10,111 +10,49 @@
   },
   "search": [
     {
-      "op": "first",
-      "branches": [
-        [
-          {
-            "op": "maccmsSuggest",
-            "headers": {
-              "Accept": "application/json, text/javascript, */*; q=0.01"
-            },
-            "detailUrlTemplate": "/GV{id}/"
-          }
-        ],
-        [
-          {
-            "op": "fetch",
-            "url": "/search/{keyword}-------------/"
-          },
-          {
-            "op": "searchList",
-            "selectors": [
-              ".vod-detail.search-list",
-              ".public-list-box"
-            ],
-            "detailPattern": "/GV"
-          }
-        ]
-      ]
+      "op": "fetch",
+      "url": "https://m3u8.girigirilove.com/api.php/Vod/get_list?vod_name={keyword}&offset=0&limit=100"
+    },
+    {
+      "op": "jsonSeries",
+      "listPath": "info.rows",
+      "idKey": "vod_id",
+      "nameKey": "vod_name",
+      "imageKey": "vod_pic",
+      "descKey": "vod_blurb",
+      "detailUrlTemplate": "/detail/{id}"
     }
   ],
   "detail": [
     {
-      "op": "follow"
+      "op": "regex",
+      "pattern": "/detail/(\\d+)",
+      "group": 1
     },
     {
-      "op": "episodes",
-      "listSelectors": [
-        ".anthology-list-box",
-        ".anthology-list-play",
-        ".module-play-list"
-      ]
+      "op": "fetch",
+      "url": "https://m3u8.girigirilove.com/api.php/Vod/get_detail?vod_id={url:raw}&user_id="
+    },
+    {
+      "op": "regex",
+      "pattern": "\"info\"\\s*:\\s*(\\{[\\s\\S]*\\})\\s*\\}\\s*$",
+      "group": 1
+    },
+    {
+      "op": "template",
+      "value": "[{url:raw}]"
+    },
+    {
+      "op": "maccmsApiEpisodes",
+      "listPath": "",
+      "directOnly": true
     }
   ],
   "useWebview": true,
   "play": [
     {
-      "op": "follow",
+      "op": "videoUrl",
       "proxyMedia": true
-    },
-    {
-      "op": "first",
-      "branches": [
-        [
-          {
-            "op": "playerAaaa",
-            "var": "player_aaaa",
-            "key": "url"
-          },
-          {
-            "op": "regex",
-            "pattern": "^(https?:\\/\\/\\S+\\.(?:m3u8|mp4|mkv|flv)(?:[?#]\\S*)?)$",
-            "group": 1
-          },
-          {
-            "op": "videoUrl"
-          }
-        ],
-        [
-          {
-            "op": "playerAaaa",
-            "var": "player_aaaa",
-            "key": "url"
-          },
-          {
-            "op": "regex",
-            "pattern": "^(https?://\\S+)",
-            "group": 1
-          },
-          {
-            "op": "follow"
-          },
-          {
-            "op": "videoUrl"
-          }
-        ],
-        [
-          {
-            "op": "videoUrl"
-          }
-        ],
-        [
-          {
-            "op": "playerAaaa",
-            "var": "player_aaaa",
-            "key": "url"
-          },
-          {
-            "op": "regex",
-            "pattern": "^(https?://\\S+)",
-            "group": 1
-          },
-          {
-            "op": "sniff",
-            "goal": "video"
-          }
-        ]
-      ]
     }
   ]
 }

@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'dart:convert';
 
 import 'package:baka/storage/storage_provider.dart';
@@ -75,12 +76,12 @@ abstract final class StorageConfigService {
         try {
           configs.add(StorageConfig.fromJson(value.cast<String, dynamic>()));
         } catch (error) {
-          debugPrint('Invalid storage config: $error');
+          Log.w('Storage', 'Invalid storage config: $error');
         }
       }
       return configs;
     } catch (error) {
-      debugPrint('Failed to load storage configs: $error');
+      Log.w('Storage', 'Failed to load storage configs: $error');
       return const [];
     }
   }

@@ -1,5 +1,9 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:baka/widgets/settings/video_enhancement_settings.dart';
+import 'package:baka/services/playback/animejanai_playback.dart';
 import 'package:baka/services/playback/dlss_global_playback.dart';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -11,6 +15,7 @@ import 'package:baka/pages/search/search_controller.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/app/platform_page_route.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:baka/widgets/common/platform_tooltip.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_volume_controller/flutter_volume_controller.dart';
@@ -79,6 +84,26 @@ class BakaPlayer extends StatefulWidget {
 }
 
 class _BakaPlayerState extends State<BakaPlayer> {
+  final _videoCaptureKey = GlobalKey();
+
+  Future<Uint8List?> _captureVideoFrame() async {
+    // Capture Flutter's video texture. mpv's software screenshot fallback can
+    // omit GPU shaders and color adjustments and cannot serve as a visual A/B.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) throw StateError('播放器已关闭');
+    final boundary = _videoCaptureKey.currentContext?.findRenderObject();
+    if (boundary is! RenderRepaintBoundary) throw StateError('当前视频画面不可用');
+    final frame = await boundary.toImage(
+      pixelRatio: MediaQuery.devicePixelRatioOf(context),
+    );
+    try {
+      final data = await frame.toByteData(format: ui.ImageByteFormat.png);
+      return data?.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+    } finally {
+      frame.dispose();
+    }
+  }
+
   late final FocusNode _playerFocusNode;
   late final bool _ownsPlayerFocusNode;
 
@@ -341,7 +366,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
         return Stack(
           fit: StackFit.passthrough,
           children: <Widget>[
-            RepaintBoundary(child: _buildVideoPlayer()),
+            RepaintBoundary(key: _videoCaptureKey, child: _buildVideoPlayer()),
             PlayerLoadingIndicator(controller: widget.controller),
             PlayerToastIndicators(controller: widget.controller),
             Positioned.fill(
@@ -1099,43 +1124,42 @@ class _BakaPlayerState extends State<BakaPlayer> {
               ),
               SizedBox(width: isWide ? 8 : 6),
             ],
-            PlatformTooltip(
-              message: '选择剧集',
-              child: InkWell(
-                onTap: widget.onPickEpisode,
-                borderRadius: BorderRadius.circular(6),
-                child: Padding(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: isWide ? 6 : 4,
-                    vertical: 4,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxWidth: isWide ? 300 : 200,
-                        ),
-                        child: Text(
-                          display,
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.9),
-                            fontSize: isWide ? 14 : 12.5,
-                            fontWeight: FontWeight.w600,
+            Flexible(
+              child: PlatformTooltip(
+                message: '选择剧集',
+                child: InkWell(
+                  onTap: widget.onPickEpisode,
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isWide ? 6 : 4,
+                      vertical: 4,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            display,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.9),
+                              fontSize: isWide ? 14 : 12.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      if (widget.onPickEpisode != null) ...[
-                        SizedBox(width: isWide ? 4 : 2),
-                        Icon(
-                          Icons.keyboard_arrow_down_rounded,
-                          color: Colors.white.withValues(alpha: 0.75),
-                          size: isWide ? 18 : 15,
-                        ),
+                        if (widget.onPickEpisode != null) ...[
+                          SizedBox(width: isWide ? 4 : 2),
+                          Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            color: Colors.white.withValues(alpha: 0.75),
+                            size: isWide ? 18 : 15,
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -1225,17 +1249,96 @@ class _BakaPlayerState extends State<BakaPlayer> {
   /// 构建底部视频增强按钮。
   Widget? _buildExtraBottomButtons(bool isWide) {
     final controller = widget.controller;
-    if (!widget.full) return null;
+    if (!widget.full && !Platform.isWindows) return null;
 
     final anime4kButton = ValueListenableBuilder<VideoEnhancementState>(
       valueListenable: controller.enhancement,
       builder: (context, enhancement, _) {
-        final isActive = enhancement.enabled;
-        final label = isActive ? enhancement.appliedPipeline.label : '增强';
-        return GestureDetector(
+        return _buildEnhancementButton(
+          isWide,
+          label: enhancement.enabled
+              ? 'Anime4K · ${enhancement.appliedPipeline.label}'
+              : 'Anime4K',
+          active: enhancement.enabled,
           onTap: _toggleVideoEnhancement,
           onLongPress: () =>
               showVideoEnhancementModeDialog(context, widget.controller),
+        );
+      },
+    );
+    if (!Platform.isWindows) return anime4kButton;
+    final anime = AnimeJaNaiService.instance;
+    final dlss = DlssGlobalPlayback.instance;
+    void settings() => showPlaybackEffects(
+      context,
+      controller.animeJaNai,
+      captureFrame: _captureVideoFrame,
+    );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      spacing: 8,
+      children: [
+        anime4kButton,
+        ListenableBuilder(
+          listenable: anime,
+          builder: (context, _) => _buildEnhancementButton(
+            isWide,
+            label: 'AnimeJaNai',
+            active: anime.enabled,
+            busy: anime.busy,
+            onTap: anime.busy
+                ? null
+                : () async {
+                    await anime.setEnabled(!anime.enabled);
+                    if (mounted && anime.error != null) {
+                      showSnackBar(anime.error!);
+                    }
+                  },
+            onLongPress: settings,
+          ),
+        ),
+        ListenableBuilder(
+          listenable: dlss,
+          builder: (context, _) => _buildEnhancementButton(
+            isWide,
+            label: 'DLSS',
+            active: dlss.enabled,
+            busy: dlss.busy,
+            onTap: dlss.busy
+                ? null
+                : () async {
+                    await dlss.setEnabled(!dlss.enabled);
+                    if (mounted && dlss.error != null) {
+                      showSnackBar(dlss.error!);
+                    }
+                  },
+            onLongPress: settings,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEnhancementButton(
+    bool isWide, {
+    required String label,
+    required bool active,
+    required VoidCallback? onTap,
+    required VoidCallback onLongPress,
+    bool busy = false,
+  }) {
+    final color = active
+        ? Theme.of(context).colorScheme.primary
+        : Colors.white.withValues(alpha: 0.7);
+    final iconSize = isWide ? 18.0 : 15.0;
+    return PlatformTooltip(
+      message: '$label：${active ? '已开启' : '已关闭'}，长按设置',
+      child: Semantics(
+        button: true,
+        toggled: active,
+        child: GestureDetector(
+          onTap: onTap,
+          onLongPress: onLongPress,
           child: _buildCapsule(
             radius: isWide ? 22 : 18,
             child: SizedBox(
@@ -1244,21 +1347,25 @@ class _BakaPlayerState extends State<BakaPlayer> {
                 padding: EdgeInsets.symmetric(horizontal: isWide ? 14 : 12),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
+                  spacing: isWide ? 6 : 4,
                   children: [
-                    Icon(
-                      Icons.auto_awesome_rounded,
-                      size: isWide ? 18 : 15,
-                      color: isActive
-                          ? Theme.of(context).colorScheme.primary
-                          : Colors.white.withValues(alpha: 0.7),
-                    ),
-                    SizedBox(width: isWide ? 6 : 4),
+                    busy
+                        ? SizedBox.square(
+                            dimension: iconSize,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: color,
+                            ),
+                          )
+                        : Icon(
+                            Icons.auto_awesome_rounded,
+                            size: iconSize,
+                            color: color,
+                          ),
                     Text(
                       label,
                       style: TextStyle(
-                        color: isActive
-                            ? Theme.of(context).colorScheme.primary
-                            : Colors.white.withValues(alpha: 0.7),
+                        color: color,
                         fontSize: isWide ? 14 : 12,
                         fontWeight: FontWeight.w700,
                       ),
@@ -1268,89 +1375,8 @@ class _BakaPlayerState extends State<BakaPlayer> {
               ),
             ),
           ),
-        );
-      },
-    );
-    if (!Platform.isWindows) return anime4kButton;
-    return ListenableBuilder(
-      listenable: DlssGlobalPlayback.instance,
-      builder: (context, _) {
-        final service = DlssGlobalPlayback.instance;
-        if (!service.enabled) return anime4kButton;
-        final color = service.hasFallback
-            ? Colors.orangeAccent
-            : service.hasEnhancedOutput
-            ? Theme.of(context).colorScheme.primary
-            : Colors.white.withValues(alpha: .7);
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            anime4kButton,
-            const SizedBox(width: 8),
-            _buildCapsule(
-              radius: isWide ? 22 : 18,
-              child: PlatformTooltip(
-                message: '${service.status}\n点击开关 DLSS；长按或右键查看详情及调整效果',
-                child: GestureDetector(
-                  onSecondaryTap: () => showDlssEffectsDialog(context),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(isWide ? 22 : 18),
-                    onTap: service.busy
-                        ? null
-                        : () async {
-                            controller.setControlsVisible(true);
-                            await service.setPlaybackEnabled(
-                              !service.playbackEnabled,
-                            );
-                            if (!mounted) return;
-                            showSnackBar(
-                              service.error ??
-                                  (service.playbackEnabled
-                                      ? '已请求开启 DLSS，正在等待增强画面'
-                                      : 'DLSS 播放增强已关闭'),
-                            );
-                          },
-                    onLongPress: () => showDlssEffectsDialog(context),
-                    child: SizedBox(
-                      height: isWide ? 42 : 34,
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: isWide ? 14 : 12,
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              service.hasFallback
-                                  ? Icons.warning_amber_rounded
-                                  : service.busy ||
-                                        (service.playbackEnabled &&
-                                            !service.hasEnhancedOutput)
-                                  ? Icons.hourglass_top_rounded
-                                  : Icons.auto_fix_high_rounded,
-                              size: isWide ? 18 : 15,
-                              color: color,
-                            ),
-                            SizedBox(width: isWide ? 6 : 4),
-                            Text(
-                              service.hasFallback ? 'DLSS 回退' : 'DLSS',
-                              style: TextStyle(
-                                color: color,
-                                fontSize: isWide ? 14 : 12,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
+        ),
+      ),
     );
   }
 

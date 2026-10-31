@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/network_service.dart';
 import 'dart:async';
 import 'dart:io';
@@ -122,27 +123,24 @@ class TorrentEngine {
       }
       _peerServer = server;
       _listenPort = server.port;
-      server.listen(
-        (socket) {
-          final address = PeerAddress(
-            socket.remoteAddress.address,
-            socket.remotePort,
-          );
-          if (_disposed ||
-              _peers.length >= _maxPeers ||
-              _peers.containsKey(address)) {
-            socket.destroy();
-            return;
-          }
-          final peer = _addPeer(address, pm);
-          unawaited(
-            peer.accept(socket).then((ok) {
-              if (ok) _peerConnected();
-            }),
-          );
-        },
-        onError: (Object e) => debugPrint('[TorrentEngine] Peer listener: $e'),
-      );
+      server.listen((socket) {
+        final address = PeerAddress(
+          socket.remoteAddress.address,
+          socket.remotePort,
+        );
+        if (_disposed ||
+            _peers.length >= _maxPeers ||
+            _peers.containsKey(address)) {
+          socket.destroy();
+          return;
+        }
+        final peer = _addPeer(address, pm);
+        unawaited(
+          peer.accept(socket).then((ok) {
+            if (ok) _peerConnected();
+          }),
+        );
+      }, onError: (Object e) => Log.w('Torrent', 'Peer listener: $e'));
       _setState(TorrentState.connecting);
       unawaited(_connectToPeers(event: 'started'));
       await Future.any([_buffered.future, _stopped.future]);
@@ -291,7 +289,7 @@ class TorrentEngine {
           if (metadata.infoHashHex == magnet.infoHash) found.complete(metadata);
         } catch (e) {
           // Try the next peer when this peer's metadata is invalid.
-          debugPrint('[TorrentEngine] Metadata: $e');
+          Log.w('Torrent', 'Metadata: $e');
         } finally {
           _metadataPeers.remove(peer);
           peer.disconnect();
@@ -317,7 +315,7 @@ class TorrentEngine {
         final metadata = await _fetchTorrent(url, trackers: magnet.trackers);
         if (metadata.infoHashHex == magnet.infoHash) return metadata;
       } catch (e) {
-        if (!_cancelToken.isCancelled) debugPrint('[TorrentEngine] $url: $e');
+        if (!_cancelToken.isCancelled) Log.w('Torrent', '$url: $e');
       }
     }
     return null;

@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'dart:async';
 
 import 'package:dlna_dart/dlna.dart';
@@ -76,7 +77,7 @@ class DlnaCastController extends ChangeNotifier {
         notifyListeners();
       });
     } catch (error) {
-      debugPrint('DLNA 搜索失败: $error');
+      Log.w('Dlna', 'DLNA 搜索失败: $error');
       if (identical(_manager, manager)) _stopSearch();
     }
   }
@@ -117,7 +118,7 @@ class DlnaCastController extends ChangeNotifier {
       await target.setUrl(url, title: '${content.title} P${episodeIndex + 1}');
       await target.play();
     } catch (error) {
-      debugPrint('DLNA 投屏失败: $error');
+      Log.w('Dlna', 'DLNA 投屏失败: $error');
       if (session == _session) _setState(DlnaCastState.error);
       return;
     }
@@ -137,7 +138,7 @@ class DlnaCastController extends ChangeNotifier {
     try {
       url = await content.resolveEpisodeUrl(index);
     } catch (error) {
-      debugPrint('DLNA 解析剧集失败: $error');
+      Log.w('Dlna', 'DLNA 解析剧集失败: $error');
     }
     if (session != _session) return;
     if (url == null || url.isEmpty) {
@@ -211,7 +212,7 @@ class DlnaCastController extends ChangeNotifier {
     try {
       await target.seek(_formatTime(position));
     } catch (error) {
-      debugPrint('DLNA 跳转失败: $error');
+      Log.w('Dlna', 'DLNA 跳转失败: $error');
     } finally {
       if (session == _session) _seeking = false;
     }
@@ -228,7 +229,7 @@ class DlnaCastController extends ChangeNotifier {
         _setState(resume ? DlnaCastState.playing : DlnaCastState.paused);
       }
     } catch (error) {
-      debugPrint('DLNA 播放控制失败: $error');
+      Log.w('Dlna', 'DLNA 播放控制失败: $error');
     }
   }
 
@@ -248,7 +249,7 @@ class DlnaCastController extends ChangeNotifier {
     try {
       await target?.stop();
     } catch (error) {
-      debugPrint('DLNA 断开失败: $error');
+      Log.w('Dlna', 'DLNA 断开失败: $error');
     }
   }
 

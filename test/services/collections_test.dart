@@ -234,6 +234,73 @@ void main() {
       historyRepository = HistoryRepository(repo.session, bangumi);
     });
 
+    for (final failedResource in ['stats', 'list']) {
+      testWidgets('initial $failedResource timeout is handled and retryable', (
+        tester,
+      ) async {
+        await prefs.setString('usertoken', 'test-token');
+        final session = AccountSession(prefs, refreshTokens: (_) async => null);
+        collections = CollectionRepository(session, bangumi);
+        historyRepository = HistoryRepository(session, bangumi);
+        var fail = true;
+        apiTransport = ApiTransport(
+          session: session,
+          version: 'test',
+          credentialOrigin: () => Uri.parse('https://www.anibaka.com'),
+          client: MockClient((request) async {
+            final path = request.url.path;
+            if (fail &&
+                path ==
+                    (failedResource == 'stats'
+                        ? '/api/v1/collection/stats'
+                        : '/api/v1/collection')) {
+              throw TimeoutException('GET ${request.url}');
+            }
+            final data = switch (path) {
+              '/api/v1/collection/stats' => {
+                'total': 1,
+                'do': 1,
+                'wish': 0,
+                'collect': 0,
+                'on_hold': 0,
+                'dropped': 0,
+              },
+              '/api/v1/collection' => {
+                'list': [
+                  {'bgm_id': 42, 'bgm_title': 'Available show', 'status': 3},
+                ],
+                'total': 1,
+                'page': 1,
+                'page_size': 20,
+              },
+              '/api/v1/play-history' => {'list': []},
+              _ => throw StateError('Unexpected request: ${request.url}'),
+            };
+            return http.Response(jsonEncode({'code': 200, 'data': data}), 200);
+          }),
+        );
+        addTearDown(apiTransport.close);
+
+        await tester.pumpWidget(
+          const MaterialApp(home: LibraryPage(initialIndex: 1)),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        if (failedResource == 'stats') {
+          expect(find.text('Available show'), findsOneWidget);
+        } else {
+          expect(find.widgetWithText(ChoiceChip, '在看 1'), findsOneWidget);
+        }
+
+        fail = false;
+        await tester.tap(find.byIcon(Icons.refresh_rounded));
+        await tester.pumpAndSettle();
+        expect(find.text('Available show'), findsOneWidget);
+        expect(find.widgetWithText(ChoiceChip, '在看 1'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
     for (final entry in ['initial load', 'refresh', 'status filter']) {
       testWidgets('cloud collections paginate after $entry', (tester) async {
         await prefs.setString('usertoken', 'test-token');

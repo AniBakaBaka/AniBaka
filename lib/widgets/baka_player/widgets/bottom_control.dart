@@ -56,8 +56,10 @@ class BottomControl extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  ?episodeTitle,
-                  const Spacer(),
+                  if (episodeTitle != null)
+                    Expanded(child: episodeTitle!)
+                  else
+                    const Spacer(),
                   ?danmakuBar,
                   if (danmakuBar != null && extraButtons != null)
                     const SizedBox(width: 8),

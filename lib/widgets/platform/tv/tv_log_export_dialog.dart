@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:baka/core/tv_log_export.dart';
 import 'package:baka/core/app_logger.dart';
 import 'package:baka/widgets/platform/tv/tv_focusable.dart';
 import 'package:baka/widgets/platform/tv/tv_theme_util.dart';
@@ -24,11 +23,9 @@ class TvLogExportDialog extends StatefulWidget {
 }
 
 class _TvLogExportDialogState extends State<TvLogExportDialog> {
-  TvLogExportSession? _session;
-  TvLogExportInfo? _info;
-  StreamSubscription<int>? _downloadSubscription;
+  LogShareServer? _server;
+  ({String url, LogArchive archive})? _info;
   Object? _error;
-  int _downloads = 0;
 
   @override
   void initState() {
@@ -38,45 +35,30 @@ class _TvLogExportDialogState extends State<TvLogExportDialog> {
 
   @override
   void dispose() {
-    unawaited(_downloadSubscription?.cancel());
-    unawaited(_session?.stop());
+    unawaited(_server?.stop());
     super.dispose();
   }
 
   Future<void> _prepare() async {
-    final oldSession = _session;
-    _session = null;
-    await _downloadSubscription?.cancel();
-    await oldSession?.stop();
-
+    await _server?.stop();
+    _server = null;
     if (!mounted) return;
     setState(() {
       _info = null;
       _error = null;
-      _downloads = 0;
     });
 
-    final session = TvLogExportSession();
-    _session = session;
+    final server = _server = LogShareServer();
     try {
-      AppLogger.instance.info('TV log export requested', tag: 'TvLogExport');
-      final info = await session.start();
+      final info = await server.start();
       if (!mounted) {
-        await session.stop();
+        await server.stop();
         return;
       }
-      _downloadSubscription = session.downloadCount.listen((count) {
-        if (mounted) setState(() => _downloads = count);
-      });
       setState(() => _info = info);
     } catch (error, stackTrace) {
-      AppLogger.instance.error(
-        'TV log export failed',
-        tag: 'TvLogExport',
-        error: error,
-        stackTrace: stackTrace,
-      );
-      await session.stop();
+      Log.e('LogShare', 'TV log export failed', error, stackTrace);
+      await server.stop();
       if (mounted) setState(() => _error = error);
     }
   }
@@ -165,8 +147,8 @@ class _TvLogExportDialogState extends State<TvLogExportDialog> {
     );
   }
 
-  Widget _buildReady(TvLogExportInfo info) {
-    final size = (info.archive.sizeBytes / 1024).clamp(0, double.infinity);
+  Widget _buildReady(({String url, LogArchive archive}) info) {
+    final size = info.archive.sizeBytes / 1024;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -190,14 +172,17 @@ class _TvLogExportDialogState extends State<TvLogExportDialog> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                _downloads > 0 ? '日志已下载' : '使用手机扫码下载',
-                style: TextStyle(
-                  color: _downloads > 0
-                      ? Colors.greenAccent
-                      : context.tvTextColor,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
+              ValueListenableBuilder(
+                valueListenable: _server!.downloads,
+                builder: (context, downloads, _) => Text(
+                  downloads > 0 ? '日志已下载' : '使用手机扫码下载',
+                  style: TextStyle(
+                    color: downloads > 0
+                        ? Colors.greenAccent
+                        : context.tvTextColor,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               const SizedBox(height: 12),

@@ -2,7 +2,7 @@ import 'package:baka/api/bangumi_account_api.dart';
 import 'dart:convert';
 
 import 'package:baka/api/anibaka_api.dart';
-import 'package:baka/api/request_cache.dart';
+import 'package:baka/core/app_storage.dart';
 import 'package:baka/core/account_session.dart';
 import 'package:baka/services/account/bangumi_session.dart';
 import 'package:baka/models/collection.dart';

@@ -1,7 +1,7 @@
+import 'package:baka/core/app_logger.dart';
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:baka/services/torrent/piece_manager.dart';
 
 /// 本地 HTTP 流媒体服务器 — 将正在下载的 torrent 数据以 HTTP 方式提供给播放器。
@@ -34,9 +34,9 @@ class TorrentStreamServer {
     _port = server.port;
     server.listen(
       _handleRequest,
-      onError: (e) => debugPrint('[StreamServer] 错误: $e'),
+      onError: (Object e) => Log.w('StreamServer', '请求处理失败', e),
     );
-    debugPrint('[StreamServer] 启动于 http://127.0.0.1:$_port');
+    Log.i('StreamServer', '启动于 http://127.0.0.1:$_port');
   }
 
   Future<void> stop() async {

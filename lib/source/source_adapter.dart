@@ -6,12 +6,11 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 
 import 'package:baka/api/bgm.dart';
+import 'package:baka/core/app_logger.dart';
+import 'package:baka/core/app_storage.dart';
 import 'package:baka/core/network_service.dart';
-import 'package:baka/core/system_proxy.dart';
-import 'package:baka/instance.dart';
 import 'package:baka/services/playback/playback_settings.dart';
 import 'package:baka/source/engine/pipeline_host.dart';
 import 'package:baka/source/engine/pipeline_interpreter.dart';
@@ -36,29 +35,36 @@ typedef PlaybackMedia = ({String url, Map<String, String> httpHeaders});
 const PlaybackMedia _noMedia = (url: '', httpHeaders: <String, String>{});
 
 /// 直链可达性探测的结论。
-enum MediaReachability { reachable, rejected, unknown }
+enum _Reach { reachable, rejected, unknown }
 
 /// Runs one anx-rule/2 source: its HTTP session, the pipeline I/O boundary,
 /// media validation and player-side preparation (HLS proxy, keep-alive).
 class SourceAdapter implements PipelineHost {
   SourceAdapter(SourceRule rule) : rule = Recipes.expand(rule);
 
-  static const String defaultUserAgent = WebViewAdapter.desktopUserAgent;
+  static const PipelineInterpreter _interpreter = PipelineInterpreter();
   static const Map<String, String> _defaultMediaHeaders = {
-    'User-Agent': defaultUserAgent,
+    'User-Agent': WebViewAdapter.desktopUserAgent,
     'Accept': '*/*',
   };
-  static const PipelineInterpreter _interpreter = PipelineInterpreter();
-
-  static const _urlCacheTtl = Duration(minutes: 10);
+  static const _playExtra = {
+    SchedulerInterceptor.priorityKey: RequestPriority.play,
+  };
+  static const _playNoRetry = {
+    SchedulerInterceptor.priorityKey: RequestPriority.play,
+    RetryInterceptor.skipRetryKey: true,
+  };
   static const _reachTtl = Duration(minutes: 3);
   static const _rejectTtl = Duration(minutes: 8);
-  static const _cacheLimit = 128;
+  static const _redirectTimeout = Duration(seconds: 20);
 
   final SourceRule rule;
   String get name => rule.name;
   String get baseUrl => rule.baseUrl;
   late final _PlayFeatures _features = _PlayFeatures(rule.play);
+
+  /// Rule headers without blank values; a blank value only suppresses a default.
+  late final Map<String, String> _ruleMediaHeaders = _nonBlank(rule.headers);
 
   final SourceOperation _lifetime = SourceOperation();
   final CookieJar _cookieJar = CookieJar();
@@ -69,20 +75,17 @@ class SourceAdapter implements PipelineHost {
   Dio? _dio;
   Dio? _dioDirect;
 
-  final _urlCache = <String, ({String url, int expiresAt})>{};
+  final _urls = RequestCache<String, String>(
+    limit: 128,
+    ttl: const Duration(minutes: 10),
+  );
+  final _reach = RequestCache<String, bool>(limit: 128);
   final _pendingUrls = <String, Object>{};
-  final _reachCache =
-      <String, ({bool ok, int expiresAt, Map<String, String> headers})>{};
 
-  WebViewTaskScope? _webViewScope;
-  RemoteMediaRedirectResolver? _redirects;
   Future<void>? _playBarrier;
-  Timer? _keepAliveTimer;
-  int _keepAliveGeneration = 0;
-  CancelToken? _keepAliveRequest;
-  HlsProxy? _hlsProxy;
+  SourceOperation? _keepAlive;
   SourceOperation? _hlsPreparation;
-  int _hlsGeneration = 0;
+  HlsProxy? _hlsProxy;
 
   /// Signed media sources opt out when their token and playback requests must
   /// use the same direct network exit.
@@ -91,70 +94,40 @@ class SourceAdapter implements PipelineHost {
   @override
   bool get allowWebview => rule.useWebview;
 
-  String get requestUserAgent {
-    final ua = (rule.headers['User-Agent'] ?? rule.headers['user-agent'])
-        ?.trim();
-    return ua != null && ua.isNotEmpty ? ua : defaultUserAgent;
+  String get _userAgent =>
+      _ruleHeader('user-agent') ?? WebViewAdapter.desktopUserAgent;
+
+  String? _ruleHeader(String lowerName) {
+    for (final entry in rule.headers.entries) {
+      final value = entry.value.trim();
+      if (entry.key.toLowerCase() == lowerName && value.isNotEmpty) {
+        return value;
+      }
+    }
+    return null;
   }
 
-  /// Rule headers without blank values; a blank value only suppresses a default.
-  late final Map<String, String> mediaHeaders = () {
-    final headers = {
-      for (final entry in rule.headers.entries)
-        if (entry.value.isNotEmpty) entry.key: entry.value,
-    };
-    return headers.isEmpty ? _defaultMediaHeaders : headers;
-  }();
+  Dio get dio => _dio ??= _buildDio(useSystemProxy);
+  Dio get _directDio => _dioDirect ??= _buildDio(false);
 
-  /// Signed CDN links reject the site's Referer.
-  Map<String, String> mediaHeadersFor(String url) =>
-      _withoutRefererForSignedCdn(url, mediaHeaders);
-
-  static Map<String, String> _withoutRefererForSignedCdn(
-    String url,
-    Map<String, String> headers,
-  ) => VideoUrlExtractor.isSignedCdnUrl(url)
-      ? {
-          for (final entry in headers.entries)
-            if (entry.key.toLowerCase() != 'referer') entry.key: entry.value,
-        }
-      : headers;
-
-  Dio get dio {
-    final existing = _dio;
-    if (existing != null) return existing;
-    return _dio = _buildDio(useSystemProxy: useSystemProxy);
-  }
-
-  Dio get _directDio {
-    final existing = _dioDirect;
-    if (existing != null) return existing;
-    return _dioDirect = _buildDio(useSystemProxy: false);
-  }
-
-  Dio _buildDio({required bool useSystemProxy}) {
+  Dio _buildDio(bool viaProxy) {
     if (_disposed) throw const RequestCancelledException();
-    SourceOperation.check();
-    final dio =
-        Dio(
-            BaseOptions(
-              headers: {
-                'User-Agent': defaultUserAgent,
-                'Accept':
-                    'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                'Connection': 'keep-alive',
-                ...rule.headers,
-              },
-              maxRedirects: 5,
-              connectTimeout: const Duration(seconds: 15),
-              receiveTimeout: const Duration(seconds: 30),
-              validateStatus: (status) => status != null && status < 600,
-            ),
-          )
-          ..httpClientAdapter = NetworkService.createDioAdapter(
-            useSystemProxy: useSystemProxy,
-          );
+    final dio = Dio(
+      BaseOptions(
+        headers: {
+          'User-Agent': WebViewAdapter.desktopUserAgent,
+          'Accept':
+              'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'Connection': 'keep-alive',
+          ...rule.headers,
+        },
+        maxRedirects: 5,
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 30),
+        validateStatus: (status) => status != null && status < 600,
+      ),
+    )..httpClientAdapter = NetworkService.createDioAdapter(useSystemProxy: viaProxy);
     dio.interceptors.addAll([
       SchedulerInterceptor(),
       RetryInterceptor(dio),
@@ -163,9 +136,62 @@ class SourceAdapter implements PipelineHost {
     return dio;
   }
 
+  /// Cookie-less clients for probes and redirect resolution: the server sees
+  /// only the headers the player will send. Shared by all adapters.
+  static final Dio _bareDio = _bareClient(true);
+  static final Dio _bareDirectDio = _bareClient(false);
+
+  static Dio _bareClient(bool viaProxy) =>
+      Dio(
+          BaseOptions(
+            connectTimeout: const Duration(seconds: 15),
+            validateStatus: (_) => true,
+          ),
+        )
+        ..httpClientAdapter = NetworkService.createDioAdapter(
+          useSystemProxy: viaProxy,
+        )
+        ..interceptors.add(SchedulerInterceptor());
+
   /// Whether [uri] leaves through a configured proxy for this rule.
   bool _proxied(Uri uri) =>
-      useSystemProxy && SystemProxyService.findProxy(uri) != 'DIRECT';
+      useSystemProxy && NetworkService.findProxy(uri) != 'DIRECT';
+
+  /// A configured proxy's exit may be refused by the CDN (e.g. region-blocked)
+  /// while the media is reachable directly, so proxied media requests get one
+  /// direct retry. [bare] requests use the shared cookie-less client.
+  Future<Response<T>> _mediaRequest<T>(
+    Uri uri,
+    Future<Response<T>> Function(Dio client) send, {
+    bool bare = false,
+  }) async {
+    final client = bare ? (useSystemProxy ? _bareDio : _bareDirectDio) : dio;
+    if (!_proxied(uri)) return send(client);
+    try {
+      final response = await send(client);
+      if ((response.statusCode ?? 0) < 400) return response;
+      // Drop the refused body before retrying so its slot is released.
+      if (response.data case final ResponseBody body) {
+        await body.stream.listen(null, onError: (Object _) {}).cancel();
+      }
+    } on DioException catch (error) {
+      if (error.type == DioExceptionType.cancel) rethrow;
+    }
+    return send(bare ? _bareDirectDio : _directDio);
+  }
+
+  /// Bounds a request; cancelling its token also aborts the response stream.
+  static Future<T> _bounded<T>(
+    Duration timeout,
+    Future<T> Function(CancelToken cancel) request,
+  ) async {
+    final cancel = CancelToken();
+    try {
+      return await request(cancel).timeout(timeout);
+    } finally {
+      cancel.cancel();
+    }
+  }
 
   /// Scopes work to this adapter: disposing it cancels the work, and the
   /// repository keeps an adapter alive while work is active.
@@ -185,15 +211,13 @@ class SourceAdapter implements PipelineHost {
 
   void dispose() {
     if (_disposed) return;
-    _webViewScope?.cancel();
-    _redirects?.close();
     stopPlaybackKeepAlive();
     _disposed = true;
     onIdle = null;
     _lifetime.cancel();
-    _urlCache.clear();
+    _urls.clear();
+    _reach.clear();
     _pendingUrls.clear();
-    _reachCache.clear();
     _dio?.close(force: true);
     _dio = null;
     _dioDirect?.close(force: true);
@@ -234,12 +258,8 @@ class SourceAdapter implements PipelineHost {
     bool skipValidation = false,
   }) => runOperation(() async {
     final cacheable = !_features.usesDynamicMetadata;
-    if (cacheable && !forceRefresh) {
-      final cached = _urlCache.remove(episodeId);
-      if (cached != null && cached.expiresAt > _now) {
-        _urlCache[episodeId] = cached;
-        return (url: cached.url, httpHeaders: mediaHeadersFor(cached.url));
-      }
+    if (_urls.peek(episodeId) case final url? when cacheable && !forceRefresh) {
+      return (url: url, httpHeaders: _mediaHeaders(url));
     }
     // Invalidating or a newer refresh must keep this run from caching a stale URL.
     final pending = _pendingUrls[episodeId] = Object();
@@ -251,30 +271,23 @@ class SourceAdapter implements PipelineHost {
           SourceOperation.check();
           return result.url.isEmpty
               ? _noMedia
-              : (url: result.url, httpHeaders: await _mediaHeadersOf(result));
+              : (url: result.url, httpHeaders: await _playHeaders(result));
         });
-      } on RequestCancelledException {
-        rethrow;
       } catch (error) {
         SourceOperation.check();
-        debugPrint('$name: 播放管线失败: $error');
+        Log.w('Source', '$name: 播放管线失败', error);
         media = _noMedia;
       }
       if (media.url.isEmpty) {
-        debugPrint('$name: 播放管线未得到媒体地址: $episodeId');
+        Log.w('Source', '$name: 播放管线未得到媒体地址: $episodeId');
         return _noMedia;
       }
-      if (!skipValidation &&
-          await _probeMedia(media.url, media.httpHeaders) ==
-              MediaReachability.rejected) {
-        debugPrint('$name: 媒体被服务器拒绝，丢弃: ${media.url}');
+      if (!skipValidation && !await _reachable(media.url, media.httpHeaders)) {
+        Log.w('Source', '$name: 媒体被服务器拒绝，丢弃: ${media.url}');
         return _noMedia;
       }
       if (cacheable && identical(_pendingUrls[episodeId], pending)) {
-        _put(_urlCache, episodeId, (
-          url: media.url,
-          expiresAt: _now + _urlCacheTtl.inMilliseconds,
-        ));
+        _urls.put(episodeId, media.url);
       }
       return media;
     } finally {
@@ -284,87 +297,115 @@ class SourceAdapter implements PipelineHost {
     }
   });
 
-  Future<String> resolveDownloadUrl(
-    String episodeId, {
-    bool forceRefresh = false,
-  }) async =>
-      (await resolvePlaybackMedia(episodeId, forceRefresh: forceRefresh)).url;
-
-  void invalidateDownloadUrl(String episodeId) {
+  void invalidatePlaybackMedia(String episodeId) {
     _pendingUrls.remove(episodeId);
-    _urlCache.remove(episodeId);
+    _urls.remove(episodeId);
   }
 
-  /// 探测媒体 URL 是否真正可拉取（自动匹配认领前必须通过）。
-  Future<bool> isPlaybackUrlReachable(String url) => runOperation(
-    () async => await _probeMedia(url) != MediaReachability.rejected,
-  );
+  /// A direct media link with the rule's media headers; no media when the
+  /// server rejects it (自动匹配认领前必须通过).
+  Future<PlaybackMedia> resolveDirectMedia(String url) =>
+      runOperation(() async {
+        final headers = _mediaHeaders(url);
+        return await _reachable(url, headers)
+            ? (url: url, httpHeaders: headers)
+            : _noMedia;
+      });
 
-  Future<MediaReachability> _probeMedia(
+  static Map<String, String> _nonBlank(Map<String, String> declared) {
+    final headers = {
+      for (final entry in declared.entries)
+        if (entry.value.isNotEmpty) entry.key: entry.value,
+    };
+    return headers.isEmpty ? _defaultMediaHeaders : headers;
+  }
+
+  /// The player's headers for [url]: the play result's (else the rule's)
+  /// non-blank headers. Signed CDN links reject the site's Referer.
+  Map<String, String> _mediaHeaders(
     String url, [
-    Map<String, String>? headers,
-  ]) async {
-    SourceOperation.check();
-    final value = url.trim();
-    final lower = value.toLowerCase();
-    if (lower.startsWith('magnet:') || lower.contains('.torrent')) {
-      return MediaReachability.reachable;
+    Map<String, String> declared = const {},
+  ]) {
+    final headers = declared.isEmpty ? _ruleMediaHeaders : _nonBlank(declared);
+    return VideoUrlExtractor.isSignedCdnUrl(url)
+        ? {
+            for (final entry in headers.entries)
+              if (entry.key.toLowerCase() != 'referer') entry.key: entry.value,
+          }
+        : headers;
+  }
+
+  /// Media headers of a play result plus the session cookies it selected.
+  Future<Map<String, String>> _playHeaders(PipelinePlayResult media) async {
+    final headers = _mediaHeaders(media.url, media.mediaHeaders);
+    if (media.cookieNames.isEmpty && media.cookiePrefixes.isEmpty) {
+      return headers;
     }
+    final selected = [
+      for (final cookie in await _cookieJar.loadForRequest(
+        Uri.parse(media.url),
+      ))
+        if (cookie.value.isNotEmpty &&
+            (media.cookieNames.contains(cookie.name) ||
+                media.cookiePrefixes.any(
+                  (prefix) =>
+                      prefix.isNotEmpty && cookie.name.startsWith(prefix),
+                )))
+          '${cookie.name}=${cookie.value}',
+    ].join('; ');
+    if (selected.isEmpty) return headers;
+    final key = headers.keys.firstWhere(
+      (key) => key.toLowerCase() == 'cookie',
+      orElse: () => 'Cookie',
+    );
+    final existing = headers[key]?.trim() ?? '';
+    return {
+      ...headers,
+      key: existing.isEmpty ? selected : '$existing; $selected',
+    };
+  }
+
+  /// Play pages that issue a single-use credential must resolve one at a time.
+  Future<T> _withPlaySession<T>(Future<T> Function() action) {
+    if (!_features.usesCookies) return action();
+    final next =
+        _playBarrier?.then((_) {
+          SourceOperation.check();
+          return action();
+        }) ??
+        Future<T>.sync(action);
+    // Keep the barrier ordered even if a queued caller stops waiting early.
+    _playBarrier = next.then<void>((_) {}, onError: (Object _) {});
+    return SourceOperation.current?.wait(next) ?? next;
+  }
+
+  /// Whether the media may play; only a definite server rejection says no.
+  Future<bool> _reachable(String url, Map<String, String> headers) async {
+    final lower = url.toLowerCase();
+    if (lower.startsWith('magnet:') || lower.contains('.torrent')) return true;
     if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
-      return MediaReachability.rejected;
+      return false;
     }
     if (_features.validatesWithCookies ||
-        VideoUrlExtractor.isSignedCdnUrl(value)) {
-      return MediaReachability.reachable;
+        VideoUrlExtractor.isSignedCdnUrl(url)) {
+      return true;
     }
-    if (VideoUrlExtractor.looksLikeNonMedia(value)) {
-      return MediaReachability.rejected;
-    }
-
-    final probeHeaders = headers ?? mediaHeaders;
-    final cached = _reachCache[value];
-    if (cached != null &&
-        cached.expiresAt > _now &&
-        mapEquals(cached.headers, probeHeaders)) {
-      return cached.ok
-          ? MediaReachability.reachable
-          : MediaReachability.rejected;
-    }
-    final verdict = await _probe(value, probeHeaders);
+    if (VideoUrlExtractor.looksLikeNonMedia(url)) return false;
+    final cacheable = !_features.usesDynamicMetadata;
+    if (_reach.peek(url) case final ok? when cacheable) return ok;
+    final verdict = await _probe(url, headers);
     SourceOperation.check();
     // Only definite verdicts are cached. Temporary media may appear shortly
     // after a rejection, so its rejection is never remembered.
-    final ok = verdict == MediaReachability.reachable;
-    if (ok ||
-        (verdict == MediaReachability.rejected &&
-            !VideoUrlExtractor.isOnDemandMediaPath(value))) {
-      _put(_reachCache, value, (
-        ok: ok,
-        expiresAt: _now + (ok ? _reachTtl : _rejectTtl).inMilliseconds,
-        headers: probeHeaders,
-      ));
+    if (cacheable &&
+        (verdict == _Reach.reachable ||
+            verdict == _Reach.rejected &&
+                !VideoUrlExtractor.isOnDemandMediaPath(url))) {
+      final ok = verdict == _Reach.reachable;
+      _reach.put(url, ok, ttl: ok ? _reachTtl : _rejectTtl);
     }
-    return verdict;
+    return verdict != _Reach.rejected;
   }
-
-  static int get _now => DateTime.now().millisecondsSinceEpoch;
-
-  static void _put<V>(Map<String, V> cache, String key, V value) {
-    cache.remove(key);
-    if (cache.length >= _cacheLimit) cache.remove(cache.keys.first);
-    cache[key] = value;
-  }
-
-  static Dio _createProbeDio(bool useSystemProxy) =>
-      Dio(BaseOptions(maxRedirects: 3, validateStatus: (_) => true))
-        ..httpClientAdapter = NetworkService.createDioAdapter(
-          useSystemProxy: useSystemProxy,
-        );
-
-  /// Probes use the rule's network exit; a direct-only source probed through
-  /// the proxy would look dead.
-  static final Dio _probeDio = _createProbeDio(true);
-  static final Dio _probeDirectDio = _createProbeDio(false);
 
   /// Statuses where the server says the media is absent or forbidden.
   static const Set<int> _rejectedStatuses = {
@@ -385,252 +426,106 @@ class SourceAdapter implements PipelineHost {
     caseSensitive: false,
   );
 
-  static bool _isOk(int status) =>
+  static bool _isOk(int? status) =>
       status == HttpStatus.ok || status == HttpStatus.partialContent;
 
   static bool _isNonMedia(String? contentType) =>
       contentType != null && _nonMediaContentType.hasMatch(contentType);
 
-  Future<MediaReachability> _probe(
-    String url,
-    Map<String, String> headers,
-  ) async {
-    final verdict = await _probeOn(
-      useSystemProxy ? _probeDio : _probeDirectDio,
-      url,
-      headers,
-    );
-    if (verdict != MediaReachability.rejected) return verdict;
-    final uri = Uri.tryParse(url);
-    if (uri == null || !_proxied(uri)) return verdict;
-    // A proxied exit may be refused while the media is reachable directly.
-    return _probeOn(_probeDirectDio, url, headers);
-  }
-
-  Future<MediaReachability> _probeOn(
-    Dio client,
-    String url,
-    Map<String, String> headers,
-  ) async {
+  /// One ranged GET with the player's headers: the status and the first bytes
+  /// tell playable media from an error page.
+  Future<_Reach> _probe(String url, Map<String, String> headers) async {
     final timeout = Duration(
       milliseconds: rule.mediaValidationTimeoutMs > 0
           ? rule.mediaValidationTimeoutMs
-          : Instances.isTV
-          ? 2200
-          : 1800,
+          : 2000,
     );
     try {
-      if (VideoUrlExtractor.isHlsUrl(url)) {
-        final response = await _probeRequest(client, url, timeout, {
-          ...headers,
-          'Range': 'bytes=0-2047',
-          'Accept': 'application/vnd.apple.mpegurl,application/x-mpegURL,*/*',
-        }, readPlaylist: true);
-        final verdict = _playlistVerdict(response.body);
-        if (verdict != MediaReachability.unknown || response.truncated) {
-          return verdict;
+      final uri = Uri.parse(url);
+      return await _bounded(timeout, (cancel) async {
+        final response = await _mediaRequest(
+          uri,
+          (client) => client.getUri<ResponseBody>(
+            uri,
+            cancelToken: cancel,
+            options: Options(
+              headers: {...headers, HttpHeaders.rangeHeader: 'bytes=0-1023'},
+              responseType: ResponseType.stream,
+              extra: _playExtra,
+            ),
+          ),
+          bare: true,
+        );
+        final status = response.statusCode;
+        final contentType = response.headers.value(
+          HttpHeaders.contentTypeHeader,
+        );
+        if (!_isOk(status)) {
+          // 3xx/405/416/429 are neither success nor a definite rejection.
+          return _rejectedStatuses.contains(status)
+              ? _rejection(url, status!, contentType)
+              : _Reach.unknown;
         }
-        return _rejection(url, response.status, response.contentType);
-      }
-      // HEAD fails fast; servers that refuse it get one ranged GET.
-      var response = await _probeRequest(
-        client,
-        url,
-        timeout,
-        headers,
-        method: 'HEAD',
-      );
-      if (!_isOk(response.status) &&
-          (response.status == HttpStatus.methodNotAllowed ||
-              _rejectedStatuses.contains(response.status))) {
-        response = await _probeRequest(client, url, timeout, {
-          ...headers,
-          'Range': 'bytes=0-0',
-        });
-      }
-      if (_isOk(response.status)) {
-        return _isNonMedia(response.contentType)
-            ? MediaReachability.rejected
-            : MediaReachability.reachable;
-      }
-      // 416/429/3xx are neither success nor a definite rejection.
-      return _rejectedStatuses.contains(response.status)
-          ? _rejection(url, response.status, response.contentType)
-          : MediaReachability.unknown;
+        final head = Uint8List(64);
+        final length = await _readPrefix(response.data!.stream, head);
+        final text = utf8
+            .decode(
+              Uint8List.sublistView(head, 0, length),
+              allowMalformed: true,
+            )
+            .trimLeft();
+        // RFC 8216: #EXTM3U is the first line of every playlist.
+        if (text.startsWith('#EXTM3U')) return _Reach.reachable;
+        if (text.startsWith('<') ||
+            text.startsWith('{') ||
+            text.startsWith('[')) {
+          return _Reach.rejected;
+        }
+        // Encrypted playlists are opaque; other media is judged by its type.
+        if (VideoUrlExtractor.isHlsUrl(url)) return _Reach.unknown;
+        return _isNonMedia(contentType) ? _Reach.rejected : _Reach.reachable;
+      });
     } catch (_) {
       SourceOperation.check();
       // A timeout or transport failure does not establish a dead URL.
-      return MediaReachability.unknown;
+      return _Reach.unknown;
     }
   }
 
   /// Temporary media may not exist yet; only an HTML/JSON auth page or a
   /// permanent status rejects it.
-  static MediaReachability _rejection(
-    String url,
-    int status,
-    String? contentType,
-  ) {
-    final keep =
+  static _Reach _rejection(String url, int status, String? contentType) {
+    final temporary =
         VideoUrlExtractor.isOnDemandMediaPath(url) &&
         switch (status) {
           HttpStatus.unauthorized ||
           HttpStatus.forbidden => !_isNonMedia(contentType),
-          HttpStatus.notFound ||
-          HttpStatus.gone ||
-          HttpStatus.internalServerError ||
-          HttpStatus.badGateway ||
-          HttpStatus.serviceUnavailable ||
-          HttpStatus.gatewayTimeout => true,
-          _ => false,
+          HttpStatus.unavailableForLegalReasons => false,
+          _ => true,
         };
-    return keep ? MediaReachability.unknown : MediaReachability.rejected;
+    return temporary ? _Reach.unknown : _Reach.rejected;
   }
 
-  Future<({int status, String? contentType, String body, bool truncated})>
-  _probeRequest(
-    Dio client,
-    String url,
-    Duration timeout,
-    Map<String, String> headers, {
-    String method = 'GET',
-    bool readPlaylist = false,
-  }) async {
-    SourceOperation.check();
-    final cancel = CancelToken();
-    final detach = SourceOperation.current?.token.onCancel(
-      () => cancel.cancel('source cancelled'),
-    );
-    try {
-      return await () async {
-        final response = await client
-            .request<ResponseBody>(
-              url,
-              cancelToken: cancel,
-              options: Options(
-                method: method,
-                headers: headers,
-                responseType: ResponseType.stream,
-                receiveTimeout: timeout,
-                sendTimeout: timeout,
-              ),
-            );
-        final status = response.statusCode ?? 0;
-        final stream = response.data!.stream;
-        var body = '';
-        var truncated = false;
-        if (readPlaylist && _isOk(status)) {
-          (body, truncated) = await _readPlaylistPrefix(stream);
-        } else {
-          await stream.listen(null, onError: (Object _) {}).cancel();
-        }
-        return (
-          status: status,
-          contentType: response.headers.value(HttpHeaders.contentTypeHeader),
-          body: body,
-          truncated: truncated,
-        );
-      }().timeout(timeout);
-    } finally {
-      detach?.call();
-      cancel.cancel('media probe complete');
-    }
-  }
-
-  static Future<(String, bool)> _readPlaylistPrefix(
+  /// Copies the stream's first bytes into [buffer] until it is full or
+  /// [enough] accepts the prefix; leaving the loop cancels the response.
+  static Future<int> _readPrefix(
     Stream<Uint8List> stream,
-  ) async {
-    const limit = 2048;
-    final bytes = Uint8List(limit);
+    Uint8List buffer, [
+    bool Function(Uint8List prefix)? enough,
+  ]) async {
     var length = 0;
-    var text = '';
     await for (final chunk in stream) {
-      final count = chunk.length < limit - length
+      final count = chunk.length < buffer.length - length
           ? chunk.length
-          : limit - length;
-      bytes.setRange(length, length + count, chunk);
+          : buffer.length - length;
+      buffer.setRange(length, length + count, chunk);
       length += count;
-      text = utf8.decode(
-        Uint8List.sublistView(bytes, 0, length),
-        allowMalformed: true,
-      );
-      if (_playlistVerdict(text) != MediaReachability.unknown) break;
-      if (length == limit) return (text, true);
-    }
-    return (text, false);
-  }
-
-  static MediaReachability _playlistVerdict(String text) {
-    final value = text.trimLeft();
-    final head = (value.length > 128 ? value.substring(0, 128) : value)
-        .toUpperCase();
-    if (head.startsWith('<!DOCTYPE') ||
-        head.contains('<HTML') ||
-        head.startsWith('{') ||
-        head.startsWith('[')) {
-      return MediaReachability.rejected;
-    }
-    return head.contains('#EXT') || value.contains('#EXT')
-        ? MediaReachability.reachable
-        : MediaReachability.unknown;
-  }
-
-  /// Media headers from the play result (or the rule), plus the cookies the
-  /// pipeline declared for the media request.
-  Future<Map<String, String>> _mediaHeadersOf(PipelinePlayResult media) async {
-    final headers = <String, String>{
-      for (final entry
-          in (media.mediaHeaders.isEmpty ? rule.headers : media.mediaHeaders)
-              .entries)
-        if (entry.value.isNotEmpty) entry.key: entry.value,
-    };
-    if (headers.isEmpty) headers.addAll(_defaultMediaHeaders);
-    if (VideoUrlExtractor.isSignedCdnUrl(media.url)) {
-      headers.removeWhere((key, _) => key.toLowerCase() == 'referer');
-    }
-    if (media.cookieNames.isEmpty && media.cookiePrefixes.isEmpty) {
-      return headers;
-    }
-    try {
-      final cookies = await _cookieJar.loadForRequest(Uri.parse(media.url));
-      SourceOperation.check();
-      final cookie = cookies
-          .where(
-            (c) =>
-                c.value.isNotEmpty &&
-                (media.cookieNames.contains(c.name) ||
-                    media.cookiePrefixes.any(
-                      (p) => p.isNotEmpty && c.name.startsWith(p),
-                    )),
-          )
-          .map((c) => '${c.name}=${c.value}')
-          .join('; ');
-      if (cookie.isNotEmpty) {
-        final key = headers.keys.firstWhere(
-          (key) => key.toLowerCase() == 'cookie',
-          orElse: () => 'Cookie',
-        );
-        final existing = headers[key]?.trim() ?? '';
-        headers[key] = existing.isEmpty ? cookie : '$existing; $cookie';
+      if ((enough?.call(Uint8List.sublistView(buffer, 0, length)) ?? false) ||
+          length == buffer.length) {
+        break;
       }
-    } catch (_) {
-      SourceOperation.check();
     }
-    return headers;
-  }
-
-  /// Play pages that issue a single-use credential must resolve one at a time.
-  Future<T> _withPlaySession<T>(Future<T> Function() action) {
-    if (!_features.usesCookies) return action();
-    final next =
-        _playBarrier?.then((_) {
-          SourceOperation.check();
-          return action();
-        }) ??
-        Future<T>.sync(action);
-    // Keep the barrier ordered even if a queued caller stops waiting early.
-    _playBarrier = next.then<void>((_) {}, onError: (Object _) {});
-    return SourceOperation.current?.wait(next) ?? next;
+    return length;
   }
 
   /// Starts the rule's authorization refresh while the media is playing.
@@ -655,7 +550,7 @@ class SourceAdapter implements PipelineHost {
     }
     final url = Uri.tryParse(render(step.str('url')?.trim() ?? ''));
     if (url == null || !url.hasScheme) {
-      debugPrint('${rule.id}: invalid playback keep-alive URL: $url');
+      Log.w('Source', '${rule.id}: invalid playback keep-alive URL: $url');
       return;
     }
     final headers = <String, String>{
@@ -665,266 +560,259 @@ class SourceAdapter implements PipelineHost {
     };
     final expectedBody = step.str('expectedBody')?.trim() ?? '';
 
-    final generation = ++_keepAliveGeneration;
-    Future<void> send() =>
-        _sendKeepAlive(generation, url, headers, expectedBody);
+    // Cancelling the scope stops the timer and any request in flight.
+    final scope = _keepAlive = SourceOperation();
+    var sending = false;
+    Future<void> send() async {
+      if (sending) return;
+      sending = true;
+      try {
+        final response = await scope.run(
+          () => dio.getUri<String>(
+            url,
+            options: Options(
+              headers: headers,
+              responseType: ResponseType.plain,
+              validateStatus: (_) => true,
+            ),
+          ),
+        );
+        final status = response.statusCode ?? 0;
+        final body = response.data?.trim() ?? '';
+        if (status < 200 ||
+            status >= 300 ||
+            (expectedBody.isNotEmpty && body != expectedBody)) {
+          Log.w(
+            'Source',
+            '${rule.id}: playback keep-alive rejected (HTTP $status, body: $body)',
+          );
+        }
+      } catch (error) {
+        if (!scope.isCancelled) {
+          Log.w('Source', '${rule.id}: playback keep-alive failed', error);
+        }
+      } finally {
+        sending = false;
+      }
+    }
+
     await send();
-    if (generation != _keepAliveGeneration) return;
-    _keepAliveTimer = Timer.periodic(
+    if (scope.isCancelled) return;
+    final timer = Timer.periodic(
       Duration(seconds: (step.intValue('intervalSeconds') ?? 10).clamp(1, 300)),
       (_) => unawaited(send()),
     );
-  }
-
-  Future<void> _sendKeepAlive(
-    int generation,
-    Uri url,
-    Map<String, String> headers,
-    String expectedBody,
-  ) async {
-    if (generation != _keepAliveGeneration || _keepAliveRequest != null) return;
-    final cancelToken = _keepAliveRequest = CancelToken();
-    try {
-      final response = await dio.getUri<String>(
-        url,
-        cancelToken: cancelToken,
-        options: Options(
-          headers: headers,
-          responseType: ResponseType.plain,
-          validateStatus: (_) => true,
-        ),
-      );
-      if (generation != _keepAliveGeneration) return;
-      final status = response.statusCode ?? 0;
-      final body = response.data?.trim() ?? '';
-      if (status < 200 ||
-          status >= 300 ||
-          (expectedBody.isNotEmpty && body != expectedBody)) {
-        debugPrint(
-          '${rule.id}: playback keep-alive rejected (HTTP $status, body: $body)',
-        );
-      }
-    } catch (error) {
-      if (generation == _keepAliveGeneration) {
-        debugPrint('${rule.id}: playback keep-alive failed: $error');
-      }
-    } finally {
-      if (identical(_keepAliveRequest, cancelToken)) _keepAliveRequest = null;
-    }
+    scope.token.onCancel(timer.cancel);
   }
 
   /// Stops the keep-alive and releases the HLS proxy of the previous media.
   void stopPlaybackKeepAlive() {
-    _keepAliveGeneration++;
-    _keepAliveTimer?.cancel();
-    _keepAliveTimer = null;
-    _keepAliveRequest?.cancel('playback keep-alive stopped');
-    _keepAliveRequest = null;
-    _hlsGeneration++;
+    _keepAlive?.cancel();
+    _keepAlive = null;
     _hlsPreparation?.cancel();
     _hlsPreparation = null;
-    final proxy = _hlsProxy;
+    unawaited(_hlsProxy?.close());
     _hlsProxy = null;
-    unawaited(proxy?.close());
   }
 
   /// Prepares a stable player-facing URL: follows redirect-only entries and,
   /// when the rule asks for it, serves the HLS manifest through a local proxy.
+  /// A newer preparation cancels this one.
   Future<PlaybackMedia> preparePlaybackMedia(
     PlaybackMedia media, {
     bool? filterHlsAds,
     void Function(String message)? onHlsAdFilterStatus,
     void Function(String key)? onTimelinePrepared,
   }) => runOperation(() async {
-    final generation = ++_hlsGeneration;
     _hlsPreparation?.cancel();
     final preparation = _hlsPreparation = SourceOperation.current!;
     try {
-      return await _preparePlaybackMedia(
-        media,
-        generation,
-        preparation,
-        filterHlsAds: filterHlsAds,
-        onStatus: onHlsAdFilterStatus,
-        onTimelinePrepared: onTimelinePrepared,
+      final prepared = _features.resolvesMediaRedirects
+          ? await _followRedirects(media)
+          : media;
+      final uri = Uri.tryParse(prepared.url);
+      if (uri == null || !uri.isScheme('http') && !uri.isScheme('https')) {
+        return prepared;
+      }
+      final headers = prepared.httpHeaders;
+      if (!VideoUrlExtractor.isHlsUrl(prepared.url)) {
+        return _features.proxiesMedia
+            ? _installProxy(
+                await HlsProxy.startMedia(
+                  uri,
+                  headers: headers,
+                  fetch: _fetchTarget,
+                ),
+              )
+            : prepared;
+      }
+
+      final filtersAds =
+          filterHlsAds ??
+          PlaybackSettingsService.getFilterHlsAdsOverride() ??
+          _features.filtersHlsAds;
+      if (!_features.materializesHls && !filtersAds) return prepared;
+
+      PlaybackMedia skip(String log, [String? status]) {
+        Log.i('Source', '${rule.id}: $log');
+        if (filtersAds && status != null) onHlsAdFilterStatus?.call(status);
+        return prepared;
+      }
+
+      final budget = SourceOperation(
+        parent: preparation,
+        timeout: filtersAds ? const Duration(seconds: 15) : null,
       );
+      try {
+        return await budget.run(() async {
+          var playlist = await _fetchPlaylist(uri, headers);
+          // Encrypted masters also need a decoded, materialized media variant.
+          if (playlist.isMaster) {
+            if (!filtersAds && _features.hlsManifestDecode == null) {
+              return skip('HLS 主清单不做物化（未开启 filterHlsAds）');
+            }
+            final variant = playlist.variant;
+            if (variant == null) {
+              return skip('HLS 主清单无法选定单一变体', 'HLS 去广告未生效：不支持此多码率清单');
+            }
+            playlist = await _fetchPlaylist(variant.uri, headers);
+            Log.i(
+              'Source',
+              '${rule.id}: HLS 主清单选定变体 ${variant.resolution}@${variant.bandwidth ~/ 1000}kbps',
+            );
+          }
+          if (!playlist.isVod) {
+            return skip('直播清单无 #EXT-X-ENDLIST', 'HLS 去广告未生效：仅支持完整点播清单');
+          }
+
+          final outcome = filtersAds
+              ? await HlsAdFilter.apply(
+                  playlist,
+                  probe: (segment) => _fingerprint(segment, headers),
+                )
+              : null;
+          final proxied = _installProxy(
+            await HlsProxy.start(
+              playlist,
+              headers: headers,
+              stripTsPrefix: _features.stripsHlsTsPrefix,
+              fetch: _fetchTarget,
+            ),
+          );
+          if (outcome != null) {
+            Log.i('Source', '${rule.id}: HLS 去广告 ${outcome.detail}');
+            onHlsAdFilterStatus?.call(
+              outcome.changed
+                  ? '已过滤 ${outcome.removedSegments} 个广告分片，'
+                        '共 ${outcome.removedSeconds.toStringAsFixed(1)} 秒'
+                  : 'HLS 去广告：${outcome.detail}',
+            );
+          }
+          onTimelinePrepared?.call(outcome?.timelineKey ?? 'original');
+          return proxied;
+        });
+      } on Exception catch (error) {
+        preparation.token.throwIfCancelled();
+        return skip(
+          'HLS manifest materialization failed: $error',
+          budget.timedOut
+              ? 'HLS 去广告超过15秒，已保留原视频'
+              : 'HLS 去广告未生效：网络或分片处理失败，已保留原视频',
+        );
+      } finally {
+        budget.close();
+      }
     } finally {
       if (identical(_hlsPreparation, preparation)) _hlsPreparation = null;
     }
   });
 
-  Future<PlaybackMedia> _preparePlaybackMedia(
-    PlaybackMedia media,
-    int generation,
-    SourceOperation preparation, {
-    bool? filterHlsAds,
-    void Function(String message)? onStatus,
-    void Function(String key)? onTimelinePrepared,
-  }) async {
-    var prepared = media;
-    if (_features.resolvesMediaRedirects) {
-      prepared = await (_redirects ??= RemoteMediaRedirectResolver(
-        useSystemProxy: useSystemProxy,
-      )).resolveMedia(media.url, headers: media.httpHeaders);
-      SourceOperation.check();
-    }
-    final manifestUri = Uri.tryParse(prepared.url);
-    if (!VideoUrlExtractor.isHlsUrl(prepared.url)) {
-      if (!_features.proxiesMedia ||
-          manifestUri == null ||
-          (manifestUri.scheme != 'http' && manifestUri.scheme != 'https')) {
-        return prepared;
-      }
-      return _installPlaybackProxy(
-        await HlsProxy.startMedia(
-          manifestUri,
-          headers: prepared.httpHeaders,
-          fetch: _fetchPlaybackTarget,
-        ),
-        generation,
-      );
-    }
-
-    final filtersAds =
-        filterHlsAds ??
-        PlaybackSettingsService.getFilterHlsAdsOverride() ??
-        _features.filtersHlsAds;
-    if ((!_features.materializesHls && !filtersAds) ||
-        manifestUri == null ||
-        !manifestUri.hasScheme) {
-      return prepared;
-    }
-
-    PlaybackMedia skip(String log, [String? status]) {
-      debugPrint('${rule.id}: $log');
-      if (filtersAds && status != null) onStatus?.call(status);
-      return prepared;
-    }
-
-    final headers = prepared.httpHeaders;
-    final budget = SourceOperation(
-      parent: preparation,
-      timeout: filtersAds ? const Duration(seconds: 15) : null,
-    );
-    try {
-      return await budget.run(() async {
-        var playlist = await _fetchPlaylist(manifestUri, headers);
-        // Encrypted masters also need a decoded, materialized media variant.
-        if (playlist.isMaster) {
-          if (!filtersAds && _features.hlsManifestDecode == null) {
-            return skip('HLS 主清单不做物化（未开启 filterHlsAds）');
-          }
-          final variant = playlist.variant;
-          if (variant == null) {
-            return skip('HLS 主清单无法选定单一变体', 'HLS 去广告未生效：不支持此多码率清单');
-          }
-          playlist = await _fetchPlaylist(variant.uri, headers);
-          debugPrint(
-            '${rule.id}: HLS 主清单选定变体 ${variant.resolution}@${variant.bandwidth ~/ 1000}kbps',
-          );
-        }
-        if (!playlist.isVod) {
-          return skip('直播清单无 #EXT-X-ENDLIST', 'HLS 去广告未生效：仅支持完整点播清单');
-        }
-
-        HlsAdFilterOutcome? outcome;
-        if (filtersAds) {
-          outcome = await HlsAdFilter.apply(
-            playlist,
-            probe: (segment) => _readSegmentFingerprint(segment, headers),
-          );
-          debugPrint('${rule.id}: HLS 去广告 ${outcome.detail}');
-        }
-
-        final proxy = await HlsProxy.start(
-          playlist,
-          headers: headers,
-          stripTsPrefix: _features.stripsHlsTsPrefix,
-          fetch: _fetchPlaybackTarget,
-        );
-        final proxied = await _installPlaybackProxy(proxy, generation);
-
-        if (outcome != null) {
-          onStatus?.call(
-            outcome.changed
-                ? '已过滤 ${outcome.removedSegments} 个广告分片，'
-                      '共 ${outcome.removedSeconds.toStringAsFixed(1)} 秒'
-                : 'HLS 去广告：${outcome.detail}',
-          );
-        }
-        onTimelinePrepared?.call(outcome?.timelineKey ?? 'original');
-        return proxied;
-      });
-    } on Exception catch (error) {
-      preparation.token.throwIfCancelled();
-      return skip(
-        'HLS manifest materialization failed: $error',
-        budget.timedOut ? 'HLS 去广告超过15秒，已保留原视频' : 'HLS 去广告未生效：网络或分片处理失败，已保留原视频',
-      );
-    } finally {
-      budget.close();
-    }
-  }
-
-  /// Media fetches that would leave through a configured proxy get one retry
-  /// over a direct connection: the proxy's exit can be refused by the CDN
-  /// (e.g. region-blocked) while the player itself connects directly.
-  Future<Response<ResponseBody>> _fetchPlaybackTarget(
-    Uri uri,
-    String method,
-    Map<String, String> headers,
-  ) async {
-    try {
-      final response = await _playbackTargetRequest(
-        dio,
-        uri,
-        method,
-        headers,
-      );
-      final status = response.statusCode;
-      if (status != null && status < 400 || !_proxied(uri)) {
-        return response;
-      }
-      // Drop the refused body before retrying so its slot is released.
-      await response.data?.stream
-          .listen(null, onError: (Object _) {})
-          .cancel();
-      return _playbackTargetRequest(_directDio, uri, method, headers);
-    } on DioException {
-      if (!_proxied(uri)) rethrow;
-      return _playbackTargetRequest(_directDio, uri, method, headers);
-    }
-  }
-
-  static Future<Response<ResponseBody>> _playbackTargetRequest(
-    Dio client,
-    Uri uri,
-    String method,
-    Map<String, String> headers,
-  ) => client.requestUri<ResponseBody>(
-    uri,
-    options: Options(
-      method: method,
-      headers: headers,
-      responseType: ResponseType.stream,
-      validateStatus: (_) => true,
-      extra: const {SchedulerInterceptor.priorityKey: RequestPriority.play},
-    ),
-  );
-
-  Future<PlaybackMedia> _installPlaybackProxy(
-    HlsProxy proxy,
-    int generation,
-  ) async {
-    if (generation != _hlsGeneration || SourceOperation.current!.isCancelled) {
-      await proxy.close();
+  /// A cancelled (superseded or disposed) preparation never installs its proxy.
+  PlaybackMedia _installProxy(HlsProxy proxy) {
+    if (SourceOperation.current!.isCancelled) {
+      unawaited(proxy.close());
       throw const RequestCancelledException();
     }
-    final previous = _hlsProxy;
+    unawaited(_hlsProxy?.close());
     _hlsProxy = proxy;
-    unawaited(previous?.close());
     return (url: proxy.url, httpHeaders: const <String, String>{});
   }
+
+  static const _originHeaders = {
+    'authorization',
+    'cookie',
+    'host',
+    'origin',
+    'referer',
+  };
+
+  /// Follows redirect-only entry points with HEAD before handing them to
+  /// libmpv; origin credentials stay on the original authority.
+  Future<PlaybackMedia> _followRedirects(PlaybackMedia media) async {
+    final origin = Uri.tryParse(media.url);
+    if (origin == null ||
+        !origin.isScheme('http') && !origin.isScheme('https')) {
+      return media;
+    }
+    final foreign = {
+      for (final entry in media.httpHeaders.entries)
+        if (!_originHeaders.contains(entry.key.toLowerCase()))
+          entry.key: entry.value,
+    };
+    final client = useSystemProxy ? _bareDio : _bareDirectDio;
+    var current = origin;
+    try {
+      for (var hop = 0; hop <= 5; hop++) {
+        final target = current;
+        final headers = target.origin == origin.origin
+            ? media.httpHeaders
+            : foreign;
+        final response = await _bounded(
+          _redirectTimeout,
+          (cancel) => client.headUri<void>(
+            target,
+            cancelToken: cancel,
+            options: Options(headers: headers, followRedirects: false),
+          ),
+        );
+        final status = response.statusCode ?? 0;
+        final location = response.headers.value(HttpHeaders.locationHeader);
+        if (location != null &&
+            const {301, 302, 303, 307, 308}.contains(status)) {
+          current = target.resolve(location);
+          continue;
+        }
+        if (status >= 200 && status < 400) {
+          return (url: '$target', httpHeaders: headers);
+        }
+        Log.w('Source', '$name: 媒体重定向 HTTP $status: ${target.host}');
+        return media;
+      }
+      Log.w('Source', '$name: 媒体重定向次数过多: ${origin.host}');
+    } catch (error) {
+      SourceOperation.check();
+      Log.w('Source', '$name: 媒体重定向解析失败', error);
+    }
+    return media;
+  }
+
+  Future<Response<ResponseBody>> _fetchTarget(
+    Uri uri,
+    String method,
+    Map<String, String> headers,
+  ) => _mediaRequest(
+    uri,
+    (client) => client.requestUri<ResponseBody>(
+      uri,
+      options: Options(
+        method: method,
+        headers: headers,
+        responseType: ResponseType.stream,
+        validateStatus: (_) => true,
+        extra: _playExtra,
+      ),
+    ),
+  );
 
   /// The manifest may redirect; segments resolve against the final URI.
   Future<HlsPlaylist> _fetchPlaylist(
@@ -932,100 +820,66 @@ class SourceAdapter implements PipelineHost {
     Map<String, String> headers,
   ) async {
     final decoder = _features.hlsManifestDecode;
-    Response<Object> response;
-    try {
-      response = await _playlistRequest(dio, uri, headers, decoder);
-    } on DioException {
-      if (!_proxied(uri)) rethrow;
-      response = await _playlistRequest(_directDio, uri, headers, decoder);
-    }
-    final data = response.data;
-    final body = decoder == null
-        ? data as String
-        : HlsManifestDecoder.decode(data as List<int>, decoder);
-    return HlsPlaylist.parse(body, response.realUri);
+    final response = await _mediaRequest(
+      uri,
+      (client) => client.getUri<Object>(
+        uri,
+        options: Options(
+          headers: headers,
+          responseType: decoder == null
+              ? ResponseType.plain
+              : ResponseType.bytes,
+          validateStatus: _isOk,
+          extra: _playNoRetry,
+        ),
+      ),
+    );
+    final data = response.data!;
+    return HlsPlaylist.parse(
+      decoder == null
+          ? data as String
+          : HlsManifestDecoder.decode(data as List<int>, decoder),
+      response.realUri,
+    );
   }
-
-  Future<Response<Object>> _playlistRequest(
-    Dio client,
-    Uri uri,
-    Map<String, String> headers,
-    Map<String, dynamic>? decoder,
-  ) => client.getUri<Object>(
-    uri,
-    options: Options(
-      headers: headers,
-      responseType: decoder == null ? ResponseType.plain : ResponseType.bytes,
-      validateStatus: (status) => status != null && _isOk(status),
-      extra: const {
-        SchedulerInterceptor.priorityKey: RequestPriority.play,
-        RetryInterceptor.skipRetryKey: true,
-      },
-    ),
-  );
 
   /// Stops the request as soon as PAT/PMT and SPS identify the video.
-  Future<HlsVideoFingerprint?> _readSegmentFingerprint(
-    Uri segment,
-    Map<String, String> headers,
-  ) async {
-    try {
-      return await _readSegmentFingerprintOn(dio, segment, headers);
-    } on DioException {
-      SourceOperation.check();
-      if (!_proxied(segment)) return null;
-      return _readSegmentFingerprintOn(_directDio, segment, headers);
-    }
-  }
-
-  Future<HlsVideoFingerprint?> _readSegmentFingerprintOn(
-    Dio client,
+  Future<HlsVideoFingerprint?> _fingerprint(
     Uri segment,
     Map<String, String> headers,
   ) async {
     final cancel = CancelToken();
     try {
-      final response = await client.requestUri<ResponseBody>(
+      final response = await _mediaRequest(
         segment,
-        cancelToken: cancel,
-        options: Options(
-          headers: {
-            ...headers,
-            HttpHeaders.rangeHeader:
-                'bytes=0-${MpegTsFingerprint.probeBytes - 1}',
-          },
-          responseType: ResponseType.stream,
-          validateStatus: (status) => status != null && _isOk(status),
-          extra: const {
-            SchedulerInterceptor.priorityKey: RequestPriority.play,
-            RetryInterceptor.skipRetryKey: true,
-          },
+        (client) => client.requestUri<ResponseBody>(
+          segment,
+          cancelToken: cancel,
+          options: Options(
+            headers: {
+              ...headers,
+              HttpHeaders.rangeHeader:
+                  'bytes=0-${MpegTsFingerprint.probeBytes - 1}',
+            },
+            responseType: ResponseType.stream,
+            validateStatus: _isOk,
+            extra: _playNoRetry,
+          ),
         ),
       );
-      Uint8List? prefix;
       final reader = MpegTsFingerprint();
-      var length = 0;
-      await for (final chunk in response.data!.stream) {
-        final remaining = MpegTsFingerprint.probeBytes - length;
-        final count = chunk.length < remaining ? chunk.length : remaining;
-        Uint8List bytes;
-        if (prefix == null) {
-          bytes = Uint8List.sublistView(chunk, 0, count);
-        } else {
-          prefix.setRange(length, length + count, chunk);
-          bytes = Uint8List.sublistView(prefix, 0, length + count);
-        }
-        length += count;
-        final fingerprint = reader.read(bytes);
-        if (fingerprint != null || length == MpegTsFingerprint.probeBytes) {
-          return fingerprint;
-        }
-        prefix ??= Uint8List(MpegTsFingerprint.probeBytes)
-          ..setRange(0, length, bytes);
-      }
+      HlsVideoFingerprint? fingerprint;
+      await _readPrefix(
+        response.data!.stream,
+        Uint8List(MpegTsFingerprint.probeBytes),
+        (prefix) => (fingerprint = reader.read(prefix)) != null,
+      );
+      return fingerprint;
+    } on DioException {
+      SourceOperation.check();
       return null;
     } finally {
-      cancel.cancel('HLS 指纹探测结束');
+      cancel.cancel();
     }
   }
 
@@ -1066,9 +920,10 @@ class SourceAdapter implements PipelineHost {
       return response.data ?? '';
     } on DioException catch (e) {
       SourceOperation.check();
-      debugPrint(
+      Log.w(
+        'Source',
         '$name: fetch 失败 $url: ${e.message ?? e.type.name}, '
-        'status: ${e.response?.statusCode}',
+            'status: ${e.response?.statusCode}',
       );
       return '';
     }
@@ -1083,62 +938,46 @@ class SourceAdapter implements PipelineHost {
   }) async {
     if (!allowWebview) return '';
     try {
-      final (html, cookies) = await WebViewAdapter.getPageContentWithCookies(
+      final (html, cookies) = await WebViewAdapter.render(
         url,
+        userAgent: _userAgent,
         isReady: isReady,
         timeout: timeout,
         settleDelay: settleDelay,
-        userAgent: requestUserAgent,
-        taskScope: _webViewScope ??= WebViewTaskScope(),
       );
       SourceOperation.check();
-      if (cookies.isNotEmpty) await _storeWebViewCookies(url, cookies);
-      return html;
-    } catch (e) {
-      SourceOperation.check();
-      debugPrint('$name: WebView 渲染失败: $e');
-      return '';
-    }
-  }
-
-  /// Continues the browser session over Dio; a malformed cookie keeps the HTML.
-  Future<void> _storeWebViewCookies(String url, String cookies) async {
-    try {
-      final jar = [
-        for (final part in cookies.split(';'))
-          if (part.indexOf('=') case final eq when eq > 0)
-            if (part.substring(0, eq).trim() case final name
-                when name.isNotEmpty)
-              Cookie(name, part.substring(eq + 1).trim()),
-      ];
+      // Continue the browser session over Dio. document.cookie may hold
+      // values that dart:io's Cookie rejects; those are skipped.
+      final jar = <Cookie>[];
+      for (final (name, value) in WebViewAdapter.cookiePairs(cookies)) {
+        try {
+          jar.add(Cookie(name, value));
+        } on FormatException catch (_) {}
+      }
       if (jar.isNotEmpty) {
         await _cookieJar.saveFromResponse(Uri.parse(url), jar);
       }
+      return html;
     } catch (e) {
-      debugPrint('$name: WebView Cookie 同步失败: $e');
+      SourceOperation.check();
+      Log.w('Source', '$name: WebView 渲染失败', e);
+      return '';
     }
-    SourceOperation.check();
   }
 
   @override
   Future<String> sniffWithWebview(String url) async {
     if (!allowWebview) return '';
     try {
-      final cookie = rule.headers.entries
-          .where((e) => e.key.toLowerCase() == 'cookie')
-          .map((e) => e.value.trim())
-          .firstWhere((v) => v.isNotEmpty, orElse: () => '');
-      return await WebViewAdapter.extractVideoUrl(
-            url,
-            userAgent: requestUserAgent,
-            cookieHeader: cookie.isEmpty ? null : cookie,
-            followEmbeddedPlayer: _features.followsEmbeddedPlayer,
-            taskScope: _webViewScope ??= WebViewTaskScope(),
-          ) ??
-          '';
+      return await WebViewAdapter.sniff(
+        url,
+        userAgent: _userAgent,
+        cookieHeader: _ruleHeader('cookie'),
+        followEmbeddedPlayer: _features.followsEmbeddedPlayer,
+      );
     } catch (e) {
       SourceOperation.check();
-      debugPrint('$name: WebView 嗅探失败: $e');
+      Log.w('Source', '$name: WebView 嗅探失败', e);
       return '';
     }
   }
@@ -1168,11 +1007,10 @@ class _PlayFeatures {
 
   void _inspect(List<PipelineStep> steps) {
     for (final step in steps) {
-      final anime1 = step.op == 'anime1Play';
-      usesDynamicMetadata |= anime1 || step.op == 'setMediaHeaders';
+      usesDynamicMetadata |= step.op == 'setMediaHeaders';
       // A play page issuing a single-use credential (cookie/session) must run
       // exclusively, or concurrent episodes invalidate each other's token.
-      usesCookies |= anime1 || step.flag('cookieSession');
+      usesCookies |= step.flag('cookieSession');
       validatesWithCookies |= step.flag('validateWithCookies');
       stripsHlsTsPrefix |= step.flag('stripHlsTsPrefix');
       proxiesMedia |= step.flag('proxyMedia');
@@ -1197,173 +1035,39 @@ class _PlayFeatures {
   }
 }
 
-/// GET retry for transient network errors.
+/// Retries GETs after transient transport failures. Rule requests accept
+/// every status below 600, so HTTP errors are left to the pipeline.
 class RetryInterceptor extends Interceptor {
-  RetryInterceptor(this.dio);
+  RetryInterceptor(this._dio);
 
-  final Dio dio;
+  final Dio _dio;
   static const int _maxRetries = 2;
   static const skipRetryKey = 'anx.skipNetworkRetry';
-  static const _countKey = '__retry_count';
+  static const _countKey = 'anx.retryCount';
 
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) async {
     final options = err.requestOptions;
     final retries = options.extra[_countKey] as int? ?? 0;
-    if (retries >= _maxRetries || !_shouldRetry(err)) return handler.next(err);
-    options.extra[_countKey] = retries + 1;
-    try {
-      handler.resolve(await dio.fetch(options));
-    } on DioException catch (e) {
-      handler.next(e);
-    } catch (_) {
-      handler.next(err);
-    }
-  }
-
-  static bool _shouldRetry(DioException e) {
-    final options = e.requestOptions;
-    if (options.extra[skipRetryKey] == true ||
-        (options.cancelToken?.isCancelled ?? false) ||
-        options.method.toUpperCase() != 'GET') {
-      return false;
-    }
-    return switch (e.type) {
+    final transient = switch (err.type) {
       DioExceptionType.connectionTimeout ||
       DioExceptionType.sendTimeout ||
       DioExceptionType.receiveTimeout ||
       DioExceptionType.connectionError => true,
-      DioExceptionType.badResponse => const {
-        429,
-        502,
-        503,
-        504,
-      }.contains(e.response?.statusCode),
       _ => false,
     };
-  }
-}
-
-/// Resolves redirect-only media entry points before handing them to libmpv.
-class RemoteMediaRedirectResolver {
-  RemoteMediaRedirectResolver({bool useSystemProxy = true})
-    : _client = NetworkService.createClient(
-        useSystemProxy: useSystemProxy,
-        connectTimeout: _requestTimeout,
-      );
-
-  static const _maxRedirects = 5;
-  static const _requestTimeout = Duration(seconds: 20);
-  static const _hopByHop = {
-    'connection',
-    'content-length',
-    'host',
-    'keep-alive',
-    'proxy-authenticate',
-    'proxy-authorization',
-    'te',
-    'trailer',
-    'transfer-encoding',
-    'upgrade',
-  };
-  static const _originHeaders = {
-    'authorization',
-    'cookie',
-    'host',
-    'origin',
-    'referer',
-  };
-  static const _redirectStatuses = {
-    HttpStatus.movedPermanently,
-    HttpStatus.found,
-    HttpStatus.seeOther,
-    HttpStatus.temporaryRedirect,
-    HttpStatus.permanentRedirect,
-  };
-
-  final http.Client _client;
-
-  Future<PlaybackMedia> resolveMedia(
-    String remoteUrl, {
-    Map<String, String> headers = const {},
-  }) async {
-    final original = Uri.tryParse(remoteUrl);
-    if (original == null ||
-        (original.scheme != 'http' && original.scheme != 'https')) {
-      return (
-        url: remoteUrl,
-        httpHeaders: original == null ? _withoutOrigin(headers) : headers,
-      );
+    if (!transient ||
+        retries >= _maxRetries ||
+        options.method != 'GET' ||
+        options.extra[skipRetryKey] == true ||
+        (options.cancelToken?.isCancelled ?? false)) {
+      return handler.next(err);
     }
-    final requestHeaders = {
-      for (final entry in headers.entries)
-        if (!_hopByHop.contains(entry.key.toLowerCase()))
-          entry.key: entry.value,
-    };
-
-    var current = original;
+    options.extra[_countKey] = retries + 1;
     try {
-      for (var hop = 0; hop <= _maxRedirects; hop++) {
-        SourceOperation.check();
-        final abort = Completer<void>();
-        void cancel() {
-          if (!abort.isCompleted) abort.complete();
-        }
-
-        final timer = Timer(_requestTimeout, cancel);
-        final detach = SourceOperation.current?.token.onCancel(cancel);
-        try {
-          final sameOrigin = _sameAuthority(current, original);
-          final request =
-              http.AbortableRequest('HEAD', current, abortTrigger: abort.future)
-                ..followRedirects = false
-                ..headers[HttpHeaders.acceptEncodingHeader] = 'identity'
-                ..headers[HttpHeaders.userAgentHeader] = 'Baka Media Resolver';
-          if (sameOrigin) request.headers.addAll(requestHeaders);
-
-          final response = await _client.send(request).timeout(_requestTimeout);
-          final location = response.headers[HttpHeaders.locationHeader];
-          final status = response.statusCode;
-          await response.stream.drain<void>().timeout(_requestTimeout);
-
-          if (location != null &&
-              location.isNotEmpty &&
-              _redirectStatuses.contains(status)) {
-            current = current.resolve(location);
-            continue;
-          }
-          if (status >= 200 && status < 400) {
-            return (
-              url: current.toString(),
-              httpHeaders: sameOrigin ? headers : _withoutOrigin(headers),
-            );
-          }
-          debugPrint('[RemoteMediaResolver] HTTP $status for ${current.host}');
-          return (url: remoteUrl, httpHeaders: headers);
-        } finally {
-          detach?.call();
-          timer.cancel();
-          cancel();
-        }
-      }
-      debugPrint('[RemoteMediaResolver] too many redirects: ${original.host}');
-    } catch (error) {
-      SourceOperation.check();
-      debugPrint('[RemoteMediaResolver] ${original.host} failed: $error');
+      handler.resolve(await _dio.fetch(options));
+    } on DioException catch (e) {
+      handler.next(e);
     }
-    return (url: remoteUrl, httpHeaders: headers);
   }
-
-  static Map<String, String> _withoutOrigin(Map<String, String> headers) => {
-    for (final entry in headers.entries)
-      if (!_originHeaders.contains(entry.key.toLowerCase()))
-        entry.key: entry.value,
-  };
-
-  static bool _sameAuthority(Uri left, Uri right) =>
-      left.scheme.toLowerCase() == right.scheme.toLowerCase() &&
-      left.host.toLowerCase() == right.host.toLowerCase() &&
-      left.port == right.port;
-
-  void close() => _client.close();
 }

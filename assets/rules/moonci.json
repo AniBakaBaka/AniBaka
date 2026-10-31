@@ -17,11 +17,12 @@
     {
       "op": "searchList",
       "selectors": [
-        ".search-item",
-        ".module-item",
-        "a[href*=\"/anime/\"]"
+        "li.hl-list-item"
       ],
-      "detailPattern": "/anime/",
+      "linkSelector": ".hl-item-title > a",
+      "titleSelector": ".hl-item-title > a",
+      "imageSelector": "a.hl-item-thumb",
+      "imageAttr": "data-original",
       "keywordMatch": true
     }
   ],
@@ -32,19 +33,12 @@
     {
       "op": "episodes",
       "listSelectors": [
-        "ul.hl-plays-list",
-        ".anthology-list-play",
-        ".module-player-list",
-        ".module-play-list",
-        ".play-list",
-        ".playlist",
-        ".episode-list",
-        ".content_playlist"
+        "ul.hl-plays-list"
       ],
       "tabSelectors": [
-        ".play-source-tab a",
-        ".source a"
-      ]
+        ".hl-plays-from a"
+      ],
+      "tabAttr": "alt"
     }
   ],
   "play": [

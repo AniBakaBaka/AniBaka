@@ -1,215 +1,238 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:developer' as developer;
 import 'dart:io';
+import 'dart:math';
 
 import 'package:archive/archive_io.dart';
+import 'package:baka/core/network_service.dart';
 import 'package:baka/instance.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
-enum _LogLevel {
-  info('INFO', 800),
-  warning('WARN', 900),
-  error('ERROR', 1000);
+/// Application log. Debug/profile builds echo every line to the console;
+/// info and above are appended to a rotating file in batches through one open
+/// handle. Errors are written immediately. Lines logged before [init] are kept
+/// and written once the file is open.
+abstract final class Log {
+  static const _maxFileBytes = 2 << 20;
+  static const _maxFiles = 5;
+  static const _maxStackLines = 24;
+  static const _batchDelay = Duration(seconds: 2);
+  static const _maxBufferedChars = 1 << 20;
+  static const _console = kDebugMode || kProfileMode;
 
-  const _LogLevel(this.label, this.developerLevel);
-
-  final String label;
-  final int developerLevel;
-}
-
-class AppLogger {
-  AppLogger._();
-
-  static const int _maxLogFileBytes = 2 * 1024 * 1024;
-  static const int _maxLogFiles = 5;
-  static const String _activeLogFileName = 'app.log';
-  static const _LogLevel _minimumPersistedLevel = _LogLevel.info;
-
-  static final AppLogger instance = AppLogger._();
-
-  static final _redactKeyValueRe = RegExp(
-    r'''((?:['"]?)(?:token|refresh_token|authorization|password|cookie|set-cookie|usertoken)(?:['"]?)\s*[:=]\s*(?:['"]?))([^,'"}\s\]]+)''',
-    caseSensitive: false,
-  );
-  static final _redactAuthHeaderRe = RegExp(
-    r'((?:Bearer|Basic)\s+)[A-Za-z0-9._~+/=-]+',
+  /// Credentials in `key=value`, JSON and Authorization header forms.
+  static final _secret = RegExp(
+    r'''((?:token|authorization|password|pwd|cookie|secret)['"]?\s*[:=]\s*['"]?(?:(?:Bearer|Basic)\s+)?)[^,'"}&;\s\]]+|((?:Bearer|Basic)\s+)[\w.~+/=-]+''',
     caseSensitive: false,
   );
 
-  Directory? _logDirectory;
-  File? _logFile;
-  int _currentLogFileBytes = 0;
-  bool _initialized = false;
-  Future<void>? _initFuture;
-  bool _errorHandlersInstalled = false;
-  Future<void> _writeQueue = Future<void>.value();
+  static String? _dir;
+  static RandomAccessFile? _file;
+  static int _size = 0;
+  static bool _ready = false;
+  static final _pending = StringBuffer();
+  static Timer? _timer;
+  static Future<void> _io = Future.value();
+  static Future<void>? _initializing;
 
+  /// Console only; never persisted.
+  static void d(String tag, Object? message) {
+    if (_console) debugPrint('D/$tag: $message');
+  }
+
+  static void i(String tag, Object? message) => _log('I', tag, message);
+
+  static void w(
+    String tag,
+    Object? message, [
+    Object? error,
+    StackTrace? stack,
+  ]) => _log('W', tag, message, error, stack);
+
+  static void e(
+    String tag,
+    Object? message, [
+    Object? error,
+    StackTrace? stack,
+  ]) => _log('E', tag, message, error, stack);
+
+  /// Runs [body] with uncaught errors logged; release builds silence `print`.
   static Future<void> runZoned(Future<void> Function() body) async {
     await runZonedGuarded(
       body,
-      (Object error, StackTrace stackTrace) {
-        AppLogger.instance.error(
-          'Uncaught zone error',
-          tag: 'Zone',
-          error: error,
-          stackTrace: stackTrace,
-        );
-      },
-      zoneSpecification: ZoneSpecification(
-        // release 模式下静默 print，debug/profile 下原样输出。
-        print: (Zone self, ZoneDelegate parent, Zone zone, String line) {
-          if (kDebugMode || kProfileMode) parent.print(zone, line);
-        },
-      ),
+      (error, stack) => e('Zone', 'Uncaught error', error, stack),
+      zoneSpecification: _console
+          ? null
+          : ZoneSpecification(print: (_, _, _, _) {}),
     );
   }
 
-  Future<void> init() => _initFuture ??= _initialize();
+  static Future<void> init() => _initializing ??= _open();
 
-  Future<void> _initialize() async {
-    _logDirectory = await _resolveLogDirectory();
-    if (!await _logDirectory!.exists()) {
-      await _logDirectory!.create(recursive: true);
-    }
-
-    _logFile = File(_joinPath(_logDirectory!.path, _activeLogFileName));
-    if (await _logFile!.exists()) {
-      _currentLogFileBytes = await _logFile!.length();
-      if (_currentLogFileBytes >= _maxLogFileBytes) {
-        await _rotateLogs();
-      }
+  static Future<void> _open() async {
+    final dir = Instances.isDesktopPlatform
+        ? await Instances.desktopDataDirectory('logs')
+        : await Directory(
+            _join((await getApplicationSupportDirectory()).path, 'logs'),
+          ).create(recursive: true);
+    _dir = dir.path;
+    final file = File(_join(dir.path, 'app.log'));
+    _size = await file.exists() ? await file.length() : 0;
+    if (_size >= _maxFileBytes) {
+      await _rotate();
     } else {
-      await _logFile!.create(recursive: true);
-      _currentLogFileBytes = 0;
+      _file = await file.open(mode: FileMode.append);
     }
-
-    _initialized = true;
-    _installGlobalErrorHandlers();
-    info('Logger initialized (${_logFile?.path})', tag: 'Logger');
-  }
-
-  void info(
-    Object? message, {
-    String? tag,
-    Object? error,
-    StackTrace? stackTrace,
-  }) => _log(
-    _LogLevel.info,
-    message,
-    tag: tag,
-    error: error,
-    stackTrace: stackTrace,
-  );
-
-  void warning(
-    Object? message, {
-    String? tag,
-    Object? error,
-    StackTrace? stackTrace,
-  }) => _log(
-    _LogLevel.warning,
-    message,
-    tag: tag,
-    error: error,
-    stackTrace: stackTrace,
-  );
-
-  void error(
-    Object? message, {
-    String? tag,
-    Object? error,
-    StackTrace? stackTrace,
-  }) => _log(
-    _LogLevel.error,
-    message,
-    tag: tag,
-    error: error,
-    stackTrace: stackTrace,
-  );
-
-  Future<void> _flush() => _writeQueue;
-
-  Future<List<File>> _logFiles() async {
-    await _flush();
-    final directory = _logDirectory;
-    if (directory == null || !await directory.exists()) {
-      return <File>[];
-    }
-
-    final entries = <(File, DateTime)>[];
-    await for (final entity in directory.list()) {
-      if (entity is! File || !entity.path.toLowerCase().endsWith('.log')) {
-        continue;
-      }
-      entries.add((entity, (await entity.stat()).modified));
-    }
-
-    entries.sort((a, b) => b.$2.compareTo(a.$2));
-    return [for (final entry in entries) entry.$1];
-  }
-
-  Future<LogArchive> createLogArchive() async {
-    final files = await _logFiles();
-    final archiveFileName = _logArchiveFileName();
-    final archiveFile = File(
-      _joinPath(await _temporaryDirectoryPath(), archiveFileName),
-    );
-    final encoder = ZipFileEncoder()..create(archiveFile.path);
-    if (files.isEmpty) {
-      encoder.addArchiveFile(
-        ArchiveFile.string('empty.log', 'No log files were found.'),
+    _ready = true;
+    final flutterError = FlutterError.onError;
+    FlutterError.onError = (details) {
+      e(
+        'Flutter',
+        details.context?.toDescription() ?? 'Framework error',
+        details.exception,
+        details.stack,
       );
-    } else {
-      for (final file in files) {
-        await encoder.addFile(file, _fileName(file.path));
-      }
-    }
-    await encoder.close();
-
-    return LogArchive(
-      file: archiveFile,
-      fileName: archiveFileName,
-      logFileCount: files.length,
-      sizeBytes: await archiveFile.length(),
-    );
+      flutterError?.call(details);
+    };
+    final platformError = PlatformDispatcher.instance.onError;
+    PlatformDispatcher.instance.onError = (error, stack) {
+      e('Platform', 'Uncaught error', error, stack);
+      return platformError?.call(error, stack) ?? true;
+    };
+    await flush();
   }
 
-  Future<LogArchive?> exportLogs() async {
-    final archive = await createLogArchive();
+  static void _log(
+    String level,
+    String tag,
+    Object? message, [
+    Object? error,
+    StackTrace? stack,
+  ]) {
+    final line = StringBuffer()
+      ..write(DateTime.now().toIso8601String())
+      ..write(' $level/$tag: ')
+      ..write(message);
+    if (error != null) line.write('\n  $error');
+    if (stack != null) {
+      final frames = stack.toString().trimRight().split('\n');
+      for (final frame in frames.take(_maxStackLines)) {
+        line.write('\n  $frame');
+      }
+      if (frames.length > _maxStackLines) line.write('\n  …');
+    }
+    final text = line.toString().replaceAllMapped(
+      _secret,
+      (m) => '${m[1] ?? m[2]}***',
+    );
+    if (_console) debugPrint(text);
+    if (!_ready && _pending.length > _maxBufferedChars) _pending.clear();
+    _pending.writeln(text);
+    if (!_ready) return;
+    if (level == 'E') {
+      flush();
+    } else {
+      _timer ??= Timer(_batchDelay, flush);
+    }
+  }
 
-    final bytes = Instances.isDesktopPlatform
-        ? null
-        : await archive.file.readAsBytes();
+  /// Writes buffered lines; completes after all earlier writes.
+  static Future<void> flush() {
+    _timer?.cancel();
+    _timer = null;
+    if (!_ready || _pending.isEmpty) return _io;
+    final bytes = utf8.encode(_pending.toString());
+    _pending.clear();
+    return _io = _io.then((_) => _append(bytes)).catchError((Object error) {
+      if (_console) debugPrint('Log write failed: $error');
+    });
+  }
 
-    final savePath = await FilePicker.saveFile(
+  static Future<void> _append(Uint8List bytes) async {
+    if (_size + bytes.length > _maxFileBytes) await _rotate();
+    await _file!.writeFrom(bytes);
+    _size += bytes.length;
+  }
+
+  /// app.log → app.1.log → … → app.{_maxFiles - 1}.log (dropped).
+  static Future<void> _rotate() async {
+    await _file?.close();
+    for (var index = _maxFiles - 1; index > 0; index--) {
+      final source = File(_join(_dir!, _fileName(index - 1)));
+      if (await source.exists()) {
+        await source.rename(_join(_dir!, _fileName(index)));
+      }
+    }
+    _file = await File(_join(_dir!, 'app.log')).open(mode: FileMode.write);
+    _size = 0;
+  }
+
+  static String _fileName(int index) =>
+      index == 0 ? 'app.log' : 'app.$index.log';
+
+  static String _join(String parent, String child) =>
+      '$parent${Platform.pathSeparator}$child';
+
+  static String _stamp() =>
+      DateTime.now().toIso8601String().replaceAll(RegExp('[:.]'), '-');
+
+  /// Zips the current logs, newest first, into the temporary directory.
+  static Future<LogArchive> createArchive() async {
+    await flush();
+    final files = <File>[];
+    if (_dir case final dir?) {
+      for (var index = 0; index < _maxFiles; index++) {
+        final file = File(_join(dir, _fileName(index)));
+        if (await file.exists()) files.add(file);
+      }
+    }
+    final temp = await Directory(
+      _join((await getTemporaryDirectory()).path, 'baka_logs'),
+    ).create(recursive: true);
+    final name = 'baka-logs-${_stamp()}.zip';
+    final file = File(_join(temp.path, name));
+    final zip = ZipFileEncoder()..create(file.path);
+    for (final log in files) {
+      await zip.addFile(log, log.uri.pathSegments.last);
+    }
+    if (files.isEmpty) {
+      zip.addArchiveFile(ArchiveFile.string('empty.log', 'No log files.'));
+    }
+    await zip.close();
+    return LogArchive(file, name, files.length, await file.length());
+  }
+
+  /// Saves an archive where the user picks; null when cancelled.
+  static Future<LogArchive?> exportLogs() async {
+    final archive = await createArchive();
+    final desktop = Instances.isDesktopPlatform;
+    final path = await FilePicker.saveFile(
       dialogTitle: 'Export Baka logs',
       fileName: archive.fileName,
       type: FileType.custom,
       allowedExtensions: const ['zip'],
       lockParentWindow: true,
-      bytes: bytes,
+      bytes: desktop ? null : await archive.file.readAsBytes(),
     );
-
-    if (savePath == null) return null;
-
-    final savedFile = Instances.isDesktopPlatform
-        ? await archive.file.copy(_ensureZipExtension(savePath))
-        : File(savePath);
-
+    if (path == null) return null;
+    final saved = desktop
+        ? await archive.file.copy(
+            path.toLowerCase().endsWith('.zip') ? path : '$path.zip',
+          )
+        : File(path);
     return LogArchive(
-      file: savedFile,
-      fileName: _fileName(savedFile.path),
-      logFileCount: archive.logFileCount,
-      sizeBytes: archive.sizeBytes,
+      saved,
+      saved.uri.pathSegments.last,
+      archive.logFileCount,
+      archive.sizeBytes,
     );
   }
 
-  Future<ShareResult> shareLogs() async {
-    final archive = await createLogArchive();
+  static Future<ShareResult> shareLogs() async {
+    final archive = await createArchive();
     return SharePlus.instance.share(
       ShareParams(
         files: [
@@ -220,240 +243,76 @@ class AppLogger {
           ),
         ],
         subject: 'Baka logs',
-        text: 'Baka logs ${DateTime.now().toIso8601String()}',
       ),
     );
   }
-
-  void _installGlobalErrorHandlers() {
-    if (_errorHandlersInstalled) return;
-    _errorHandlersInstalled = true;
-
-    final previousFlutterErrorHandler = FlutterError.onError;
-    FlutterError.onError = (FlutterErrorDetails details) {
-      error(
-        'Flutter framework error',
-        tag: 'Flutter',
-        error: details.exception,
-        stackTrace: details.stack,
-      );
-      previousFlutterErrorHandler?.call(details);
-    };
-
-    final previousPlatformErrorHandler = PlatformDispatcher.instance.onError;
-    PlatformDispatcher.instance.onError =
-        (Object error, StackTrace stackTrace) {
-          this.error(
-            'Uncaught platform error',
-            tag: 'Platform',
-            error: error,
-            stackTrace: stackTrace,
-          );
-          return previousPlatformErrorHandler?.call(error, stackTrace) ?? true;
-        };
-  }
-
-  void _log(
-    _LogLevel level,
-    Object? message, {
-    String? tag,
-    Object? error,
-    StackTrace? stackTrace,
-  }) {
-    const shouldEmitConsole = kDebugMode || kProfileMode;
-    final shouldPersist = level.index >= _minimumPersistedLevel.index;
-    if (!shouldEmitConsole && !shouldPersist) return;
-
-    final timestamp = DateTime.now();
-    final safeMessage = _redact(message?.toString() ?? '');
-    final safeError = error == null ? null : _redact(error.toString());
-    final safeStackTrace = stackTrace == null
-        ? null
-        : _redact(stackTrace.toString());
-
-    if (shouldEmitConsole) {
-      developer.log(
-        safeMessage,
-        time: timestamp,
-        level: level.developerLevel,
-        name: tag == null ? 'Baka' : 'Baka.$tag',
-        error: safeError,
-        stackTrace: safeStackTrace == null
-            ? null
-            : StackTrace.fromString(safeStackTrace),
-      );
-    }
-
-    if (!shouldPersist || !_initialized || _logFile == null) return;
-
-    final entry = _formatEntry(
-      timestamp: timestamp,
-      level: level,
-      message: safeMessage,
-      tag: tag,
-      error: safeError,
-      stackTrace: safeStackTrace,
-    );
-    _writeQueue = _writeQueue
-        .then((_) => _writeEntry(entry, level: level))
-        .catchError((_) {});
-  }
-
-  String _formatEntry({
-    required DateTime timestamp,
-    required _LogLevel level,
-    required String message,
-    required String? tag,
-    required String? error,
-    required String? stackTrace,
-  }) {
-    final buffer = StringBuffer()
-      ..write(timestamp.toIso8601String())
-      ..write(' [')
-      ..write(level.label)
-      ..write(']');
-
-    if (tag != null && tag.isNotEmpty) {
-      buffer
-        ..write(' [')
-        ..write(tag)
-        ..write(']');
-    }
-
-    buffer
-      ..write(' ')
-      ..write(message);
-
-    if (error != null && error.isNotEmpty) {
-      buffer
-        ..write('\nerror: ')
-        ..write(error);
-    }
-
-    if (stackTrace != null && stackTrace.isNotEmpty) {
-      buffer
-        ..write('\n')
-        ..write(stackTrace);
-    }
-
-    return buffer.toString();
-  }
-
-  Future<void> _writeEntry(String entry, {required _LogLevel level}) async {
-    final payload = utf8.encode('$entry\n');
-    if (_currentLogFileBytes + payload.length >= _maxLogFileBytes) {
-      await _rotateLogs();
-    }
-
-    await _logFile!.writeAsBytes(
-      payload,
-      mode: FileMode.append,
-      flush: level.index >= _LogLevel.error.index,
-    );
-    _currentLogFileBytes += payload.length;
-  }
-
-  Future<void> _rotateLogs() async {
-    final directory = _logDirectory;
-    final activeFile = _logFile;
-    if (directory == null || activeFile == null) return;
-
-    try {
-      final oldest = File(
-        _joinPath(directory.path, 'app.${_maxLogFiles - 1}.log'),
-      );
-      if (await oldest.exists()) {
-        await oldest.delete();
-      }
-
-      for (var index = _maxLogFiles - 2; index >= 1; index--) {
-        final source = File(_joinPath(directory.path, 'app.$index.log'));
-        if (!await source.exists()) continue;
-
-        final target = File(_joinPath(directory.path, 'app.${index + 1}.log'));
-        await source.rename(target.path);
-      }
-
-      if (await activeFile.exists()) {
-        await activeFile.rename(_joinPath(directory.path, 'app.1.log'));
-      }
-
-      _logFile = File(_joinPath(directory.path, _activeLogFileName));
-      await _logFile!.create(recursive: true);
-      _currentLogFileBytes = 0;
-    } catch (error, stackTrace) {
-      if (kDebugMode || kProfileMode) {
-        developer.log(
-          'Failed to rotate logs',
-          name: 'Baka.Logger',
-          level: _LogLevel.warning.developerLevel,
-          error: error,
-          stackTrace: stackTrace,
-        );
-      }
-    }
-  }
-
-  Future<Directory> _resolveLogDirectory() async {
-    if (Instances.isDesktopPlatform) {
-      return Instances.desktopDataDirectory('logs');
-    }
-
-    final supportDirectory = await getApplicationSupportDirectory();
-    return Directory(_joinPath(supportDirectory.path, 'logs'));
-  }
-
-  Future<String> _temporaryDirectoryPath() async {
-    final directory = await getTemporaryDirectory();
-    final logExportDirectory = Directory(
-      _joinPath(directory.path, 'baka_logs'),
-    );
-    if (!await logExportDirectory.exists()) {
-      await logExportDirectory.create(recursive: true);
-    }
-    return logExportDirectory.path;
-  }
-
-  String _logArchiveFileName() {
-    final timestamp = DateTime.now()
-        .toIso8601String()
-        .replaceAll(':', '-')
-        .replaceAll('.', '-');
-    return 'baka-logs-$timestamp.zip';
-  }
-
-  /// 脱敏 token / 密码 / cookie 等敏感字段。
-  String _redact(String input) => input
-      .replaceAllMapped(
-        _redactKeyValueRe,
-        (Match match) => '${match.group(1)}[REDACTED]',
-      )
-      .replaceAllMapped(
-        _redactAuthHeaderRe,
-        (Match match) => '${match.group(1)}[REDACTED]',
-      );
-
-  static final _pathSeparatorRe = RegExp(r'[\\/]');
-
-  String _joinPath(String parent, String child) =>
-      '$parent${Platform.pathSeparator}$child';
-
-  String _fileName(String path) => path.split(_pathSeparatorRe).last;
-
-  String _ensureZipExtension(String path) =>
-      path.toLowerCase().endsWith('.zip') ? path : '$path.zip';
 }
 
 class LogArchive {
-  const LogArchive({
-    required this.file,
-    required this.fileName,
-    required this.logFileCount,
-    required this.sizeBytes,
-  });
+  const LogArchive(this.file, this.fileName, this.logFileCount, this.sizeBytes);
 
   final File file;
   final String fileName;
   final int logFileCount;
   final int sizeBytes;
+}
+
+/// Serves one log archive on the LAN at an unguessable path, so a phone can
+/// download a TV's logs by scanning a QR code.
+class LogShareServer {
+  HttpServer? _server;
+  final downloads = ValueNotifier<int>(0);
+
+  Future<({String url, LogArchive archive})> start() async {
+    if (_server != null) throw StateError('日志导出服务已启动');
+    final archive = await Log.createArchive();
+    final address = await NetworkService.findLanIpv4();
+    if (address == null) throw StateError('未找到可用的局域网地址，请检查电视网络连接');
+    final random = Random.secure();
+    final token = base64UrlEncode([
+      for (var i = 0; i < 18; i++) random.nextInt(256),
+    ]);
+    final path = '/logs/$token/${Uri.encodeComponent(archive.fileName)}';
+    final server = _server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
+    server.listen((request) => _serve(request, path, archive));
+    Log.i('LogShare', 'Serving ${archive.fileName} on ${address.address}');
+    return (
+      url: 'http://${address.address}:${server.port}$path',
+      archive: archive,
+    );
+  }
+
+  Future<void> _serve(
+    HttpRequest request,
+    String path,
+    LogArchive archive,
+  ) async {
+    final response = request.response;
+    if (request.method != 'GET' || request.uri.path != path) {
+      response.statusCode = HttpStatus.notFound;
+      await response.close();
+      return;
+    }
+    try {
+      response.headers
+        ..contentType = ContentType('application', 'zip')
+        ..set(
+          'content-disposition',
+          'attachment; filename="${archive.fileName}"',
+        )
+        ..set(HttpHeaders.cacheControlHeader, 'no-store')
+        ..contentLength = archive.sizeBytes;
+      await response.addStream(archive.file.openRead());
+      await response.close();
+      downloads.value++;
+    } catch (error) {
+      Log.w('LogShare', 'Download failed', error);
+      await response.close();
+    }
+  }
+
+  Future<void> stop() async {
+    await _server?.close(force: true);
+    _server = null;
+  }
 }

@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
@@ -590,13 +591,13 @@ class SourceCatalog extends ChangeNotifier {
           }
           count++;
         } catch (e) {
-          debugPrint('[SourceCatalog] 跳过无效规则: $e');
+          Log.w('SourceCatalog', '跳过无效规则: $e');
         }
       }
       if (count > 0) await _commit();
       return count;
     } catch (e) {
-      debugPrint('[SourceCatalog] 导入失败: $e');
+      Log.w('SourceCatalog', '导入失败: $e');
       return 0;
     }
   }

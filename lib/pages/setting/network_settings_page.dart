@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'package:baka/core/network_settings.dart';
+import 'package:baka/core/network_service.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/settings/settings_widgets.dart';

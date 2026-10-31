@@ -41,7 +41,8 @@ Baka 是使用 Flutter 开发的多端媒体客户端，通过规则驱动的视
 - 本地播放历史及登录后的历史同步
 - Windows、Android、macOS、iOS 和 Android TV 界面
 - Windows Anime4K 实时画质增强
-- Windows [DLSS 5 实验性视频增强](docs/dlss5-video-enhancement.md)，实验室开关可为所有内置播放启用 NVIDIA 神经渲染、2 倍超分与帧生成，仅作用于内置播放器
+- Windows AnimeJaNai 实时超分，支持 TensorRT / DirectML、三档切换和首次自动下载，可与 Anime4K、DLSS 叠加
+- Windows DLSS 5 实验性视频增强，实验室开关可为所有内置播放启用 NVIDIA 神经渲染、2 倍超分与帧生成，仅作用于内置播放器
 
 内置规则随应用打包，社区规则由
 [AniBakaRule](https://github.com/AniBakaBaka/AniBakaRule) 维护并通过规则中心获取。
@@ -118,12 +119,14 @@ fvm flutter build ios --release --no-codesign
 ### 组织维护的依赖
 
 `media_kit_video` 和 `screen_brightness` 通过 pub 的 Git 依赖引用组织 fork，
+`media_kit_libs_windows_video` 通过 Git 覆盖固定到同一 media-kit 提交。
 `pubspec.yaml` 固定提交，`pubspec.lock` 记录解析结果。运行 `fvm flutter pub get`
 即可获取，无需复制 `third_party` 或修改 Pub 缓存。
 
 - [media-kit](https://github.com/AniBakaBaka/media-kit/tree/main)：
-  Windows 播放器增强补丁；主项目 CMake 启用 `MEDIA_KIT_VIDEO_ENABLE_DLSS`，
-  并提供 `windows/runner/dlss_realtime` 中的 GPU 后端。
+  Windows 播放器增强补丁、DLSS GPU 后端和 AnimeJaNai 内核打包均由 fork 维护；
+  主项目 CMake 仅启用 `MEDIA_KIT_VIDEO_ENABLE_DLSS` 和
+  `MEDIA_KIT_LIBS_ENABLE_ANIMEJANAI`，不再复制或覆盖插件源码。
 - [screen_brightness](https://github.com/AniBakaBaka/screen_brightness/tree/main)：
   移除 Windows 亮度插件注册，保留上游 Dart API 和其他平台实现。
 
@@ -207,12 +210,10 @@ DoH 加密 DNS 查询，减少被监听和篡改的风险；ECH 加密连接时�
 
 手动标注保存在本机；登录后可以主动共享。其他两位用户确认后用于当前片源自动跳过，
 两位用户报错后暂停使用。切换片源、线路或 HLS 去广告结果会重新匹配；过滤后的时间轴
-只使用该版本上确认的标注。新接口需要配套后端，旧服务器仍可使用本机标注。
 
 OP、ED 都可分别一键“应用到全集”，同一番剧、同片源线路和时间轴沿用相同起止时间；
 已有单集校准优先，超出视频时长的区间不使用，第 1 集仍保留片头片尾。
 区间详情中的“应用到全集”同时决定保存和上传范围，登录后可共享全集标注；
-全集上传需配套后端更新并执行迁移，旧服务器仍可使用本机全集设置。
 
 查询通过所选社区服务器完成，发送 Bangumi 条目和剧集 ID、视频时长、片源摘要及
 时间轴摘要，不发送播放地址、请求头或本地文件路径。提交与反馈需登录，并关联提交账号。

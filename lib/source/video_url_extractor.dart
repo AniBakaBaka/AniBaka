@@ -1,24 +1,10 @@
-import 'dart:convert';
-
 /// Video URL extraction and validation utilities.
 class VideoUrlExtractor {
   VideoUrlExtractor._();
 
-  /// Key-value pattern: `"url":"https://.../index.m3u8"` etc.
-  static final _kvPattern = RegExp(
-    r'''["']?(?:url|source|file|video|src|play_url|videoUrl)["']?\s*[:=]\s*["']([^"'\s]+\.(?:m3u8|mp4|flv|mkv|avi|ts|mknvideo)[^"'\s]*)["']''',
-    caseSensitive: false,
-  );
-
-  /// Direct URL pattern: bare `https://.../play.m3u8` or CDN signed URLs.
+  /// Literal HTTP(S) and protocol-relative URLs in page content.
   static final _directPattern = RegExp(
-    r'https?://[^\s"<>]+?(?:\.(?:m3u8|mp4|flv|mkv|avi|ts|mknvideo)(?:[?#/&][^\s"<>]*)?|/video/tos/|sign\.bytetos|sign\.byteimg|bytefcdn|bot-workflow-sign\.byteimg\.com|mime_type=video|/hls/)[^\s"<>]*',
-    caseSensitive: false,
-  );
-
-  /// Encoded URL pattern: base64 or URL-encoded video URLs in JSON values.
-  static final _encodedPattern = RegExp(
-    r'"(?:url|file|src|video|videoUrl|play_url)"\s*:\s*"((?:aHR0|JT|https?%3A%2F%2F)[A-Za-z0-9%+/_=-]{12,})"',
+    r'''(?:https?:)?//[^\s"'<>\\]+''',
     caseSensitive: false,
   );
 
@@ -42,19 +28,6 @@ class VideoUrlExtractor {
 
   /// `verify=<unix 时间戳>-<签名>` 形式（如 31dm CDN）。
   static final _verifyParamRegex = RegExp(r'^\d{9,}');
-
-  static final _trailingJunkPattern = RegExp(r'[,;.\s]+$');
-
-  static const _queryParamKeys = [
-    'url',
-    'u',
-    'src',
-    'file',
-    'video',
-    'videoUrl',
-    'play_url',
-    'path',
-  ];
 
   static bool isVideoUrl(String url) {
     if (url.isEmpty) return false;
@@ -184,7 +157,7 @@ class VideoUrlExtractor {
     return uri.path != '/' && !_htmlExtRegex.hasMatch(uri.path);
   }
 
-  /// 单趟反转义常见的 JS/HTML 转义序列（长序列在前，双反斜杠放最后兜底）。
+  /// 单趟反转义常见的 JS/HTML 转义序列。
   static final _escapePattern = RegExp(
     r'''\\u002F|\\u0026|\\"|\\'|\\/|\\\\|&amp;|&quot;''',
   );
@@ -195,7 +168,7 @@ class VideoUrlExtractor {
     r'\"': '"',
     r"\'": "'",
     r'\/': '/',
-    r'\\': '',
+    r'\\': r'\',
     '&amp;': '&',
     '&quot;': '"',
   };
@@ -205,108 +178,29 @@ class VideoUrlExtractor {
     return text.replaceAllMapped(_escapePattern, (m) => _escapeMap[m[0]]!);
   }
 
-  static String? _tryBase64Decode(String value) {
-    try {
-      return utf8.decode(base64.decode(base64.normalize(value)));
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static String? _decodeEncodedVideoUrl(String encoded) {
-    try {
-      var text = encoded;
-      if (text.contains('%')) text = Uri.decodeComponent(text);
-      final decoded = _tryBase64Decode(text);
-      if (decoded != null) {
-        return decoded.contains('%') ? Uri.decodeComponent(decoded) : decoded;
-      }
-      return isVideoUrl(text) ? text : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// Extract the best video direct-link from page content.
-  /// m3u8 is preferred; otherwise first playable URL wins.
+  /// Extract literal media links; HLS is preferred over the first other link.
+  /// Encoded values and player query parameters must be handled by the rule.
   static String extractBest(String content, String pageUrl) {
     final searchSpace = _normalizeUrlText(content);
-
-    for (final match in _encodedPattern.allMatches(searchSpace)) {
-      final decoded = _decodeEncodedVideoUrl(match.group(1) ?? '');
-      if (decoded != null && isPlayable(decoded)) {
-        return toAbsolute(decoded, pageUrl);
-      }
-    }
-
-    String? keyedFallback;
-    for (final match in _kvPattern.allMatches(searchSpace)) {
-      final url = match.group(1) ?? '';
-      if (isPlayable(url)) {
-        final abs = toAbsolute(url, pageUrl);
-        if (abs.contains('.m3u8')) return abs;
-        keyedFallback = abs;
-        break;
-      }
-    }
-
-    String? directFallback;
+    String? first;
     for (final match in _directPattern.allMatches(searchSpace)) {
-      final raw = match.group(0) ?? '';
-      // Check nested URL in query params (e.g. `/player?url=...m3u8`)
-      final nested = _extractNestedUrl(raw);
-      if (nested == null && !isPlayable(raw)) continue;
-      final url = nested ?? raw;
-      final abs = toAbsolute(url, pageUrl);
-      if (abs.contains('.m3u8')) return abs;
-      directFallback ??= abs;
+      final url = toAbsolute(match.group(0)!, pageUrl);
+      if (!isPlayable(url)) continue;
+      if (isHlsUrl(url)) return url;
+      first ??= url;
     }
-    return directFallback ?? keyedFallback ?? '';
-  }
-
-  static String? _extractNestedUrl(String playerUrl) {
-    if (!playerUrl.contains('?')) return null;
-    try {
-      final parameters = Uri.parse(playerUrl).queryParameters;
-      for (final key in _queryParamKeys) {
-        final value = parameters[key];
-        if (value == null || value.isEmpty) continue;
-        var decoded = value;
-        if (decoded.contains('%')) {
-          try {
-            decoded = Uri.decodeComponent(decoded);
-          } catch (_) {}
-        }
-        // `path` commonly identifies a resource inside a signed media API
-        // endpoint. A relative value such as `episodes/1/master.m3u8` is not
-        // a nested player URL and must not replace the authenticated endpoint.
-        if (key == 'path' &&
-            !decoded.startsWith('http://') &&
-            !decoded.startsWith('https://') &&
-            !decoded.startsWith('//')) {
-          continue;
-        }
-        if (isPlayable(decoded)) return decoded;
-        final nested = _decodeEncodedVideoUrl(decoded);
-        if (nested != null && isPlayable(nested)) return nested;
-      }
-    } catch (_) {}
-    return null;
+    return first ?? '';
   }
 
   static String toAbsolute(String url, String baseUrl) {
     url = url.trim();
     if (url.isEmpty) return url;
-    if (url.startsWith('http')) return url;
-    if (url.startsWith('//')) {
-      final scheme = Uri.tryParse(baseUrl)?.scheme ?? 'https';
-      return '$scheme:$url';
-    }
     try {
+      final uri = Uri.parse(url);
+      if (uri.hasScheme) return url;
       return Uri.parse(baseUrl).resolve(url).toString();
-    } catch (_) {
-      final sep = url.startsWith('/') || baseUrl.endsWith('/') ? '' : '/';
-      return '$baseUrl$sep$url';
+    } on FormatException {
+      return '';
     }
   }
 
@@ -319,32 +213,12 @@ class VideoUrlExtractor {
     var text = _normalizeUrlText(url).trim();
     if (text.isEmpty || text.startsWith('blob:')) return '';
     if (preserveMagnet && text.startsWith('magnet:')) return text;
-    if (text.startsWith('url=')) text = text.substring(4);
-
     if (text.length > 1 &&
         ((text.startsWith('"') && text.endsWith('"')) ||
             (text.startsWith("'") && text.endsWith("'")))) {
       text = text.substring(1, text.length - 1);
     }
 
-    final isAbsoluteHttp =
-        text.startsWith('http://') || text.startsWith('https://');
-    if (!isAbsoluteHttp && !isSignedCdnUrl(text)) {
-      for (var i = 0; i < 2; i++) {
-        try {
-          final decoded = Uri.decodeComponent(text);
-          if (decoded == text) break;
-          text = decoded;
-        } catch (_) {
-          break;
-        }
-      }
-    }
-
-    text = text.replaceAll(_trailingJunkPattern, '');
-
-    final nested = _extractNestedUrl(text);
-    if (nested != null && nested.isNotEmpty) return toAbsolute(nested, pageUrl);
     return toAbsolute(text, pageUrl);
   }
 }

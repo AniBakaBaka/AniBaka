@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/network_service.dart';
 import 'dart:convert';
 
@@ -6,7 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'package:baka/instance.dart';
-import 'package:baka/api/request_cache.dart';
+import 'package:baka/core/app_storage.dart';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/models/rule_hub.dart';
 import 'package:baka/services/source/source_codec.dart';
@@ -68,7 +69,7 @@ class RuleRepositoryService extends ChangeNotifier {
       }
       await fetchAll();
     } catch (error) {
-      debugPrint('[RuleHub] Update check failed: $error');
+      Log.w('RuleHub', 'Update check failed: $error');
     }
   }
 
@@ -162,7 +163,7 @@ class RuleRepositoryService extends ChangeNotifier {
         fetchIndex(url, forceRefresh: forceRefresh).then<RuleHubIndex?>(
           (index) => index,
           onError: (Object error, StackTrace stack) {
-            debugPrint('[RuleHub] Failed to fetch $url: $error');
+            Log.w('RuleHub', 'Failed to fetch $url: $error');
             return null;
           },
         ),
@@ -240,7 +241,7 @@ class RuleRepositoryService extends ChangeNotifier {
       );
       return await pending;
     } catch (error) {
-      debugPrint('[RuleHub] Failed to install ${item.name}: $error');
+      Log.w('RuleHub', 'Failed to install ${item.name}: $error');
       return RuleInstallResult.failed;
     }
   }

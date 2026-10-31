@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -67,7 +68,7 @@ class _AnimeCommentsTabState extends State<AnimeCommentsTab>
       _hasMoreComments =
           page.comments.isNotEmpty && comments.length < page.total;
     } catch (e) {
-      debugPrint('获取番剧评论失败: $e');
+      Log.w('Comment', '获取番剧评论失败: $e');
       if (identical(comments, _comments)) _failed = true;
     } finally {
       if (mounted && identical(comments, _comments)) {

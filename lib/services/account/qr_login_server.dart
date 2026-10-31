@@ -1,4 +1,4 @@
-import 'package:baka/core/lan_address.dart';
+import 'package:baka/core/network_service.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -11,7 +11,7 @@ import 'dart:math';
 /// TV 端接收后完成登录。
 class QrLoginServer {
   QrLoginServer({Future<InternetAddress?> Function()? findAddress})
-    : _findAddress = findAddress ?? LanAddress.findIpv4;
+    : _findAddress = findAddress ?? NetworkService.findLanIpv4;
 
   final Future<InternetAddress?> Function() _findAddress;
   HttpServer? _server;

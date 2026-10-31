@@ -9,7 +9,6 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart' hide ContextExtensionss;
 import 'package:url_launcher/url_launcher_string.dart';
 
-import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/pages/setting/bangumi_sync_page.dart';
 import 'package:baka/utils/toast_utils.dart';
@@ -136,8 +135,8 @@ class LoginState extends State<Login> {
     try {
       final account = await _bangumi.connect(result);
       if (!mounted) return;
-      if (Get.isRegistered<AppState>()) {
-        Get.find<AccountSession>().refreshView();
+      if (Get.isRegistered<AccountSession>()) {
+        Get.find<AccountSession>().user.refresh();
       }
       setState(() {});
       showSnackBar('已使用 Bangumi 登录：${account.nickname}');
@@ -179,8 +178,8 @@ class LoginState extends State<Login> {
       }
       final account = await _bangumi.completeOAuthLogin(login.state);
       if (!mounted) return;
-      if (Get.isRegistered<AppState>()) {
-        Get.find<AccountSession>().refreshView();
+      if (Get.isRegistered<AccountSession>()) {
+        Get.find<AccountSession>().user.refresh();
       }
       setState(() {});
       showSnackBar('已成功连接 Bangumi：${account.nickname}');
@@ -203,8 +202,8 @@ class LoginState extends State<Login> {
       MaterialPageRoute(builder: (_) => const BangumiSyncPage()),
     );
     if (!mounted) return;
-    if (Get.isRegistered<AppState>()) {
-      Get.find<AccountSession>().refreshView();
+    if (Get.isRegistered<AccountSession>()) {
+      Get.find<AccountSession>().user.refresh();
     }
     setState(() {});
   }

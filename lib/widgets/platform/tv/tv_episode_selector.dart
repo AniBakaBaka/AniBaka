@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/utils/json_values.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -168,7 +169,7 @@ class _TvEpisodeSelectorState extends State<TvEpisodeSelector> {
             season: 1,
             episode: index + 1,
           ).catchError((Object error) {
-            debugPrint('获取 TV 剧集剧照失败: $error');
+            Log.w('TvEpisode', '获取 TV 剧集剧照失败: $error');
             return null;
           });
     }

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:baka/core/network_service.dart';
 import 'package:http/http.dart' as http;
+import 'package:baka/source/runtime/source_operation.dart';
 import 'package:baka/source/webview_adapter.dart';
 
 class SiteProbeRequest {
@@ -68,14 +69,14 @@ class SiteProbeService {
   };
 
   final http.Client _client;
-  final WebViewTaskScope _webViewScope = WebViewTaskScope();
+  final SourceOperation _lifetime = SourceOperation();
   final Map<String, List<Cookie>> _cookies = {};
   bool _cancelled = false;
 
   void dispose() {
     if (_cancelled) return;
     _cancelled = true;
-    _webViewScope.cancel();
+    _lifetime.cancel();
     _client.close();
     _cookies.clear();
   }
@@ -99,12 +100,12 @@ class SiteProbeService {
       if (method != 'GET') throw const FormatException('WebView 探测只允许 GET');
       await validatePublicUri(uri);
       _throwIfCancelled();
-      final (html, _) = await WebViewAdapter.getPageContentWithCookies(
-        uri.toString(),
-        timeout: const Duration(seconds: 30),
-        userAgent:
-            request.headers['User-Agent'] ?? WebViewAdapter.desktopUserAgent,
-        taskScope: _webViewScope,
+      final (html, _) = await _lifetime.run(
+        () => WebViewAdapter.render(
+          uri.toString(),
+          userAgent:
+              request.headers['User-Agent'] ?? WebViewAdapter.desktopUserAgent,
+        ),
       );
       _throwIfCancelled();
       final bytes = utf8.encoder.convert(

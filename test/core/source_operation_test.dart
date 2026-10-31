@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:baka/source/runtime/source_operation.dart';
 import 'package:baka/source/runtime/request_scheduler.dart';
-import 'package:baka/source/runtime/webview_task_queue.dart';
+import 'package:baka/source/webview_adapter.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -44,14 +44,14 @@ void main() {
 
   for (final phase in ['initialize', 'navigate', 'poll']) {
     test(
-      'WebView $phase timeout discards controller and releases queue',
+      'WebView $phase timeout resets the browser and releases queue',
       () async {
         final queue = WebViewTaskQueue();
         final stuck = Completer<void>();
         final events = <String>[];
         final first = queue.run<String>(
           timeout: const Duration(milliseconds: 30),
-          action: (operation) async {
+          action: () async {
             for (final stage in ['initialize', 'navigate', 'poll']) {
               SourceOperation.check();
               events.add(stage);
@@ -63,24 +63,48 @@ void main() {
           },
           cleanup: () async => events.add('clean'),
           discard: () => events.add('discard'),
-          onExpired: () => 'expired',
         );
         final second = queue.run<String>(
           timeout: const Duration(seconds: 1),
-          action: (_) async => 'second',
+          action: () async => 'second',
           cleanup: () async {},
           discard: () {},
-          onExpired: () => 'expired',
         );
-        expect(await first, 'expired');
+        expect(await first, isNull);
         expect(await second, 'second');
-        expect(events, contains('discard'));
+        expect(events, contains('clean'));
+        expect(events, isNot(contains('discard')));
         stuck.complete();
         await Future<void>.delayed(Duration.zero);
         expect(events, isNot(contains('late write')));
       },
     );
   }
+
+  test('a failed WebView task discards the browser and rethrows', () async {
+    final queue = WebViewTaskQueue();
+    var cleaned = 0;
+    var discarded = 0;
+    await expectLater(
+      queue.run<int>(
+        timeout: const Duration(seconds: 1),
+        action: () async => throw StateError('platform failure'),
+        cleanup: () async => cleaned++,
+        discard: () => discarded++,
+      ),
+      throwsStateError,
+    );
+    expect((cleaned, discarded), (0, 1));
+    expect(
+      await queue.run<int>(
+        timeout: const Duration(seconds: 1),
+        action: () async => 2,
+        cleanup: () async {},
+        discard: () {},
+      ),
+      2,
+    );
+  });
 
   test(
     'WebView reset has its own deadline and cannot block next task',
@@ -90,18 +114,16 @@ void main() {
       var discarded = 0;
       final first = queue.run<int>(
         timeout: const Duration(seconds: 1),
-        action: (_) async => 1,
+        action: () async => 1,
         cleanup: () => reset.future,
         cleanupTimeout: const Duration(milliseconds: 20),
         discard: () => discarded++,
-        onExpired: () => -1,
       );
       final second = queue.run<int>(
         timeout: const Duration(seconds: 1),
-        action: (_) async => 2,
+        action: () async => 2,
         cleanup: () async {},
         discard: () {},
-        onExpired: () => -1,
       );
       expect(await first, 1);
       expect(await second, 2);
@@ -116,25 +138,23 @@ void main() {
     var navigations = 0;
     final first = queue.run<int>(
       timeout: const Duration(seconds: 1),
-      action: (_) async {
+      action: () async {
         await gate.future;
         return 1;
       },
       cleanup: () async {},
       discard: () {},
-      onExpired: () => -1,
     );
     final second = queue.run<int>(
       timeout: const Duration(milliseconds: 10),
-      action: (_) async {
+      action: () async {
         navigations++;
         return 2;
       },
       cleanup: () async {},
       discard: () {},
-      onExpired: () => -1,
     );
-    expect(await second, -1);
+    expect(await second, isNull);
     gate.complete();
     expect(await first, 1);
     await Future<void>.delayed(Duration.zero);

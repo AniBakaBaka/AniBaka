@@ -84,7 +84,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
   }
 
   Future<void> _exportLogs() => _run('导出日志', () async {
-    final archive = await AppLogger.instance.exportLogs();
+    final archive = await Log.exportLogs();
     if (archive == null) return;
     showSnackBar(
       '日志已导出：${archive.fileName}',
@@ -201,7 +201,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                 value: bangumiSession.account?.nickname ?? '未关联',
                 onTap: () async {
                   await _push(const BangumiSyncPage());
-                  _session.refreshView();
+                  _session.user.refresh();
                 },
               ),
               if (loggedIn)
@@ -305,8 +305,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                 secondary: const Icon(Icons.visibility_off_outlined),
                 title: const Text('隐藏 NSFW 内容'),
                 value: enabled,
-                onChanged: (value) =>
-                    contentFilter.setEnabled(value, Instances.sp),
+                onChanged: (value) => contentFilter.setEnabled(value),
               ),
             ),
             if (!Instances.isDesktopPlatform)
@@ -360,7 +359,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                 icon: Icons.ios_share_rounded,
                 title: '分享日志',
                 busy: _busy == '分享日志',
-                onTap: () => _run('分享日志', AppLogger.instance.shareLogs),
+                onTap: () => _run('分享日志', Log.shareLogs),
               ),
           ],
         ),

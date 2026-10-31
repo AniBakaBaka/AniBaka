@@ -1,9 +1,9 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/playback_request.dart';
 import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/collection.dart';
-import 'package:baka/models/page.dart';
 import 'package:baka/pages/player/player_page.dart';
 import 'package:baka/services/collection/collection_repository.dart';
 import 'package:baka/services/playback/history_repository.dart';
@@ -69,40 +69,17 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   Future<void> _loadInitialData() async {
-    final generation = ++_collectionGeneration;
-    final status = _collectionStatusFilter;
-    setState(() => _isCollectionLoading = true);
-    try {
-      final results = await Future.wait<Object?>([
-        collections.getStats(),
-        collections.getList(page: 1, pageSize: 20, status: status),
-        if (_isLoggedIn)
-          historyRepository.syncRemoteToLocal().then((_) {
-            return historyRepository.getHistoryList();
-          }),
-      ]);
-      if (!mounted ||
-          generation != _collectionGeneration ||
-          status != _collectionStatusFilter) {
-        return;
-      }
-
-      final stats = results[0] as CollectionStats;
-      final response = results[1] as PageData<AnimeCollection>;
-      setState(() {
-        _stats = stats;
-        _collectionPage = 1;
-        _collectionList = response.list;
-        _hasMoreCollection = _collectionList.length < response.total;
-        if (results.length > 2) {
-          _historyList = results[2] as List<Map<String, dynamic>>;
-        }
-      });
-    } finally {
-      if (mounted && generation == _collectionGeneration) {
-        setState(() => _isCollectionLoading = false);
-      }
-    }
+    // Each resource handles its own failure and can update without the others.
+    await Future.wait<void>([
+      _fetchStats(),
+      _fetchCollectionData(),
+      if (_isLoggedIn)
+        historyRepository.syncRemoteToLocal().then((_) {
+          if (mounted) {
+            setState(() => _historyList = historyRepository.getHistoryList());
+          }
+        }),
+    ]);
   }
 
   Future<void> _fetchStats() async {
@@ -110,7 +87,7 @@ class _LibraryPageState extends State<LibraryPage> {
       final newStats = await collections.getStats();
       if (mounted) setState(() => _stats = newStats);
     } catch (error) {
-      debugPrint('刷新收藏统计失败: $error');
+      Log.w('Library', '刷新收藏统计失败: $error');
     }
   }
 
@@ -140,7 +117,7 @@ class _LibraryPageState extends State<LibraryPage> {
         _hasMoreCollection = _collectionList.length < response.total;
       });
     } catch (e) {
-      debugPrint('获取收藏列表失败: $e');
+      Log.w('Library', '获取收藏列表失败: $e');
     } finally {
       if (mounted && generation == _collectionGeneration) {
         setState(() => _isCollectionLoading = false);

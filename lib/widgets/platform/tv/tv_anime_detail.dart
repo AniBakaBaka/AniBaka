@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/utils/json_values.dart';
@@ -88,7 +89,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
       final (bgm, anibaka, episodes) = await (
         getBgmSubject(subjectId),
         AniBakaApi.getAnimeDetail(subjectId).catchError((Object error) {
-          debugPrint('获取 AniBaka 详情失败: $error');
+          Log.w('TvDetail', '获取 AniBaka 详情失败: $error');
           return null;
         }),
         _videoList.isEmpty
@@ -115,7 +116,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
       }
       setState(() => _detail = detail);
     } catch (e) {
-      debugPrint('获取番剧数据失败: $e');
+      Log.w('TvDetail', '获取番剧数据失败: $e');
     }
   }
 
@@ -134,7 +135,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
         }
       }
     } catch (e) {
-      debugPrint('获取收藏状态失败: $e');
+      Log.w('TvDetail', '获取收藏状态失败: $e');
     } finally {
       if (mounted) {
         setState(() {
@@ -167,7 +168,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
         showSnackBar('已标记为「${status.label}」');
       }
     } catch (e) {
-      debugPrint('更新收藏失败: $e');
+      Log.w('TvDetail', '更新收藏失败: $e');
       if (mounted) showSnackBar(e.toString(), isError: true);
     }
   }

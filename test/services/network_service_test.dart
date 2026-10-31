@@ -6,7 +6,6 @@ import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/api/bangumi_account_api.dart';
 import 'package:baka/api/bgm.dart';
 import 'package:baka/api/post.dart';
-import 'package:baka/core/http_request.dart';
 import 'package:baka/app/app_runtime.dart' show MonitoredImageCache;
 import 'package:baka/services/account/login_service.dart';
 import 'package:baka/services/account/bangumi_session.dart';
@@ -14,6 +13,7 @@ import 'package:baka/api/playback.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/models/play_history.dart';
 import 'package:baka/models/app_user.dart';
+import 'package:baka/models/token_response.dart';
 import 'package:baka/pages/login/login_page.dart';
 import 'package:baka/pages/login/account_security_page.dart';
 import 'package:baka/utils/toast_utils.dart';
@@ -772,7 +772,7 @@ void main() {
 
   test('changing QQ submits current password with the profile', () async {
     const user = AppUser(id: 1, name: 'user', qq: '123456', sign: '', level: 1);
-    await apiTransport.session.saveLoginInfo('access', user);
+    await apiTransport.session.login(const TokenResponse('access'), user);
     useClient(
       MockClient((request) async {
         final body = jsonDecode(request.body) as Map<String, dynamic>;
@@ -804,10 +804,9 @@ void main() {
   test(
     'email recovery omits stale credentials and preserves rejection reasons',
     () async {
-      await apiTransport.session.saveLoginInfo(
-        'stale-access',
+      await apiTransport.session.login(
+        TokenResponse('stale-access', expiresAt: DateTime.utc(2000)),
         const AppUser(id: 1, name: 'old', qq: '12345', sign: '', level: 1),
-        tokenExpiresAt: '2000-01-01T00:00:00Z',
       );
       final paths = <String>[];
       useClient(
@@ -857,8 +856,8 @@ void main() {
   test(
     'email binding retains authenticated identity and updated mailbox',
     () async {
-      await apiTransport.session.saveLoginInfo(
-        'access',
+      await apiTransport.session.login(
+        const TokenResponse('access'),
         const AppUser(id: 1, name: 'user', qq: '12345', sign: '', level: 1),
       );
       useClient(

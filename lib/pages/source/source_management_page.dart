@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/pages/source/ai_rule_authoring_page.dart';
 import 'package:baka/services/source/rule_repository_service.dart';
@@ -243,7 +244,7 @@ class _SourceManagementPageState extends State<SourceManagementPage> {
           }
         } catch (error) {
           failed++;
-          debugPrint('[RuleHub] Failed to install ${rule.item.name}: $error');
+          Log.w('RuleHub', 'Failed to install ${rule.item.name}: $error');
         } finally {
           if (mounted) {
             setState(() {

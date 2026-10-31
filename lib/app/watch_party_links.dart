@@ -43,12 +43,7 @@ class WatchPartyLinks {
         if (code != null) unawaited(joinInviteLink(code));
       },
       onError: (Object error, StackTrace stackTrace) {
-        AppLogger.instance.warning(
-          'Unable to process app link',
-          tag: 'WatchParty',
-          error: error,
-          stackTrace: stackTrace,
-        );
+        Log.w('WatchParty', 'Unable to process app link', error, stackTrace);
       },
     );
   }
@@ -94,12 +89,7 @@ class WatchPartyLinks {
       WatchPartySheet.show(context, party);
     } catch (error, stackTrace) {
       if (_closed) return;
-      AppLogger.instance.warning(
-        'Unable to join watch party',
-        tag: 'WatchParty',
-        error: error,
-        stackTrace: stackTrace,
-      );
+      Log.w('WatchParty', 'Unable to join watch party', error, stackTrace);
       final context = Instances.navigatorKey.currentContext;
       if (context != null && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -148,11 +138,11 @@ class WatchPartyLinks {
         RegistryValue.string('', '"${Platform.resolvedExecutable}" "%1"'),
       );
     } catch (error, stackTrace) {
-      AppLogger.instance.warning(
+      Log.w(
+        'WatchParty',
         'Unable to register anibaka:// protocol',
-        tag: 'WatchParty',
-        error: error,
-        stackTrace: stackTrace,
+        error,
+        stackTrace,
       );
     } finally {
       command?.close();

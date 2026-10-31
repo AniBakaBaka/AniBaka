@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:baka/api/request_cache.dart';
+import 'package:baka/core/app_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 

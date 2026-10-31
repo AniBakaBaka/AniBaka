@@ -7,7 +7,6 @@ fvm flutter test --no-pub
 fvm flutter analyze --no-pub
 ```
 
-应用网络设置接入测试：`fvm flutter test --no-pub test/core/network_privacy_test.dart`。
 通用 DoH/ECH 与 Dio 测试维护于组织的 [ech_http](https://github.com/AniBakaBaka/ech_http)。
 在该依赖仓库运行 `dart test`；设置 `ECH_TEST_DOH_LIVE=1` 可包含真实 Cloudflare
 DoH/ECH 握手测试，需代理时指定 `ECH_TEST_PROXY`。首次执行需要原生 C++ 构建工具

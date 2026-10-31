@@ -6,7 +6,6 @@ import 'package:baka/api/api_config.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/core/api_transport.dart';
-import 'package:baka/core/http_request.dart';
 import 'package:baka/core/network_service.dart';
 import 'package:http/http.dart' as http;
 
@@ -348,15 +347,10 @@ class BangumiApi {
           statusCode: status,
         );
       }
-      var message = 'Bangumi 请求失败（$status）';
-      try {
-        final json = decodeJson<Map<String, dynamic>>(error.responseBody ?? '');
-        final detail = json['description'] ?? json['title'];
-        if (detail is String && detail.isNotEmpty) message = detail;
-      } on FormatException {
-        /* Non-JSON error bodies keep the HTTP status. */
-      }
-      throw BangumiSyncException(message, statusCode: status);
+      throw BangumiSyncException(
+        error.serverMessage ?? 'Bangumi 请求失败（$status）',
+        statusCode: status,
+      );
     }
   }
 }

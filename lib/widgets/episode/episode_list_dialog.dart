@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -264,7 +265,7 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
           ),
         );
       } catch (error) {
-        debugPrint('resolve download episode ${index + 1}: $error');
+        Log.w('Download', 'resolve download episode ${index + 1}: $error');
       }
     }
     service.addTasks(tasks);

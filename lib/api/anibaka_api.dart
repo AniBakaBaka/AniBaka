@@ -1,5 +1,5 @@
 import 'package:baka/api/api_config.dart';
-import 'package:baka/api/request_cache.dart';
+import 'package:baka/core/app_storage.dart';
 import 'package:baka/core/api_transport.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/models/page.dart';

@@ -1,7 +1,7 @@
+import 'package:baka/core/app_logger.dart';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 
 /// HLS byte-range: `length@offset`（RFC 8216）。
 class HlsByteRange {
@@ -69,7 +69,7 @@ abstract final class HlsOfflineRemux {
     final raw = await file.readAsString();
     final plan = await _buildRemuxPlan(dir, raw);
     if (plan == null || plan.parts.isEmpty) {
-      debugPrint('HlsOfflineRemux: empty plan for $manifestPath');
+      Log.w('HlsRemux', 'Empty plan for $manifestPath');
       return null;
     }
 
@@ -110,7 +110,7 @@ abstract final class HlsOfflineRemux {
       if (await outFile.exists()) await outFile.delete();
       await partial.rename(outPath);
     } catch (error, stack) {
-      debugPrint('HlsOfflineRemux failed: $error\n$stack');
+      Log.w('HlsRemux', 'Remux failed: $manifestPath', error, stack);
       try {
         await sink.close();
       } catch (_) {}
@@ -120,7 +120,7 @@ abstract final class HlsOfflineRemux {
     }
 
     await _cleanupFragments(dir, keepFileName: outName);
-    debugPrint('HlsOfflineRemux: wrote $outPath');
+    Log.i('HlsRemux', 'Wrote $outPath');
     return outPath;
   }
 

@@ -1,16 +1,14 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/playback_request.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/utils/json_values.dart';
 import 'dart:async';
-import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
 
 import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/core/account_session.dart';
 import 'package:baka/core/app_storage.dart';
-import 'package:baka/core/http_request.dart';
 import 'package:baka/models/play_history.dart';
 import 'package:baka/services/account/bangumi_session.dart';
 
@@ -32,22 +30,8 @@ class HistoryRepository {
 
   final Map<String, List<Map<String, dynamic>>> _memory = {};
 
-  void _logUploadFailure(Object error) {
-    var detail = '';
-    if (error is ApiException && error.responseBody != null) {
-      try {
-        final body = jsonDecode(error.responseBody!);
-        final message = body is Map ? body['message'] ?? body['msg'] : null;
-        if (message is String && message.isNotEmpty) {
-          detail =
-              '；${message.length > 500 ? message.substring(0, 500) : message}';
-        }
-      } on FormatException {
-        // Do not fill playback logs with proxy HTML.
-      }
-    }
-    debugPrint('上传播放历史失败（本地已保存）: $error$detail');
-  }
+  void _logUploadFailure(Object error) =>
+      Log.w('History', '上传播放历史失败（本地已保存）', error);
 
   String _localKey(Map record) {
     final bgm = toInt(record['bgmId']);
@@ -279,7 +263,7 @@ class HistoryRepository {
           : ordered;
       await _write(_historyKey, finalHistory);
     } catch (e) {
-      debugPrint('同步远程历史失败: $e');
+      Log.w('History', '同步远程历史失败: $e');
     }
   }
 
@@ -351,7 +335,7 @@ class HistoryRepository {
         bangumi
             .markEpisodeWatched(subjectId: subjectId, watched: episodeIndex + 1)
             .catchError((Object error, StackTrace stackTrace) {
-              debugPrint('更新 Bangumi 集数失败: $error');
+              Log.w('History', '更新 Bangumi 集数失败: $error');
             }),
       );
     }

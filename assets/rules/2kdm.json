@@ -12,28 +12,19 @@
   },
   "search": [
     {
-      "op": "first",
-      "branches": [
-        [
-          {
-            "op": "maccmsSuggest",
-            "detailUrlTemplate": "/voddetail/{id}.html",
-            "verify": true
-          }
-        ],
-        [
-          {
-            "op": "fetch",
-            "url": "/vodsearch/{keyword}-------------.html"
-          },
-          {
-            "op": "searchList",
-            "selectors": [
-              ".module-card-item, .module-poster-item, .module-search-item, a[href*=\"/voddetail/\"]"
-            ]
-          }
-        ]
-      ]
+      "op": "fetch",
+      "url": "/index.php/ajax/suggest?mid=1&wd={keyword}&limit=20",
+      "headers": {
+        "X-Requested-With": "XMLHttpRequest"
+      }
+    },
+    {
+      "op": "jsonSeries",
+      "listPath": "list",
+      "idKey": "id",
+      "nameKey": "name",
+      "imageKey": "pic",
+      "detailUrlTemplate": "/voddetail/{id}.html"
     }
   ],
   "detail": [
@@ -46,8 +37,9 @@
         ".module-play-list"
       ],
       "tabSelectors": [
-        ".module-tab-item"
-      ]
+        ".module-tab-item[data-dropdown-value]"
+      ],
+      "tabAttr": "data-dropdown-value"
     }
   ],
   "play": [

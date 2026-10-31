@@ -50,13 +50,12 @@ void main() {
         await Hive.close();
         Hive.resetAdapters();
 
-        final recoveries = await AppStorage.init(hiveDirectory: hiveDirectory);
+        await AppStorage.init(hiveDirectory: hiveDirectory);
 
-        expect(recoveries, hasLength(1));
-        expect(recoveries.single.boxName, AppStorage.videoProgressBoxName);
-        expect(recoveries.single.reason, contains('unknown typeId: 69'));
-        expect(recoveries.single.backupPath, isNotNull);
-        expect(await File(recoveries.single.backupPath!).exists(), isTrue);
+        final backups = Directory(
+          '${hiveDirectory.path}${Platform.pathSeparator}recovery',
+        ).listSync().map((entity) => entity.uri.pathSegments.last);
+        expect(backups, [startsWith('${AppStorage.videoProgressBoxName}-')]);
         expect(AppStorage.videoProgressBox.isEmpty, isTrue);
         expect(AppStorage.customSourcesBox.isOpen, isTrue);
       },

@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -136,7 +137,7 @@ class DanmakuController extends ChangeNotifier {
           : (decoded is Map ? decoded['data'] as List? ?? const [] : const []);
       return _decodeItems(rawItems);
     } catch (e) {
-      debugPrint('解析弹幕异常: $e');
+      Log.w('Danmaku', '解析弹幕异常: $e');
       return const [];
     }
   }
@@ -303,7 +304,7 @@ class DanmakuController extends ChangeNotifier {
       _loadAbort = null;
       _loading = false;
       if (error is! http.RequestAbortedException) {
-        debugPrint('获取弹幕失败: $error');
+        Log.w('Danmaku', '获取弹幕失败: $error');
       }
       notifyListeners();
       return false;

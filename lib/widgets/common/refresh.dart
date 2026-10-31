@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 
@@ -74,7 +75,7 @@ class _RefreshWrapperState extends State<RefreshWrapper> {
       final hasMore = await widget.onLoadMore();
       if (mounted && generation == _loadMoreGeneration) _hasMore = hasMore;
     } catch (e) {
-      debugPrint('load more error: $e');
+      Log.w('Refresh', 'load more error: $e');
     } finally {
       _isLoading = false;
     }

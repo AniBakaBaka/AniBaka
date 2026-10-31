@@ -1,26 +1,8 @@
 import 'package:baka/models/playback_state.dart';
-import 'package:baka/widgets/settings/dlss_effects_editor.dart';
 import '../controller.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:flutter/material.dart';
-
-Future<void> showDlssEffectsDialog(BuildContext context) => showDialog<void>(
-  context: context,
-  builder: (context) => AlertDialog(
-    title: const Text('DLSS 播放增强'),
-    content: const SizedBox(
-      width: 540,
-      child: SingleChildScrollView(child: DlssSettings()),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('关闭'),
-      ),
-    ],
-  ),
-);
 
 Future<void> showSpeedDialog(
   BuildContext context,

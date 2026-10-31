@@ -59,8 +59,9 @@ add_subdirectory("runner")
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
-# The pinned media-kit fork selects its Windows bridge sources itself.
+# The pinned media-kit packages own the renderer, GPU backend and libmpv bundle.
 set(MEDIA_KIT_VIDEO_ENABLE_DLSS ON)
+set(MEDIA_KIT_LIBS_ENABLE_ANIMEJANAI ON)
 include(flutter/generated_plugins.cmake)
 
 
@@ -80,8 +81,6 @@ set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
-install(FILES "runner/dlss_realtime/vendor/LICENSE"
-  DESTINATION "${INSTALL_BUNDLE_DATA_DIR}/licenses/video2dlssnr" COMPONENT Runtime)
 install(FILES "${FLUTTER_MANAGED_DIR}/ephemeral/.plugin_symlinks/media_kit_video/LICENSE"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}/licenses/media_kit_video_windows" COMPONENT Runtime)
 

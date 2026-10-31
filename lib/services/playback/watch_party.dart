@@ -184,12 +184,7 @@ class WatchPartyService {
     _channelSubscription = channel.stream.listen(
       (raw) => _onMessage(generation, channel, raw),
       onError: (Object error, StackTrace stackTrace) {
-        AppLogger.instance.warning(
-          'Watch-party socket error',
-          tag: 'WatchParty',
-          error: error,
-          stackTrace: stackTrace,
-        );
+        Log.w('WatchParty', 'Watch-party socket error', error, stackTrace);
         _onDisconnected(generation, channel);
       },
       onDone: () => _onDisconnected(generation, channel),
@@ -391,12 +386,7 @@ class WatchPartyService {
       }
       _queueRemoteApply(generation, snapshot, previous);
     } catch (error, stackTrace) {
-      AppLogger.instance.warning(
-        'Invalid watch-party message',
-        tag: 'WatchParty',
-        error: error,
-        stackTrace: stackTrace,
-      );
+      Log.w('WatchParty', 'Invalid watch-party message', error, stackTrace);
       final initialSnapshot = _initialSnapshot;
       if (initialSnapshot != null && !initialSnapshot.isCompleted) {
         initialSnapshot.completeError(StateError('无法解析一起看房间状态'), stackTrace);
@@ -420,11 +410,11 @@ class WatchPartyService {
         try {
           await _applySnapshot(pending.$1, pending.$2, pending.$3);
         } catch (error, stackTrace) {
-          AppLogger.instance.warning(
+          Log.w(
+            'WatchParty',
             'Unable to apply watch-party snapshot',
-            tag: 'WatchParty',
-            error: error,
-            stackTrace: stackTrace,
+            error,
+            stackTrace,
           );
         }
       }
@@ -568,11 +558,11 @@ class WatchPartyService {
         await _connect(webSocketUrl, generation);
       } catch (error, stackTrace) {
         if (!_isCurrentConnection(generation)) return;
-        AppLogger.instance.warning(
+        Log.w(
+          'WatchParty',
           'Unable to reconnect watch party',
-          tag: 'WatchParty',
-          error: error,
-          stackTrace: stackTrace,
+          error,
+          stackTrace,
         );
         _scheduleReconnect(generation);
       }

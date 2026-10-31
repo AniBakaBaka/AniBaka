@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/source/models/source_search_result.dart';
 import 'package:baka/services/source/source_repository.dart';
@@ -78,7 +79,7 @@ class _TvSearchPageState extends State<TvSearchPage> {
         NavigationService.toPlayback(context, playerData, autoMatch: false);
       }
     } catch (e) {
-      debugPrint('打开剧集错误: $e');
+      Log.w('TvSearch', '打开剧集错误: $e');
     }
   }
 

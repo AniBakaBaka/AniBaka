@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/utils/format_utils.dart';
 import 'package:baka/utils/json_values.dart';
 import 'package:baka/core/api_transport.dart';
@@ -506,7 +507,7 @@ class CIslandCommentWidgetState extends State<CIslandCommentWidget>
           fallbackName;
       return (episodeName: name, comments: comments);
     } catch (error) {
-      debugPrint('获取BGM剧集评论失败: $error');
+      Log.w('Comment', '获取BGM剧集评论失败: $error');
       return (episodeName: fallbackName, comments: const <_BgmComment>[]);
     }
   }

@@ -67,6 +67,7 @@ dependencies:
       ref: df73d230307caee2d1910f254eeacdc3d360c204
       path: screen_brightness
   crypto: ^3.0.7
+  ffi: ^2.2.0
   encrypt: ^5.0.3
   # 4.x migrates to the separate material_ui package.
   cached_network_image: ^3.4.1
@@ -79,11 +80,11 @@ dependencies:
   audio_video_progress_bar: ^2.0.3
   get: ^4.7.3
   media_kit: ^1.2.6 # Primary package.
-  # Upstream fork: Windows video bridge, enabled in windows/CMakeLists.txt.
+  # Organization fork: Windows renderer and runtime, enabled by CMake options.
   media_kit_video:
     git:
       url: https://github.com/AniBakaBaka/media-kit.git
-      ref: 12e1fdd72ffec6ef08f2f1b78490ca95632be4d5
+      ref: 9a7ecb383359d014ac681f68d6435e60b82f2e01
       path: media_kit_video
   media_kit_libs_video: ^1.0.7
   flutter_volume_controller: ^2.0.2
@@ -120,6 +121,15 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+
+# The cross-platform libs package requests its Windows package from pub.dev.
+# Override that source so both Windows packages use the same verified fork.
+dependency_overrides:
+  media_kit_libs_windows_video:
+    git:
+      url: https://github.com/AniBakaBaka/media-kit.git
+      ref: 9a7ecb383359d014ac681f68d6435e60b82f2e01
+      path: libs/windows/media_kit_libs_windows_video
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

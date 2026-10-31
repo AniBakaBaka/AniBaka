@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/source/models/source_search_result.dart';
 import 'package:baka/services/source/source_repository.dart';
@@ -660,7 +661,7 @@ class _SearchPageState extends State<SearchPage> {
         ),
       );
     } catch (error) {
-      debugPrint('Error opening $source: $error');
+      Log.w('Search', 'Error opening $source: $error');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

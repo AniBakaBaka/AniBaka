@@ -13,134 +13,62 @@
   "search": [
     {
       "op": "fetch",
-      "url": "/api/videos/search?q={keyword}"
+      "url": "/api/client/anime?keyword={keyword}&page=1&pageSize=100"
     },
     {
       "op": "jsonSeries",
-      "listPath": "data.videos",
-      "idKey": "id",
+      "listPath": "data.items",
+      "idKey": "slug",
       "nameKey": "name",
-      "imageKey": "pic",
-      "descKey": "remarks",
-      "detailUrlTemplate": "/api/videos/{id}"
+      "imageKey": "coverUrl",
+      "descKey": "summary",
+      "detailUrlTemplate": "/anime/{id}"
     }
   ],
   "detail": [
     {
-      "op": "follow"
+      "op": "regex",
+      "pattern": "/anime/([^/?#]+)",
+      "group": 1
     },
     {
-      "op": "setVar",
-      "name": "tvtDetailJson",
-      "value": "{url:raw}"
-    },
-    {
-      "op": "json",
-      "path": "data.slug"
-    },
-    {
-      "op": "setVar",
-      "name": "tvtVideoSlug",
-      "value": "{url:raw}"
-    },
-    {
-      "op": "template",
-      "value": "{tvtDetailJson:raw}"
+      "op": "fetch",
+      "url": "/api/client/anime/{url:raw}"
     },
     {
       "op": "jsonEpisodes",
-      "sourcesPath": "data.playSources",
+      "sourcesPath": "data.seasons",
       "episodesKey": "episodes",
       "sourceNameKey": "name",
-      "episodeNameKey": "name",
-      "episodeIdTemplate": "{id:raw}|{tvtVideoSlug:raw}|{source_index:raw}|{sort:raw}"
+      "episodeNameKey": "title",
+      "episodeIdTemplate": "{id:raw}"
     }
   ],
   "play": [
     {
-      "op": "setVar",
-      "name": "tvtPackedEpisode",
-      "value": "{episodeId:raw}"
-    },
-    {
-      "op": "regex",
-      "pattern": "^([^|]+)",
-      "group": 1
-    },
-    {
-      "op": "setVar",
-      "name": "tvtEpisodeId",
-      "value": "{url:raw}"
-    },
-    {
-      "op": "template",
-      "value": "{tvtPackedEpisode:raw}"
-    },
-    {
-      "op": "regex",
-      "pattern": "^[^|]+\\|([^|]+)",
-      "group": 1
-    },
-    {
-      "op": "setVar",
-      "name": "tvtVideoSlug",
-      "value": "{url:raw}"
-    },
-    {
-      "op": "template",
-      "value": "{tvtPackedEpisode:raw}"
-    },
-    {
-      "op": "regex",
-      "pattern": "^[^|]+\\|[^|]+\\|([^|]+)",
-      "group": 1
-    },
-    {
-      "op": "setVar",
-      "name": "tvtSourceIndex",
-      "value": "{url:raw}"
-    },
-    {
-      "op": "template",
-      "value": "{tvtPackedEpisode:raw}"
-    },
-    {
-      "op": "regex",
-      "pattern": "^[^|]+\\|[^|]+\\|[^|]+\\|([^|]+)",
-      "group": 1
-    },
-    {
-      "op": "setVar",
-      "name": "tvtEpisodeIndex",
-      "value": "{url:raw}"
-    },
-    {
       "op": "fetch",
-      "url": "/video/{tvtVideoSlug}/play?source={tvtSourceIndex}&episode={tvtEpisodeIndex}",
-      "cookieSession": true,
-      "headers": {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Referer": "https://www.tvtfun.net/video/{tvtVideoSlug}"
-      }
-    },
-    {
-      "op": "fetch",
-      "url": "/api/videos/resolve-play-url?episodeId={tvtEpisodeId}",
-      "delayMs": 600,
-      "headers": {
-        "Accept": "application/json",
-        "Referer": "https://www.tvtfun.net/video/{tvtVideoSlug}/play?source={tvtSourceIndex}&episode={tvtEpisodeIndex}",
-        "X-Play-Ctx": "eyJmIjozMDAsInYiOjEsInciOjEyODAsImhndCI6NzIwLCJwIjoxfQ=="
-      }
-    },
-    {
-      "op": "setMediaHeaders",
-      "headers": { "Referer": "" },
-      "jsonPath": "data.headers"
+      "url": "/api/client/anime/episodes/{episodeId:raw}/playback"
     },
     {
       "op": "json",
-      "path": "data.url"
+      "path": "data.items[0].id"
+    },
+    {
+      "op": "fetch",
+      "url": "/api/site-auth/playback-resolve",
+      "method": "POST",
+      "contentType": "application/json",
+      "headers": {
+        "Origin": "https://www.tvtfun.net"
+      },
+      "body": {
+        "episodeId": "{episodeId:raw}",
+        "sourceId": "{url:raw}"
+      }
+    },
+    {
+      "op": "json",
+      "path": "data.playback.url"
     }
   ]
 }

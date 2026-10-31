@@ -221,7 +221,7 @@ class _TvSettingsPageState extends State<TvSettingsPage> {
                 : Icons.visibility_outlined,
             title: '隐藏 NSFW 内容',
             subtitle: enabled ? '已开启 · 隐藏被数据源标记为 NSFW 的内容' : '已关闭 · 点击开启',
-            onPressed: () => contentFilter.setEnabled(!enabled, Instances.sp),
+            onPressed: () => contentFilter.setEnabled(!enabled),
           ),
         ),
         const SizedBox(height: 16),

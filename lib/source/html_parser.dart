@@ -1,5 +1,5 @@
 import 'dart:collection';
-import 'package:html/dom.dart' show Document, Element;
+import 'package:html/dom.dart' show Document, Element, Text;
 import 'package:html/parser.dart' as html_parser;
 import 'package:xpath_selector_html_parser/xpath_selector_html_parser.dart';
 import 'package:baka/source/models/series.dart';
@@ -19,28 +19,19 @@ class HtmlParser {
     return _document!;
   }
 
-  static const _searchSelectors = [
-    '.module-items .module-item',
-    '.stui-vodlist__box',
-    '.search-list .item',
-    'ul.items li',
-    '.list-item',
-  ];
-
-  static const _titleLinkSelectors = [
-    'a[title]',
-    'h1 a, h2 a, h3 a, h4 a',
-    '.module-card-item-title a, .stui-vodlist__title a',
-  ];
-
   static List<Series> parseSearchResults(
     Document doc, {
     required String baseUrl,
-    List<String>? selectors,
+    List<String> selectors = const [],
     String? detailPattern,
     String? listXPath,
     String nameXPath = '',
     String linkXPath = '',
+    String? linkSelector,
+    String? titleSelector,
+    String titleAttr = 'text',
+    String? imageSelector,
+    String imageAttr = 'src',
   }) {
     if (listXPath != null) {
       final results = <Series>[];
@@ -49,28 +40,34 @@ class HtmlParser {
         final link = linkXPath.isEmpty ? node : node.queryXPath(linkXPath).node;
         final href = link?.attributes['href'] ?? '';
         if (href.isEmpty) continue;
+        final seriesId = VideoUrlExtractor.toAbsolute(href, baseUrl);
+        if (seriesId.isEmpty) continue;
         final name =
             (nameXPath.isEmpty
                     ? node.node.text
                     : node.queryXPath(nameXPath).node?.text)
                 ?.trim() ??
             '';
-        results.add(
-          Series(
-            VideoUrlExtractor.toAbsolute(href, baseUrl),
-            name.isEmpty ? '未知标题' : name,
-          ),
-        );
+        if (name.isNotEmpty) results.add(Series(seriesId, name));
       }
       return results;
     }
-    for (final selector in selectors ?? _searchSelectors) {
+    for (final selector in selectors) {
       if (selector.trim().isEmpty) continue;
       final elements = doc.querySelectorAll(selector);
       if (elements.isEmpty) continue;
       final results = <Series>[];
       for (final element in elements) {
-        final series = _parseSeriesElement(element, baseUrl, detailPattern);
+        final series = _parseSeriesElement(
+          element,
+          baseUrl,
+          detailPattern,
+          linkSelector,
+          titleSelector,
+          titleAttr,
+          imageSelector,
+          imageAttr,
+        );
         if (series != null) results.add(series);
       }
       if (results.isNotEmpty) return results;
@@ -82,45 +79,49 @@ class HtmlParser {
     Element element,
     String baseUrl,
     String? detailPattern,
+    String? linkSelector,
+    String? titleSelector,
+    String titleAttr,
+    String? imageSelector,
+    String imageAttr,
   ) {
-    final link = _findLink(element, detailPattern);
-    if (link == null) return null;
-
-    final href = link.attributes['href'] ?? '';
-    final img = element.querySelector('img');
-    final name = _extractTitle(element, link, img);
+    final link = linkSelector == null
+        ? (element.localName == 'a'
+              ? element
+              : element.querySelector('a[href]'))
+        : _select(element, linkSelector);
+    if (link == null || !_isUsableLink(link, detailPattern)) return null;
+    final href = VideoUrlExtractor.toAbsolute(
+      link.attributes['href']!,
+      baseUrl,
+    );
+    if (href.isEmpty) return null;
+    final title = titleSelector == null
+        ? link
+        : _select(element, titleSelector);
+    final name = _value(title, titleAttr);
     if (name.isEmpty) return null;
-
-    final src =
-        img?.attributes['data-original'] ??
-        img?.attributes['data-src'] ??
-        img?.attributes['src'] ??
-        element.querySelector('[data-original]')?.attributes['data-original'] ??
-        element.querySelector('[data-src]')?.attributes['data-src'] ??
-        element.attributes['data-original'] ??
-        element.attributes['data-src'] ??
-        element.attributes['src'];
+    final src = imageSelector == null
+        ? ''
+        : _value(_select(element, imageSelector), imageAttr);
     return Series(
-      VideoUrlExtractor.toAbsolute(href, baseUrl),
+      href,
       name,
-      image: src != null && src.isNotEmpty
-          ? VideoUrlExtractor.toAbsolute(src, baseUrl)
-          : null,
+      image: src.isEmpty ? null : VideoUrlExtractor.toAbsolute(src, baseUrl),
     );
   }
 
-  static Element? _findLink(Element element, String? detailPattern) {
-    for (final selector in _titleLinkSelectors) {
-      for (final link in element.querySelectorAll(selector)) {
-        if (_isUsableLink(link, detailPattern)) return link;
-      }
-    }
-    if (element.localName == 'a' && _isUsableLink(element, detailPattern)) {
-      return element;
-    }
-    final link = element.querySelector('a');
-    return link != null && _isUsableLink(link, detailPattern) ? link : null;
-  }
+  static Element? _select(Element element, String selector) =>
+      selector.isEmpty ? element : element.querySelector(selector);
+
+  static String _value(Element? element, String attr) =>
+      (switch (attr) {
+        'text' => element?.text,
+        'ownText' =>
+          element?.nodes.whereType<Text>().map((node) => node.text).join(),
+        _ => element?.attributes[attr],
+      })?.trim() ??
+      '';
 
   static bool _isUsableLink(Element link, String? detailPattern) {
     final href = link.attributes['href'] ?? '';
@@ -129,61 +130,17 @@ class HtmlParser {
     return true;
   }
 
-  static String _extractTitle(Element element, Element link, Element? img) {
-    final title = link.attributes['title']?.trim() ?? '';
-    if (title.length > 1 && title.length < 100) return title;
-
-    final header =
-        element.querySelector('h1, h2, h3, h4, .title')?.text.trim() ?? '';
-    if (header.length > 1 && header.length < 100) return header;
-
-    final alt = img?.attributes['alt']?.trim() ?? '';
-    if (alt.length > 1 && alt.length < 100) return alt;
-
-    final text = link.text.trim();
-    if (text.length > 1 && text.length < 100) return text;
-    return '';
-  }
-
-  static const _tabSelectors = [
-    '.play_source_tab a',
-    '.anthology-tab a',
-    '.module-tab-item',
-    '.play-source-tab span',
-    '.player-tab',
-  ];
-
-  static const _listSelectors = [
-    '.anthology-list-play',
-    '.module-player-list',
-    '.module-play-list',
-    '.play-list',
-    '.playlist',
-    '.episode-list',
-    '.content_playlist',
-    'ul.hl-plays-list',
-  ];
-
-  static final _explicitEpisodePatterns = [
-    RegExp(r'[?&](?:nid|episode|ep)=(\d+)(?:&|$)', caseSensitive: false),
-    RegExp(r'/sid/\d+/nid/(\d+)', caseSensitive: false),
-  ];
-
-  static final _tuplePatterns = [
-    RegExp(r'/(?:vod)?play/[^/?#]+?-(\d+)-(\d+)', caseSensitive: false),
-    RegExp(r'/(?:vod/)?play/[^/?#]+?_(\d+)_(\d+)', caseSensitive: false),
-  ];
-
   static final _wsRegex = RegExp(r'\s+');
-  static final _trailingDigitsRegex = RegExp(r'\d+$');
 
   static List<Source> parseSources(
     Document doc, {
     required String baseUrl,
-    List<String>? listSelectors,
-    List<String>? tabSelectors,
+    List<String> listSelectors = const [],
+    List<String> tabSelectors = const [],
+    String tabAttr = 'text',
     String? roadsXPath,
     String itemsXPath = '',
+    RegExp? episodeNumberPattern,
   }) {
     if (roadsXPath != null) {
       final sources = <Source>[];
@@ -193,13 +150,16 @@ class HtmlParser {
         for (var i = 0; i < items.length; i++) {
           final href = items[i].attributes['href'] ?? '';
           if (href.isEmpty) continue;
+          final episodeId = VideoUrlExtractor.toAbsolute(href, baseUrl);
+          final index = _episodeIndex(
+            href,
+            episodes.length,
+            episodeNumberPattern,
+          );
+          if (episodeId.isEmpty || index == null) continue;
           final name = items[i].node.text?.replaceAll(_wsRegex, '') ?? '';
           episodes.add(
-            Episode(
-              VideoUrlExtractor.toAbsolute(href, baseUrl),
-              i,
-              name.isEmpty ? '第${i + 1}集' : name,
-            ),
+            Episode(episodeId, index, name.isEmpty ? '第${index + 1}集' : name),
           );
         }
         if (episodes.isNotEmpty) {
@@ -208,10 +168,10 @@ class HtmlParser {
       }
       return sources;
     }
-    final labels = _findTabLabels(doc, tabSelectors ?? _tabSelectors);
-    final selectors = listSelectors ?? _listSelectors;
+    final labels = _findTabLabels(doc, tabSelectors, tabAttr);
 
-    for (final selector in selectors) {
+    for (final selector in listSelectors) {
+      if (selector.trim().isEmpty) continue;
       final containers = doc.querySelectorAll(selector);
       if (containers.isEmpty) continue;
 
@@ -223,7 +183,11 @@ class HtmlParser {
       );
       var sourceIndex = 0;
       for (final container in containers) {
-        final episodes = _extractEpisodes(container, baseUrl);
+        final episodes = _extractEpisodes(
+          container,
+          baseUrl,
+          episodeNumberPattern,
+        );
         if (episodes.isEmpty) continue;
         final index = sourceIndex++;
         if (!seen.add(episodes)) continue;
@@ -242,34 +206,27 @@ class HtmlParser {
     return true;
   }
 
-  static List<Episode> _extractEpisodes(Element container, String baseUrl) {
+  static List<Episode> _extractEpisodes(
+    Element container,
+    String baseUrl,
+    RegExp? episodeNumberPattern,
+  ) {
     final links = container.querySelectorAll('a');
-    final hrefs = <String>[];
-    var count = 0;
-    for (final link in links) {
-      final href = (link.attributes['href'] ?? '').trim();
-      if (href.isNotEmpty &&
-          !href.contains('javascript') &&
-          !href.startsWith('#')) {
-        links[count++] = link;
-        hrefs.add(href);
-      }
-    }
-    links.length = count;
-    if (links.isEmpty) return [];
-    final episodeNumbers = _resolveEpisodeNumbers(hrefs);
-
     final episodes = <Episode>[];
     final seen = <String>{};
-    for (var i = 0; i < links.length; i++) {
-      final link = links[i];
-      final episodeId = VideoUrlExtractor.toAbsolute(hrefs[i], baseUrl);
+    for (final link in links) {
+      final href = (link.attributes['href'] ?? '').trim();
+      if (href.isEmpty ||
+          href.toLowerCase().startsWith('javascript:') ||
+          href.startsWith('#')) {
+        continue;
+      }
+      final episodeId = VideoUrlExtractor.toAbsolute(href, baseUrl);
+      if (episodeId.isEmpty) continue;
       if (!seen.add(episodeId)) continue;
 
-      final number = episodeNumbers[i];
-      final index = (number != null && number > 0)
-          ? number - 1
-          : episodes.length;
+      final index = _episodeIndex(href, episodes.length, episodeNumberPattern);
+      if (index == null) continue;
       final name = link.text.trim().replaceAll(_wsRegex, ' ');
       episodes.add(
         Episode(episodeId, index, name.isEmpty ? 'Episode ${index + 1}' : name),
@@ -278,63 +235,27 @@ class HtmlParser {
     return episodes;
   }
 
-  static List<int?> _resolveEpisodeNumbers(List<String> hrefs) {
-    final numbers = List<int?>.filled(hrefs.length, null);
-    final tuples = <({int index, int first, int second})>[];
-    int? firstColumn0;
-    int? firstColumn1;
-    var column0Varies = false;
-    var column1Varies = false;
-
-    for (var i = 0; i < hrefs.length; i++) {
-      final normalized = hrefs[i].replaceAll(r'\/', '/');
-      for (final pattern in _explicitEpisodePatterns) {
-        final match = pattern.firstMatch(normalized);
-        if (match != null) {
-          final n = int.tryParse(match.group(1) ?? '');
-          if (n != null && n > 0) {
-            numbers[i] = n;
-            break;
-          }
-        }
-      }
-      if (numbers[i] != null) continue;
-
-      for (final pattern in _tuplePatterns) {
-        final match = pattern.firstMatch(normalized);
-        if (match != null) {
-          final a = int.tryParse(match.group(1) ?? '');
-          final b = int.tryParse(match.group(2) ?? '');
-          if (a != null && b != null) {
-            firstColumn0 ??= a;
-            firstColumn1 ??= b;
-            column0Varies |= a != firstColumn0;
-            column1Varies |= b != firstColumn1;
-            tuples.add((index: i, first: a, second: b));
-            break;
-          }
-        }
-      }
+  static int? _episodeIndex(String href, int position, RegExp? pattern) {
+    if (pattern == null) return position;
+    final match = pattern.firstMatch(href);
+    if (match == null) return null;
+    if (match.groupCount < 1) {
+      throw const FormatException('episodeNumberPattern 必须捕获集数');
     }
-
-    if (tuples.isNotEmpty) {
-      final useFirst = column0Varies && !column1Varies;
-      final useSecond = column1Varies && !column0Varies;
-      if (useFirst || useSecond) {
-        for (final tuple in tuples) {
-          numbers[tuple.index] = useFirst ? tuple.first : tuple.second;
-        }
-      }
-    }
-    return numbers;
+    final number = int.tryParse(match.group(1) ?? '');
+    return number != null && number > 0 ? number - 1 : null;
   }
 
-  static List<String> _findTabLabels(Document doc, List<String> selectors) {
+  static List<String> _findTabLabels(
+    Document doc,
+    List<String> selectors,
+    String attr,
+  ) {
     for (final selector in selectors) {
       final elements = doc.querySelectorAll(selector);
       final labels = <String>[];
       for (final element in elements) {
-        final label = element.text.trim();
+        final label = _value(element, attr);
         if (label.isNotEmpty) labels.add(label);
       }
       if (labels.isNotEmpty) return labels;
@@ -344,11 +265,8 @@ class HtmlParser {
 
   static String _sourceName(int index, List<String> labels) {
     if (index < labels.length) {
-      final label = labels[index]
-          .trim()
-          .replaceAll(_trailingDigitsRegex, '')
-          .trim();
-      if (label.isNotEmpty && label.length < 50) return label;
+      final label = labels[index].trim();
+      if (label.isNotEmpty) return label;
     }
     return '播放源 ${index + 1}';
   }

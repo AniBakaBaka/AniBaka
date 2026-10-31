@@ -13,8 +13,18 @@
   },
   "search": [
     {
-      "op": "maccmsSuggest",
-      "urlKey": "url",
+      "op": "fetch",
+      "url": "/index.php/ajax/suggest?mid=1&wd={keyword}&limit=20",
+      "headers": {
+        "X-Requested-With": "XMLHttpRequest"
+      }
+    },
+    {
+      "op": "jsonSeries",
+      "listPath": "list",
+      "idKey": "id",
+      "nameKey": "name",
+      "imageKey": "pic",
       "detailUrlTemplate": "/voddetail/{id}/"
     }
   ],
@@ -26,13 +36,16 @@
       "op": "episodes",
       "listSelectors": [
         "ul.hl-plays-list"
-      ]
+      ],
+      "tabSelectors": [
+        ".hl-plays-from a"
+      ],
+      "tabAttr": "alt"
     }
   ],
   "play": [
     {
-      "op": "follow",
-      "filterHlsAds": true
+      "op": "follow"
     },
     {
       "op": "playerAaaa",

@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -275,7 +276,20 @@ class PipelineInterpreter {
           return SourceOperation.delay(Duration(milliseconds: ms));
         }
       case 'select':
-        _opSelect(step, ctx);
+        return _opSelect(step, ctx);
+      case 'urlDecode':
+        final input = step.str('input') == null
+            ? ctx.currentString
+            : _render(step.str('input')!, ctx);
+        try {
+          ctx.value = step.flag('form')
+              ? Uri.decodeQueryComponent(input)
+              : Uri.decodeComponent(input);
+        } on FormatException {
+          ctx.value = '';
+        } on ArgumentError {
+          ctx.value = '';
+        }
       case 'regex':
         _opRegex(step, ctx);
       case 'replace':
@@ -314,12 +328,6 @@ class PipelineInterpreter {
         _opPlayerDecrypt(step, ctx);
       case 'sniff':
         return _opSniff(step, ctx);
-      case 'anime1Search':
-        return _opAnime1Search(step, ctx);
-      case 'anime1Detail':
-        return _opAnime1Detail(step, ctx);
-      case 'anime1Play':
-        return _opAnime1Play(step, ctx);
       case 'hhPlayer':
         return _opHhPlayer(step, ctx);
       case 'torrentRecords':
@@ -327,7 +335,7 @@ class PipelineInterpreter {
       case 'maccmsSuggest':
         return _opMaccmsSuggest(step, ctx);
       default:
-        _debugLog('[pipeline] 未知 op: ${step.op}');
+        Log.w('Pipeline', '未知 op: ${step.op}');
         ctx.value = '';
     }
   }
@@ -376,8 +384,8 @@ class PipelineInterpreter {
     ctx.pageUrl = url;
   }
 
-  /// `select`：CSS 选择器取值。all=true 取列表，否则取单值（attr 或文本）。
-  void _opSelect(PipelineStep step, _PipelineContext ctx) {
+  /// `select`：CSS 选择器取值；all=true 时可跟随 nextSelector 分页收集。
+  Future<void> _opSelect(PipelineStep step, _PipelineContext ctx) async {
     final selector = step.str('css') ?? '';
     final attr = step.str('attr') ?? 'text';
     if (selector.isEmpty) {
@@ -385,17 +393,48 @@ class PipelineInterpreter {
       return;
     }
     if (step.flag('all')) {
-      ctx.value = [
-        for (final element
-            in ctx.htmlParser
-                .documentFor(ctx.currentString)
-                .querySelectorAll(selector))
-          if ((attr == 'text'
-                  ? element.text.trim()
-                  : element.attributes[attr] ?? '')
-              case final value when value.isNotEmpty)
-            value,
-      ];
+      final values = <String>[];
+      final nextSelector = step.str('nextSelector')?.trim() ?? '';
+      final maxPages = (step.intValue('maxPages') ?? 32).clamp(1, 256);
+      final visited = <String>{};
+      var html = ctx.currentString;
+      for (var page = 0; page < maxPages && html.trim().isNotEmpty; page++) {
+        SourceOperation.check();
+        final pageUrl = ctx.pageUrl.isEmpty ? ctx.baseUrl : ctx.pageUrl;
+        visited.add(Uri.parse(pageUrl).removeFragment().toString());
+        final document = ctx.htmlParser.documentFor(html);
+        for (final element in document.querySelectorAll(selector)) {
+          final value = attr == 'text'
+              ? element.text.trim()
+              : element.attributes[attr] ?? '';
+          if (value.isNotEmpty) values.add(value);
+        }
+        if (nextSelector.isEmpty || page + 1 >= maxPages) break;
+        final href = document
+            .querySelector(nextSelector)
+            ?.attributes['href']
+            ?.trim();
+        if (href == null || href.isEmpty) break;
+        final link = Uri.tryParse(href);
+        final next = link == null
+            ? null
+            : Uri.tryParse(pageUrl)?.resolveUri(link).removeFragment();
+        if (next == null ||
+            (next.scheme != 'http' && next.scheme != 'https') ||
+            !visited.add(next.toString())) {
+          break;
+        }
+        final headers = _renderMap(step.params['headers'], ctx);
+        html = await ctx.host.fetch(
+          next.toString(),
+          headers: headers.isEmpty ? null : headers,
+          referer: pageUrl,
+          priority: ctx.priority,
+        );
+        SourceOperation.check();
+        ctx.pageUrl = next.toString();
+      }
+      ctx.value = step.flag('unique') ? values.toSet().toList() : values;
     } else {
       final element = ctx.htmlParser
           .documentFor(ctx.currentString)
@@ -458,7 +497,7 @@ class PipelineInterpreter {
             : '';
       }
     } catch (e) {
-      _debugLog('[pipeline] regex 错误: $e');
+      Log.w('Pipeline', 'regex 错误: $e');
       ctx.value = '';
     }
   }
@@ -492,7 +531,7 @@ class PipelineInterpreter {
           ? source.replaceFirst(matcher, replacement)
           : source.replaceAll(matcher, replacement);
     } catch (e) {
-      _debugLog('[pipeline] replace 错误: $e');
+      Log.w('Pipeline', 'replace 错误: $e');
       ctx.value = '';
     }
   }
@@ -557,10 +596,10 @@ class PipelineInterpreter {
           ctx.value = _aes(step, ctx, input, enc.AESMode.gcm, mode);
           break;
         default:
-          _debugLog('[pipeline] 未知 crypto algo: $algo');
+          Log.w('Pipeline', '未知 crypto algo: $algo');
       }
     } catch (e) {
-      _debugLog('[pipeline] crypto 错误: $e');
+      Log.w('Pipeline', 'crypto 错误: $e');
       ctx.value = '';
     }
   }
@@ -794,7 +833,7 @@ class PipelineInterpreter {
         preserveMagnet: true,
       );
     } catch (e) {
-      _debugLog('[pipeline] ecPlayer 解密失败: $e');
+      Log.w('Pipeline', 'ecPlayer 解密失败: $e');
       ctx.value = '';
     }
   }
@@ -921,13 +960,16 @@ class PipelineInterpreter {
     final results = HtmlParser.parseSearchResults(
       ctx.htmlParser.documentFor(html),
       baseUrl: ctx.baseUrl,
-      selectors: step.params['selectors'] == null
-          ? null
-          : step.strList('selectors'),
+      selectors: step.strList('selectors'),
       detailPattern: step.str('detailPattern'),
       listXPath: step.str('listXPath'),
       nameXPath: step.str('nameXPath') ?? '',
       linkXPath: step.str('linkXPath') ?? '',
+      linkSelector: step.str('linkSelector'),
+      titleSelector: step.str('titleSelector'),
+      titleAttr: step.str('titleAttr') ?? 'text',
+      imageSelector: step.str('imageSelector'),
+      imageAttr: step.str('imageAttr') ?? 'src',
     );
     RegExp? namePattern;
     final nameFilter = step.str('nameFilter') ?? '';
@@ -935,7 +977,7 @@ class PipelineInterpreter {
       try {
         namePattern = _cachedRegExp(nameFilter);
       } catch (e) {
-        _debugLog('[pipeline] nameFilter 错误: $e');
+        Log.w('Pipeline', 'nameFilter 错误: $e');
       }
     }
 
@@ -991,21 +1033,24 @@ class PipelineInterpreter {
     final prefix = step.str('idPrefix') ?? '';
     final suffix = step.str('idSuffix') ?? '';
 
-    final keyword = step.flag('keywordMatch')
-        ? (ctx.vars['keyword']?.toString() ?? '').toLowerCase().trim()
+    final caseSensitive = step.flag('caseSensitive');
+    final rawKeyword = step.flag('keywordMatch')
+        ? (ctx.vars['keyword']?.toString() ?? '').trim()
         : '';
+    final keyword = caseSensitive ? rawKeyword : rawKeyword.toLowerCase();
 
     for (final item in list) {
-      if (item is! Map) continue;
-      final name = item[nameKey]?.toString().trim() ?? '';
+      if (item is! Map && item is! List) continue;
+      Object? field(String path) => jsonPath(item, path);
+      final name = field(nameKey)?.toString().trim() ?? '';
       if (name.isEmpty) continue;
       if (keyword.isNotEmpty) {
-        final lowerName = name.toLowerCase();
-        if (!lowerName.contains(keyword) && !keyword.contains(lowerName)) {
+        final matchName = caseSensitive ? name : name.toLowerCase();
+        if (!matchName.contains(keyword) && !keyword.contains(matchName)) {
           continue;
         }
       }
-      final rawId = item[idKey]?.toString().trim() ?? '';
+      final rawId = field(idKey)?.toString().trim() ?? '';
       var id = rawId;
       if (encodeId && id.isNotEmpty) {
         final numeric = int.tryParse(id);
@@ -1014,7 +1059,7 @@ class PipelineInterpreter {
       }
       final rawUrl = urlKey == null
           ? ''
-          : item[urlKey]?.toString().trim() ?? '';
+          : field(urlKey)?.toString().trim() ?? '';
       String seriesUrl;
       if (rawUrl.isNotEmpty) {
         seriesUrl = VideoUrlExtractor.toAbsolute(rawUrl, baseUrl);
@@ -1029,7 +1074,7 @@ class PipelineInterpreter {
         continue;
       }
       if (ctx._seriesById.containsKey(seriesUrl)) continue;
-      final pic = item[imageKey]?.toString().trim() ?? '';
+      final pic = field(imageKey)?.toString().trim() ?? '';
       ctx.addSeries(
         Series(
           seriesUrl,
@@ -1037,7 +1082,7 @@ class PipelineInterpreter {
           image: pic.isEmpty
               ? null
               : VideoUrlExtractor.toAbsolute(pic, baseUrl),
-          description: descKey == null ? null : item[descKey]?.toString(),
+          description: descKey == null ? null : field(descKey)?.toString(),
         ),
       );
     }
@@ -1048,17 +1093,18 @@ class PipelineInterpreter {
     ctx.sinkRuns++;
     final html = ctx.currentString;
     if (html.isEmpty) return;
+    final episodeNumberPattern = step.str('episodeNumberPattern');
     final sources = HtmlParser.parseSources(
       ctx.htmlParser.documentFor(html),
       baseUrl: ctx.baseUrl,
-      listSelectors: step.params['listSelectors'] == null
-          ? null
-          : step.strList('listSelectors'),
-      tabSelectors: step.params['tabSelectors'] == null
-          ? null
-          : step.strList('tabSelectors'),
+      listSelectors: step.strList('listSelectors'),
+      tabSelectors: step.strList('tabSelectors'),
+      tabAttr: step.str('tabAttr') ?? 'text',
       roadsXPath: step.str('roadsXPath'),
       itemsXPath: step.str('itemsXPath') ?? '',
+      episodeNumberPattern: episodeNumberPattern == null
+          ? null
+          : _cachedRegExp(episodeNumberPattern),
     );
     final orderedSources = step.flag('reverse') ? sources.reversed : sources;
     if (!step.flag('reverseEpisodes')) {
@@ -1092,7 +1138,7 @@ class PipelineInterpreter {
     ctx.sinkRuns++;
     final data = ctx.json;
     final episodesPath = step.str('episodesPath') ?? '';
-    if (episodesPath.isNotEmpty) {
+    if (step.params.containsKey('episodesPath')) {
       final epList = jsonPath(data, episodesPath);
       if (epList is! List) return;
       final episodes = _buildJsonEpisodes(epList, step, ctx);
@@ -1217,9 +1263,15 @@ class PipelineInterpreter {
     final sourceIdText = sourceId?.toString() ?? '';
     final sourceIndexText = sourceIndex.toString();
     final episodes = <Episode>[];
-    for (var i = 0; i < epList.length; i++) {
-      final item = epList[i];
-      if (item is! Map) continue;
+    final ordered = step.flag('reverse') ? epList.reversed.toList() : epList;
+    for (var i = 0; i < ordered.length; i++) {
+      final item = switch (ordered[i]) {
+        final Map value => value,
+        final String value => {'id': value},
+        final num value => {'id': value},
+        _ => null,
+      };
+      if (item == null) continue;
       final String epId;
       if (plainIdTemplate || rawIdTemplate) {
         final id =
@@ -1248,9 +1300,19 @@ class PipelineInterpreter {
         if (_blankEpisodeId(epId)) continue;
       }
       final title = item[epNameKey]?.toString().trim() ?? '';
-      episodes.add(
-        Episode(epId, i, title.isEmpty ? 'Episode ${i + 1}' : title),
-      );
+      final nameTemplate = step.str('episodeNameTemplate');
+      final fallbackName = nameTemplate == null
+          ? 'Episode ${i + 1}'
+          : _render(
+              nameTemplate,
+              ctx,
+              extra: {
+                'index': '${i + 1}',
+                'index0': '$i',
+                'id': item['id']?.toString(),
+              },
+            );
+      episodes.add(Episode(epId, i, title.isEmpty ? fallbackName : title));
     }
     return episodes;
   }
@@ -1283,13 +1345,6 @@ class PipelineInterpreter {
         ctx.pageUrl.isEmpty ? ctx.baseUrl : ctx.pageUrl,
       );
     }
-    if (url.isNotEmpty && !VideoUrlExtractor.isSignedCdnUrl(url)) {
-      try {
-        url = Uri.encodeFull(Uri.decodeFull(url));
-      } catch (_) {
-        url = Uri.encodeFull(url);
-      }
-    }
     ctx.value = url;
   }
 
@@ -1320,6 +1375,12 @@ class PipelineInterpreter {
       }
     }
     if (updated != null) ctx.mediaHeaders = updated;
+    if (step.params.containsKey('cookieNames')) {
+      ctx.cookieNames = step.strList('cookieNames');
+    }
+    if (step.params.containsKey('cookiePrefixes')) {
+      ctx.cookiePrefixes = step.strList('cookiePrefixes');
+    }
   }
 
   /// `playerAaaa`：提取 MacCMS `player_aaaa` 变量 JSON 中的 url 键。
@@ -1433,7 +1494,7 @@ class PipelineInterpreter {
           .replaceAll(r'\/', '/')
           .trim();
     } catch (e) {
-      _debugLog('[pipeline] playerDecrypt 错误: $e');
+      Log.w('Pipeline', 'playerDecrypt 错误: $e');
       ctx.value = '';
     }
   }
@@ -1481,7 +1542,7 @@ class PipelineInterpreter {
             dotAll: true,
           );
         } catch (e) {
-          _debugLog('[pipeline] sniff readyRegex 错误: $e');
+          Log.w('Pipeline', 'sniff readyRegex 错误: $e');
         }
       }
       final readyContains = step
@@ -1522,130 +1583,6 @@ class PipelineInterpreter {
     }
   }
 
-  /// `anime1Search`：Anime1 catalog 是 `[[id, name, ...], ...]`，按名称双向子串匹配。
-  Future<void> _opAnime1Search(PipelineStep step, _PipelineContext ctx) async {
-    ctx.sinkRuns++;
-    final keyword = ctx.vars['keyword']?.toString().trim() ?? '';
-    final idIndex = step.intValue('idIndex') ?? 0;
-    final nameIndex = step.intValue('nameIndex') ?? 1;
-    if (keyword.isEmpty || idIndex < 0 || nameIndex < 0) return;
-
-    final rows = _asJson(
-      await ctx.host.fetch(
-        VideoUrlExtractor.toAbsolute(
-          step.str('url') ?? 'https://d1zquzjgwo9yb.cloudfront.net/',
-          ctx.baseUrl,
-        ),
-        priority: ctx.priority,
-      ),
-    );
-    if (rows is! List) return;
-    final caseSensitive = step.flag('caseSensitive');
-    final query = caseSensitive ? keyword : keyword.toLowerCase();
-    for (final row in rows) {
-      if (row is! List || idIndex >= row.length || nameIndex >= row.length) {
-        continue;
-      }
-      final id = row[idIndex]?.toString().trim() ?? '';
-      final name = row[nameIndex]?.toString().trim() ?? '';
-      if (id.isEmpty || name.isEmpty) continue;
-      final value = caseSensitive ? name : name.toLowerCase();
-      if (value.contains(query) || query.contains(value)) {
-        ctx.addSeries(Series(id, name));
-      }
-    }
-  }
-
-  /// `anime1Detail`：跟随分类页分页收集剧集 token（站点新集在前，`reverse` 转为正序）。
-  Future<void> _opAnime1Detail(PipelineStep step, _PipelineContext ctx) async {
-    ctx.sinkRuns++;
-    final seriesId = ctx.vars['seriesId']?.toString() ?? ctx.currentString;
-    if (seriesId.isEmpty) return;
-
-    final itemSelector = step.str('itemSelector') ?? 'video[data-apireq]';
-    final tokenAttribute = step.str('tokenAttribute') ?? 'data-apireq';
-    final nextSelector = step.str('nextSelector') ?? '.nav-previous a';
-    final maxPages = step.intValue('maxPages') ?? 32;
-    final tokens = <String>{};
-    final visited = <String>{};
-    String? pageUrl = VideoUrlExtractor.toAbsolute(
-      _render(step.str('url') ?? 'https://anime1.me/?cat={seriesId:raw}', ctx),
-      ctx.baseUrl,
-    );
-    while (pageUrl != null &&
-        visited.length < maxPages &&
-        visited.add(pageUrl)) {
-      final html = await ctx.host.fetch(pageUrl, priority: ctx.priority);
-      if (html.trim().isEmpty) break;
-      final document = ctx.htmlParser.documentFor(html);
-      for (final element in document.querySelectorAll(itemSelector)) {
-        final token = element.attributes[tokenAttribute]?.trim() ?? '';
-        if (token.isNotEmpty) tokens.add(token);
-      }
-      final href = nextSelector.trim().isEmpty
-          ? null
-          : document.querySelector(nextSelector)?.attributes['href']?.trim();
-      final next = href == null || href.isEmpty ? null : Uri.tryParse(href);
-      pageUrl = next == null
-          ? null
-          : Uri.parse(pageUrl).resolveUri(next).toString();
-    }
-
-    final template = step.str('episodeNameTemplate') ?? '第{index}集';
-    final ordered = step.flag('reverse') ? tokens.toList().reversed : tokens;
-    final episodes = [
-      for (final (i, token) in ordered.indexed)
-        Episode(
-          token,
-          i,
-          template
-              .replaceAll('{index}', '${i + 1}')
-              .replaceAll('{index0}', '$i'),
-        ),
-    ];
-    if (episodes.isEmpty) return;
-    final name = step.str('sourceName') ?? 'Anime1';
-    ctx._sources.add(Source(episodes, name.trim().isEmpty ? null : name));
-  }
-
-  /// `anime1Play`：调用 Anime1 play API 解析媒体直链与所需 cookie。
-  Future<void> _opAnime1Play(PipelineStep step, _PipelineContext ctx) async {
-    final token = ctx.vars['episodeId']?.toString() ?? ctx.currentString;
-    if (token.isEmpty) {
-      ctx.value = '';
-      return;
-    }
-
-    final payload = await ctx.host.fetch(
-      VideoUrlExtractor.toAbsolute(
-        step.str('url') ?? 'https://v.anime1.me/api',
-        ctx.baseUrl,
-      ),
-      method: 'POST',
-      contentType: step.str('contentType') ?? 'form',
-      body: {step.str('tokenField') ?? 'd': Uri.decodeComponent(token)},
-      headers: _renderMap(step.params['headers'], ctx),
-      priority: ctx.priority,
-    );
-    final raw =
-        jsonPath(
-          _asJson(payload),
-          step.str('sourcePath') ?? 's[0].src',
-        )?.toString().trim() ??
-        '';
-    final rawUri = raw.isEmpty ? null : Uri.tryParse(raw);
-    ctx.value = rawUri == null
-        ? ''
-        : Uri.parse(
-            step.str('mediaBaseUrl') ?? 'https://v.anime1.me/',
-          ).resolveUri(rawUri).toString();
-
-    final mediaHeaders = _renderMap(step.params['mediaHeaders'], ctx);
-    if (mediaHeaders.isNotEmpty) ctx.mediaHeaders = mediaHeaders;
-    ctx.cookieNames = step.strList('cookieNames');
-    ctx.cookiePrefixes = step.strList('cookiePrefixes');
-  }
-
   /// `hhPlayer`：iframe URL 带加密地址，页面带时间戳与映射过的 base64 key，
   /// 三者以表单提交到 API 换取直链。
   Future<void> _opHhPlayer(PipelineStep step, _PipelineContext ctx) async {
@@ -1675,7 +1612,7 @@ class PipelineInterpreter {
             ? ''
             : match.group(group)?.trim() ?? '';
       } on FormatException catch (e) {
-        _debugLog('[pipeline] hhPlayer pattern 错误: $e');
+        Log.w('Pipeline', 'hhPlayer pattern 错误: $e');
         return '';
       }
     }
@@ -1790,13 +1727,6 @@ class PipelineInterpreter {
     return false;
   }
 
-  void _debugLog(String message) {
-    assert(() {
-      // ignore: avoid_print
-      print(message);
-      return true;
-    }());
-  }
 
   Map<String, String> _renderMap(Object? raw, _PipelineContext ctx) {
     if (raw is! Map) return const <String, String>{};

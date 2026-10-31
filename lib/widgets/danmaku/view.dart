@@ -572,7 +572,7 @@ class _DanmakuViewState extends State<DanmakuView>
 
   void _log(String message) {
     if (!Instances.isTV) return;
-    AppLogger.instance.info(message, tag: 'TvDanmaku');
+    Log.i('TvDanmaku', message);
   }
 
   double _measureLineHeight(DanmakuOption option) {

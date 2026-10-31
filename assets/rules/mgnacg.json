@@ -11,11 +11,20 @@
   },
   "search": [
     {
-      "op": "maccmsSuggest",
+      "op": "fetch",
+      "url": "/index.php/ajax/suggest?mid=1&wd={keyword}&limit=20",
       "headers": {
+        "X-Requested-With": "XMLHttpRequest",
         "Referer": "https://www.mgnacg.com/",
         "Origin": "https://www.mgnacg.com"
-      },
+      }
+    },
+    {
+      "op": "jsonSeries",
+      "listPath": "list",
+      "idKey": "id",
+      "nameKey": "name",
+      "imageKey": "pic",
       "detailUrlTemplate": "/media/{id}/"
     }
   ],
@@ -29,14 +38,12 @@
     {
       "op": "episodes",
       "listSelectors": [
-        ".anthology-list-box"
+        "ul.anthology-list-play"
       ],
       "tabSelectors": [
-        ".anthology-tab .swiper-slide",
-        ".anthology-tab a",
-        ".module-tab-item",
-        ".tab-item"
-      ]
+        ".anthology-tab a.swiper-slide"
+      ],
+      "tabAttr": "ownText"
     }
   ],
   "useWebview": true,

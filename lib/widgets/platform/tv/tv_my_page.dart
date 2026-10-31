@@ -1,6 +1,8 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/services/source/rule_repository_service.dart';
 import 'package:baka/core/account_session.dart';
 import 'package:baka/models/app_user.dart';
+import 'package:baka/models/token_response.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -79,7 +81,7 @@ class _TvMyPageState extends State<TvMyPage> {
         });
       }
     } catch (e) {
-      debugPrint('加载统计失败: $e');
+      Log.w('TvMine', '加载统计失败: $e');
     }
   }
 
@@ -108,11 +110,9 @@ class _TvMyPageState extends State<TvMyPage> {
         const Duration(minutes: 5),
       );
       if (!mounted || _qrServer != server || result == null) return;
-      await _account.saveLoginInfo(
-        result['token'] as String,
+      await _account.login(
+        TokenResponse.fromJson(result),
         AppUser.fromJson(result['user'] as Map<String, dynamic>),
-        refreshToken: result['refresh_token'] as String?,
-        tokenExpiresAt: result['token_expires_at'] as String?,
       );
 
       if (mounted) showSnackBar('登录成功');

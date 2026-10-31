@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/source/runtime/source_operation.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -179,7 +180,7 @@ class AnimeSearchController {
         }
       } catch (error) {
         if (!_disposed && task.wanted) {
-          debugPrint('Search failed for ${task.key.query}: $error');
+          Log.w('Search', 'Search failed for ${task.key.query}: $error');
           _results.value = const [];
         }
       } finally {
@@ -276,7 +277,7 @@ class AnimeSearchController {
             _results.publish(results);
           }
         } catch (error) {
-          if (isActive()) debugPrint('Search failed for $source: $error');
+          if (isActive()) Log.w('Search', 'Search failed for $source: $error');
         } finally {
           operation.cancel();
           operation.close();

@@ -454,10 +454,10 @@ class _AiRuleAuthoringPageState extends State<AiRuleAuthoringPage> {
               ? '解析成功：${catalog.sourceNames.length} 条线路，共 ${catalog.episodes.length} 集\n线路：${catalog.sourceNames.join('、')}'
               : '未提取到播放线路';
         case _TestStage.playback:
-          final url = await adapter.resolveDownloadUrl(
+          final url = (await adapter.resolvePlaybackMedia(
             _testEpisodeUrl!,
             forceRefresh: true,
-          );
+          )).url;
           if (!mounted || !identical(adapter, _testAdapter)) return;
           passed = url.isNotEmpty;
           log = passed ? '播放直链解析成功：\n$url' : '未提取到播放直链';

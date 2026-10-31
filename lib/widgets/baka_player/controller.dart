@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:baka/instance.dart';
 import 'package:baka/models/skip_segment.dart';
 import 'package:baka/models/skip_selection.dart';
 import 'package:baka/services/playback/skip_segments.dart';
@@ -12,6 +13,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/models/subtitle_config.dart';
 import 'package:baka/services/playback/anime4k.dart';
+import 'package:baka/services/playback/animejanai_playback.dart';
 import 'package:baka/services/playback/danmaku_controller.dart';
 import 'package:baka/services/playback/playback_settings.dart';
 import 'package:baka/core/app_logger.dart';
@@ -39,6 +41,11 @@ class PlaybackController {
   static const _maxLongPressRate = 5.0;
 
   Player? _player;
+  late final animeJaNai = AnimeJaNaiPlayback(
+    canPause: () => canControlPlayback,
+  );
+  Future<void> _playerChanges = Future<void>.value();
+  int _mediaGeneration = 0;
   final skipData = ValueNotifier<SkipData>(const SkipData());
   final skipSelection = ValueNotifier<SkipSelection?>(null);
   bool _playingBeforeSkipSelection = false;
@@ -125,10 +132,10 @@ class PlaybackController {
       showDanmaku: !preferences.value.defaultDanmakuOff,
     );
 
-    _createPlayer(preferences.value.videoRenderer);
+    await _createPlayer(preferences.value.videoRenderer);
   }
 
-  void _createPlayer(String renderer) {
+  Future<void> _createPlayer(String renderer) async {
     MediaKit.ensureInitialized();
     final player = Player(
       configuration: const PlayerConfiguration(
@@ -137,6 +144,20 @@ class PlaybackController {
       ),
     );
     _player = player;
+    if (Platform.isWindows) animeJaNai.attach(NativeAnimeJaNaiPlayer(player));
+    if (Platform.isWindows) {
+      // Keep Flutter, Anime4K and DLSS on one D3D11/ANGLE presentation path.
+      // Native CUDA/GL interop can lose frames when layered with the D3D12 bridge.
+      final native = player.platform as NativePlayer;
+      await native.command(['set', 'user-data/anibaka-renderer', 'angle']);
+      final shaderCache = await Instances.desktopDataDirectory(
+        'cache/gpu-shaders',
+      );
+      if (_disposed || !identical(_player, player)) return;
+      await native.command(['set', 'gpu-shader-cache', 'yes']);
+      await native.command(['set', 'gpu-shader-cache-dir', shaderCache.path]);
+    }
+    if (_disposed || !identical(_player, player)) return;
 
     final embedded = Platform.isAndroid && renderer == mediacodecEmbedRenderer;
     videoController.value = VideoController(
@@ -153,8 +174,22 @@ class PlaybackController {
       player.stream.buffer.listen(_onBufferedChanged),
       player.stream.buffering.listen(_onBufferingChanged),
       player.stream.error.listen(_onError),
+      if (Platform.isWindows)
+        player.stream.log.listen((log) {
+          animeJaNai.nativeLog(log.prefix, log.level, log.text);
+          if (log.prefix.startsWith('libmpv_render') &&
+              (log.level == 'error' || log.level == 'fatal')) {
+            Log.w(
+              'VideoRenderer',
+              '[${log.prefix}] ${sanitizePlaybackError(log.text)}',
+            );
+          }
+        }),
       player.stream.completed.listen((completed) {
         _eofReached = completed;
+        if (!_disposed && completed && Platform.isWindows) {
+          animeJaNai.beginMedia();
+        }
         if (!_disposed && completed) _completed.add(null);
       }),
       player.stream.tracks.listen(_onTracksChanged),
@@ -166,22 +201,59 @@ class PlaybackController {
     bool autoplay = true,
     Map<String, String>? httpHeaders,
     Duration? start,
+  }) {
+    final generation = ++_mediaGeneration;
+    if (Platform.isWindows) animeJaNai.beginMedia();
+    return _changePlayer(() async {
+      if (_disposed || generation != _mediaGeneration) return;
+      await _open(
+        uri,
+        generation: generation,
+        autoplay: autoplay,
+        httpHeaders: httpHeaders,
+        start: start,
+      );
+    });
+  }
+
+  Future<void> _changePlayer(Future<void> Function() change) {
+    final result = _playerChanges.then((_) => change());
+    _playerChanges = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return result;
+  }
+
+  Future<void> _open(
+    String uri, {
+    required int generation,
+    required bool autoplay,
+    Map<String, String>? httpHeaders,
+    Duration? start,
   }) async {
     if (_disposed) return;
     try {
       _resetPlaybackState();
       await initialize();
       final player = _player;
-      if (_disposed || player == null) return;
+      if (_disposed || generation != _mediaGeneration || player == null) return;
       if (currentMediaUri != null) await player.stop();
       await _configurePlayer(uri, preferences.value.defaultPlaybackSpeed);
+      if (_disposed || generation != _mediaGeneration) return;
       await player.open(
         Media(uri, httpHeaders: httpHeaders, start: start),
         play: autoplay,
       );
-      await _reapplyHwdec();
+      if (_disposed || generation != _mediaGeneration) return;
+      if (Platform.isWindows) {
+        animeJaNai.opened();
+      } else {
+        await _reapplyHwdec();
+      }
       if (!_disposed) core.value = core.value.copyWith(loading: false);
     } catch (error) {
+      if (_disposed || generation != _mediaGeneration) return;
       final safeError = sanitizePlaybackError(error);
       if (!_disposed) {
         core.value = core.value.copyWith(
@@ -199,9 +271,11 @@ class PlaybackController {
     final platform = _player?.platform;
     if (platform is NativePlayer) {
       try {
-        await platform.setProperty(name, value);
+        // setProperty wraps synchronous FFI even though it returns a Future.
+        // Shader compilation / inference must never block Flutter's UI isolate.
+        await platform.command(['set', name, value]);
       } catch (e) {
-        debugPrint('setNativeProperty $name failed: $e');
+        Log.w('Player', 'setNativeProperty $name failed: $e');
       }
     }
   }
@@ -209,10 +283,11 @@ class PlaybackController {
   Future<void> _reapplyHwdec() async {
     await _setNativeProperty(
       'hwdec',
-      effectiveHwdec(
-        preferences.value.hwdecMode,
-        preferences.value.videoRenderer,
-      ),
+      (Platform.isWindows ? animeJaNai.hwdec : null) ??
+          effectiveHwdec(
+            preferences.value.hwdecMode,
+            preferences.value.videoRenderer,
+          ),
     );
   }
 
@@ -241,6 +316,7 @@ class PlaybackController {
 
   void _onPlayingChanged(bool playing) {
     if (_disposed) return;
+    if (Platform.isWindows) animeJaNai.playingChanged(playing);
     final current = core.value;
     final loading = playing ? false : current.loading;
     final buffering = playing ? false : current.buffering;
@@ -329,8 +405,9 @@ class PlaybackController {
 
   void _onError(String error) {
     if (_disposed) return;
+    if (Platform.isWindows && animeJaNai.ownsError(error)) return;
     final safeError = sanitizePlaybackError(error);
-    AppLogger.instance.warning('Playback error: $safeError', tag: 'Playback');
+    Log.w('Playback', 'Playback error: $safeError');
     if ((_player?.state.playing ?? false) && !isFatalPlaybackError(safeError)) {
       return;
     }
@@ -356,14 +433,19 @@ class PlaybackController {
 
   Future<void> pause({bool remote = false}) async {
     if (_disposed || (!_roomCanControl && _roomConnected && !remote)) return;
+    if (Platform.isWindows) animeJaNai.userPaused();
     await _player?.pause();
     _danmakuController?.pause();
   }
 
-  Future<void> stop() async {
-    if (_disposed) return;
-    await _player?.stop();
-    _danmakuController?.pause();
+  Future<void> stop() {
+    final generation = ++_mediaGeneration;
+    if (Platform.isWindows) animeJaNai.beginMedia();
+    return _changePlayer(() async {
+      if (_disposed || generation != _mediaGeneration) return;
+      await _player?.stop();
+      _danmakuController?.pause();
+    });
   }
 
   void togglePlayback() {
@@ -1034,14 +1116,20 @@ class PlaybackController {
     if (previous.hwdecMode != next.hwdecMode) {
       await _setNativeProperty(
         'hwdec',
-        effectiveHwdec(next.hwdecMode, next.videoRenderer),
+        (Platform.isWindows ? animeJaNai.hwdec : null) ??
+            effectiveHwdec(next.hwdecMode, next.videoRenderer),
       );
     }
     if (previous.videoRenderer != next.videoRenderer) {
       if (Platform.isAndroid) {
         await _rebuildForRenderer(next.videoRenderer);
       } else {
-        await _syncProperties(buildVideoRendererProperties(next.videoRenderer));
+        await _syncProperties(
+          buildRendererSwitchProperties(
+            renderer: next.videoRenderer,
+            hwdecMode: next.hwdecMode,
+          ),
+        );
       }
     }
     if (persist) await _persistPreferences(next);
@@ -1161,6 +1249,10 @@ class PlaybackController {
       'sub-visibility',
       preferences.value.showSubtitle ? 'yes' : 'no',
     );
+    if (Platform.isWindows) {
+      await animeJaNai.configure();
+      await _reapplyHwdec();
+    }
     await setRate(rate);
   }
 
@@ -1170,13 +1262,23 @@ class PlaybackController {
     }
   }
 
-  Future<void> _rebuildForRenderer(String renderer) async {
+  Future<void> _rebuildForRenderer(String renderer) {
+    final generation = _mediaGeneration;
+    return _changePlayer(() async {
+      if (_disposed || generation != _mediaGeneration) return;
+      await _rebuildPlayer(renderer, generation);
+    });
+  }
+
+  Future<void> _rebuildPlayer(String renderer, int generation) async {
     final player = _player;
     if (player == null) return;
     final wasPlaying = player.state.playing;
     final position = player.state.position;
     final media = player.state.playlist.medias.firstOrNull;
     final subtitleTrack = currentSubtitleTrack;
+    final audioTrack = player.state.track.audio;
+    final volume = player.state.volume;
     final rate = core.value.playbackRate;
     final context = skipContext;
 
@@ -1186,27 +1288,38 @@ class PlaybackController {
     _subscriptions.clear();
 
     videoController.value = null;
+    if (Platform.isWindows) animeJaNai.detach();
     await player.dispose();
     _player = null;
     if (_disposed) return;
-    _createPlayer(renderer);
+    await _createPlayer(renderer);
+    if (generation != _mediaGeneration) return;
     final newPlayer = _player!;
     _resetPlaybackState();
     await _configurePlayer(media?.uri, rate);
+    if (_disposed || generation != _mediaGeneration) return;
+    await newPlayer.setVolume(volume);
 
     if (media != null) {
       await newPlayer.open(
         Media(media.uri, httpHeaders: media.httpHeaders, start: position),
         play: wasPlaying,
       );
-      if (_disposed) return;
-      await _reapplyHwdec();
+      if (_disposed || generation != _mediaGeneration) return;
+      if (!Platform.isWindows) await _reapplyHwdec();
+      await newPlayer.setRate(rate);
+      if (audioTrack.id != 'auto') {
+        try {
+          await newPlayer.setAudioTrack(audioTrack);
+        } catch (_) {}
+      }
       setSkipContext(context);
-      if (subtitleTrack.id != 'auto' && subtitleTrack.id != 'no') {
+      if (subtitleTrack.id != 'auto') {
         try {
           await newPlayer.setSubtitleTrack(subtitleTrack);
         } catch (_) {}
       }
+      if (Platform.isWindows) animeJaNai.opened();
     }
   }
 
@@ -1273,6 +1386,7 @@ class PlaybackController {
   Future<void> _dispose() async {
     if (_disposed) return;
     _disposed = true;
+    if (Platform.isWindows) animeJaNai.dispose();
     _hideControlsTimer?.cancel();
     _skipCancelHideTimer?.cancel();
     _reversePlaybackTimer?.cancel();
@@ -1418,6 +1532,16 @@ Map<String, String> buildVideoRendererProperties(
     'sigmoid-upscaling': 'no',
   };
 }
+
+// A running libmpv renderer only accepts scaling changes. Android switches
+// rebuild the player; neither path should overwrite AnimeJaNai's decoder.
+Map<String, String> buildRendererSwitchProperties({
+  required String renderer,
+  required String hwdecMode,
+  bool? android,
+}) => (android ?? Platform.isAndroid)
+    ? const {}
+    : buildVideoRendererProperties(renderer, android: false);
 
 Map<String, String> buildVideoEnhancementFramebufferProperties({
   required bool enabled,

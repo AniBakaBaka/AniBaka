@@ -3,7 +3,7 @@ import 'package:baka/app/baka_app.dart';
 import 'package:baka/core/app_logger.dart';
 import 'package:flutter/widgets.dart';
 
-Future<void> main() => AppLogger.runZoned(() async {
+Future<void> main() => Log.runZoned(() async {
   final runtime = AppRuntime();
   await runtime.initialize();
   runApp(const BakaApp());

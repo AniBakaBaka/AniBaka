@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'dart:async';
 
 import 'package:baka/api/post.dart';
@@ -60,7 +61,7 @@ class ThreadController extends ChangeNotifier {
             }
           }
         } catch (error) {
-          debugPrint('读取评论缓存失败: $error');
+          Log.w('Thread', '读取评论缓存失败: $error');
         }
       }
 
@@ -97,7 +98,7 @@ class ThreadController extends ChangeNotifier {
             List<Map>.of(result, growable: false),
           );
         } catch (error) {
-          debugPrint('保存评论缓存失败: $error');
+          Log.w('Thread', '保存评论缓存失败: $error');
         }
       }
     } catch (failure) {

@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/utils/json_values.dart';
@@ -125,7 +126,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
           _rebuildDetail();
         });
       } catch (e) {
-        debugPrint('解析bgmId失败: $e');
+        Log.w('Detail', '解析bgmId失败: $e');
       }
     }
 
@@ -146,7 +147,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
               });
             })
             .catchError((Object e) {
-              debugPrint('获取 AniBaka 详情失败: $e');
+              Log.w('Detail', '获取 AniBaka 详情失败: $e');
             }),
       );
     }
@@ -162,7 +163,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
               });
             })
             .catchError((Object e) {
-              debugPrint('获取 BGM 条目失败: $e');
+              Log.w('Detail', '获取 BGM 条目失败: $e');
             }),
       );
     }
@@ -179,7 +180,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
             _collection.value = collection;
           })
           .catchError((Object e) {
-            debugPrint('获取收藏状态失败: $e');
+            Log.w('Detail', '获取收藏状态失败: $e');
           }),
     );
   }
@@ -230,7 +231,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
       if (removing) {
         showSnackBar(e.toString(), isError: true);
       } else {
-        debugPrint('更新收藏状态失败: $e');
+        Log.w('Detail', '更新收藏状态失败: $e');
         showSnackBar('操作失败: $e');
       }
     } finally {

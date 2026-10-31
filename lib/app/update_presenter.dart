@@ -1,12 +1,12 @@
+import 'package:baka/core/app_logger.dart';
 import 'dart:io';
 
 import 'package:baka/api/post.dart';
 import 'package:baka/core/api_transport.dart';
-import 'package:baka/core/content_visibility.dart';
+import 'package:baka/core/content_filter.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/update_info.dart';
 import 'package:baka/widgets/dialog/update_dialog.dart';
-import 'package:flutter/foundation.dart';
 
 const _kAnnouncementContentKey = 'last_announcement_content';
 
@@ -90,7 +90,7 @@ class VersionService {
     try {
       updateInfo = await checkUpdateInfo();
     } catch (e) {
-      debugPrint('版本检查失败: $e');
+      Log.w('Update', '版本检查失败: $e');
     }
 
     String announcementContent = '';
@@ -102,7 +102,7 @@ class VersionService {
         announcementContent,
       );
     } catch (e) {
-      debugPrint('公告获取失败: $e');
+      Log.w('Update', '公告获取失败: $e');
       announcementContent =
           Instances.sp.getString(_kAnnouncementContentKey) ?? '';
     }
@@ -110,11 +110,7 @@ class VersionService {
     final hasUpdate = updateInfo?.hasUpdate ?? false;
     final forceUpdate = updateInfo?.forceUpdate ?? false;
     final announcementId = 'announcement_$host';
-    if (contentVisibility.isDismissed(
-      Instances.sp,
-      id: announcementId,
-      content: announcementContent,
-    )) {
+    if (contentVisibility.isDismissed(announcementId, announcementContent)) {
       announcementContent = '';
     }
 
@@ -129,11 +125,7 @@ class VersionService {
           UpdateInfo(hasUpdate: false, latestVersion: Instances.appVersion),
     );
     if (shown && announcementContent.isNotEmpty) {
-      await contentVisibility.dismiss(
-        Instances.sp,
-        id: announcementId,
-        content: announcementContent,
-      );
+      await contentVisibility.dismiss(announcementId, announcementContent);
     }
   }
 }

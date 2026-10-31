@@ -3,7 +3,6 @@ import 'package:baka/utils/json_values.dart';
 import 'package:flutter/foundation.dart';
 import 'package:baka/core/app_storage.dart';
 import 'package:baka/utils/title_matcher.dart';
-import 'package:baka/api/request_cache.dart';
 import 'package:baka/core/api_transport.dart';
 
 const String _bgmApiBase = 'https://bgm.anibaka.com';

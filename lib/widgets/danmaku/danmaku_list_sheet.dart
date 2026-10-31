@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/api/bgm.dart';
 import 'package:baka/services/playback/danmaku_controller.dart';
@@ -144,7 +145,7 @@ class _DanmakuListSheetState extends State<DanmakuListSheet> {
     } catch (e) {
       if (!mounted || request != _loadRequest) return;
       setState(() => _loadingEpisode = null);
-      debugPrint('关联弹幕失败: $e');
+      Log.w('Danmaku', '关联弹幕失败: $e');
     }
   }
 

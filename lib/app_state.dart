@@ -47,7 +47,7 @@ class AppState extends GetxService with WidgetsBindingObserver {
   @override
   void onInit() {
     super.onInit();
-    contentFilter.load(Instances.sp);
+    contentFilter.load();
     isHideBottomNavOnScroll.value =
         Instances.sp.getBool('hide_bottom_nav_on_scroll') ?? true;
     _themeMode.value = Instances.sp.getInt(_themeModeKey) ?? 1;

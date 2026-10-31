@@ -15,7 +15,6 @@ import 'package:baka/app_state.dart';
 import 'package:baka/core/account_session.dart';
 import 'package:baka/core/api_transport.dart';
 import 'package:baka/core/app_storage.dart';
-import 'package:baka/core/system_proxy.dart';
 import 'package:baka/core/network_service.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/pages/player/download_page.dart';
@@ -26,6 +25,7 @@ import 'package:baka/services/download/download_manager.dart';
 import 'package:baka/services/playback/media_session.dart';
 import 'package:baka/services/playback/playback_settings.dart';
 import 'package:baka/services/playback/dlss_global_playback.dart';
+import 'package:baka/services/playback/animejanai_playback.dart';
 import 'package:baka/services/playback/watch_party.dart';
 import 'package:baka/services/source/source_repository.dart';
 import 'package:baka/core/app_logger.dart';
@@ -67,14 +67,18 @@ class AppRuntime {
 
   Future<void> _initialize() async {
     WidgetsFlutterBinding.ensureInitialized();
-    SystemProxyService.initialize();
     await Instances.init();
-    NetworkService.initialize(Instances.sp);
+    await Log.init();
+    Log.i(
+      'App',
+      'Baka ${Instances.appVersion} on ${Platform.operatingSystem} '
+          '${Platform.operatingSystemVersion}',
+    );
+    NetworkService.init(Instances.sp);
     _cleanup.add(NetworkService.close);
     PlaybackSettingsService.applyLowMemoryMode(
       PlaybackSettingsService.getLowMemoryMode(),
     );
-    await AppLogger.instance.init();
     final networkNotices = NetworkNotices(
       onNetworkError: () {
         if (_ready) showSnackBar('网络连接失败，请检查网络和线路＞︿＜', isError: true);
@@ -157,16 +161,7 @@ class AppRuntime {
     Directory? directory;
     if (Instances.isDesktopPlatform) {
       await Instances.prepareDesktopWorkspace(
-        legacyHiveBoxes: const [
-          AppStorage.videoProgressBoxName,
-          AppStorage.customSourcesBoxName,
-          AppStorage.downloadTasksBoxName,
-          AppStorage.playHistoryBoxName,
-          AppStorage.threadCommentsBoxName,
-          AppStorage.bgmCacheBoxName,
-          AppStorage.homeCacheBoxName,
-          'storage_configs',
-        ],
+        legacyHiveBoxes: const [...AppStorage.boxNames, 'storage_configs'],
       );
       directory = await Instances.desktopDataDirectory('hive');
       Hive.init(directory.path);
@@ -180,6 +175,8 @@ class AppRuntime {
     await platformSetup();
     await DlssGlobalPlayback.instance.initialize();
     _cleanup.add(DlssGlobalPlayback.instance.close);
+    await AnimeJaNaiService.instance.initialize();
+    _cleanup.add(AnimeJaNaiService.instance.close);
     Get.put(this, permanent: true);
     Get.put(account, permanent: true);
     Get.put(apiTransport, permanent: true);
@@ -243,12 +240,7 @@ class AppRuntime {
       try {
         await release();
       } catch (error, stack) {
-        AppLogger.instance.warning(
-          'Resource shutdown failed',
-          tag: 'Lifecycle',
-          error: error,
-          stackTrace: stack,
-        );
+        Log.w('Lifecycle', 'Resource shutdown failed', error, stack);
       }
     }
     _cleanup.clear();
@@ -261,12 +253,7 @@ class AppRuntime {
       try {
         await playback.dispose();
       } catch (error, stack) {
-        AppLogger.instance.warning(
-          'Playback shutdown failed',
-          tag: 'Lifecycle',
-          error: error,
-          stackTrace: stack,
-        );
+        Log.w('Lifecycle', 'Playback shutdown failed', error, stack);
       }
     }
     playbacks.clear();
@@ -275,6 +262,8 @@ class AppRuntime {
       await AppStorage.clearAllCache();
     }
     await Hive.close();
+    Log.i('App', 'Closed');
+    await Log.flush();
   }
 }
 

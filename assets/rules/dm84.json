@@ -18,18 +18,12 @@
     {
       "op": "searchList",
       "selectors": [
-        ".search-list .item",
-        ".video-list li",
-        ".drama-module li",
-        ".module-items .module-item",
-        ".module-search-item",
-        ".stui-vodlist__box",
-        ".list-item",
-        "ul.items li",
-        "div.item",
-        "li.video-item"
+        "div.item"
       ],
-      "detailPattern": "/v/"
+      "linkSelector": "a.title",
+      "titleSelector": "a.title",
+      "imageSelector": "a.cover",
+      "imageAttr": "data-bg"
     }
   ],
   "detail": [
@@ -38,20 +32,13 @@
     },
     {
       "op": "episodes",
-      "tabSelectors": [
-        "ul.tab_control.play_from li",
-        "ul.tab_control li",
-        ".play_from li",
-        "#tab li",
-        ".play_source_tab li"
-      ],
       "listSelectors": [
-        "ul.play_list",
-        ".play_list",
-        ".player_list",
-        ".playlist",
-        ".episode-list"
-      ]
+        "ul.play_list"
+      ],
+      "tabSelectors": [
+        "ul.tab_control.play_from > li"
+      ],
+      "reverseEpisodes": true
     }
   ],
   "play": [

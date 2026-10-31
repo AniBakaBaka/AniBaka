@@ -19,11 +19,12 @@
       {
         "op": "searchList",
         "selectors": [
-          ".search-list",
-          ".vod-detail",
-          "#dataList .public-list-box"
+          ".vod-detail.search-list"
         ],
-        "detailPattern": "/bgmdetail/",
+        "linkSelector": ".detail-info > a[href^=\"/bgmdetail/\"]",
+        "titleSelector": "h3.slide-info-title",
+        "imageSelector": ".detail-pic img",
+        "imageAttr": "data-src",
         "keywordMatch": true
       }
     ],
@@ -37,15 +38,12 @@
       {
         "op": "episodes",
         "listSelectors": [
-          ".anthology-list-box",
-          ".anthology-list-play"
+          "ul.anthology-list-play"
         ],
         "tabSelectors": [
-          ".anthology-tab .swiper-slide",
-          ".anthology-tab a",
-          ".module-tab-item",
-          ".tab-item"
-        ]
+          ".anthology-tab a.swiper-slide"
+        ],
+        "tabAttr": "ownText"
       }
     ],
     "play": [

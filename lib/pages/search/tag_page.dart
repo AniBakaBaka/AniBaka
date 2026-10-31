@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/models/playback_request.dart';
@@ -56,7 +57,7 @@ class _TagPageState extends State<TagPage> {
       }
       return _hasMore;
     } catch (e) {
-      debugPrint('Error getting tag list: $e');
+      Log.w('Search', 'Error getting tag list: $e');
       return false;
     }
   }

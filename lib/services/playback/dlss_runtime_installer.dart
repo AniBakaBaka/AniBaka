@@ -15,38 +15,11 @@ class DlssRuntime {
   static const _settingsKey = 'dlss5_runtime_directory';
   final String directory;
 
-  static DlssRuntime load(SharedPreferences preferences) {
-    final directory = preferences.getString(_settingsKey);
-    if (directory != null && directory.isNotEmpty) {
-      return DlssRuntime(directory);
-    }
-    String? executable;
-    try {
-      final saved = preferences.getString('dlss5_toolchain');
-      if (saved != null) {
-        executable =
-            (jsonDecode(saved) as Map<String, dynamic>)['executable']
-                as String?;
-      }
-    } on FormatException {
-      // Fall back to the original manual configuration.
-    } on TypeError {
-      // Ignore incomplete settings from an interrupted migration.
-    }
-    executable ??= preferences.getString('dlss5_tool_path');
-    return DlssRuntime(
-      executable == null || executable.isEmpty
-          ? ''
-          : File(executable).parent.path,
-    );
-  }
+  static DlssRuntime load(SharedPreferences preferences) =>
+      DlssRuntime(preferences.getString(_settingsKey) ?? '');
 
-  Future<void> save(SharedPreferences preferences) async {
-    if (!await preferences.setString(_settingsKey, directory)) {
-      throw StateError('运行库已下载，但路径保存失败，请重试');
-    }
-  }
-
+  Future<void> save(SharedPreferences preferences) =>
+      preferences.setString(_settingsKey, directory);
   Future<bool> isAvailable() async {
     if (!Platform.isWindows || directory.isEmpty) return false;
     for (final name in [
@@ -192,9 +165,8 @@ class DlssRuntimeInstaller extends ChangeNotifier {
       }
       status = '正在配置运行库路径…';
       _notify();
-      final runtime = await _findRuntimeDirectory(
-        Directory('${staging.path}${Platform.pathSeparator}package-0'),
-      );
+      // v1.4.1 is pinned by SHA-256; its DLLs are in package-0/out.
+      final runtime = Directory('${staging.path}/package-0/out');
       if (!await DlssRuntime(runtime.path).isAvailable()) {
         throw StateError('增强包缺少 DLSS 神经渲染、超分辨率或转接运行库，请检查下载来源');
       }
@@ -257,35 +229,6 @@ class DlssRuntimeInstaller extends ChangeNotifier {
       running = false;
       _notify();
     }
-  }
-
-  Future<Directory> _findRuntimeDirectory(Directory root) async {
-    const name = 'nvngx_dlss.dll';
-    const companion = 'nvngx.dll_dlssnr.dll';
-    final matches = <File>[];
-    await for (final entity in root.list(recursive: true, followLinks: false)) {
-      _checkCancelled();
-      if (entity is! File ||
-          entity.uri.pathSegments.last.toLowerCase() != name) {
-        continue;
-      }
-      final adjacent = File(
-        '${entity.parent.path}${Platform.pathSeparator}$companion',
-      );
-      if (await adjacent.exists()) matches.add(entity);
-    }
-    if (matches.length != 1) throw StateError('压缩包中未找到唯一完整的 $name');
-    final file = matches.single;
-    final handle = await file.open();
-    try {
-      final header = await handle.read(2);
-      if (header.length != 2 || header[0] != 0x4d || header[1] != 0x5a) {
-        throw StateError('$name 不是有效的 Windows 运行库');
-      }
-    } finally {
-      await handle.close();
-    }
-    return file.parent;
   }
 
   @override

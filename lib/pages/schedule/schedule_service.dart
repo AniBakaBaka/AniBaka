@@ -27,12 +27,7 @@ class ScheduleService {
           calendarUnavailable: calendar == null,
         );
       } catch (error, stackTrace) {
-        AppLogger.instance.warning(
-          '放送排期解析失败',
-          tag: 'Schedule',
-          error: error,
-          stackTrace: stackTrace,
-        );
+        Log.w('Schedule', '放送排期解析失败', error, stackTrace);
         if (calendar == null) rethrow;
       }
     }
@@ -43,12 +38,7 @@ class ScheduleService {
     try {
       return await load();
     } catch (error, stackTrace) {
-      AppLogger.instance.warning(
-        '$name加载失败',
-        tag: 'Schedule',
-        error: error,
-        stackTrace: stackTrace,
-      );
+      Log.w('Schedule', '$name加载失败', error, stackTrace);
       return null;
     }
   }

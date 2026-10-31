@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/skip_segment.dart';
 import 'package:baka/source/runtime/source_operation.dart';
@@ -6,7 +7,6 @@ import 'package:baka/utils/title_matcher.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/utils/json_values.dart';
 
-import 'package:flutter/foundation.dart';
 
 import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/api/bgm.dart';
@@ -376,7 +376,7 @@ class PlaybackContent {
           }
         } catch (e) {
           if (lifetime.isCancelled || videoList.isEmpty) rethrow;
-          debugPrint('[PlaybackContent] Failed to load post detail: $e');
+          Log.w('Playback', 'Failed to load post detail: $e');
         } finally {
           detach();
         }
@@ -575,7 +575,7 @@ class PlaybackContent {
                 episodeId,
                 episodeIndex: episodeIndex,
               )?.url ??
-              await adapter.resolveDownloadUrl(episodeId);
+              (await adapter.resolvePlaybackMedia(episodeId)).url;
           return resolvedUrl.isEmpty ? null : resolvedUrl;
         }
 
@@ -641,7 +641,7 @@ class PlaybackContent {
       final resolvedLogo = AnimeDetailViewData.resolveLogoUrl(animeDetail);
       if (resolvedLogo.isNotEmpty) _logoUrl = resolvedLogo;
     } catch (e) {
-      debugPrint('获取 BGM 放映信息失败: $e');
+      Log.w('Playback', '获取 BGM 放映信息失败: $e');
       _bgmDetailFuture = null;
     }
   }

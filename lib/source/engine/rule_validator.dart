@@ -86,6 +86,16 @@ class RuleValidator {
           break;
         case 'select':
           if ((step.str('css') ?? '').isEmpty) errors.add('$at: 缺少 css');
+          if ((step.str('nextSelector') ?? '').isNotEmpty &&
+              !step.flag('all')) {
+            errors.add('$at: nextSelector 需要 all=true');
+          }
+          if (step.params.containsKey('maxPages')) {
+            final maxPages = step.intValue('maxPages');
+            if (maxPages == null || maxPages < 1 || maxPages > 256) {
+              errors.add('$at: maxPages 必须在 1..256 之间');
+            }
+          }
           break;
         case 'crypto':
           final algo = (step.str('algo') ?? '').toLowerCase();
@@ -143,14 +153,38 @@ class RuleValidator {
           }
           break;
         case 'searchList':
-          final selectors = step.params['selectors'];
-          if (selectors is! String &&
-              (selectors is! List || selectors.isEmpty) &&
-              step.str('listXPath') == null) {
-            warnings.add('$at: 未提供 selectors / listXPath');
+          if (!_hasSelector(step, 'selectors') &&
+              (step.str('listXPath') ?? '').trim().isEmpty) {
+            errors.add('$at: 缺少 selectors / listXPath');
+          }
+          break;
+        case 'episodes':
+          final roadsXPath = (step.str('roadsXPath') ?? '').trim();
+          if (!_hasSelector(step, 'listSelectors') && roadsXPath.isEmpty) {
+            errors.add('$at: 缺少 listSelectors / roadsXPath');
+          }
+          if (roadsXPath.isNotEmpty &&
+              (step.str('itemsXPath') ?? '').trim().isEmpty) {
+            errors.add('$at: roadsXPath 需要 itemsXPath');
+          }
+          final episodeNumberPattern = step.str('episodeNumberPattern');
+          if (episodeNumberPattern != null) {
+            try {
+              RegExp(episodeNumberPattern);
+            } on FormatException {
+              errors.add('$at: episodeNumberPattern 正则无法编译');
+            }
           }
           break;
       }
     }
+  }
+
+  static bool _hasSelector(PipelineStep step, String key) {
+    final value = step.params[key];
+    if (value is String) return value.trim().isNotEmpty;
+    return value is List &&
+        value.every((selector) => selector is String) &&
+        value.any((selector) => (selector as String).trim().isNotEmpty);
   }
 }

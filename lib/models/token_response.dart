@@ -18,4 +18,11 @@ class TokenResponse {
   final String token;
   final String? refreshToken;
   final DateTime? expiresAt;
+
+  /// The [TokenResponse.fromJson] form, for handing a sign-in to another device.
+  Map<String, dynamic> toJson() => {
+    'token': token,
+    'refresh_token': ?refreshToken,
+    'token_expires_at': ?expiresAt?.toUtc().toIso8601String(),
+  };
 }

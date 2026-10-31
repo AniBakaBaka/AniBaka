@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/models/anime_filter.dart';
 import 'package:baka/models/anime_detail_view_data.dart';
@@ -6,7 +7,6 @@ import 'package:flutter/foundation.dart';
 import 'package:baka/api/bgm.dart';
 import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/api/post.dart';
-import 'package:baka/api/request_cache.dart';
 import 'package:baka/core/app_storage.dart';
 
 typedef HomeItem = Map;
@@ -120,7 +120,7 @@ class HomeController {
       _feed.value = List<Map>.of(items);
       _nextPage = 2;
     } catch (error) {
-      debugPrint('home feed: $error');
+      Log.w('Home', 'home feed: $error');
     } finally {
       if (request == _feedRequest) _loadingFeed = false;
     }
@@ -153,7 +153,7 @@ class HomeController {
       _nextPage = page + 1;
       return true;
     } catch (error) {
-      debugPrint('home feed page $page: $error');
+      Log.w('Home', 'home feed page $page: $error');
       return false;
     } finally {
       if (request == _feedRequest) _loadingFeed = false;
@@ -228,7 +228,7 @@ class HomeController {
       }
       swipers.value = items;
     } catch (error) {
-      debugPrint('home swipers: $error');
+      Log.w('Home', 'home swipers: $error');
     }
   }
 
@@ -284,7 +284,7 @@ class HomeController {
             item['bannerImageUrl'] = url;
           }
         } catch (error) {
-          debugPrint('home swiper backdrop $bgmId: $error');
+          Log.w('Home', 'home swiper backdrop $bgmId: $error');
         }
       }),
     );
@@ -306,7 +306,7 @@ class HomeController {
       );
       _ranks.replaceAt(index, items);
     } catch (error) {
-      debugPrint('home rank $index: $error');
+      Log.w('Home', 'home rank $index: $error');
     }
   }
 
@@ -329,7 +329,7 @@ class HomeController {
     try {
       schedule.value = await getBgmCalendar(force: force);
     } catch (error) {
-      debugPrint('home schedule: $error');
+      Log.w('Home', 'home schedule: $error');
     }
   }
 

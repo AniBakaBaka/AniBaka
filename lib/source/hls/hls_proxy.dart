@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -216,7 +217,7 @@ class HlsProxy {
       try {
         await response.close();
       } catch (_) {}
-      debugPrint('HLS proxy request failed: $error');
+      Log.w('Hls', 'HLS proxy request failed: $error');
     }
   }
 

@@ -20,6 +20,8 @@ class FakeHost implements PipelineHost {
   FakeHost(this.responses);
   final Map<String, String> responses;
   final List<String> fetched = [];
+  final requests =
+      <({String url, String method, Object? body, String? contentType})>[];
 
   @override
   bool get allowWebview => false;
@@ -35,6 +37,12 @@ class FakeHost implements PipelineHost {
     RequestPriority priority = RequestPriority.search,
   }) async {
     fetched.add(url);
+    requests.add((
+      url: url,
+      method: method,
+      body: body,
+      contentType: contentType,
+    ));
     return responses[url] ?? '';
   }
 
@@ -338,6 +346,7 @@ void main() {
           baseUrl: _baseUrl,
           listSelectors: ['.absent', 'section'],
           tabSelectors: ['nav b'],
+          episodeNumberPattern: RegExp(r'(?:[?&]ep=|/nid/)(\d+)'),
         );
         expect(sources.map((source) => source.sourceName), ['Main', 'Second']);
         expect(sources.first.episodes.map((episode) => episode.episode), [
@@ -350,7 +359,7 @@ void main() {
       },
     );
 
-    test('infers only the varying tuple column', () {
+    test('numbers in document order without guessing from URL columns', () {
       final sources = HtmlParser.parseSources(
         html.parse('''
         <section><a href="/play/show-3-2">Two</a><a href="/play/show-3-5">Five</a></section>
@@ -362,8 +371,8 @@ void main() {
         tabSelectors: [],
       );
       expect(sources.map((s) => s.episodes.map((e) => e.episode).toList()), [
-        [1, 4],
-        [1, 4],
+        [0, 1],
+        [0, 1],
         [0, 1],
       ]);
     });
@@ -723,6 +732,58 @@ void main() {
         'https://example.com/b1',
         'https://example.com/b2',
       ]);
+    });
+
+    test(
+      'video URL decoding and nested query extraction are explicit',
+      () async {
+        const direct = 'https://media.test/list.m3u8?sign=A%2FB';
+        for (final steps in <List<PipelineStep>>[
+          [
+            PipelineStep('template', {
+              'value': base64.encode(utf8.encode(direct)),
+            }),
+            const PipelineStep('crypto', {'algo': 'base64', 'mode': 'decrypt'}),
+          ],
+          [
+            PipelineStep('template', {'value': Uri.encodeComponent(direct)}),
+            const PipelineStep('urlDecode', {}),
+          ],
+          [
+            PipelineStep('template', {
+              'value':
+                  'https://player.test/embed?url=${Uri.encodeComponent(direct)}',
+            }),
+            const PipelineStep('query', {'name': 'url', 'input': '{url:raw}'}),
+          ],
+        ]) {
+          final result = await interp.runPlay(
+            _pipelineRule(play: [...steps, const PipelineStep('videoUrl', {})]),
+            FakeHost({}),
+            '/episode',
+          );
+          expect(result, direct);
+        }
+      },
+    );
+
+    test('video URL extraction failure advances the declared branch', () async {
+      final result = await interp.runPlay(
+        _pipelineRule(
+          play: const [
+            PipelineStep('template', {'value': '<html>No media</html>'}),
+            PipelineStep.first([
+              [PipelineStep('videoUrl', {})],
+              [
+                PipelineStep('template', {'value': 'https://media.test/1.mp4'}),
+              ],
+            ]),
+          ],
+        ),
+        FakeHost({}),
+        '/episode',
+      );
+      expect(result, 'https://media.test/1.mp4');
     });
 
     test('HTML readiness does not add an implicit settling delay', () async {
@@ -1309,30 +1370,188 @@ void main() {
       expect(results.single.seriesId, 'https://example.com/bangumi/30.html');
     });
 
-    test('anime1Play 只解析 URL，媒体头与 Cookie 规则交给宿主', () async {
+    test('jsonSeries 解析数组列路径并按规则指定大小写匹配', () async {
       final host = FakeHost({
-        'https://v.anime1.me/api': '{"s":[{"src":"media/video.mp4"}]}',
+        'https://example.com/catalog': jsonEncode([
+          [1, 'Sample Show', '/cover.jpg'],
+          [2, 'sample sequel'],
+          [3, 'Other'],
+          [null, 'Sample without ID'],
+          [4],
+          null,
+          [1, 'Sample duplicate'],
+        ]),
+      });
+      SourceRule catalogRule(bool caseSensitive) => _rule([]).copyWith(
+        search: [
+          const PipelineStep('fetch', {'url': '/catalog'}),
+          PipelineStep('jsonSeries', {
+            'idKey': '[0]',
+            'nameKey': '[1]',
+            'imageKey': '[2]',
+            'keywordMatch': true,
+            'caseSensitive': caseSensitive,
+          }),
+        ],
+      );
+      final exact = await interp.runSearch(catalogRule(true), host, 'Sample');
+      expect(exact.map((s) => s.seriesId), ['1']);
+      expect(exact.single.image, 'https://example.com/cover.jpg');
+      final folded = await interp.runSearch(catalogRule(false), host, 'SAMPLE');
+      expect(folded.map((s) => s.seriesId), ['1', '2']);
+      final longer = await interp.runSearch(
+        catalogRule(true),
+        host,
+        'Sample Show Season 2',
+      );
+      expect(longer.single.seriesId, '1');
+    });
+
+    for (final maxPages in [1, 2, 32]) {
+      test('分页 select 去重、限制页数并阻止循环：$maxPages', () async {
+        final host = FakeHost({
+          'https://example.com/catalog/42':
+              '<i data-token="new"></i><i data-token="shared"></i>'
+              '<a class="next" href="pages/2#top">Next</a>',
+          'https://example.com/catalog/pages/2':
+              '<i data-token="shared"></i><i data-token="old"></i>'
+              '<a class="next" href="../42#again">Next</a>',
+        });
+        final rule = _rule([]).copyWith(
+          detail: [
+            const PipelineStep('fetch', {'url': '/catalog/{seriesId}'}),
+            PipelineStep('select', {
+              'css': 'i[data-token]',
+              'attr': 'data-token',
+              'all': true,
+              'unique': true,
+              'nextSelector': 'a.next',
+              'maxPages': maxPages,
+            }),
+            const PipelineStep('jsonEpisodes', {
+              'episodesPath': '',
+              'episodeIdTemplate': '{id:raw}',
+              'sourceName': 'Catalog',
+              'reverse': true,
+              'episodeNameTemplate': '第{index}集',
+            }),
+          ],
+        );
+        expect(RuleValidator.validate(rule).isValid, isTrue);
+        final source = (await interp.runDetail(rule, host, '42')).single;
+        expect(source.sourceName, 'Catalog');
+        expect(
+          source.episodes.map((e) => e.episodeId),
+          maxPages == 1 ? ['shared', 'new'] : ['old', 'shared', 'new'],
+        );
+        expect(
+          source.episodes.map((e) => e.episode),
+          List.generate(source.episodes.length, (i) => i),
+        );
+        expect(source.episodes.first.name, '第1集');
+        expect(host.fetched.length, maxPages == 1 ? 1 : 2);
+      });
+    }
+
+    test('分页 select 不凭空追加页面，缺失、空页和非 HTTP 链接均停止', () async {
+      for (final link in [
+        '',
+        '<a href="/empty">Next</a>',
+        '<a href="javascript:next()">Next</a>',
+      ]) {
+        final host = FakeHost({'https://example.com/start': '<b>one</b>$link'});
+        final rule = _rule([]).copyWith(
+          detail: const [
+            PipelineStep('fetch', {'url': '/start'}),
+            PipelineStep('select', {
+              'css': 'b',
+              'all': true,
+              'nextSelector': 'a',
+            }),
+            PipelineStep('jsonEpisodes', {'episodesPath': ''}),
+          ],
+        );
+        final source = (await interp.runDetail(rule, host, 'unused')).single;
+        expect(source.episodes.single.episodeId, 'one');
+        expect(host.fetched.length, link.contains('/empty') ? 2 : 1);
+      }
+    });
+
+    test('urlDecode 区分组件编码和表单编码，并对坏转义回退', () async {
+      for (final form in [false, true]) {
+        final rule = _rule([
+          {'op': 'urlDecode', 'form': form},
+          {'op': 'setVar', 'name': 'decoded', 'value': '{url:raw}'},
+          {'op': 'template', 'value': 'https://example.com/{decoded}'},
+        ]);
+        expect(
+          await interp.runPlay(rule, FakeHost({}), 'a+b%2Bc'),
+          form
+              ? 'https://example.com/a%20b%2Bc'
+              : 'https://example.com/a%2Bb%2Bc',
+        );
+      }
+      final fallback = _rule([
+        {
+          'op': 'first',
+          'branches': [
+            [
+              {'op': 'urlDecode'},
+            ],
+            [
+              {'op': 'template', 'value': 'https://example.com/fallback.mp4'},
+            ],
+          ],
+        },
+      ]);
+      expect(
+        await interp.runPlay(fallback, FakeHost({}), '%broken'),
+        'https://example.com/fallback.mp4',
+      );
+    });
+
+    test('通用表单播放管线保留令牌、相对 URL 和媒体 Cookie 声明', () async {
+      final host = FakeHost({
+        'https://example.com/api': '{"s":[{"src":"media/video.mp4"}]}',
       });
       final rule = SourceRule.fromJson({
         'format': kSourceRuleFormatV2,
-        'id': 'anime1',
-        'name': 'Anime1',
-        'baseUrl': 'https://anime1.me',
+        'id': 'form-api',
+        'name': 'Form API',
+        'baseUrl': 'https://example.com',
         'search': [],
         'detail': [],
         'play': [
+          {'op': 'urlDecode'},
+          {'op': 'setVar', 'name': 'token', 'value': '{url:raw}'},
           {
-            'op': 'anime1Play',
-            'mediaHeaders': {'Referer': 'https://anime1.me/'},
+            'op': 'fetch',
+            'url': '/api',
+            'method': 'POST',
+            'contentType': 'form',
+            'body': {'d': '{token:raw}'},
+          },
+          {'op': 'json', 'path': 's[0].src'},
+          {
+            'op': 'setMediaHeaders',
+            'headers': {'Referer': 'https://example.com/'},
             'cookieNames': ['e'],
             'cookiePrefixes': ['cf_'],
           },
         ],
       });
 
-      final result = await interp.runPlayMedia(rule, host, 'token');
-      expect(result.url, 'https://v.anime1.me/media/video.mp4');
-      expect(result.mediaHeaders['Referer'], 'https://anime1.me/');
+      const token = '{"id":42,"key":"a+b%/=& 字"}';
+      final result = await interp.runPlayMedia(
+        rule,
+        host,
+        Uri.encodeComponent(token),
+      );
+      expect(host.requests.single.method, 'POST');
+      expect(host.requests.single.contentType, 'form');
+      expect(host.requests.single.body, {'d': token});
+      expect(result.url, 'https://example.com/media/video.mp4');
+      expect(result.mediaHeaders['Referer'], 'https://example.com/');
       expect(result.cookieNames, ['e']);
       expect(result.cookiePrefixes, ['cf_']);
     });
@@ -1435,6 +1654,8 @@ void main() {
                 {
                   'op': 'setMediaHeaders',
                   'headers': {'X-Leak': 'yes'},
+                  'cookieNames': ['private'],
+                  'cookiePrefixes': ['session_'],
                 },
                 {'op': 'template', 'value': ''},
               ],
@@ -1452,6 +1673,34 @@ void main() {
       final media = await interp.runPlayMedia(rule, host, '/unused');
       expect(media.url, 'https://cdn.example.com/video.mp4');
       expect(media.mediaHeaders, isEmpty);
+      expect(media.cookieNames, isEmpty);
+      expect(media.cookiePrefixes, isEmpty);
+    });
+
+    test('setMediaHeaders 保留未声明 Cookie 选择器，空列表显式清除', () async {
+      final steps = <Map<String, dynamic>>[
+        {'op': 'template', 'value': 'https://example.com/video.mp4'},
+        {
+          'op': 'setMediaHeaders',
+          'cookieNames': ['token'],
+          'cookiePrefixes': ['session_'],
+        },
+        {
+          'op': 'setMediaHeaders',
+          'headers': {'X-Media': 'yes'},
+        },
+      ];
+      final preserved = await interp.runPlayMedia(
+        _rule(steps),
+        FakeHost({}),
+        '',
+      );
+      expect(preserved.cookieNames, ['token']);
+      expect(preserved.cookiePrefixes, ['session_']);
+      steps.add({'op': 'setMediaHeaders', 'cookieNames': []});
+      final cleared = await interp.runPlayMedia(_rule(steps), FakeHost({}), '');
+      expect(cleared.cookieNames, isEmpty);
+      expect(cleared.cookiePrefixes, ['session_']);
     });
 
     test('播放结果的媒体元数据不会跨调用残留', () async {

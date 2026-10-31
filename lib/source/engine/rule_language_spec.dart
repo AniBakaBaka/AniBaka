@@ -11,11 +11,13 @@ class RuleLanguageSpec {
   static const Map<String, String> operations = {
     'template': 'Render a string template with variables.',
     'setVar': 'Store a rendered value in a named variable.',
-    'query': 'Build or transform URL query parameters.',
+    'query': 'Read a named query parameter from a URL.',
     'fetch': 'Perform an HTTP request and place its body in current.',
     'follow': 'Resolve and fetch a URL found in current content.',
     'delay': 'Pause execution for a given duration in milliseconds.',
     'select': 'Select HTML with css and extract text/html/attribute.',
+    'urlDecode':
+        'Decode percent-encoded text; form=true also decodes + as space.',
     'regex': 'Extract a regex capture from current text.',
     'replace': 'Replace literal or regex text in current.',
     'json': 'Decode current text as JSON.',
@@ -32,13 +34,10 @@ class RuleLanguageSpec {
     'maccmsApiEpisodes': 'Build episode lines from a MacCMS provide API.',
     'videoUrl': 'Extract a playable URL from current content.',
     'setMediaHeaders':
-        'Attach HTTP headers to the resolved media (headers, jsonPath, remove).',
+        'Attach media headers and select session cookies (headers, jsonPath, remove, cookieNames, cookiePrefixes).',
     'playerAaaa': 'Parse the common player_aaaa bootstrap object.',
     'playerDecrypt': 'Decrypt the supported player payload.',
     'sniff': 'Use WebView to follow a page and sniff playable media.',
-    'anime1Search': 'Run the built-in Anime1 search protocol.',
-    'anime1Detail': 'Run the built-in Anime1 episode protocol.',
-    'anime1Play': 'Run the built-in Anime1 playback protocol.',
     'hhPlayer': 'Resolve the supported HHPlayer bootstrap API.',
     'torrentRecords': 'Build torrent episodes from supported records.',
     'maccmsSuggest': 'Search through MacCMS suggest endpoints.',
@@ -89,6 +88,39 @@ operations over inventing a new operation. Never return executable Dart code.
 JSON paths and HTML selectors are exact: a missing path or selector does not
 trigger a search elsewhere. Use explicit pipe-separated JSON paths or first
 branches for known alternatives. An empty JSON path selects the root value.
+searchList requires selectors or listXPath. episodes requires listSelectors
+or roadsXPath with itemsXPath. No site selectors are supplied by the engine;
+CSS searchList reads linkSelector (default the row anchor or its a[href]), titleSelector
+(default the link text), titleAttr (default text), imageSelector and imageAttr
+(default src). An empty field selector reads the list item itself. Missing declared
+fields stay empty; the engine does not search other titles or image attributes.
+tabSelectors is optional. tabAttr chooses its field (default text); ownText
+reads direct text nodes, excluding nested episode counts. Titles are preserved.
+Episodes
+are numbered in document order unless episodeNumberPattern is declared: its
+first capture is the 1-based episode number in href; nonmatching links are skipped.
+videoUrl scans literal media URLs only. Decode encoded fields with explicit
+json/regex, urlDecode, or crypto steps. Playback URL normalization preserves
+query values and signatures; extracting a nested player URL requires query.
+jsonSeries accepts object rows and array rows; idKey/nameKey/imageKey/urlKey/
+descKey are JSON paths (use [0], [1] for array columns). keywordMatch=true
+filters names by bidirectional substring; caseSensitive defaults to false.
+select with all=true returns a list. unique=true removes duplicate values.
+To collect multiple HTML pages, first fetch the initial page, then use select
+with nextSelector (a CSS selector for a link with href) and optional maxPages
+(default 32, range 1..256, including the initial page). Relative links resolve
+against each page; repeated URLs stop pagination. Optional headers apply to
+subsequent page requests. Without nextSelector only the initial page is read.
+jsonEpisodes with episodesPath="" reads a root list, including strings/numbers
+as IDs. reverse=true reverses the episode list before numbering, and optional
+episodeNameTemplate supplies missing titles using {index} (1-based), {index0}
+(0-based), and {id}. Use episodeIdTemplate="{id:raw}" to preserve opaque IDs.
+urlDecode reads current text or an input template and fails on malformed escapes.
+For form POSTs, decode a percent-encoded token once, store it with setVar, then
+use a raw placeholder in fetch.body; the host performs form encoding.
+setMediaHeaders can select cookies for the resolved media URL by exact
+cookieNames and/or cookiePrefixes. Unspecified selectors persist; [] clears
+them. Cookie selection is independent of cookieSession serialization.
 HTML sniffing has no default settle delay. Declare readyRegex/readyContains for
 dynamic pages; set settleMs only when the site's protocol requires a delay.
 ''';

@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -76,7 +77,7 @@ class _PlayerPageState extends State<PlayerPage>
     request: widget.request,
     posIndex: widget.posIndex,
   );
-  late final _tabs = TabController(length: 2, vsync: this);
+  late final TabController _tabs;
   final _party = Get.find<WatchPartyService>();
   final _mediaSession = Get.find<MediaSessionService>();
   final ctr = PlaybackController();
@@ -123,6 +124,7 @@ class _PlayerPageState extends State<PlayerPage>
   @override
   void initState() {
     super.initState();
+    _tabs = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addObserver(this);
     contentFilter.addListener(_onContentFilterChanged);
     _sourceSearch = VideoSourceSearchController.takeCachedFor(
@@ -201,7 +203,7 @@ class _PlayerPageState extends State<PlayerPage>
         seeked: seeked,
       );
     } catch (error) {
-      debugPrint('保存播放进度失败: $error');
+      Log.w('Player', '保存播放进度失败: $error');
     }
   }
 
@@ -297,7 +299,7 @@ class _PlayerPageState extends State<PlayerPage>
     try {
       ready = await _content.prepareInitialPlayback();
     } catch (e) {
-      debugPrint('加载初始数据失败: $e');
+      Log.w('Player', '加载初始数据失败: $e');
       error = e;
     }
     if (_isStale(id)) return;
@@ -521,7 +523,7 @@ class _PlayerPageState extends State<PlayerPage>
       }
     } catch (error) {
       if (_isStale(id) || SourceOperation.current?.isCancelled == true) return;
-      debugPrint('打开视频失败: $error');
+      Log.w('Player', '打开视频失败: $error');
       _lastError = error;
       if (_opened) return;
       content.clearPrefetchedPlaybackMedia();
@@ -569,7 +571,7 @@ class _PlayerPageState extends State<PlayerPage>
           _castUrl.isNotEmpty &&
           _refreshedMediaKey != refreshKey) {
         _refreshedMediaKey = refreshKey;
-        (await content.prepareAdapterSource()).invalidateDownloadUrl(
+        (await content.prepareAdapterSource()).invalidatePlaybackMedia(
           content.currentEpisodeId,
         );
         content.clearPrefetchedPlaybackMedia();
@@ -625,7 +627,7 @@ class _PlayerPageState extends State<PlayerPage>
       showSnackBar('所有可用匹配源均播放失败，请点击源名称手动搜索选择', isError: true);
       _fail(_lastError ?? error);
     } catch (e) {
-      debugPrint('[PlayerPage] 自动换源失败: $e');
+      Log.w('Player', '自动换源失败: $e');
       _fail(e);
     } finally {
       _recovering = false;
@@ -802,7 +804,7 @@ class _PlayerPageState extends State<PlayerPage>
       await _content.refreshCollection();
       if (mounted) _followed.value = _content.isFollow();
     } catch (error) {
-      debugPrint('读取追番状态失败: $error');
+      Log.w('Player', '读取追番状态失败: $error');
     }
   }
 

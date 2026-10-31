@@ -1,3 +1,4 @@
+import 'package:baka/core/app_logger.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -7,7 +8,6 @@ import 'dart:typed_data';
 import 'package:baka/services/torrent/bencode.dart';
 import 'package:baka/core/network_service.dart';
 import 'package:http/http.dart' as http;
-import 'package:flutter/foundation.dart';
 
 /// Tracker 客户端 — 从 HTTP/UDP tracker 获取 peer 列表
 class TrackerClient {
@@ -137,7 +137,7 @@ class TrackerClient {
 
       final failure = decoded['failure reason'];
       if (failure != null) {
-        debugPrint('[Tracker] $url 失败: ${bencodeString(failure)}');
+        Log.w('Tracker', '$url 失败: ${bencodeString(failure)}');
         return const TrackerAnnounceResult();
       }
       final seconds = (decoded['interval'] as int);
@@ -146,7 +146,7 @@ class TrackerClient {
         interval: seconds > 0 ? Duration(seconds: seconds) : null,
       );
     } catch (e) {
-      if (!_disposed) debugPrint('[Tracker] $url 请求失败: $e');
+      if (!_disposed) Log.w('Tracker', '$url 请求失败: $e');
       return const TrackerAnnounceResult();
     } finally {
       timer?.cancel();
@@ -240,7 +240,7 @@ class TrackerClient {
         interval: seconds > 0 ? Duration(seconds: seconds) : null,
       );
     } catch (e) {
-      debugPrint('[Tracker] $url UDP 请求失败: $e');
+      Log.w('Tracker', '$url UDP 请求失败: $e');
       return const TrackerAnnounceResult();
     } finally {
       socket?.close();

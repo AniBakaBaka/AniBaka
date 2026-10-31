@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:baka/api/api_config.dart';
@@ -223,18 +222,7 @@ class LoginService {
 
   static String _failureMessage(Object error, String action) {
     if (error is ApiException) {
-      final body = error.responseBody;
-      if (body != null) {
-        try {
-          final response = jsonDecode(body);
-          if (response is Map<String, dynamic>) {
-            final message = _responseMessage(response);
-            if (message != null) return message;
-          }
-        } on FormatException {
-          // Non-JSON gateway response.
-        }
-      }
+      if (error.serverMessage case final message?) return message;
       final status = error.statusCode;
       if (status == null) return error.message;
       if (status == 429) return '请求过于频繁，请稍后重试';

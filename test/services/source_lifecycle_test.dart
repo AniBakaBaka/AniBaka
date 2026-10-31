@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:baka/source/models/source_rule.dart';
 import 'package:baka/source/source_adapter.dart';
@@ -38,6 +39,96 @@ void main() {
     HttpOverrides.global = null;
     addTearDown(() => HttpOverrides.global = previous);
   });
+
+  test(
+    'generic form sessions serialize resolutions and refresh selected cookies',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final base = 'http://127.0.0.1:${server.port}';
+      final firstStarted = Completer<void>();
+      final releaseFirst = Completer<void>();
+      final tokens = <String>[];
+      server.listen((request) async {
+        final body = await utf8.decoder.bind(request).join();
+        final token = Uri.splitQueryString(body)['token']!;
+        tokens.add(token);
+        final sequence = tokens.length;
+        if (sequence == 1) {
+          firstStarted.complete();
+          await releaseFirst.future;
+        }
+        request.response.cookies.addAll([
+          Cookie('credential', '$token-$sequence')..path = '/media',
+          Cookie('session_key', 'selected')..path = '/media',
+          Cookie('unrelated', 'excluded')..path = '/',
+        ]);
+        request.response
+          ..headers.contentType = ContentType.json
+          ..write('{"media":{"url":"/media/video.mp4"}}');
+        await request.response.close();
+      });
+      final adapter = SourceAdapter(
+        SourceRule(
+          id: 'form-session',
+          name: 'Form session',
+          baseUrl: base,
+          directConnection: true,
+          play: [
+            const PipelineStep('urlDecode', {}),
+            const PipelineStep('setVar', {
+              'name': 'token',
+              'value': '{url:raw}',
+            }),
+            PipelineStep.first([
+              [
+                PipelineStep('fetch', {
+                  'url': '$base/api',
+                  'method': 'POST',
+                  'contentType': 'form',
+                  'body': {'token': '{token:raw}'},
+                  'cookieSession': true,
+                }),
+              ],
+            ]),
+            const PipelineStep('json', {'path': 'media.url'}),
+            const PipelineStep('setMediaHeaders', {
+              'headers': {'Cookie': 'static=kept'},
+              'cookieNames': ['credential'],
+              'cookiePrefixes': ['session_'],
+            }),
+          ],
+        ),
+      );
+      addTearDown(() async {
+        if (!releaseFirst.isCompleted) releaseFirst.complete();
+        adapter.dispose();
+        await server.close(force: true);
+      });
+      final first = adapter.resolvePlaybackMedia('A%2BB', skipValidation: true);
+      await firstStarted.future;
+      final second = adapter.resolvePlaybackMedia('C', skipValidation: true);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(tokens, ['A+B']);
+      releaseFirst.complete();
+      final results = await Future.wait([first, second]);
+      expect(tokens, ['A+B', 'C']);
+      for (var i = 0; i < results.length; i++) {
+        final media = results[i];
+        expect(media.url, '$base/media/video.mp4');
+        final cookie = media.httpHeaders['Cookie']!;
+        expect(cookie, contains('static=kept'));
+        expect(cookie, contains('credential=${tokens[i]}-${i + 1}'));
+        expect(cookie, contains('session_key=selected'));
+        expect(cookie, isNot(contains('unrelated')));
+      }
+      final refreshed = await adapter.resolvePlaybackMedia(
+        'A%2BB',
+        skipValidation: true,
+      );
+      expect(tokens, ['A+B', 'C', 'A+B']);
+      expect(refreshed.httpHeaders['Cookie'], contains('credential=A+B-3'));
+    },
+  );
 
   test(
     'proxied files stream on demand and retain Range, HEAD and headers',
@@ -233,6 +324,65 @@ void main() {
       200,
     );
     expect(methods, ['HEAD', 'GET']);
+  });
+
+  test('media probe judges one ranged GET by status and body prefix', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final base = 'http://127.0.0.1:${server.port}';
+    final requests = <String>[];
+    server.listen((request) async {
+      requests.add('${request.uri.path} ${request.headers.value('range')}');
+      final response = request.response;
+      switch (request.uri.path) {
+        case '/ok.m3u8':
+          response.headers.contentType = ContentType(
+            'application',
+            'vnd.apple.mpegurl',
+            charset: 'utf-8',
+          );
+          response.write('\uFEFF#EXTM3U\n#EXT-X-ENDLIST\n');
+        case '/video.mp4':
+          response.statusCode = 206;
+          response.headers.contentType = ContentType('video', 'mp4');
+          response.add(List.filled(1024, 0));
+        case '/page.mp4':
+          response.headers.contentType = ContentType.html;
+          response.write('<!DOCTYPE html><title>login</title>');
+        case '/limited.mp4':
+          response.statusCode = 429;
+        default:
+          response.statusCode = 404;
+      }
+      try {
+        await response.close();
+      } catch (_) {}
+    });
+    final adapter = _adapter(base);
+    addTearDown(() async {
+      adapter.dispose();
+      await server.close(force: true);
+    });
+    Future<bool> playable(String path) async =>
+        (await adapter.resolveDirectMedia('$base$path')).url.isNotEmpty;
+
+    expect(await playable('/ok.m3u8'), isTrue);
+    expect(await playable('/video.mp4'), isTrue);
+    expect(await playable('/page.mp4'), isFalse);
+    expect(await playable('/gone.mp4'), isFalse);
+    expect(await playable('/limited.mp4'), isTrue);
+    // Temporary media may appear later: its 404 neither rejects nor is cached.
+    expect(await playable('/temp/01.mp4'), isTrue);
+    expect(await playable('/temp/01.mp4'), isTrue);
+    expect(await playable('/gone.mp4'), isFalse);
+    expect(requests, [
+      '/ok.m3u8 bytes=0-1023',
+      '/video.mp4 bytes=0-1023',
+      '/page.mp4 bytes=0-1023',
+      '/gone.mp4 bytes=0-1023',
+      '/limited.mp4 bytes=0-1023',
+      '/temp/01.mp4 bytes=0-1023',
+      '/temp/01.mp4 bytes=0-1023',
+    ]);
   });
 
   test(
