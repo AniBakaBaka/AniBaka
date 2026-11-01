@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart' hide ContextExtensionss;
 import 'package:open_filex/open_filex.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import 'package:baka/app/update_presenter.dart';
@@ -44,10 +45,12 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
   final _session = Get.find<AccountSession>();
   String? _cacheSize;
   String? _busy;
+  String? _downloadDir;
 
   @override
   void initState() {
     super.initState();
+    _downloadDir = Instances.sp.getString('download_default_dir');
     _loadCacheSize();
   }
 
@@ -94,6 +97,16 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
       ),
     );
   });
+
+  Future<void> _pickDefaultDir() async {
+    final picked = await FilePicker.getDirectoryPath(
+      initialDirectory: _downloadDir,
+    );
+    if (picked == null || picked.isEmpty) return;
+    await Instances.sp.setString('download_default_dir', picked);
+    if (mounted) setState(() => _downloadDir = picked);
+    showSnackBar('已设置默认下载目录');
+  }
 
   Future<void> _checkUpdate() => _run('检查更新', () async {
     final info = await VersionService.checkUpdateInfo();
@@ -334,6 +347,52 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
               icon: Icons.security_outlined,
               title: '网络设置',
               onTap: () => _push(const NetworkSettingsPage()),
+            ),
+          ],
+        ),
+        SettingsSection(
+          title: '下载（定制版）',
+          children: [
+            SettingsTile(
+              icon: Icons.folder_outlined,
+              title: '默认下载目录',
+              value: _downloadDir ?? '未设置（使用应用数据目录）',
+              onTap: _pickDefaultDir,
+            ),
+            SettingsSelectTile<int>(
+              icon: Icons.align_horizontal_left_rounded,
+              title: '同时下载任务数',
+              value: Instances.sp.getInt('download_max_concurrent') ?? 3,
+              options: const {
+                1: '1',
+                2: '2',
+                3: '3',
+                4: '4',
+                6: '6',
+                8: '8',
+                10: '10',
+              },
+              onChanged: (v) async {
+                await Instances.sp.setInt('download_max_concurrent', v);
+                setState(() {});
+              },
+            ),
+            SettingsSelectTile<int>(
+              icon: Icons.speed_rounded,
+              title: 'HLS 分片并发数',
+              value: Instances.sp.getInt('download_hls_concurrency') ?? 16,
+              options: const {
+                4: '4',
+                8: '8',
+                16: '16',
+                24: '24',
+                32: '32',
+                48: '48',
+              },
+              onChanged: (v) async {
+                await Instances.sp.setInt('download_hls_concurrency', v);
+                setState(() {});
+              },
             ),
           ],
         ),

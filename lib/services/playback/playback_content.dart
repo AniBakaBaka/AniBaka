@@ -747,7 +747,28 @@ class PlaybackContent {
   }
 
   Future<void>? _disposing;
-  Future<void> dispose() => _disposing ??= _dispose();
+  bool _disposeRequested = false;
+  int _retainCount = 0;
+
+  /// 下载解析期间延长生命周期：播放页退出后解析仍能继续。
+  void retain() => _retainCount++;
+
+  void release() {
+    if (_retainCount > 0) _retainCount--;
+    if (_retainCount == 0 && _disposeRequested && _disposing == null) {
+      unawaited(dispose());
+    }
+  }
+
+  Future<void> dispose() {
+    if (_retainCount > 0) {
+      // 有解析任务还在使用本实例：推迟销毁，等全部 release 后再真正清理。
+      _disposeRequested = true;
+      return _disposing ?? Future<void>.value();
+    }
+    return _disposing ??= _dispose();
+  }
+
   Future<void> _dispose() async {
     if (_disposed) return;
     _disposed = true;

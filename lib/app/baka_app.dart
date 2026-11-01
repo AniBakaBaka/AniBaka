@@ -7,6 +7,7 @@ import 'dart:ui' show PointerDeviceKind;
 import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/pages/home/home_page.dart';
+import 'package:baka/services/download/download_resolve_manager.dart';
 import 'package:baka/pages/library/library_page.dart';
 import 'package:baka/pages/login/login_page.dart';
 import 'package:baka/pages/mine/mine_page.dart';
@@ -104,7 +105,12 @@ class BakaApp extends StatelessWidget {
                     mediaQuery.disableAnimations ||
                     appState.reduceVisualEffects,
               ),
-              child: child ?? const SizedBox.shrink(),
+              child: Stack(
+                children: [
+                  child ?? const SizedBox.shrink(),
+                  const DownloadResolveBanner(),
+                ],
+              ),
             );
           }),
         );

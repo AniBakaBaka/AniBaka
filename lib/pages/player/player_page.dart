@@ -773,6 +773,7 @@ class _PlayerPageState extends State<PlayerPage>
           _fullscreen && (downloadMode || !Instances.isDesktopPlatform),
       postDetail: content.buildDetailData(),
       urlResolver: content.resolveEpisodeUrl,
+      resolveTarget: content,
       startInDownloadMode: downloadMode,
       currentLineIndex: downloadMode ? null : content.currUrl,
       sourceNames: downloadMode ? null : content.sourceNames,

@@ -26,6 +26,8 @@ class _DownloadManagerPageState extends State<DownloadManagerPage> {
   final _service = downloads;
   List<DownloadTask> _active = [];
   List<MapEntry<String, List<DownloadTask>>> _completed = [];
+  bool _selectMode = false;
+  final Set<String> _selectedIds = {};
 
   @override
   void initState() {
@@ -57,29 +59,109 @@ class _DownloadManagerPageState extends State<DownloadManagerPage> {
     _completed = grouped.entries.toList(growable: false);
   }
 
+  // ---- 多选删除 ----
+
+  void _enterSelectMode(String id) {
+    setState(() {
+      _selectMode = true;
+      _selectedIds.add(id);
+    });
+  }
+
+  void _toggleSelect(String id) {
+    setState(() {
+      if (!_selectedIds.remove(id)) _selectedIds.add(id);
+      if (_selectedIds.isEmpty) _selectMode = false;
+    });
+  }
+
+  void _exitSelectMode() {
+    setState(() {
+      _selectMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  bool get _allActiveSelected =>
+      _active.isNotEmpty && _active.every((t) => _selectedIds.contains(t.id));
+
+  void _toggleSelectAll() {
+    setState(() {
+      if (_allActiveSelected) {
+        _selectedIds.clear();
+      } else {
+        _selectedIds
+          ..clear()
+          ..addAll(_active.map((t) => t.id));
+      }
+    });
+  }
+
+  Future<void> _deleteSelected() async {
+    if (_selectedIds.isEmpty) return;
+    final count = _selectedIds.length;
+    final confirmed = await confirmDeleteDialog(
+      context,
+      '确定要删除所选的 $count 项吗？正在下载的任务会被停止，本地文件将被删除且无法恢复。',
+    );
+    if (confirmed != true || !mounted) return;
+    final ids = _selectedIds.toSet();
+    for (final task in _service.tasks.toList()) {
+      if (ids.contains(task.id)) _service.delete(task);
+    }
+    _exitSelectMode();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: !widget.embedded,
-        title: Text(widget.embedded ? '下载管理' : '缓存'),
-        actions: [
-          PopupMenuButton<String>(
-            onSelected: (val) {
-              if (val == 'pause_all') _service.pauseAll();
-              if (val == 'resume_all') _service.resumeAll();
-              if (val == 'clear_completed') _service.clearCompleted();
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'pause_all', child: Text('全部暂停')),
-              PopupMenuItem(value: 'resume_all', child: Text('全部继续')),
-              PopupMenuItem(value: 'clear_completed', child: Text('清除已完成记录')),
-            ],
-          ),
-        ],
+    final normalAppBar = AppBar(
+      automaticallyImplyLeading: !widget.embedded,
+      title: Text(widget.embedded ? '下载管理' : '缓存'),
+      actions: [
+        PopupMenuButton<String>(
+          onSelected: (val) {
+            if (val == 'pause_all') _service.pauseAll();
+            if (val == 'resume_all') _service.resumeAll();
+            if (val == 'clear_completed') _service.clearCompleted();
+          },
+          itemBuilder: (context) => const [
+            PopupMenuItem(value: 'pause_all', child: Text('全部暂停')),
+            PopupMenuItem(value: 'resume_all', child: Text('全部继续')),
+            PopupMenuItem(value: 'clear_completed', child: Text('清除已完成记录')),
+          ],
+        ),
+      ],
+    );
+
+    final selectAppBar = AppBar(
+      leading: IconButton(
+        icon: const Icon(Icons.close_rounded),
+        tooltip: '退出多选',
+        onPressed: _exitSelectMode,
       ),
+      title: Text('已选 ${_selectedIds.length} 项'),
+      actions: [
+        IconButton(
+          tooltip: '全选 / 取消全选',
+          icon: Icon(
+            _allActiveSelected
+                ? Icons.check_box_rounded
+                : Icons.check_box_outline_blank_rounded,
+          ),
+          onPressed: _active.isEmpty ? null : _toggleSelectAll,
+        ),
+        IconButton(
+          tooltip: '删除所选',
+          icon: const Icon(Icons.delete_outline_rounded),
+          onPressed: _selectedIds.isEmpty ? null : _deleteSelected,
+        ),
+      ],
+    );
+
+    return Scaffold(
+      appBar: _selectMode ? selectAppBar : normalAppBar,
       body: _active.isEmpty && _completed.isEmpty
           ? Center(
               child: Column(
@@ -130,7 +212,14 @@ class _DownloadManagerPageState extends State<DownloadManagerPage> {
                   index--;
                   if (index < _active.length) {
                     final task = _active[index];
-                    return _TaskCard(key: ValueKey(task.id), task: task);
+                    return _TaskCard(
+                      key: ValueKey(task.id),
+                      task: task,
+                      selectMode: _selectMode,
+                      selected: _selectedIds.contains(task.id),
+                      onToggle: () => _toggleSelect(task.id),
+                      onLongPress: () => _enterSelectMode(task.id),
+                    );
                   }
                   index -= _active.length;
                 }
@@ -174,6 +263,29 @@ Widget _dismissBackground(ThemeData theme) {
   );
 }
 
+Future<bool?> confirmDeleteDialog(BuildContext context, String message) {
+  return showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('删除下载'),
+      content: Text(message),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('取消'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(
+            '删除',
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 class _Thumbnail extends StatelessWidget {
   const _Thumbnail({this.url});
 
@@ -208,8 +320,19 @@ class _Thumbnail extends StatelessWidget {
 
 class _TaskCard extends StatelessWidget {
   final DownloadTask task;
+  final bool selectMode;
+  final bool selected;
+  final VoidCallback? onToggle;
+  final VoidCallback? onLongPress;
 
-  const _TaskCard({required this.task, super.key});
+  const _TaskCard({
+    required this.task,
+    super.key,
+    this.selectMode = false,
+    this.selected = false,
+    this.onToggle,
+    this.onLongPress,
+  });
 
   void _onTap(BuildContext context) {
     final service = downloads;
@@ -265,13 +388,22 @@ class _TaskCard extends StatelessWidget {
 
     return Dismissible(
       key: ValueKey('dismiss_${task.id}'),
-      direction: DismissDirection.endToStart,
+      // 多选模式下禁用右滑删除，避免与勾选状态冲突。
+      direction: selectMode
+          ? DismissDirection.none
+          : DismissDirection.endToStart,
       onDismissed: (_) => downloads.delete(task),
       background: _dismissBackground(theme),
       child: ValueListenableBuilder<DownloadStatus>(
         valueListenable: task.statusNotifier,
         builder: (context, status, _) {
-          final (statusText, actionIcon) = _statusInfo(status);
+          // HLS 任务在分片全部下完后进入拼接阶段（进度定格 0.99），
+          // 显示“合并中”避免看起来像卡死。
+          final merging =
+              status == DownloadStatus.downloading && task.progress >= 0.99;
+          final (statusText, actionIcon) = merging
+              ? ('合并中', Icons.pause_rounded)
+              : _statusInfo(status);
           final statusColor = _statusColor(theme, status);
 
           return Container(
@@ -282,11 +414,19 @@ class _TaskCard extends StatelessWidget {
             ),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
-              onTap: () => _onTap(context),
+              onTap: selectMode ? onToggle : () => _onTap(context),
+              onLongPress: onLongPress,
               child: Padding(
                 padding: const EdgeInsets.all(10),
                 child: Row(
                   children: [
+                    if (selectMode) ...[
+                      Checkbox(
+                        value: selected,
+                        onChanged: (_) => onToggle?.call(),
+                      ),
+                      const SizedBox(width: 4),
+                    ],
                     _Thumbnail(url: task.thumbnail),
                     const SizedBox(width: 12),
                     Expanded(
@@ -373,25 +513,9 @@ class _AnimeGroupCard extends StatelessWidget {
   const _AnimeGroupCard({required this.title, required this.tasks, super.key});
 
   Future<bool?> _confirmDelete(BuildContext context) {
-    return showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('删除合集'),
-        content: Text('确定要删除《$title》的所有已下载剧集吗？这会清除本地文件且无法恢复。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(
-              '删除',
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ),
-        ],
-      ),
+    return confirmDeleteDialog(
+      context,
+      '确定要删除《$title》的所有已下载剧集吗？这会清除本地文件且无法恢复。',
     );
   }
 
@@ -478,6 +602,8 @@ class _AnimeGroupPage extends StatefulWidget {
 class _AnimeGroupPageState extends State<_AnimeGroupPage> {
   final _service = downloads;
   List<DownloadTask> _tasks = [];
+  bool _selectMode = false;
+  final Set<String> _selectedIds = {};
 
   @override
   void initState() {
@@ -501,6 +627,59 @@ class _AnimeGroupPageState extends State<_AnimeGroupPage> {
 
   void _onTasksChanged() => setState(_readTasks);
 
+  // ---- 多选删除 ----
+
+  void _enterSelectMode(String id) {
+    setState(() {
+      _selectMode = true;
+      _selectedIds.add(id);
+    });
+  }
+
+  void _toggleSelect(String id) {
+    setState(() {
+      if (!_selectedIds.remove(id)) _selectedIds.add(id);
+      if (_selectedIds.isEmpty) _selectMode = false;
+    });
+  }
+
+  void _exitSelectMode() {
+    setState(() {
+      _selectMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  bool get _allSelected =>
+      _tasks.isNotEmpty && _tasks.every((t) => _selectedIds.contains(t.id));
+
+  void _toggleSelectAll() {
+    setState(() {
+      if (_allSelected) {
+        _selectedIds.clear();
+      } else {
+        _selectedIds
+          ..clear()
+          ..addAll(_tasks.map((t) => t.id));
+      }
+    });
+  }
+
+  Future<void> _deleteSelected() async {
+    if (_selectedIds.isEmpty) return;
+    final count = _selectedIds.length;
+    final confirmed = await confirmDeleteDialog(
+      context,
+      '确定要删除所选的 $count 集吗？本地文件将被删除且无法恢复。',
+    );
+    if (confirmed != true || !mounted) return;
+    final ids = _selectedIds.toSet();
+    for (final task in _service.tasks.toList()) {
+      if (ids.contains(task.id)) _service.delete(task);
+    }
+    _exitSelectMode();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_tasks.isEmpty) {
@@ -514,12 +693,43 @@ class _AnimeGroupPageState extends State<_AnimeGroupPage> {
       });
     }
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
+      appBar: _selectMode
+          ? AppBar(
+              leading: IconButton(
+                icon: const Icon(Icons.close_rounded),
+                tooltip: '退出多选',
+                onPressed: _exitSelectMode,
+              ),
+              title: Text('已选 ${_selectedIds.length} 集'),
+              actions: [
+                IconButton(
+                  tooltip: '全选 / 取消全选',
+                  icon: Icon(
+                    _allSelected
+                        ? Icons.check_box_rounded
+                        : Icons.check_box_outline_blank_rounded,
+                  ),
+                  onPressed: _tasks.isEmpty ? null : _toggleSelectAll,
+                ),
+                IconButton(
+                  tooltip: '删除所选',
+                  icon: const Icon(Icons.delete_outline_rounded),
+                  onPressed: _selectedIds.isEmpty ? null : _deleteSelected,
+                ),
+              ],
+            )
+          : AppBar(title: Text(widget.title)),
       body: ListView.builder(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         itemCount: _tasks.length,
-        itemBuilder: (context, i) =>
-            _TaskCard(key: ValueKey(_tasks[i].id), task: _tasks[i]),
+        itemBuilder: (context, i) => _TaskCard(
+          key: ValueKey(_tasks[i].id),
+          task: _tasks[i],
+          selectMode: _selectMode,
+          selected: _selectedIds.contains(_tasks[i].id),
+          onToggle: () => _toggleSelect(_tasks[i].id),
+          onLongPress: () => _enterSelectMode(_tasks[i].id),
+        ),
       ),
     );
   }
