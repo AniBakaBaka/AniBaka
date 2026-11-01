@@ -19,7 +19,8 @@ class SkipSelection {
   final ({SkipRange? op, SkipRange? ed}) ranges;
   final ({bool op, bool ed}) changed;
   final bool saving;
-  SkipRange get range => (type == 'op' ? ranges.op : ranges.ed)!;
+  SkipRange? _rangeOf(String type) => type == 'op' ? ranges.op : ranges.ed;
+  SkipRange get range => _rangeOf(type)!;
   String get label => type == 'op' ? '片头' : '片尾';
 
   SkipSelection copyWith({
@@ -37,7 +38,7 @@ class SkipSelection {
   );
 
   SkipSegment segment(String type) {
-    final range = (type == 'op' ? ranges.op : ranges.ed)!;
+    final range = _rangeOf(type)!;
     return SkipSegment(
       id: 'local:$type',
       type: type,

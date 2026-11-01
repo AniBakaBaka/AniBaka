@@ -860,7 +860,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
       links.add(('IMDb', 'https://www.imdb.com/title/$formattedImdb/'));
     }
 
-    if (tmdbId != null && tmdbId.isNotEmpty) {
+    if (tmdbId != null && tmdbId > 0) {
       links.add(('TMDB', 'https://www.themoviedb.org/tv/$tmdbId'));
     }
 

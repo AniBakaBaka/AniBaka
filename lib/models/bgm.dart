@@ -91,7 +91,6 @@ List<Map<String, dynamic>> convertBgmSubjectsToAppFormat(
       if (!compact) 'id': id,
       'title': title,
       'subtitle': nameCn != null && name != null && name != nameCn ? name : '',
-      'content': imageUrl,
       'bgmImageUrl': imageUrl,
       if (!compact) 'tag': '动画',
       if (!compact) 'sort': trending ? '推荐' : '',
@@ -104,11 +103,8 @@ List<Map<String, dynamic>> convertBgmSubjectsToAppFormat(
       if (!compact) 'summary': trimmed(subject['summary']) ?? '',
       if (!compact) 'eps': subject['eps'] ?? subject['total_episodes'] ?? 0,
       'source': 'bgm',
+      if (trending) 'info': trimmed(subject['info']) ?? '',
     };
-    if (trending) {
-      converted['info'] = trimmed(subject['info']) ?? '';
-      converted['videos'] = '';
-    }
     result.add(converted);
   }
   return result;

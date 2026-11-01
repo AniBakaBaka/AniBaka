@@ -1,7 +1,6 @@
 import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/bgm.dart';
-import 'package:baka/utils/json_values.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -486,7 +485,7 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
                     currentIndex: 0,
                     currUrl: 1,
                     bgmId: _subjectId ?? _detail.bgmId,
-                    tmdbId: toInt(_detail.tmdbId),
+                    tmdbId: _detail.tmdbId,
                     tvdbId: _detail.tvdbId,
                     onEpisodeSelected: (index) {
                       setState(() {

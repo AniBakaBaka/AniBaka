@@ -48,7 +48,6 @@ class SourceSearchResult {
       'description': description,
       'subtitle': description,
       'image': image,
-      'content': image,
       if (series!.bgmId != null) 'bgmId': series!.bgmId,
       if (series!.score != null) 'score': series!.score,
       if (image.isNotEmpty) 'bgmImageUrl': image,

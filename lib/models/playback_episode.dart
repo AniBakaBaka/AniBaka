@@ -71,49 +71,23 @@ class PlaybackEpisodeCatalog {
   /// 计算剧集总数。
   static int countFrom(Map data) {
     final rawList = data['videoList'];
+    if (rawList is List<PlaybackEpisode>) return rawList.length;
     if (rawList is List) {
-      if (rawList is List<PlaybackEpisode>) return rawList.length;
-      var count = 0;
-      for (final item in rawList) {
-        if (item is PlaybackEpisode ||
-            (item is String && item.trim().isNotEmpty)) {
-          count++;
-        }
-      }
+      final count = rawList
+          .where(
+            (item) =>
+                item is PlaybackEpisode ||
+                (item is String && item.trim().isNotEmpty),
+          )
+          .length;
       if (count > 0) return count;
     }
-
     final raw = data['videos'];
-    if (raw is String && raw.isNotEmpty) {
-      var count = 0;
-      var start = 0;
-      while (start < raw.length) {
-        // Match String.trim's Unicode whitespace without allocating each line.
-        switch (raw.codeUnitAt(start)) {
-          case >= 0x09 && <= 0x0d ||
-              0x20 ||
-              0x85 ||
-              0xa0 ||
-              0x1680 ||
-              >= 0x2000 && <= 0x200a ||
-              0x2028 ||
-              0x2029 ||
-              0x202f ||
-              0x205f ||
-              0x3000 ||
-              0xfeff:
-            start++;
-            continue;
-        }
-        count++;
-        final end = raw.indexOf('\n', start);
-        if (end < 0) break;
-        start = end + 1;
-      }
-      return count;
-    }
-    return 0;
+    return raw is String ? _nonBlankLine.allMatches(raw).length : 0;
   }
+
+  // `\s*` may cross blank lines, so each match ends on a distinct line.
+  static final _nonBlankLine = RegExp(r'^\s*\S', multiLine: true);
 
   /// 解析序列化字符串集合为 [PlaybackEpisode] 列表。
   static List<PlaybackEpisode> parse(

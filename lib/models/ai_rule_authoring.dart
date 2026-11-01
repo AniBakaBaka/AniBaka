@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:baka/models/custom_source_config.dart';
 
 enum RuleAuthoringMode { create, repair }
@@ -102,9 +100,6 @@ class RuleAuthoringResult {
   final CustomSourceConfig config;
   final RuleValidationReport validation;
   final int rounds;
-
-  String get formattedJson =>
-      const JsonEncoder.withIndent('  ').convert(config.toJson());
 }
 
 class PlayerFailureContext {

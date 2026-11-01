@@ -1,6 +1,7 @@
 import 'dart:collection';
 
 import 'package:baka/models/playback_episode.dart';
+import 'package:baka/utils/json_values.dart';
 
 /// Shared handoff between matching, navigation and a playback session.
 /// Each consumer owns its selection; immutable catalogs are shared. Legacy
@@ -41,9 +42,9 @@ class PlaybackRequest {
   /// It must be matched to a source instead of being queried as a site post.
   factory PlaybackRequest.fromHistory(Map data) {
     final source = (data['source'] as String? ?? '').trim();
-    final bgmId = int.tryParse('${data['bgmId']}') ?? 0;
+    final bgmId = toInt(data['bgmId']) ?? 0;
     final legacyCloud =
-        source.isEmpty && bgmId > 0 && int.tryParse('${data['id']}') == bgmId;
+        source.isEmpty && bgmId > 0 && toInt(data['id']) == bgmId;
     return PlaybackRequest.fromMap(data, source: legacyCloud ? 'bgm' : source)
       ..episodeIndex = data['index'] as int?
       ..lineIndex = data['url'] as int?;

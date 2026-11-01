@@ -1,4 +1,3 @@
-import 'package:baka/utils/json_values.dart';
 import 'package:flutter/foundation.dart';
 
 enum DownloadStatus { waiting, downloading, paused, completed, failed }
@@ -92,9 +91,9 @@ class DownloadTask {
     title: json['title'],
     subtitle: json['subtitle'],
     thumbnail: json['thumbnail'],
-    bgmId: toInt(json['bgmId'] ?? json['videoId']),
+    bgmId: json['bgmId'],
     episodeIndex: json['episodeIndex'],
-    kind: _kindFromJson(json),
+    kind: DownloadTaskKind.values.asNameMap()[json['kind']],
     danmakuPath: json['danmakuPath'],
     status: DownloadStatus.values[json['status'] ?? 0],
     progress: (json['progress'] ?? 0.0).toDouble(),
@@ -114,14 +113,4 @@ class DownloadTask {
       url.toLowerCase().contains('m3u8')
       ? DownloadTaskKind.hls
       : DownloadTaskKind.file;
-
-  static DownloadTaskKind _kindFromJson(Map<String, dynamic> json) {
-    final raw = json['kind'];
-    if (raw is String) {
-      for (final kind in DownloadTaskKind.values) {
-        if (kind.name == raw) return kind;
-      }
-    }
-    return inferKind(json['url']?.toString() ?? '');
-  }
 }

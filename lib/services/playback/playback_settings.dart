@@ -263,13 +263,13 @@ class PlaybackSettingsService {
     write(_showSystemTimeKey, previous.showSystemTime, next.showSystemTime);
     write(
       _videoEnhancementModeKey,
-      previous.videoEnhancementMode.storageValue,
-      next.videoEnhancementMode.storageValue,
+      previous.videoEnhancementMode.name,
+      next.videoEnhancementMode.name,
     );
     write(
       _lastVideoEnhancementModeKey,
-      previous.lastVideoEnhancementMode.storageValue,
-      next.lastVideoEnhancementMode.storageValue,
+      previous.lastVideoEnhancementMode.name,
+      next.lastVideoEnhancementMode.name,
     );
     write(_showSubtitleKey, previous.showSubtitle, next.showSubtitle);
     write(_hwdecModeKey, previous.hwdecMode, next.hwdecMode);

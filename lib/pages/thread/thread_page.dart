@@ -12,7 +12,6 @@ import 'package:baka/pages/login/qr_scanner_page.dart';
 import 'package:baka/pages/player/player_page.dart';
 import 'package:baka/pages/thread/thread_controller.dart';
 import 'package:baka/utils/toast_utils.dart';
-import 'package:baka/widgets/comment/comment_card.dart';
 import 'package:baka/widgets/comment/comment_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -24,8 +23,13 @@ class _ThreadTab {
   final String name;
   final ThreadController data;
   final ScrollController scroll = ScrollController();
-  final GlobalKey<CommentListState> commentKey = GlobalKey<CommentListState>();
   double lastOffset = 0;
+
+  Future<void> reply(String text, int rid, String runame) async {
+    if (await sendComment(data.pid, text, rid: rid, runame: runame)) {
+      await data.load(refresh: true);
+    }
+  }
 
   void dispose() {
     data.dispose();
@@ -122,10 +126,7 @@ class _ThreadPageState extends State<ThreadPage>
       return;
     }
     final result = await CommentInputWidget.show(context);
-    if (result == null || !mounted) return;
-    final state = tab.commentKey.currentState;
-    if (state == null) return;
-    await state.sendComment(result, 0, '');
+    if (result != null && mounted) await tab.reply(result, 0, '');
   }
 
   Future<void> _refreshWatchRooms() async {
@@ -228,14 +229,10 @@ class _ThreadPageState extends State<ThreadPage>
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
               sliver: CommentList(
-                pid: tab.pid,
                 comments: tab.isRefreshing && tab.comments.isEmpty
                     ? null
                     : tab.comments,
-                key: ui.commentKey,
-                autoLoad: false,
-                onRefresh: () => tab.load(refresh: true),
-                asSliver: true,
+                onReply: ui.reply,
                 onTapLink: _onLink,
               ),
             ),

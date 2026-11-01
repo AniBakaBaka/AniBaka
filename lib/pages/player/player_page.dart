@@ -821,16 +821,13 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
-  void _onCommentLink(String text, String? url, String title) =>
-      handleCommentLinkTap(
-        text: text,
-        url: url,
-        title: title,
-        controller: ctr,
-        currentPlayIndex: _content.currPlayIndex,
-        videoList: _content.videoList,
-        onChangePlayIndex: _switchEpisode,
-      );
+  void _onCommentLink(String _, String? url, String _) => handleCommentLinkTap(
+    url,
+    controller: ctr,
+    currentIndex: _content.currPlayIndex,
+    episodeCount: _content.videoList.length,
+    onChangeEpisode: _switchEpisode,
+  );
 
   @override
   Widget build(BuildContext context) {

@@ -150,8 +150,6 @@ enum VideoEnhancementMode {
     _ => off,
   };
 
-  String get storageValue => name;
-
   String get label => switch (this) {
     off => '关闭',
     low => '低',

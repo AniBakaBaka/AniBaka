@@ -65,7 +65,7 @@ class AnimeDetailViewData {
   final int doingCount;
   final int wishCount;
   final String? imdbId;
-  final String? tmdbId;
+  final int? tmdbId;
   final String? tvdbId;
   final int? bgmId;
 
@@ -191,7 +191,7 @@ class AnimeDetailViewData {
       doingCount: collection?['doing'] as int? ?? 0,
       wishCount: collection?['wish'] as int? ?? 0,
       imdbId: trimmed(ids?['imdb_id'] as String?),
-      tmdbId: (ids?['tmdb_id'] as int?)?.toString(),
+      tmdbId: ids?['tmdb_id'] as int?,
       tvdbId: (ids?['tvdb_id'] as int?)?.toString(),
       bgmId: ids?['bgm_id'] as int? ?? bgm?['id'] as int? ?? bgmInfo.subjectId,
     );
@@ -211,7 +211,6 @@ class AnimeDetailViewData {
     final images = detail?['images'] as Map<String, dynamic>?;
     return _preferredImage(images?['logos'] as List<dynamic>?) ??
         trimmed(detail?['logoUrl'] as String?) ??
-        trimmed(detail?['logo'] as String?) ??
         '';
   }
 

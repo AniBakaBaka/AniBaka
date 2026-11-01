@@ -13,16 +13,6 @@ class SubtitleConfig {
   final double opacity;
   final String fontFamily;
 
-  static const double defaultFontSize = 24.0;
-  static const double defaultPosition = 95.0;
-  static const Color defaultFontColor = Colors.white;
-  static const Color defaultBackgroundColor = Color(0x00000000);
-  static const double defaultBorderWidth = 2.0;
-  static const Color defaultBorderColor = Colors.black;
-  static const bool defaultBold = false;
-  static const double defaultOpacity = 1.0;
-  static const String defaultFontFamily = '';
-
   /// 可选字体列表
   static const fonts = {
     '': '系统默认',
@@ -38,15 +28,15 @@ class SubtitleConfig {
   };
 
   const SubtitleConfig({
-    this.fontSize = defaultFontSize,
-    this.position = defaultPosition,
-    this.fontColor = defaultFontColor,
-    this.backgroundColor = defaultBackgroundColor,
-    this.borderWidth = defaultBorderWidth,
-    this.borderColor = defaultBorderColor,
-    this.bold = defaultBold,
-    this.opacity = defaultOpacity,
-    this.fontFamily = defaultFontFamily,
+    this.fontSize = 24.0,
+    this.position = 95.0,
+    this.fontColor = Colors.white,
+    this.backgroundColor = const Color(0x00000000),
+    this.borderWidth = 2.0,
+    this.borderColor = Colors.black,
+    this.bold = false,
+    this.opacity = 1.0,
+    this.fontFamily = '',
   });
 
   SubtitleConfig copyWith({
@@ -71,42 +61,42 @@ class SubtitleConfig {
     fontFamily: fontFamily ?? this.fontFamily,
   );
 
+  static String _hex(Color color) =>
+      color.toARGB32().toRadixString(16).padLeft(8, '0');
+
   Map<String, dynamic> toJson() => {
     'fontSize': fontSize,
     'position': position,
-    'fontColor': fontColor.toSubtitleHex(),
-    'backgroundColor': backgroundColor.toSubtitleHex(),
+    'fontColor': _hex(fontColor),
+    'backgroundColor': _hex(backgroundColor),
     'borderWidth': borderWidth,
-    'borderColor': borderColor.toSubtitleHex(),
+    'borderColor': _hex(borderColor),
     'bold': bold,
     'opacity': opacity,
     'fontFamily': fontFamily,
   };
 
-  factory SubtitleConfig.fromJson(Map<String, dynamic> json) => SubtitleConfig(
-    fontSize: (json['fontSize'] as num?)?.toDouble() ?? defaultFontSize,
-    position: (json['position'] as num?)?.toDouble() ?? defaultPosition,
-    fontColor: _parseColor(json['fontColor'], defaultFontColor),
-    backgroundColor: _parseColor(
-      json['backgroundColor'],
-      defaultBackgroundColor,
-    ),
-    borderWidth:
-        (json['borderWidth'] as num?)?.toDouble() ?? defaultBorderWidth,
-    borderColor: _parseColor(json['borderColor'], defaultBorderColor),
-    bold: json['bold'] as bool? ?? defaultBold,
-    opacity: (json['opacity'] as num?)?.toDouble() ?? defaultOpacity,
-    fontFamily: fonts.containsKey(json['fontFamily'])
-        ? json['fontFamily'] as String
-        : defaultFontFamily,
-  );
-
-  static Color _parseColor(dynamic value, Color fallback) {
-    if (value is String && value.isNotEmpty) {
-      final parsed = int.tryParse(value, radix: 16);
-      if (parsed != null) return Color(parsed);
-    }
-    return fallback;
+  factory SubtitleConfig.fromJson(Map<String, dynamic> json) {
+    const defaults = SubtitleConfig();
+    Color color(String key, Color fallback) => switch (json[key]) {
+      final String hex => Color(int.parse(hex, radix: 16)),
+      _ => fallback,
+    };
+    final font = json['fontFamily'];
+    return SubtitleConfig(
+      fontSize: (json['fontSize'] as num?)?.toDouble() ?? defaults.fontSize,
+      position: (json['position'] as num?)?.toDouble() ?? defaults.position,
+      fontColor: color('fontColor', defaults.fontColor),
+      backgroundColor: color('backgroundColor', defaults.backgroundColor),
+      borderWidth:
+          (json['borderWidth'] as num?)?.toDouble() ?? defaults.borderWidth,
+      borderColor: color('borderColor', defaults.borderColor),
+      bold: json['bold'] as bool? ?? defaults.bold,
+      opacity: (json['opacity'] as num?)?.toDouble() ?? defaults.opacity,
+      fontFamily: fonts.containsKey(font)
+          ? font as String
+          : defaults.fontFamily,
+    );
   }
 
   @override
@@ -135,14 +125,4 @@ class SubtitleConfig {
     opacity,
     fontFamily,
   );
-}
-
-extension SubtitleColorHex on Color {
-  String toSubtitleHex() {
-    var packed = 0;
-    for (final channel in [a, r, g, b]) {
-      packed = (packed << 8) | (channel * 255.0).round().clamp(0, 255);
-    }
-    return packed.toRadixString(16).padLeft(8, '0');
-  }
 }
