@@ -227,6 +227,7 @@ abstract final class HlsOfflineRemux {
     Directory dir, {
     required String keepFileName,
   }) async {
+    final victims = <File>[];
     await for (final entity in dir.list(followLinks: false)) {
       if (entity is! File) continue;
       final name = entity.uri.pathSegments.isEmpty
@@ -234,10 +235,23 @@ abstract final class HlsOfflineRemux {
           : entity.uri.pathSegments.last;
       if (name == keepFileName) continue;
       if (name.endsWith('_danmaku.json') || name.endsWith('.json')) continue;
-      try {
-        await entity.delete();
-      } catch (_) {}
+      victims.add(entity);
     }
+    // 串行逐个删在 Windows 上是几百次同步等待；分批并发删除能明显缩短
+    // 下载收尾（界面停在最后进度）的时间。
+    const batch = 64;
+    for (var i = 0; i < victims.length; i += batch) {
+      final end = i + batch > victims.length ? victims.length : i + batch;
+      await Future.wait([
+        for (final f in victims.sublist(i, end)) _deleteQuietly(f),
+      ]);
+    }
+  }
+
+  static Future<void> _deleteQuietly(File f) async {
+    try {
+      await f.delete();
+    } catch (_) {}
   }
 
   static Future<bool> _looksLikeFmp4(File file) async {

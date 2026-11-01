@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'package:baka/models/download_task.dart';
-import 'package:baka/models/bgm.dart';
-import 'package:baka/api/bgm.dart';
-import 'package:baka/services/download/download_manager.dart';
-import 'package:baka/services/playback/history_repository.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:baka/instance.dart';
 import 'package:baka/models/playback_episode.dart';
+import 'package:baka/services/download/download_manager.dart';
+import 'package:baka/services/download/download_resolve_manager.dart';
+import 'package:baka/services/playback/history_repository.dart';
+import 'package:baka/services/playback/playback_content.dart';
+import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/episode/episode_widgets.dart';
 
 const _kSearchThreshold = 12;
@@ -21,6 +23,7 @@ Future<int?> showEpisodeListDialog({
   bool isFullScreen = false,
   Map<String, dynamic>? postDetail,
   Future<String?> Function(int episodeIndex)? urlResolver,
+  PlaybackContent? resolveTarget,
   bool startInDownloadMode = false,
   int? currentLineIndex,
   List<String>? sourceNames,
@@ -33,6 +36,7 @@ Future<int?> showEpisodeListDialog({
     isFullScreen: isFullScreen,
     postDetail: postDetail,
     urlResolver: urlResolver,
+    resolveTarget: resolveTarget,
     startInDownloadMode: startInDownloadMode,
     currentLineIndex: currentLineIndex,
     sourceNames: sourceNames,
@@ -71,12 +75,17 @@ class EpisodeListDialog extends StatefulWidget {
   final bool isFullScreen;
   final Map<String, dynamic>? postDetail;
   final Future<String?> Function(int episodeIndex)? urlResolver;
+
+  /// 解析所依赖的播放内容实例：下载解析期间会被 retain，
+  /// 播放页退出不会中断解析。
+  final PlaybackContent? resolveTarget;
   final bool startInDownloadMode;
   final int? currentLineIndex;
   final List<String>? sourceNames;
   final ValueChanged<int>? onLineChanged;
 
-  bool get canDownload => postDetail != null && urlResolver != null;
+  bool get canDownload =>
+      postDetail != null && urlResolver != null && resolveTarget != null;
 
   const EpisodeListDialog({
     required this.videoList,
@@ -86,6 +95,7 @@ class EpisodeListDialog extends StatefulWidget {
     super.key,
     this.postDetail,
     this.urlResolver,
+    this.resolveTarget,
     this.startInDownloadMode = false,
     this.currentLineIndex,
     this.sourceNames,
@@ -215,59 +225,46 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
     Navigator.pop(context);
   }
 
-  void _submitDownload() {
+  Future<void> _submitDownload() async {
     if (_selected.isEmpty) return;
     final indices = [
       for (var index = 0; index < widget.videoList.length; index++)
         if (_selected.contains(index)) index,
     ];
     HapticFeedback.mediumImpact();
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('开始在后台解析 ${indices.length} 集')));
-    Navigator.pop(context);
-    _resolveAndEnqueue(indices).ignore();
-  }
-
-  Future<void> _resolveAndEnqueue(List<int> indices) async {
-    final service = downloads;
-    final detail = widget.postDetail!;
-    final bgmId = (await resolveBgmFromData(detail)).subjectId;
-
-    final sourceName = detail['sourceDisplayName'] as String? ?? '';
-    final title = detail['title'] as String? ?? '';
-    final thumbnail = resolveCoverImage(detail);
-    final filenamePrefix = sourceName.isNotEmpty
-        ? '${title}_[$sourceName]_'
-        : '${title}_';
-    final subtitlePrefix = sourceName.isNotEmpty ? '$sourceName · ' : '';
-
-    final tasks = <DownloadTask>[];
-    for (final index in indices) {
-      try {
-        final resolvedUrl = await widget.urlResolver!(index);
-        if (resolvedUrl == null || resolvedUrl.isEmpty) continue;
-        final episodeTitle = widget.videoList[index].title;
-        final kind = DownloadTask.inferKind(resolvedUrl);
-        final extension = kind == DownloadTaskKind.hls ? 'm3u8' : 'mp4';
-        tasks.add(
-          DownloadTask(
-            id: _taskId(index),
-            url: resolvedUrl,
-            filename: '$filenamePrefix${episodeTitle}_${index + 1}.$extension',
-            title: title,
-            subtitle: '$subtitlePrefix$episodeTitle',
-            thumbnail: thumbnail,
-            bgmId: bgmId,
-            episodeIndex: index + 1,
-            kind: kind,
-          ),
+    final initial = Instances.sp.getString('download_default_dir');
+    var saveDir = await FilePicker.getDirectoryPath(
+      initialDirectory: initial != null && initial.isNotEmpty ? initial : null,
+    );
+    if (saveDir == null || saveDir.isEmpty) {
+      // 取消选择时回退到默认目录，仍继续下载；未设置默认目录则中止。
+      if (initial != null && initial.isNotEmpty) {
+        saveDir = initial;
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('未选择目录，使用默认下载目录')),
         );
-      } catch (error) {
-        debugPrint('resolve download episode ${index + 1}: $error');
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已取消：未选择保存目录')),
+        );
+        return;
       }
     }
-    service.addTasks(tasks);
+    if (!mounted) return;
+    Navigator.pop(context);
+    DownloadResolveManager.instance.enqueue(
+      DownloadResolveJob(
+        indices: indices,
+        saveDir: saveDir,
+        resolver: widget.urlResolver!,
+        keepAlive: widget.resolveTarget,
+        detail: widget.postDetail!,
+        videoList: widget.videoList,
+        taskIdPrefix: _taskIdPrefix,
+      ),
+    );
   }
 
   @override
