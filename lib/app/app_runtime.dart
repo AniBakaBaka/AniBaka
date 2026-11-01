@@ -187,8 +187,13 @@ class AppRuntime {
     Get.put(party, permanent: true);
     Get.put(links, permanent: true);
     Get.put(mediaSession, permanent: true);
+    // 应用启动即初始化下载服务：加载任务、清理失效记录并压实存储，
+    // 不等用户打开下载管理页才执行。
+    await downloads.init();
     downloads.onCompleted = (task) => showSnackBar(
       '已缓存 ${task.title}',
+      duration: const Duration(seconds: 3),
+      replace: true,
       action: SnackBarAction(
         label: '前往缓存中心',
         onPressed: () {

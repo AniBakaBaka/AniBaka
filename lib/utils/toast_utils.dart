@@ -9,26 +9,42 @@ import 'package:fluttertoast/fluttertoast.dart';
 final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
 
+Timer? _snackDismissTimer;
+int _snackSeq = 0;
+
 void showSnackBar(
   String text, {
   ToastGravity gravity = ToastGravity.BOTTOM,
   bool isError = false,
   SnackBarAction? action,
   Duration? duration,
+  bool replace = false,
 }) {
   if (action != null ||
       Platform.isWindows ||
       Platform.isMacOS ||
       Platform.isLinux) {
-    scaffoldMessengerKey.currentState?.showSnackBar(
+    final messenger = scaffoldMessengerKey.currentState;
+    if (messenger == null) return;
+    if (replace) messenger.removeCurrentSnackBar();
+    final effective = duration ?? Duration(seconds: action == null ? 2 : 4);
+    final seq = ++_snackSeq;
+    messenger.showSnackBar(
       SnackBar(
         content: Text(text),
-        duration: duration ?? Duration(seconds: action == null ? 2 : 4),
+        duration: effective,
         behavior: SnackBarBehavior.floating,
         backgroundColor: isError ? const Color(0xFFD32F2F) : null,
         action: action,
       ),
     );
+    // SnackBar 自带的计时依赖帧调度：窗口失焦、被遮挡或无障碍模式打开时
+    // 可能永不触发自动关闭。这里用一个真实的 Timer 兜底，保证到点一定消失。
+    _snackDismissTimer?.cancel();
+    _snackDismissTimer = Timer(effective, () {
+      if (seq != _snackSeq) return;
+      scaffoldMessengerKey.currentState?.removeCurrentSnackBar();
+    });
   } else {
     Fluttertoast.showToast(
       msg: text,

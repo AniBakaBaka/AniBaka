@@ -16,6 +16,36 @@ import 'package:saver_gallery/saver_gallery.dart';
 
 late DownloadService downloads;
 
+///  async 信号量：跨任务共享的 HLS 分片下载并发上限。
+///
+/// 每个任务内部有 N 个 worker，若不限流，6 任务 × 32 分片 = 192 路并发请求
+/// 会把主 isolate 的事件循环塞满，导致界面明显卡顿。全局闸门把同时在飞的
+/// 分片请求压回设置值。
+class _Semaphore {
+  _Semaphore(this.max);
+  final int max;
+  int _held = 0;
+  final _waiters = <void Function()>[];
+
+  Future<void> acquire() {
+    if (_held < max) {
+      _held++;
+      return Future<void>.value();
+    }
+    final c = Completer<void>();
+    _waiters.add(c.complete);
+    return c.future;
+  }
+
+  void release() {
+    if (_waiters.isNotEmpty) {
+      _waiters.removeAt(0)();
+    } else if (_held > 0) {
+      _held--;
+    }
+  }
+}
+
 class DownloadService {
   static const String _storageKey = 'download_tasks';
   DownloadService();
@@ -45,8 +75,56 @@ class DownloadService {
   );
 
   final _waiting = <String, DownloadTask>{};
-  _DownloadRun? _active;
+  final Set<_DownloadRun> _activeRuns = {};
   bool _saveScheduled = false;
+
+  /// 同时进行的下载任务数（设置中可调，默认 3）。
+  int get _maxConcurrent {
+    try {
+      final v = Instances.sp.getInt('download_max_concurrent');
+      return v != null && v > 0 ? v : 3;
+    } catch (_) {
+      return 3;
+    }
+  }
+
+  /// HLS 分片并发下载数（设置中可调，默认 16，数值越大越快）。
+  int get _hlsConcurrency {
+    try {
+      final v = Instances.sp.getInt('download_hls_concurrency');
+      return v != null && v > 0 ? v : 16;
+    } catch (_) {
+      return 16;
+    }
+  }
+
+  /// 是否在下载完成后一并缓存弹幕（默认关闭，只下载视频）。
+  bool get _downloadDanmaku {
+    try {
+      return Instances.sp.getBool('download_danmaku') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 跨任务共享的 HLS 分片并发闸门（首次使用时按设置值创建）。
+  ///
+  /// 上限压到 16：分片请求的处理（TLS 解密、分块事件）全在主 isolate，
+  /// 32 路以上会挤占 UI 帧调度造成明显掉帧；16 路足以跑满常见带宽。
+  _Semaphore? _hlsGate;
+  _Semaphore get _gate =>
+      _hlsGate ??= _Semaphore(_hlsConcurrency > 16 ? 16 : _hlsConcurrency);
+
+  /// 分片拼接（remux）串行锁：拼接是磁盘大块读写，多个一起跑会形成
+  /// 磁盘寻道风暴（系统级卡顿），串行反而总吞吐更高。
+  Future<void> _enqueueRemux(Future<void> Function() action) {
+    final prev = _remuxLock.catchError((_) {});
+    final completer = Completer<void>();
+    _remuxLock = completer.future;
+    return prev.then((_) => action()).whenComplete(completer.complete);
+  }
+
+  Future<void> _remuxLock = Future<void>.value();
 
   Future<void> init() =>
       _initialization ??= AppStorage.open(AppStorage.downloadTasksBoxName)
@@ -66,10 +144,17 @@ class DownloadService {
   Future<void> _dispose() async {
     if (_closed) return;
     _closed = true;
-    _active?.token.cancel();
+    for (final run in _activeRuns) {
+      run.token.cancel();
+    }
     try {
       await _initialization;
-      await _running;
+      final pending = <Future<void>>[];
+      if (_running != null) pending.add(_running!);
+      for (final run in _activeRuns) {
+        if (run.future != null) pending.add(run.future!);
+      }
+      await Future.wait(pending);
       if (_initialization != null) await _save();
     } finally {
       client.close(force: true);
@@ -86,11 +171,38 @@ class DownloadService {
     try {
       final storedTasks = AppStorage.downloadTasksBox.get(_storageKey);
       if (storedTasks is List) {
-        _tasks.value = _restoreTasks(storedTasks);
+        var removed = 0;
+        final restored = _restoreTasks(storedTasks);
+        // 清理无效任务：失败的任务，以及记录指向的本地文件已不存在的
+        // 任务（文件被外部移动/删除）。waiting 且尚未落盘的不受影响。
+        final valid = <DownloadTask>[];
+        for (final task in restored) {
+          final path = task.filePath;
+          final fileGone =
+              path != null && path.isNotEmpty && !File(path).existsSync();
+          if (task.status == DownloadStatus.failed || fileGone) {
+            removed++;
+            task.dispose();
+            continue;
+          }
+          valid.add(task);
+        }
+        if (removed > 0) {
+          debugPrint('DownloadService: dropped $removed stale task(s)');
+        }
+        _tasks.value = valid;
         for (final task in tasks) {
           if (task.status == DownloadStatus.waiting) _waiting[task.id] = task;
         }
+        if (removed > 0) _scheduleSave();
       }
+      // Hive 是追加写：任务状态每次变化都会留下一帧死数据，文件只增不减。
+      // 启动时压实一次，避免长期使用后无谓膨胀。
+      unawaited(
+        (AppStorage.downloadTasksBox as dynamic)
+            .compact()
+            .catchError((_) {}),
+      );
     } catch (e) {
       if (kDebugMode) debugPrint('DownloadService load error: $e');
     }
@@ -154,7 +266,9 @@ class DownloadService {
       return;
     }
     _waiting.remove(task.id);
-    if (identical(_active?.task, task)) _active!.token.cancel();
+    for (final run in _activeRuns) {
+      if (identical(run.task, task)) run.token.cancel();
+    }
     task.status = DownloadStatus.paused;
     _notifyAndSave();
     _processQueue();
@@ -173,15 +287,21 @@ class DownloadService {
 
   void delete(DownloadTask task) {
     _waiting.remove(task.id);
-    final active = _active;
-    if (active != null && identical(active.task, task)) {
+    _DownloadRun? active;
+    for (final run in _activeRuns) {
+      if (identical(run.task, task)) {
+        active = run;
+        break;
+      }
+    }
+    if (active != null) {
       active.deleteOnFinish = true;
       active.token.cancel();
     } else {
       _deleteTaskFiles(task).ignore();
     }
     tasks.remove(task);
-    if (!identical(active?.task, task)) task.dispose();
+    if (active == null) task.dispose();
     _notifyAndSave();
   }
 
@@ -204,7 +324,9 @@ class DownloadService {
 
   void pauseAll() {
     _waiting.clear();
-    _active?.token.cancel();
+    for (final run in _activeRuns) {
+      run.token.cancel();
+    }
     for (final task in tasks) {
       if (task.status == DownloadStatus.downloading ||
           task.status == DownloadStatus.waiting) {
@@ -226,19 +348,27 @@ class DownloadService {
     _processQueue();
   }
 
-  void clearCompleted() {
-    tasks.removeWhere((task) {
-      if (task.status != DownloadStatus.completed) return false;
+  Future<void> clearCompleted() async {
+    final completed = tasks
+        .where((task) => task.status == DownloadStatus.completed)
+        .toList();
+    for (final task in completed) {
+      await _deleteTaskFiles(task);
       task.dispose();
-      return true;
-    });
+    }
+    tasks.removeWhere((task) => task.status == DownloadStatus.completed);
     _notifyAndSave();
   }
 
   void _processQueue() {
-    if (_closed || _active != null || _waiting.isEmpty) return;
-    final task = _waiting.remove(_waiting.keys.first)!;
-    _running = _downloadFile(task);
+    if (_closed || _waiting.isEmpty) return;
+    // 合并中的任务不占下载槽：只有还在跑网络下载的任务计入并发。
+    int activeDownloads() =>
+        _activeRuns.where((run) => !run.merging).length;
+    while (activeDownloads() < _maxConcurrent && _waiting.isNotEmpty) {
+      final task = _waiting.remove(_waiting.keys.first)!;
+      _running = _downloadFile(task);
+    }
   }
 
   Future<Directory> _downloadDirectory() async {
@@ -248,8 +378,18 @@ class DownloadService {
     return getApplicationDocumentsDirectory();
   }
 
+  /// 优先使用任务自定义保存目录，否则回退到默认下载目录。
+  Future<Directory> _taskDirectory(DownloadTask task) async {
+    final custom = task.saveDir;
+    if (custom != null && custom.isNotEmpty) {
+      final dir = Directory(custom);
+      if (await dir.exists()) return dir;
+    }
+    return _downloadDirectory();
+  }
+
   Future<String> _resolveDownloadFilePath(DownloadTask task) async {
-    final dir = await _downloadDirectory();
+    final dir = await _taskDirectory(task);
     final targetPath = '${dir.path}/${task.filename}';
 
     if (!Instances.isDesktopPlatform ||
@@ -283,7 +423,7 @@ class DownloadService {
       return _joinPath(parent, 'index.m3u8');
     }
 
-    final dir = await _downloadDirectory();
+    final dir = await _taskDirectory(task);
     final baseName = _stripExtension(task.filename);
     final folderName =
         '${_sanitizePathPart(baseName)}_${_sanitizePathPart(task.id)}.hls';
@@ -291,8 +431,14 @@ class DownloadService {
   }
 
   Future<void> _downloadFile(DownloadTask task) async {
-    // Hold the slot through permission, cancellation, remux and final cleanup.
-    final run = _active = _DownloadRun(task);
+    // Hold a slot through permission, cancellation, remux and final cleanup.
+    final run = _DownloadRun(task);
+    _activeRuns.add(run);
+    run.future = _runDownload(task, run);
+    await run.future;
+  }
+
+  Future<void> _runDownload(DownloadTask task, _DownloadRun run) async {
     final cancelToken = run.token;
     task.status = DownloadStatus.downloading;
     try {
@@ -305,7 +451,7 @@ class DownloadService {
       }
       _throwIfCancelled(cancelToken);
       final filePath = task.kind == DownloadTaskKind.hls
-          ? await _downloadHls(task, cancelToken)
+          ? await _downloadHls(task, cancelToken, run)
           : await _downloadDirectFile(task, cancelToken);
 
       _throwIfCancelled(cancelToken);
@@ -334,7 +480,7 @@ class DownloadService {
         task.status = DownloadStatus.paused;
       }
       if (run.deleteOnFinish) await _deleteTaskFiles(task).catchError((_) {});
-      _active = null;
+      _activeRuns.remove(run);
       if (run.deleteOnFinish) task.dispose();
       _notifyAndSave();
       _processQueue();
@@ -355,7 +501,7 @@ class DownloadService {
     task.downloadedBytes = resumePos;
 
     final progressClock = Stopwatch()..start();
-    var lastProgress = -150;
+    var lastProgress = -300;
     await client.download(
       task.url,
       filePath,
@@ -367,7 +513,7 @@ class DownloadService {
       onReceiveProgress: (received, total) {
         if (cancelToken.isCancelled) return;
         final now = progressClock.elapsedMilliseconds;
-        if (received != total && now - lastProgress < 150) return;
+        if (received != total && now - lastProgress < 300) return;
         lastProgress = now;
         final currentBytes = resumePos + received;
         task.downloadedBytes = currentBytes;
@@ -384,6 +530,7 @@ class DownloadService {
   Future<String> _downloadHls(
     DownloadTask task,
     CancelToken cancelToken,
+    _DownloadRun run,
   ) async {
     final manifestPath = await _resolveHlsManifestPath(task);
     _throwIfCancelled(cancelToken);
@@ -408,20 +555,79 @@ class DownloadService {
     // 分片下完后合并为单一视频，播放时走普通文件 seek，不再依赖 m3u8。
     task.progress = 0.99;
     _notifyAndSave();
-    final remuxed = await HlsOfflineRemux.remuxManifest(
-      manifestPath,
-      checkCancelled: () => _throwIfCancelled(cancelToken),
-    );
+
+    // 拼接是纯本地 IO，不再占用下载槽：立刻补位下一个等待任务，
+    // 并用全局串行锁保证同一时间只有一个视频在拼接（磁盘友好）。
+    run.merging = true;
+    _processQueue();
+    String? remuxed;
+    await _enqueueRemux(() async {
+      remuxed = await HlsOfflineRemux.remuxManifest(
+        manifestPath,
+        checkCancelled: () => _throwIfCancelled(cancelToken),
+      );
+    });
     _throwIfCancelled(cancelToken);
-    final playablePath = remuxed ?? manifestPath;
-    task.filePath = playablePath;
-    if (remuxed != null) {
-      final length = await File(remuxed).length();
-      task.downloadedBytes = length;
-      task.totalBytes = length;
+    if (remuxed == null) {
+      // 无法拼接（如加密流），保留本地 m3u8 结构，行为与旧版一致。
+      task.filePath = manifestPath;
+      task.progress = 1;
+      return manifestPath;
     }
+
+    // 成品移出 .hls 缓存文件夹，直接放到用户选择的保存目录，
+    // 文件名与任务一致（xxx.mp4 / xxx.ts），本地播放器可直接连续播放。
+    final dir = await _taskDirectory(task);
+    final base = _stripExtension(task.filename);
+    final ext = remuxed!.toLowerCase().endsWith('.ts') ? '.ts' : '.mp4';
+    final finalPath = _joinPath(dir.path, '$base$ext');
+    final src = File(remuxed!);
+    final dst = File(finalPath);
+
+    // 移动必须成功：失败重试（Windows 句柄释放有延迟）。在成品安全
+    // 落位之前，绝不能删除缓存文件夹——否则唯一成品会被一起删掉。
+    var moved = false;
+    for (var attempt = 0; attempt < 3 && !moved; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
+      if (await dst.exists()) {
+        try {
+          await dst.delete();
+        } catch (_) {}
+      }
+      try {
+        await src.rename(finalPath);
+        moved = true;
+      } catch (_) {
+        try {
+          await src.copy(finalPath);
+          await src.delete();
+          moved = true;
+        } catch (_) {}
+      }
+    }
+
+    // 只有成品已安全移出才清理缓存文件夹；删除失败也重试，
+    // 避免留下空文件夹。
+    if (moved) {
+      for (var attempt = 0; attempt < 3; attempt++) {
+        try {
+          await File(manifestPath).parent.delete(recursive: true);
+          break;
+        } catch (_) {
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+        }
+      }
+    }
+
+    final usedPath = moved ? finalPath : remuxed!;
+    task.filePath = usedPath;
+    final length = await File(usedPath).length();
+    task.downloadedBytes = length;
+    task.totalBytes = length;
     task.progress = 1;
-    return playablePath;
+    return usedPath;
   }
 
   Future<_M3u8Playlist> _resolveMediaPlaylist(
@@ -463,11 +669,11 @@ class DownloadService {
     final assets = plan.assets;
     final totalUnits = assets.length;
     var next = 0, completedUnits = 0, downloadedBytes = 0;
-    const concurrency = 4;
+    final concurrency = _hlsConcurrency;
     final received = List.filled(concurrency, 0);
     final fractions = List.filled(concurrency, 0.0);
     final clock = Stopwatch()..start();
-    var lastPublish = -150;
+    var lastPublish = -300;
     final assetToken = CancelToken();
     unawaited(cancelToken.whenCancel.then((error) => assetToken.cancel(error)));
     Object? failure;
@@ -493,25 +699,32 @@ class DownloadService {
         while (next < totalUnits) {
           _throwIfCancelled(assetToken);
           final asset = assets[next++];
-          final bytes = await _downloadHlsAsset(
-            asset,
-            cacheDir,
-            assetToken,
-            onProgress: (count, total) {
-              if (assetToken.isCancelled) return;
-              received[slot] = count;
-              fractions[slot] = total > 0
-                  ? (count / total).clamp(0.0, 1.0)
-                  : 0.5;
-              publish();
-            },
-          );
-          _throwIfCancelled(assetToken);
-          downloadedBytes += bytes;
-          completedUnits++;
-          received[slot] = 0;
-          fractions[slot] = 0;
-          publish();
+          // 全局闸门：多任务并行时把同时在飞的分片请求压回设置值，
+          // 避免几十上百路并发请求挤爆主 isolate 的事件循环卡住界面。
+          await _gate.acquire();
+          try {
+            final bytes = await _downloadHlsAsset(
+              asset,
+              cacheDir,
+              assetToken,
+              onProgress: (count, total) {
+                if (assetToken.isCancelled) return;
+                received[slot] = count;
+                fractions[slot] = total > 0
+                    ? (count / total).clamp(0.0, 1.0)
+                    : 0.5;
+                publish();
+              },
+            );
+            _throwIfCancelled(assetToken);
+            downloadedBytes += bytes;
+            completedUnits++;
+            received[slot] = 0;
+            fractions[slot] = 0;
+            publish();
+          } finally {
+            _gate.release();
+          }
         }
       } catch (error, stack) {
         failure ??= error;
@@ -608,7 +821,9 @@ class DownloadService {
       }
     }
 
-    if (task.bgmId != null && task.episodeIndex != null) {
+    if (_downloadDanmaku &&
+        task.bgmId != null &&
+        task.episodeIndex != null) {
       try {
         final danmuList = await DanmakuController.fetchDanmaku(
           subjectId: task.bgmId!,
@@ -618,7 +833,7 @@ class DownloadService {
         );
         _throwIfCancelled(token);
         if (danmuList.isNotEmpty) {
-          final dir = await _downloadDirectory();
+          final dir = await _taskDirectory(task);
           final path = '${dir.path}/${task.filename}_danmaku.json';
           await File(
             path,
@@ -683,6 +898,11 @@ class _DownloadRun {
   final DownloadTask task;
   final token = CancelToken();
   bool deleteOnFinish = false;
+
+  /// true = 已进入分片拼接阶段（纯本地 IO，不再占用网络下载槽），
+  /// 让后续任务可以继续下载，避免"合并时全部排队等待"。
+  bool merging = false;
+  Future<void>? future;
 }
 
 class _DownloadTasksNotifier extends ValueNotifier<List<DownloadTask>> {
