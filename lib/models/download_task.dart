@@ -17,6 +17,9 @@ class DownloadTask {
   final DownloadTaskKind kind;
   String? danmakuPath;
   String? filePath;
+  /// 自定义保存目录（每次下载由用户选择，或取自默认下载目录设置）。
+  /// 为空时回退到应用默认下载目录。
+  String? saveDir;
 
   final ValueNotifier<DownloadStatus> statusNotifier;
   final ValueNotifier<double> progressNotifier;
@@ -42,6 +45,7 @@ class DownloadTask {
     int downloadedBytes = 0,
     this.totalBytes = 0,
     this.filePath,
+    this.saveDir,
     DateTime? createdAt,
     this.completedAt,
   }) : statusNotifier = ValueNotifier(status),
@@ -83,6 +87,7 @@ class DownloadTask {
     'createdAt': createdAt.millisecondsSinceEpoch,
     'completedAt': completedAt?.millisecondsSinceEpoch,
     'filePath': filePath,
+    'saveDir': saveDir,
   };
 
   factory DownloadTask.fromJson(Map<String, dynamic> json) => DownloadTask(
@@ -107,6 +112,7 @@ class DownloadTask {
         ? DateTime.fromMillisecondsSinceEpoch(json['completedAt'])
         : null,
     filePath: json['filePath'],
+    saveDir: json['saveDir'] as String?,
   );
 
   /// `.m3u8` 是 `m3u8` 的子串，两次扫描里第一次恒被第二次覆盖。
@@ -125,3 +131,4 @@ class DownloadTask {
     return inferKind(json['url']?.toString() ?? '');
   }
 }
+

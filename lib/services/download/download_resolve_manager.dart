@@ -159,6 +159,9 @@ class DownloadResolveManager {
       _totalOfCurrentJob = total;
       _resolvedCount = 0;
       _remaining = List<int>.from(job.indices);
+      // 每个 job 独立：重置失败重试状态，避免被上一部作品的失败集覆盖。
+      _failed = const [];
+      _lastAbandoned = null;
       _showRunningBanner();
 
       final tasks = <DownloadTask>[];
@@ -224,22 +227,30 @@ class DownloadResolveManager {
         return;
       }
 
+      // 已解析成功的剧集立即入队：部分失败时前面成功的集也不会被丢弃。
+      if (tasks.isNotEmpty) {
+        downloads.addTasks(tasks);
+      }
+
       if (_remaining.isEmpty) {
-        final added = downloads.addTasks(tasks);
-        _failed = const [];
-        _lastAbandoned = null;
+        final ok = tasks.length;
         _showBanner(
-          added > 0 ? '解析完成，$added 集已加入下载队列' : '解析完成，所选剧集已在下载队列中',
+          ok > 0 ? '解析完成，$ok 集已加入下载队列' : '解析完成，所选剧集已在下载队列中',
           autoHideAfter: const Duration(seconds: 3),
         );
+        _failed = const [];
+        _lastAbandoned = null;
         job.keepAlive?.release();
         return;
       }
 
       _failed = List<int>.from(_remaining);
       _lastAbandoned = job;
+      final okCount = tasks.length;
       _showBanner(
-        '解析完成：第 ${episodeNumbers(_failed)} 集解析失败，已放弃',
+        okCount > 0
+            ? '解析完成：第 ${episodeNumbers(_failed)} 集解析失败，其余 $okCount 集已加入下载队列'
+            : '解析完成：第 ${episodeNumbers(_failed)} 集解析失败，已放弃',
         isError: true,
         actions: [
           ResolveBannerAction('重试', retry),
@@ -454,3 +465,4 @@ class _DownloadResolveBannerState extends State<DownloadResolveBanner> {
     );
   }
 }
+

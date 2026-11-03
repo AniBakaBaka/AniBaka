@@ -107,13 +107,21 @@ class DownloadService {
     }
   }
 
-  /// 跨任务共享的 HLS 分片并发闸门（首次使用时按设置值创建）。
+  /// 跨任务共享的 HLS 分片并发闸门。
   ///
-  /// 上限压到 16：分片请求的处理（TLS 解密、分块事件）全在主 isolate，
-  /// 32 路以上会挤占 UI 帧调度造成明显掉帧；16 路足以跑满常见带宽。
+  /// 尊重用户在设置页选择的并发数（24/32/48 等均可生效）；
+  /// 设置变更后下一次获取时按新值重建，使调高并发即时生效
+  ///（此前信号量只创建一次，改设置不生效，导致高并发选项形同虚设）。
   _Semaphore? _hlsGate;
-  _Semaphore get _gate =>
-      _hlsGate ??= _Semaphore(_hlsConcurrency > 16 ? 16 : _hlsConcurrency);
+  int? _hlsGateValue;
+  _Semaphore get _gate {
+    final c = _hlsConcurrency;
+    if (_hlsGate == null || _hlsGateValue != c) {
+      _hlsGate = _Semaphore(c);
+      _hlsGateValue = c;
+    }
+    return _hlsGate!;
+  }
 
   /// 分片拼接（remux）串行锁：拼接是磁盘大块读写，多个一起跑会形成
   /// 磁盘寻道风暴（系统级卡顿），串行反而总吞吐更高。
@@ -352,8 +360,12 @@ class DownloadService {
     final completed = tasks
         .where((task) => task.status == DownloadStatus.completed)
         .toList();
+    if (completed.isEmpty) return;
+    // 只清除「已完成」的记录，不删除已下载的视频文件：
+    // 「清除已完成记录」是列表清理操作（原实现即只清记录）；
+    // 误删本地文件会让用户清理列表时丢失视频，移动端还会被系统管家拦截。
+    // 需要连同文件删除的场景走 delete()（删除单个/整部作品）。
     for (final task in completed) {
-      await _deleteTaskFiles(task);
       task.dispose();
     }
     tasks.removeWhere((task) => task.status == DownloadStatus.completed);
@@ -584,27 +596,31 @@ class DownloadService {
     final src = File(remuxed!);
     final dst = File(finalPath);
 
-    // 移动必须成功：失败重试（Windows 句柄释放有延迟）。在成品安全
-    // 落位之前，绝不能删除缓存文件夹——否则唯一成品会被一起删掉。
+    // 目标已存在同名成品：不覆盖（避免误删用户已有的视频文件），
+    // 直接丢弃本次临时成品，保留磁盘上已有的那份。
     var moved = false;
-    for (var attempt = 0; attempt < 3 && !moved; attempt++) {
-      if (attempt > 0) {
-        await Future<void>.delayed(const Duration(milliseconds: 500));
-      }
-      if (await dst.exists()) {
-        try {
-          await dst.delete();
-        } catch (_) {}
-      }
+    if (await dst.exists()) {
       try {
-        await src.rename(finalPath);
-        moved = true;
-      } catch (_) {
+        await src.delete();
+      } catch (_) {}
+      moved = true;
+    } else {
+      // 移动必须成功：失败重试（Windows 句柄释放有延迟）。在成品安全
+      // 落位之前，绝不能删除缓存文件夹——否则唯一成品会被一起删掉。
+      for (var attempt = 0; attempt < 3 && !moved; attempt++) {
+        if (attempt > 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+        }
         try {
-          await src.copy(finalPath);
-          await src.delete();
+          await src.rename(finalPath);
           moved = true;
-        } catch (_) {}
+        } catch (_) {
+          try {
+            await src.copy(finalPath);
+            await src.delete();
+            moved = true;
+          } catch (_) {}
+        }
       }
     }
 
@@ -913,3 +929,4 @@ class _DownloadTasksNotifier extends ValueNotifier<List<DownloadTask>> {
 
 typedef _M3u8Playlist = ({Uri url, String content});
 typedef _HlsCacheResult = ({String localContent, int totalBytes});
+
