@@ -2,10 +2,78 @@ import 'package:baka/models/playback_request.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:baka/utils/format_utils.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:baka/models/download_task.dart';
 import 'package:baka/pages/player/player_page.dart';
 import 'package:baka/services/download/download_manager.dart';
+
+/// 多选状态下按 Esc 退出（取消全选不再自动退出多选）。
+class _ExitSelectIntent extends Intent {
+  const _ExitSelectIntent();
+}
+
+/// 仅多选状态下挂接 Esc 快捷键；非多选状态原样返回，避免拦截对话框等 Esc。
+class _EscapeExitWrapper extends StatelessWidget {
+  const _EscapeExitWrapper({
+    required this.enabled,
+    required this.onExit,
+    required this.child,
+  });
+
+  final bool enabled;
+  final VoidCallback onExit;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!enabled) return child;
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.escape): _ExitSelectIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _ExitSelectIntent: CallbackAction<_ExitSelectIntent>(
+            onInvoke: (_) {
+              onExit();
+              return null;
+            },
+          ),
+        },
+        child: Focus(autofocus: true, child: child),
+      ),
+    );
+  }
+}
+
+/// 标题右侧的长按提示（仅下载管理主页使用；已完成详情页只显示作品名，不显示提示）。
+/// 用 FittedBox 在空间不足时整体缩小，避免窄窗口下 AppBar 标题溢出。
+Widget _titleWithHint(BuildContext context, String title) {
+  final theme = Theme.of(context);
+  final titleStyle =
+      theme.appBarTheme.titleTextStyle ?? theme.textTheme.titleLarge;
+  final hintSize = (titleStyle?.fontSize ?? 20) * 0.8;
+  return FittedBox(
+    fit: BoxFit.scaleDown,
+    alignment: Alignment.centerLeft,
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(title),
+        const SizedBox(width: 12),
+        Text(
+          '【提示：长按列表任务可进入多选删除界面】',
+          style: titleStyle?.copyWith(
+            fontSize: hintSize,
+            fontWeight: FontWeight.normal,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
 class DownloadManagerPage extends StatefulWidget {
   final bool embedded;
@@ -34,16 +102,63 @@ class _DownloadManagerPageState extends State<DownloadManagerPage> {
     super.initState();
     _readTasks();
     _service.tasksListenable.addListener(_onTasksChanged);
+    downloads.warning.addListener(_onWarningChanged);
     _service.init();
   }
 
   @override
   void dispose() {
     _service.tasksListenable.removeListener(_onTasksChanged);
+    downloads.warning.removeListener(_onWarningChanged);
     super.dispose();
   }
 
   void _onTasksChanged() => setState(_readTasks);
+
+  void _onWarningChanged() {
+    final msg = downloads.warning.value;
+    if (msg != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 6)),
+      );
+    }
+  }
+
+  void _enterSelectModeEmpty() {
+    setState(() {
+      _selectMode = true;
+    });
+  }
+
+  Future<void> _confirmClearCompleted() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        content: const Text(
+          '将清除全部的【已完成】任务，且无法还原，是否继续',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              '是',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text(
+              '否',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await _service.clearCompleted();
+  }
 
   void _readTasks() {
     final active = <DownloadTask>[];
@@ -59,6 +174,11 @@ class _DownloadManagerPageState extends State<DownloadManagerPage> {
     _completed = grouped.entries.toList(growable: false);
   }
 
+  /// 全部已完成的任务（多选「全选（已完成）」用）。
+  List<DownloadTask> get _completedTasks => [
+    for (final group in _completed) ...group.value,
+  ];
+
   // ---- 多选删除 ----
 
   void _enterSelectMode(String id) {
@@ -71,7 +191,7 @@ class _DownloadManagerPageState extends State<DownloadManagerPage> {
   void _toggleSelect(String id) {
     setState(() {
       if (!_selectedIds.remove(id)) _selectedIds.add(id);
-      if (_selectedIds.isEmpty) _selectMode = false;
+      // 取消到一项不剩时仍停留在多选界面，只能手动按 Esc / 左上角关闭退出。
     });
   }
 
@@ -85,15 +205,56 @@ class _DownloadManagerPageState extends State<DownloadManagerPage> {
   bool get _allActiveSelected =>
       _active.isNotEmpty && _active.every((t) => _selectedIds.contains(t.id));
 
-  void _toggleSelectAll() {
+  bool get _allCompletedSelected =>
+      _completedTasks.isNotEmpty &&
+      _completedTasks.every((t) => _selectedIds.contains(t.id));
+
+  /// 只全选/取消「下载中」任务，不影响已完成任务的选中状态。
+  void _toggleSelectAllActive() {
     setState(() {
-      if (_allActiveSelected) {
-        _selectedIds.clear();
-      } else {
-        _selectedIds
-          ..clear()
-          ..addAll(_active.map((t) => t.id));
+      final all = _allActiveSelected;
+      for (final t in _active) {
+        if (all) {
+          _selectedIds.remove(t.id);
+        } else {
+          _selectedIds.add(t.id);
+        }
       }
+    });
+  }
+
+  /// 只全选/取消「已完成」任务，不影响下载中任务的选中状态。
+  void _toggleSelectAllCompleted() {
+    setState(() {
+      final all = _allCompletedSelected;
+      for (final t in _completedTasks) {
+        if (all) {
+          _selectedIds.remove(t.id);
+        } else {
+          _selectedIds.add(t.id);
+        }
+      }
+    });
+  }
+
+  /// 主页「已完成」以作品分组卡片展示，勾选即选中该组全部剧集。
+  void _toggleSelectGroup(List<DownloadTask> tasks) {
+    setState(() {
+      final all = tasks.every((t) => _selectedIds.contains(t.id));
+      for (final t in tasks) {
+        if (all) {
+          _selectedIds.remove(t.id);
+        } else {
+          _selectedIds.add(t.id);
+        }
+      }
+    });
+  }
+
+  void _enterSelectModeGroup(List<DownloadTask> tasks) {
+    setState(() {
+      _selectMode = true;
+      _selectedIds.addAll(tasks.map((t) => t.id));
     });
   }
 
@@ -118,18 +279,23 @@ class _DownloadManagerPageState extends State<DownloadManagerPage> {
 
     final normalAppBar = AppBar(
       automaticallyImplyLeading: !widget.embedded,
-      title: Text(widget.embedded ? '下载管理' : '缓存'),
+      title: _titleWithHint(context, widget.embedded ? '下载管理' : '缓存'),
       actions: [
         PopupMenuButton<String>(
           onSelected: (val) {
             if (val == 'pause_all') _service.pauseAll();
             if (val == 'resume_all') _service.resumeAll();
-            if (val == 'clear_completed') _service.clearCompleted();
+            if (val == 'clear_completed') _confirmClearCompleted();
+            if (val == 'delete_files') _enterSelectModeEmpty();
           },
           itemBuilder: (context) => const [
             PopupMenuItem(value: 'pause_all', child: Text('全部暂停')),
             PopupMenuItem(value: 'resume_all', child: Text('全部继续')),
-            PopupMenuItem(value: 'clear_completed', child: Text('清除已完成记录')),
+            PopupMenuItem(
+              value: 'clear_completed',
+              child: Text('清除已完成记录（非删除）'),
+            ),
+            PopupMenuItem(value: 'delete_files', child: Text('删除下载文件')),
           ],
         ),
       ],
@@ -143,24 +309,28 @@ class _DownloadManagerPageState extends State<DownloadManagerPage> {
       ),
       title: Text('已选 ${_selectedIds.length} 项'),
       actions: [
-        IconButton(
-          tooltip: '全选 / 取消全选',
-          icon: Icon(
-            _allActiveSelected
-                ? Icons.check_box_rounded
-                : Icons.check_box_outline_blank_rounded,
+        if (_active.isNotEmpty)
+          TextButton(
+            onPressed: _toggleSelectAllActive,
+            child: Text(
+              _allActiveSelected ? '取消全选（下载中）' : '全选（下载中）',
+            ),
           ),
-          onPressed: _active.isEmpty ? null : _toggleSelectAll,
-        ),
-        IconButton(
-          tooltip: '删除所选',
-          icon: const Icon(Icons.delete_outline_rounded),
+        if (_completedTasks.isNotEmpty)
+          TextButton(
+            onPressed: _toggleSelectAllCompleted,
+            child: Text(
+              _allCompletedSelected ? '取消全选（已完成）' : '全选（已完成）',
+            ),
+          ),
+        TextButton(
           onPressed: _selectedIds.isEmpty ? null : _deleteSelected,
+          child: const Text('删除'),
         ),
       ],
     );
 
-    return Scaffold(
+    final page = Scaffold(
       appBar: _selectMode ? selectAppBar : normalAppBar,
       body: _active.isEmpty && _completed.isEmpty
           ? Center(
@@ -231,9 +401,20 @@ class _DownloadManagerPageState extends State<DownloadManagerPage> {
                   key: ValueKey('group_${group.key}'),
                   title: group.key,
                   tasks: group.value,
+                  selectMode: _selectMode,
+                  selected: group.value.every(
+                    (t) => _selectedIds.contains(t.id),
+                  ),
+                  onToggle: () => _toggleSelectGroup(group.value),
+                  onLongPress: () => _enterSelectModeGroup(group.value),
                 );
               },
             ),
+    );
+    return _EscapeExitWrapper(
+      enabled: _selectMode,
+      onExit: _exitSelectMode,
+      child: page,
     );
   }
 
@@ -509,8 +690,20 @@ class _TaskCard extends StatelessWidget {
 class _AnimeGroupCard extends StatelessWidget {
   final String title;
   final List<DownloadTask> tasks;
+  final bool selectMode;
+  final bool selected;
+  final VoidCallback? onToggle;
+  final VoidCallback? onLongPress;
 
-  const _AnimeGroupCard({required this.title, required this.tasks, super.key});
+  const _AnimeGroupCard({
+    required this.title,
+    required this.tasks,
+    super.key,
+    this.selectMode = false,
+    this.selected = false,
+    this.onToggle,
+    this.onLongPress,
+  });
 
   Future<bool?> _confirmDelete(BuildContext context) {
     return confirmDeleteDialog(
@@ -526,7 +719,10 @@ class _AnimeGroupCard extends StatelessWidget {
 
     return Dismissible(
       key: ValueKey('dismiss_group_$title'),
-      direction: DismissDirection.endToStart,
+      // 多选模式下禁用右滑删除，避免与勾选状态冲突。
+      direction: selectMode
+          ? DismissDirection.none
+          : DismissDirection.endToStart,
       confirmDismiss: (_) => _confirmDelete(context),
       onDismissed: (_) {
         for (final task in tasks) {
@@ -542,13 +738,25 @@ class _AnimeGroupCard extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => _AnimeGroupPage(title: title)),
-          ),
+          onTap: selectMode
+              ? onToggle
+              : () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => _AnimeGroupPage(title: title),
+                  ),
+                ),
+          onLongPress: onLongPress,
           child: Padding(
             padding: const EdgeInsets.all(10),
             child: Row(
               children: [
+                if (selectMode) ...[
+                  Checkbox(
+                    value: selected,
+                    onChanged: (_) => onToggle?.call(),
+                  ),
+                  const SizedBox(width: 4),
+                ],
                 _Thumbnail(url: tasks.first.thumbnail),
                 const SizedBox(width: 12),
                 Expanded(
@@ -610,22 +818,43 @@ class _AnimeGroupPageState extends State<_AnimeGroupPage> {
     super.initState();
     _readTasks();
     _service.tasksListenable.addListener(_onTasksChanged);
+    downloads.warning.addListener(_onWarningChanged);
   }
 
   @override
   void dispose() {
     _service.tasksListenable.removeListener(_onTasksChanged);
+    downloads.warning.removeListener(_onWarningChanged);
     super.dispose();
   }
 
   void _readTasks() {
+    // 这是「已完成」分组的详情界面，只放下载完成的任务；
+    // 下载中 / 等待中 / 失败的任务仍归下载管理主页的「下载中」区。
     _tasks = [
       for (final task in _service.tasks.reversed)
-        if (task.title == widget.title) task,
+        if (task.title == widget.title &&
+            task.status == DownloadStatus.completed)
+          task,
     ];
   }
 
   void _onTasksChanged() => setState(_readTasks);
+
+  void _onWarningChanged() {
+    final msg = downloads.warning.value;
+    if (msg != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 6)),
+      );
+    }
+  }
+
+  void _enterSelectModeEmpty() {
+    setState(() {
+      _selectMode = true;
+    });
+  }
 
   // ---- 多选删除 ----
 
@@ -639,7 +868,7 @@ class _AnimeGroupPageState extends State<_AnimeGroupPage> {
   void _toggleSelect(String id) {
     setState(() {
       if (!_selectedIds.remove(id)) _selectedIds.add(id);
-      if (_selectedIds.isEmpty) _selectMode = false;
+      // 取消到一项不剩时仍停留在多选界面，只能手动按 Esc / 左上角关闭退出。
     });
   }
 
@@ -692,7 +921,7 @@ class _AnimeGroupPageState extends State<_AnimeGroupPage> {
         }
       });
     }
-    return Scaffold(
+    final page = Scaffold(
       appBar: _selectMode
           ? AppBar(
               leading: IconButton(
@@ -702,23 +931,33 @@ class _AnimeGroupPageState extends State<_AnimeGroupPage> {
               ),
               title: Text('已选 ${_selectedIds.length} 集'),
               actions: [
-                IconButton(
-                  tooltip: '全选 / 取消全选',
-                  icon: Icon(
-                    _allSelected
-                        ? Icons.check_box_rounded
-                        : Icons.check_box_outline_blank_rounded,
+                if (_tasks.isNotEmpty)
+                  TextButton(
+                    onPressed: _toggleSelectAll,
+                    child: Text(_allSelected ? '取消全选' : '全选'),
                   ),
-                  onPressed: _tasks.isEmpty ? null : _toggleSelectAll,
-                ),
-                IconButton(
-                  tooltip: '删除所选',
-                  icon: const Icon(Icons.delete_outline_rounded),
+                TextButton(
                   onPressed: _selectedIds.isEmpty ? null : _deleteSelected,
+                  child: const Text('删除'),
                 ),
               ],
             )
-          : AppBar(title: Text(widget.title)),
+          : AppBar(
+              title: Text(widget.title),
+              actions: [
+                PopupMenuButton<String>(
+                  onSelected: (val) {
+                    if (val == 'delete_files') _enterSelectModeEmpty();
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: 'delete_files',
+                      child: Text('删除下载文件'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
       body: ListView.builder(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         itemCount: _tasks.length,
@@ -731,6 +970,11 @@ class _AnimeGroupPageState extends State<_AnimeGroupPage> {
           onLongPress: () => _enterSelectMode(_tasks[i].id),
         ),
       ),
+    );
+    return _EscapeExitWrapper(
+      enabled: _selectMode,
+      onExit: _exitSelectMode,
+      child: page,
     );
   }
 }
