@@ -20,6 +20,13 @@ class DownloadTask {
   /// 自定义保存目录（每次下载由用户选择，或取自默认下载目录设置）。
   /// 为空时回退到应用默认下载目录。
   String? saveDir;
+  /// 扩展源名（如 Bangumi / C 岛等）。仅用于区分同名作品，作为作品
+  /// 文件夹命名后缀，避免不同源的同一作品名互相覆盖。
+  String? sourceName;
+  /// 播放地址名（线路名，如「播放源1」「播放源2」）。同一个扩展源下
+  /// 可能有多个播放地址，作品文件夹名需据此区分，否则不同播放地址
+  /// 下载的同名作品都会落进同一个扩展源名文件夹。无播放地址时为空。
+  String? lineName;
 
   final ValueNotifier<DownloadStatus> statusNotifier;
   final ValueNotifier<double> progressNotifier;
@@ -46,6 +53,8 @@ class DownloadTask {
     this.totalBytes = 0,
     this.filePath,
     this.saveDir,
+    this.sourceName,
+    this.lineName,
     DateTime? createdAt,
     this.completedAt,
   }) : statusNotifier = ValueNotifier(status),
@@ -88,6 +97,8 @@ class DownloadTask {
     'completedAt': completedAt?.millisecondsSinceEpoch,
     'filePath': filePath,
     'saveDir': saveDir,
+    'sourceName': sourceName,
+    'lineName': lineName,
   };
 
   factory DownloadTask.fromJson(Map<String, dynamic> json) => DownloadTask(
@@ -113,6 +124,8 @@ class DownloadTask {
         : null,
     filePath: json['filePath'],
     saveDir: json['saveDir'] as String?,
+    sourceName: json['sourceName'] as String?,
+    lineName: json['lineName'] as String?,
   );
 
   /// `.m3u8` 是 `m3u8` 的子串，两次扫描里第一次恒被第二次覆盖。
@@ -131,4 +144,3 @@ class DownloadTask {
     return inferKind(json['url']?.toString() ?? '');
   }
 }
-

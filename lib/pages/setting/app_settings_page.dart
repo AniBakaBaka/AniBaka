@@ -382,7 +382,6 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
               title: 'HLS 分片并发数',
               value: Instances.sp.getInt('download_hls_concurrency') ?? 16,
               options: const {
-                4: '4',
                 8: '8',
                 16: '16',
                 24: '24',
@@ -391,6 +390,20 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
               },
               onChanged: (v) async {
                 await Instances.sp.setInt('download_hls_concurrency', v);
+                setState(() {});
+              },
+            ),
+            SwitchListTile(
+              secondary: const Icon(Icons.published_with_changes_outlined),
+              title: const Text('覆盖同名文件'),
+              subtitle: const Text(
+                '开启：文件夹用纯作品名，同名文件直接覆盖；'
+                '关闭：文件夹带【扩展源名（播放地址名）】，同名文件保留旧文件并另存',
+              ),
+              value:
+                  Instances.sp.getBool('download_overwrite_same_name') ?? false,
+              onChanged: (v) async {
+                await Instances.sp.setBool('download_overwrite_same_name', v);
                 setState(() {});
               },
             ),
