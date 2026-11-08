@@ -351,7 +351,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
           ],
         ),
         SettingsSection(
-          title: '下载（定制版）',
+          title: '下载',
           children: [
             SettingsTile(
               icon: Icons.folder_outlined,

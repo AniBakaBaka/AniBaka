@@ -35,7 +35,7 @@ typedef PlaybackMedia = ({String url, Map<String, String> httpHeaders});
 
 const PlaybackMedia _noMedia = (url: '', httpHeaders: <String, String>{});
 
-/// 直链可达性探测的结论。
+/// 记录地址能不能直连的结果。
 enum MediaReachability { reachable, rejected, unknown }
 
 /// Runs one anx-rule/2 source: its HTTP session, the pipeline I/O boundary,
@@ -200,10 +200,94 @@ class SourceAdapter implements PipelineHost {
     _dioDirect = null;
   }
 
+  /// 同一部作品的多集合成一张卡，只对指定源生效。
+  static const Set<String> _titleGroupingSourceIds = {'hanimeone'};
+  static const String _groupTag = '#baka_group=';
+  static final RegExp _titleEpisodeSuffix = RegExp(
+    r'\s*(?:'
+    r'[(（]?\s*(?:第\s*)?(\d{1,3})\s*(?:集|話|话|章|部|期)?\s*[)）]?'
+    r'|(?:Part|part|PART|Ep|EP|ep|Episode|episode|E)\s*\.?\s*(\d{1,3})'
+    r')\s*$',
+  );
+
+  List<Series> _groupSeriesByTitle(List<Series> input) {
+    if (!_titleGroupingSourceIds.contains(rule.id)) return input;
+    final output = <Series>[];
+    final slotOf = <String, int>{};
+    final members = <String, List<({String id, int number})>>{};
+    for (final series in input) {
+      final match = _titleEpisodeSuffix.firstMatch(series.name);
+      final base = match == null
+          ? ''
+          : series.name.replaceFirst(_titleEpisodeSuffix, '').trim();
+      if (match == null || base.length < 2) {
+        output.add(series);
+        continue;
+      }
+      final number =
+          int.tryParse(match.group(1) ?? match.group(2) ?? '') ?? 0;
+      if (!members.containsKey(base)) {
+        members[base] = <({String id, int number})>[];
+        slotOf[base] = output.length;
+        output.add(series);
+      }
+      members[base]!.add((id: series.seriesId, number: number));
+    }
+    for (final entry in members.entries) {
+      final group = entry.value;
+      if (group.length < 2) continue;
+      group.sort((a, b) => a.number.compareTo(b.number));
+      final slot = slotOf[entry.key]!;
+      final placeholder = output[slot];
+      final extras = [for (final item in group.skip(1)) item.id];
+      final encoded = Uri.encodeComponent(extras.join('|'));
+      output[slot] = Series(
+        '${group.first.id}${_groupTag}$encoded',
+        entry.key,
+        image: placeholder.image,
+        description: placeholder.description,
+        bgmId: placeholder.bgmId,
+        score: placeholder.score,
+      );
+    }
+    return output;
+  }
+
+  List<String>? _decodeGroupedSeries(String seriesId) {
+    if (!_titleGroupingSourceIds.contains(rule.id)) return null;
+    final at = seriesId.indexOf(_groupTag);
+    if (at < 0) return null;
+    try {
+      final first = seriesId.substring(0, at);
+      final rest = Uri.decodeComponent(
+        seriesId.substring(at + _groupTag.length),
+      );
+      return [first, ...rest.split('|').where((e) => e.isNotEmpty)];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<Source>> _detailSources(String seriesId) async {
+    final grouped = _decodeGroupedSeries(seriesId);
+    if (grouped != null && grouped.isNotEmpty) {
+      return [
+        Source(
+          [
+            for (var i = 0; i < grouped.length; i++)
+              Episode(grouped[i], i, '第${i + 1}集'),
+          ],
+          rule.name,
+        ),
+      ];
+    }
+    return _interpreter.runDetail(rule, this, seriesId);
+  }
+
   Future<List<Series>> search(String query, {bool enhanceWithBgm = true}) =>
       runOperation(() async {
         final series = await _interpreter.runSearch(rule, this, query);
-        if (!enhanceWithBgm) return series;
+        if (!enhanceWithBgm) return _groupSeriesByTitle(series);
         await runConcurrent(series.length, 5, (index) async {
           final item = series[index];
           try {
@@ -217,13 +301,11 @@ class SourceAdapter implements PipelineHost {
             SourceOperation.check();
           }
         });
-        return series;
+        return _groupSeriesByTitle(series);
       });
 
   Future<PlaybackCatalog> getPlaybackCatalog(String seriesId) => runOperation(
-    () async => PlaybackCatalog.fromSources(
-      await _interpreter.runDetail(rule, this, seriesId),
-    ),
+    () async => PlaybackCatalog.fromSources(await _detailSources(seriesId)),
   );
 
   /// Runs the play pipeline for [episodeId]. Rules without per-request media
@@ -295,7 +377,7 @@ class SourceAdapter implements PipelineHost {
     _urlCache.remove(episodeId);
   }
 
-  /// 探测媒体 URL 是否真正可拉取（自动匹配认领前必须通过）。
+  /// 检查这个地址能不能真的下到视频。
   Future<bool> isPlaybackUrlReachable(String url) => runOperation(
     () async => await _probeMedia(url) != MediaReachability.rejected,
   );

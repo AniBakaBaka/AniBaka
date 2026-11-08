@@ -32,9 +32,13 @@ class SystemProxyService {
   static List<RegExp> _fallbackRegexBypass = const [];
   static bool _bypassLocal = false;
 
-  /// 环境变量代理在进程生命周期内不变，启动时判定一次即可；
-  /// findProxy 因此不必对每个请求都跑一遍 findProxyFromEnvironment。
+  /// 代理设置只在启动时读一次，之后不再重复判断。
   static bool _envProxyPresent = false;
+
+  /// 电脑上的本机代理工具不再接管软件联网，远程代理照常使用。
+  static const bool bypassLoopbackProxy = true;
+  static bool _envProxyLoopback = false;
+  static bool _registryProxyLoopback = false;
 
   static const _envProxyKeys = <String>[
     'http_proxy',
@@ -53,7 +57,12 @@ class SystemProxyService {
     _prefixBypass = const [];
     _fallbackRegexBypass = const [];
     _bypassLocal = false;
+    _envProxyLoopback = false;
+    _registryProxyLoopback = false;
     _envProxyPresent = _envProxyKeys.any(Platform.environment.containsKey);
+    _envProxyLoopback = _envProxyKeys.any(
+      (key) => _isLoopbackServer(Platform.environment[key]),
+    );
     if (Platform.isWindows) {
       RegistryKey? key;
       try {
@@ -66,6 +75,9 @@ class SystemProxyService {
           if (server != null && server.isNotEmpty) {
             _parseProxyServer(server);
             _parseBypass(key.getStringValue('ProxyOverride') ?? '');
+            _registryProxyLoopback =
+                _isLoopbackServer(_defaultProxy) ||
+                _proxyByScheme.values.any((v) => _isLoopbackServer(v));
           }
         }
       } catch (_) {
@@ -76,6 +88,8 @@ class SystemProxyService {
         _prefixBypass = const [];
         _fallbackRegexBypass = const [];
         _bypassLocal = false;
+        _envProxyLoopback = false;
+        _registryProxyLoopback = false;
       } finally {
         key?.close();
       }
@@ -105,10 +119,14 @@ class SystemProxyService {
   static String directProxy(Uri _) => 'DIRECT';
 
   static String findProxy(Uri uri) {
-    if (_envProxyPresent) {
+    // 本机代理一律直连，远程代理照常跟随。
+    final bool skipEnv = bypassLoopbackProxy && _envProxyLoopback;
+    final bool skipReg = bypassLoopbackProxy && _registryProxyLoopback;
+    if (_envProxyPresent && !skipEnv) {
       final environmentProxy = HttpClient.findProxyFromEnvironment(uri);
       if (environmentProxy != 'DIRECT') return environmentProxy;
     }
+    if (skipReg) return 'DIRECT';
 
     final server = _proxyForScheme(uri.scheme);
     if (server == null || _shouldBypass(uri.host)) return 'DIRECT';
@@ -180,6 +198,25 @@ class SystemProxyService {
         _proxyByScheme['http'];
   }
 
+  /// 判断代理是不是在本机。
+  static bool _isLoopbackServer(String? value) {
+    if (value == null) return false;
+    var result = value.trim().toLowerCase();
+    if (result.isEmpty) return false;
+    final scheme = result.indexOf('://');
+    if (scheme >= 0) result = result.substring(scheme + 3);
+    final at = result.lastIndexOf('@');
+    if (at >= 0) result = result.substring(at + 1);
+    final slash = result.indexOf('/');
+    if (slash >= 0) result = result.substring(0, slash);
+    if (result.startsWith('[::1]')) return true;
+    final host = result.split(':').first.trim();
+    return host == 'localhost' ||
+        host == '::1' ||
+        host == '127.0.0.1' ||
+        host.startsWith('127.');
+  }
+
   static String? _normalizeServer(String value) {
     var result = value.trim();
     if (result.isEmpty) return null;
@@ -209,7 +246,7 @@ class SystemProxyService {
   }
 }
 
-/// 全局代理重载，保证未显式配置 findProxy 的 HttpClient 也能继承系统代理。
+/// 让所有网络请求都按系统代理走。
 class SystemProxyHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {

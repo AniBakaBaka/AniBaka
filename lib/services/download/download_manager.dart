@@ -16,11 +16,9 @@ import 'package:saver_gallery/saver_gallery.dart';
 
 late DownloadService downloads;
 
-///  async 信号量：跨任务共享的 HLS 分片下载并发上限。
+/// 控制同时下载的分片数量。
 ///
-/// 每个任务内部有 N 个 worker，若不限流，6 任务 × 32 分片 = 192 路并发请求
-/// 会把主 isolate 的事件循环塞满，导致界面明显卡顿。全局闸门把同时在飞的
-/// 分片请求压回设置值。
+/// 限制同时下载的分片数，避免界面卡顿。
 class _Semaphore {
   _Semaphore(this.max);
   final int max;
@@ -68,11 +66,10 @@ class DownloadService {
     });
   }
 
-  /// 异常是否由磁盘空间不足 / 磁盘只读等写入失败引起（避免静默失败）。
+  /// 判断是不是磁盘写不进去。
   bool _isDiskFull(Object? error) {
     if (error is FileSystemException) {
       final code = error.osError?.errorCode;
-      // Windows: 112=ERROR_DISK_FULL, 19=ERROR_WRITE_PROTECT；其余平台看消息。
       if (code == 112 || code == 19) return true;
       final msg = '${error.message}${error.osError}'.toLowerCase();
       if (msg.contains('disk') ||
@@ -105,7 +102,7 @@ class DownloadService {
   bool _closed = false;
   void Function(DownloadTask task)? onCompleted;
 
-  /// 视频与图片下载共用连接池、系统代理和应用关闭时的资源释放。
+  /// 管理下载连接，退出时清理。
   final client = NetworkService.createDio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 30),
@@ -131,10 +128,9 @@ class DownloadService {
     }
   }
 
-  /// HLS 分片并发下载数（设置中可调，默认 16，软上限 [_kMaxHlsConcurrency]）。
+  /// 同时下载的分片数，设置里可调。
   ///
-  /// 分片请求的处理（TLS 解密、分块事件）全在主 isolate，并发过高会挤占 UI
-  /// 帧调度造成明显掉帧；上限 48 供带宽充裕时手动拉满（用户实测 32 偏慢）。
+  /// 分片并发上限，默认 16，最高 48。
   static const int _kMaxHlsConcurrency = 48;
 
   int get _hlsConcurrency {
@@ -156,10 +152,9 @@ class DownloadService {
     }
   }
 
-  /// 是否覆盖同名下载文件（设置页「下载（定制版）」可调，默认关闭）。
+  /// 是否覆盖同名下载文件（设置页「下载」可调，默认关闭）。
   ///
-  /// 关闭：遇到同名文件保留旧文件，新成品另存为 `xxx_2.ext`，谁都不丢；
-  /// 打开：直接覆盖旧文件，同名作品只保留一份。
+  /// 同名文件：默认另存一份，打开开关才覆盖。
   bool get _overwriteSameName {
     try {
       return Instances.sp.getBool('download_overwrite_same_name') ?? false;
@@ -168,7 +163,7 @@ class DownloadService {
     }
   }
 
-  /// 成品落点决策（[path] 为期望的目标路径）。
+  /// 决定下载文件存到哪里。
   Future<String> _resolveTargetPath(String path) async {
     if (_overwriteSameName || !await File(path).exists()) return path;
     final slash = path.lastIndexOf('/');
@@ -185,10 +180,9 @@ class DownloadService {
     return '${base}_${DateTime.now().millisecondsSinceEpoch}$ext';
   }
 
-  /// 跨任务共享的 HLS 分片并发闸门（首次使用 / 设置变更时按当前值重建）。
+  /// 全局限制同时下载的分片数。
   ///
-  /// 上限由 [_kMaxHlsConcurrency] 约束（默认 16，最高 48）：分片请求的处理
-  /// （TLS 解密、分块事件）全在主 isolate，并发过高会挤占 UI 帧调度掉帧。
+  /// 全局限制分片并发数，防止卡顿。
   int? _hlsGateValue;
   _Semaphore? _hlsGate;
   _Semaphore get _gate {
@@ -200,8 +194,7 @@ class DownloadService {
     return _hlsGate!;
   }
 
-  /// 分片拼接（remux）串行锁：拼接是磁盘大块读写，多个一起跑会形成
-  /// 磁盘寻道风暴（系统级卡顿），串行反而总吞吐更高。
+  /// 同一时间只拼接一个视频，避免磁盘卡。
   Future<void> _enqueueRemux(Future<void> Function() action) {
     final prev = _remuxLock.catchError((_) {});
     final completer = Completer<void>();
@@ -258,8 +251,7 @@ class DownloadService {
       if (storedTasks is List) {
         var removed = 0;
         final restored = _restoreTasks(storedTasks);
-        // 清理无效任务：失败的任务，以及记录指向的本地文件已不存在的
-        // 任务（文件被外部移动/删除）。waiting 且尚未落盘的不受影响。
+        // 启动时清掉失败和文件已不存在的记录。
         final valid = <DownloadTask>[];
         for (final task in restored) {
           final path = task.filePath;
@@ -281,8 +273,7 @@ class DownloadService {
         }
         if (removed > 0) _scheduleSave();
       }
-      // Hive 是追加写：任务状态每次变化都会留下一帧死数据，文件只增不减。
-      // 启动时压实一次，避免长期使用后无谓膨胀。
+      // 启动时整理一次记录文件，避免越来越大。
       unawaited(
         (AppStorage.downloadTasksBox as dynamic)
             .compact()
@@ -379,8 +370,7 @@ class DownloadService {
         break;
       }
     }
-    // 先移除记录再删文件：_maybeRemoveSeriesDir 依赖 tasks 判断
-    // 「这部作品是否还有其他下载内容」，顺序反了会误删作品文件夹。
+    // 先删记录再删文件，避免误删整部作品的文件夹。
     tasks.remove(task);
     if (active != null) {
       active.deleteOnFinish = true;
@@ -397,10 +387,7 @@ class DownloadService {
 
   /// 这部作品的下载记录全部移除后，删除它专属的文件夹。
   ///
-  /// 三条安全边界：
-  /// 1. 同作品还有任何任务（下载中/已完成/失败）→ 一律不动目录；
-  /// 2. 目录或文件早已不在（被用户外部移动/删除）→ 静默跳过，不报错；
-  /// 3. 只清理属于这些任务的文件残留，目录里若有其他内容则保留目录本身。
+  /// 只删没有任务占用的作品文件夹，其他内容不动。
   Future<void> _maybeRemoveSeriesDir(DownloadTask task) async {
     if (tasks.any((t) => t.id != task.id && _isSameSeries(t, task))) return;
 
@@ -446,7 +433,7 @@ class DownloadService {
     final filePath = task.filePath;
     if (filePath == null || filePath.isEmpty) return;
 
-    // HLS 缓存目录（index.m3u8 或 remux 后的 video.mp4 / video.ts）。
+    // 临时缓存文件夹。
     if (task.kind == DownloadTaskKind.hls && _isHlsCachePath(filePath)) {
       final dir = File(filePath).parent;
       if (await dir.exists()) {
@@ -490,9 +477,7 @@ class DownloadService {
         .where((task) => task.status == DownloadStatus.completed)
         .toList();
     if (completed.isEmpty) return;
-    // 只清「已完成记录」，绝不删除本地视频文件。
-    // 该菜单语义是清列表，误点很常见；Dart 的 File.delete() 是永久删除、
-    // 不进回收站，一旦误删无法恢复。需要删文件请用「删除下载文件」多选入口。
+    // 只清记录，不删已下载的视频文件。
     tasks.removeWhere((task) => task.status == DownloadStatus.completed);
     _notifyAndSave();
     for (final task in completed) {
@@ -502,7 +487,7 @@ class DownloadService {
 
   void _processQueue() {
     if (_closed || _waiting.isEmpty) return;
-    // 合并中的任务不占下载槽：只有还在跑网络下载的任务计入并发。
+    // 拼接视频时不占下载位置，后面的任务可以继续下。
     int activeDownloads() =>
         _activeRuns.where((run) => !run.merging).length;
     while (activeDownloads() < _maxConcurrent && _waiting.isNotEmpty) {
@@ -528,13 +513,7 @@ class DownloadService {
     return _downloadDirectory();
   }
 
-  /// 作品文件夹名，与「覆盖同名文件」开关联动：
-  /// - 关闭（默认）：`作品名【扩展源名（播放地址名）】`；无播放地址名时
-  ///   退化为 `作品名【扩展源名】`，两者都没有时只用 `作品名`。
-  ///   「播放地址名」是当前线路名（播放源1 / 播放源2…），有些扩展源会把
-  ///   同一部作品拆成多个播放地址，必须用它区分，否则不同播放地址下载的
-  ///   同名作品都会落进同一个扩展源名文件夹、互相覆盖（原作者期望不覆盖）。
-  /// - 打开：纯 `作品名`，同名作品合并到同一文件夹，同名文件直接覆盖。
+  /// 按作品名和来源给下载文件分文件夹，同名时另存一份。
   String _seriesFolderName(DownloadTask task) {
     final base = _sanitizePathPart(task.title);
     if (_overwriteSameName) return base;
@@ -552,10 +531,9 @@ class DownloadService {
     return '$base【$inner】';
   }
 
-  /// 作品专属目录（不创建）：基础目录 / 作品名[【扩展源名（播放地址名）】]。
+  /// 算出这部作品该放哪个文件夹（不创建）。
   ///
-  /// 路径完全由任务字段推导，不落库，因此旧任务也无需迁移标记；
-  /// 作品名与扩展源名都经 [_sanitizePathPart] 处理，非法字符与超长都会被规范化。
+  /// 文件夹名由任务信息算出，不写进数据库。
   Future<Directory> _seriesRoot(DownloadTask task) async {
     final base = await _baseDirectory(task);
     return Directory(_joinPath(base.path, _seriesFolderName(task)));
@@ -567,8 +545,7 @@ class DownloadService {
 
   /// 下载落点目录：作品专属目录，调用时确保已创建。
   ///
-  /// 只在真正进入下载流程后才被调用（解析阶段不触碰文件系统），
-  /// 因此「解析未完成或取消」不会留下空文件夹。
+  /// 真正开始下载时才建文件夹，取消不会留空目录。
   Future<Directory> _taskDirectory(DownloadTask task) async {
     final dir = await _seriesRoot(task);
     if (!await dir.exists()) await dir.create(recursive: true);
@@ -603,7 +580,7 @@ class DownloadService {
   Future<String> _resolveHlsManifestPath(DownloadTask task) async {
     final existing = task.filePath;
     if (existing != null && _isHlsCachePath(existing)) {
-      // 已 remux 成 video.mp4/ts 时，清单路径固定为同目录 index.m3u8。
+      // 合并后的视频用同目录的清单文件。
       final parent = File(existing).parent.path;
       final name = existing.replaceAll('\\', '/').split('/').last.toLowerCase();
       if (name == 'index.m3u8') return existing;
@@ -697,7 +674,7 @@ class DownloadService {
     final resolved = await _resolveDownloadFilePath(task);
     _throwIfCancelled(cancelToken);
     final filePath = await _resolveTargetPath(resolved);
-    // 打开覆盖时从零重下：若旧文件还在，按旧长度续传会把两次内容拼在一起。
+    // 覆盖旧文件时从头重下，避免新旧内容拼在一起。
     if (_overwriteSameName) {
       final old = File(filePath);
       if (await old.exists()) await old.delete().catchError((_) => old);
@@ -761,12 +738,11 @@ class DownloadService {
     _throwIfCancelled(cancelToken);
     task.downloadedBytes = result.totalBytes;
     task.totalBytes = result.totalBytes;
-    // 分片下完后合并为单一视频，播放时走普通文件 seek，不再依赖 m3u8。
+    // 分片下完后合成一个视频文件，方便直接播放。
     task.progress = 0.99;
     _notifyAndSave();
 
-    // 拼接是纯本地 IO，不再占用下载槽：立刻补位下一个等待任务，
-    // 并用全局串行锁保证同一时间只有一个视频在拼接（磁盘友好）。
+    // 拼接时让出下载位置，下一个任务可以开始。
     run.merging = true;
     _processQueue();
     String? remuxed;
@@ -778,26 +754,24 @@ class DownloadService {
     });
     _throwIfCancelled(cancelToken);
     if (remuxed == null) {
-      // 无法拼接（如加密流），保留本地 m3u8 结构，行为与旧版一致。
+      // 合并不了就保留原样。
       task.filePath = manifestPath;
       task.progress = 1;
       return manifestPath;
     }
 
-    // 成品移出 .hls 缓存文件夹，直接放到用户选择的保存目录，
-    // 文件名与任务一致（xxx.mp4 / xxx.ts），本地播放器可直接连续播放。
+    // 下好的视频移到用户选的保存目录，可直接播放。
     final dir = await _taskDirectory(task);
     final base = _stripExtension(task.filename);
     final ext = remuxed!.toLowerCase().endsWith('.ts') ? '.ts' : '.mp4';
-    // 覆盖关闭时另存为不冲突文件名；打开时沿用原路径（下面会先删旧文件）。
+    // 同名文件默认另存一份，打开开关才覆盖。
     final finalPath = await _resolveTargetPath(
       _joinPath(dir.path, '$base$ext'),
     );
     final src = File(remuxed!);
     final dst = File(finalPath);
 
-    // 移动必须成功：失败重试（Windows 句柄释放有延迟）。在成品安全
-    // 落位之前，绝不能删除缓存文件夹——否则唯一成品会被一起删掉。
+    // 移好成品后才删缓存，避免把成品一起删掉。
     var moved = false;
     for (var attempt = 0; attempt < 3 && !moved; attempt++) {
       if (attempt > 0) {
@@ -820,8 +794,7 @@ class DownloadService {
       }
     }
 
-    // 只有成品已安全移出才清理缓存文件夹；删除失败也重试，
-    // 避免留下空文件夹。
+    // 成品移走后清掉缓存文件夹。
     if (moved) {
       for (var attempt = 0; attempt < 3; attempt++) {
         try {
@@ -849,9 +822,7 @@ class DownloadService {
     var playlistUrl = Uri.parse(url);
     var content = await _fetchPlaylistText(playlistUrl, cancelToken);
 
-    // 音视频分离（demuxed）源：主清单里声明了独立的 AUDIO 媒体组，但 variant
-    // 选择只取了最高码率的视频流，离线合并后很可能没有声音。给出一次性告警
-    // （彻底修复需要 ffmpeg 混流，当前离线合并只做分片拼接，无法混流）。
+    // 视频和音频分开的源，合并后可能没声音，提示一次。
     if (content.contains('#EXT-X-MEDIA:TYPE=AUDIO')) {
       _warnAudioSeparated();
     }
@@ -918,8 +889,7 @@ class DownloadService {
         while (next < totalUnits) {
           _throwIfCancelled(assetToken);
           final asset = assets[next++];
-          // 全局闸门：多任务并行时把同时在飞的分片请求压回设置值，
-          // 避免几十上百路并发请求挤爆主 isolate 的事件循环卡住界面。
+          // 控制同时下载的分片数，避免界面卡住。
           await _gate.acquire();
           try {
             final bytes = await _downloadHlsAsset(
@@ -963,9 +933,7 @@ class DownloadService {
     return (localContent: plan.localContent, totalBytes: downloadedBytes);
   }
 
-  /// 下载单条 HLS 分片：网络错误 / 签名 URL 过期(403/404) / 分片长度校验不符时，
-  /// 重新解析清单、按 localName 找回最新分片地址重试（最多 2 次），避免“黄金神威
-  /// 下 2 次才成功”这类因签名 URL 中途失效导致的失败。
+  /// 分片下载失败时重新取地址再试，最多两次。
   Future<int> _downloadHlsAsset(
     DownloadTask task,
     HlsAsset asset,
@@ -985,7 +953,7 @@ class DownloadService {
       } catch (e) {
         if (cancelToken.isCancelled) rethrow;
         if (attempt == 2) rethrow;
-        // 清掉可能残留的半成品，避免复用到损坏的旧分片，再重新解析清单重试。
+        // 先删掉坏的分片，再重新取地址重试。
         final bad = File(_joinPath(cacheDir.path, current.localName));
         if (await bad.exists()) await bad.delete().catchError((_) {});
         final badPart = File('${bad.path}.part');
@@ -1011,7 +979,7 @@ class DownloadService {
     final range = asset.byteRange;
     if (await target.exists()) {
       final length = await target.length();
-      // 已按 BYTERANGE 裁好，或无完整文件可直接用。
+      // 分片已经裁好，可以直接用。
       if (length > 0 && (range == null || length == range.length)) {
         return length;
       }
@@ -1030,7 +998,7 @@ class DownloadService {
 
     final headers = <String, dynamic>{};
     if (range != null) {
-      // 优先让服务端只回传分片；若忽略 Range 则下完再裁。
+      // 尽量只下需要的那段。
       headers['Range'] =
           'bytes=${range.offset}-${range.offset + range.length - 1}';
     }
@@ -1057,8 +1025,7 @@ class DownloadService {
           checkCancelled: () => _throwIfCancelled(cancelToken),
         );
       }
-      // 分片长度必须精确等于 byteRange，否则后续拼接会错位/花屏：抛错让上层
-      // 按 localName 重新解析清单并重下整段。
+      // 分片大小不对就重下，避免拼接后花屏。
       final finalLength = await target.length();
       if (finalLength != range.length) {
         await target.delete().catchError((_) {});
@@ -1151,7 +1118,7 @@ class DownloadService {
     return '$parent$separator$child';
   }
 
-  /// 是否位于 `*.hls/` 缓存目录（清单或 remux 后的单文件）。
+  /// 是不是在临时缓存文件夹里。
   bool _isHlsCachePath(String path) {
     final normalized = path.replaceAll('\\', '/');
     final parts = normalized.split('/');
@@ -1169,8 +1136,7 @@ class _DownloadRun {
   final token = CancelToken();
   bool deleteOnFinish = false;
 
-  /// true = 已进入分片拼接阶段（纯本地 IO，不再占用网络下载槽），
-  /// 让后续任务可以继续下载，避免"合并时全部排队等待"。
+  /// 是否正在拼接视频；拼接时别的位置可以接着下载。
   bool merging = false;
   Future<void>? future;
 }
