@@ -10,6 +10,7 @@ import 'package:baka/pages/search/search_controller.dart';
 import 'package:baka/app/navigation.dart';
 import 'package:baka/widgets/anime/post_card.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key, this.k, this.initialSource});
@@ -33,8 +34,14 @@ class _SearchPageState extends State<SearchPage> {
   late final _resultChanges = Listenable.merge([
     _searchService.isLoadingNotifier,
     _searchService.resultsNotifier,
+    _searchPageNotifier,
     contentFilter,
   ]);
+
+  static const int _searchPageSize = 30;
+  final ValueNotifier<int> _searchPageNotifier = ValueNotifier<int>(1);
+  final TextEditingController _jumpPageController = TextEditingController();
+  final FocusNode _jumpFocus = FocusNode();
 
   bool get _isWindows => Instances.isDesktopPlatform;
 
@@ -42,6 +49,7 @@ class _SearchPageState extends State<SearchPage> {
   void initState() {
     super.initState();
     _searchService = AnimeSearchController();
+    // 跳页框初始留空，仅在用户输入并跳转后填充；翻页时不自动回填，保持“ /总页”样式。
     _init();
   }
 
@@ -49,6 +57,9 @@ class _SearchPageState extends State<SearchPage> {
   void dispose() {
     _debounce?.cancel();
     _searchController.dispose();
+    _jumpPageController.dispose();
+    _jumpFocus.dispose();
+    _searchPageNotifier.dispose();
     _searchService.dispose();
     super.dispose();
   }
@@ -80,6 +91,7 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _search(String value) async {
     _debounce?.cancel();
+    _searchPageNotifier.value = 1;
     await _searchService.search(value);
   }
 
@@ -163,10 +175,10 @@ class _SearchPageState extends State<SearchPage> {
       listenable: _resultChanges,
       builder: (context, _) {
         final isLoading = _searchService.isLoadingNotifier.value;
-        final items = contentFilter.visibleItems(
+        final all = contentFilter.visibleItems(
           _searchService.resultsNotifier.value,
         );
-        if (isLoading && items.isEmpty) {
+        if (isLoading && all.isEmpty) {
           if (isVertical) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -175,22 +187,33 @@ class _SearchPageState extends State<SearchPage> {
             child: Center(child: CircularProgressIndicator()),
           );
         }
+        final totalPages =
+            all.isEmpty ? 1 : ((all.length - 1) ~/ _searchPageSize + 1);
+        final currentPage = _searchPageNotifier.value.clamp(1, totalPages);
+        final start = (currentPage - 1) * _searchPageSize;
+        final end = start + _searchPageSize < all.length
+            ? start + _searchPageSize
+            : all.length;
+        final pageItems = all.sublist(start, end);
         final results = SliverMainAxisGroup(
           slivers: [
             if (isLoading)
               const SliverToBoxAdapter(child: LinearProgressIndicator()),
-            _buildResults(items, isVertical: isVertical),
+            _buildResults(pageItems, isVertical: isVertical),
           ],
         );
-        return isVertical
-            ? CustomScrollView(
-                physics: const BouncingScrollPhysics(),
-                slivers: [
-                  results,
-                  const SliverToBoxAdapter(child: SizedBox(height: 40)),
-                ],
-              )
-            : results;
+        final pageBar = _buildPageBar(totalPages, currentPage);
+        if (isVertical) {
+          return CustomScrollView(
+            physics: const BouncingScrollPhysics(),
+            slivers: [
+              results,
+              pageBar,
+              const SliverToBoxAdapter(child: SizedBox(height: 40)),
+            ],
+          );
+        }
+        return SliverMainAxisGroup(slivers: [results, pageBar]);
       },
     );
   }
@@ -571,7 +594,7 @@ class _SearchPageState extends State<SearchPage> {
     final isTablet = MediaQuery.sizeOf(context).shortestSide >= 600;
     final wideLayout = _isWindows || isTablet;
 
-    final double maxExtent;
+    final int crossCount;
     final double childAspectRatio;
     final EdgeInsets padding;
     final double crossSpacing;
@@ -582,8 +605,9 @@ class _SearchPageState extends State<SearchPage> {
         horizontal: wideLayout ? 16 : 8,
         vertical: 12,
       );
-      maxExtent = _isWindows ? 220 : (isTablet ? 180 : 140);
-      childAspectRatio = _isWindows ? 0.68 : (isTablet ? 0.65 : 0.62);
+      // 桌面端固定每行 6 条，封面更大；窄屏退化为 3 条，避免卡片过小。
+      crossCount = wideLayout ? 6 : 3;
+      childAspectRatio = wideLayout ? 0.72 : 0.68;
       crossSpacing = isTablet ? 12 : 8;
       mainSpacing = isTablet ? 16 : 10;
     } else {
@@ -591,8 +615,8 @@ class _SearchPageState extends State<SearchPage> {
         horizontal: wideLayout ? 24 : 16,
         vertical: 16,
       );
-      maxExtent = _isWindows ? 280 : (isTablet ? 250 : 220);
-      childAspectRatio = _isWindows ? 0.65 : 0.58;
+      crossCount = wideLayout ? 6 : 3;
+      childAspectRatio = wideLayout ? 0.72 : 0.68;
       crossSpacing = isTablet ? 20 : 16;
       mainSpacing = isTablet ? 28 : 24;
     }
@@ -600,8 +624,8 @@ class _SearchPageState extends State<SearchPage> {
     return SliverPadding(
       padding: padding,
       sliver: SliverGrid(
-        gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: maxExtent,
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: crossCount,
           childAspectRatio: childAspectRatio,
           crossAxisSpacing: crossSpacing,
           mainAxisSpacing: mainSpacing,
@@ -635,6 +659,233 @@ class _SearchPageState extends State<SearchPage> {
           return PostCard(data, onTap: onTap);
         }, childCount: results.length),
       ),
+    );
+  }
+
+  Widget _buildPageBar(int totalPages, int currentPage) {
+    if (totalPages <= 1) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+    final theme = Theme.of(context);
+    // 结果超过 20 页时只展示一个 20 页的窗口，避免一次性渲染过多。
+    final useWindow = totalPages > 20;
+    final windowStart = useWindow ? ((currentPage - 1) ~/ 20) * 20 + 1 : 1;
+    final windowEnd =
+        useWindow ? (windowStart + 19).clamp(1, totalPages) : totalPages;
+
+    final List<int> pageList;
+    if (useWindow) {
+      pageList = [for (var p = windowStart; p <= windowEnd; p++) p];
+    } else {
+      pageList =
+          _computeVisiblePages(currentPage, totalPages)
+              .whereType<int>()
+              .toList();
+    }
+
+    final children = <Widget>[
+      IconButton(
+        icon: const Icon(Icons.chevron_left),
+        tooltip: '上一页',
+        onPressed: currentPage > 1
+            ? () => _gotoPage(currentPage - 1, totalPages)
+            : null,
+      ),
+    ];
+    for (final p in pageList) {
+      final selected = p == currentPage;
+      children.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          child: TextButton(
+            style: TextButton.styleFrom(
+              minimumSize: const Size(36, 36),
+              backgroundColor: selected
+                  ? theme.colorScheme.primaryContainer
+                  : null,
+              foregroundColor: selected
+                  ? theme.colorScheme.onPrimaryContainer
+                  : null,
+            ),
+            onPressed: selected ? null : () => _gotoPage(p, totalPages),
+            child: Text('$p'),
+          ),
+        ),
+      );
+    }
+    children.add(
+      IconButton(
+        icon: const Icon(Icons.chevron_right),
+        tooltip: '下一页',
+        onPressed: currentPage < totalPages
+            ? () => _gotoPage(currentPage + 1, totalPages)
+            : null,
+      ),
+    );
+    children.add(const SizedBox(width: 12));
+    children.add(_buildJumpToPage(totalPages));
+
+    final barRow = SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Center(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: children,
+        ),
+      ),
+    );
+
+    final widgets = <Widget>[barRow];
+    if (useWindow) {
+      widgets.add(const SizedBox(height: 8));
+      widgets.add(Center(child: _buildTooManyLine(windowStart, totalPages)));
+    }
+
+    return SliverToBoxAdapter(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: widgets,
+        ),
+      ),
+    );
+  }
+
+  /// 结果过多（超过 20 页）时，在页码栏下方居中提示，并提供前进/后退 20 页的按钮。
+  Widget _buildTooManyLine(int windowStart, int totalPages) {
+    final theme = Theme.of(context);
+    final children = <Widget>[
+      Text(
+        '当前搜索作品过多，仅展示20页，是否继续展示',
+        style: TextStyle(color: theme.hintColor, fontSize: 13),
+      ),
+    ];
+    if (windowStart > 1) {
+      children.add(
+        Padding(
+          padding: const EdgeInsets.only(left: 8),
+          child: TextButton(
+            onPressed: () =>
+                _gotoPage((windowStart - 20).clamp(1, totalPages), totalPages),
+            child: const Text('前20页'),
+          ),
+        ),
+      );
+    }
+    if (windowStart + 19 < totalPages) {
+      children.add(
+        Padding(
+          padding: const EdgeInsets.only(left: 8),
+          child: TextButton(
+            onPressed: () =>
+                _gotoPage((windowStart + 20).clamp(1, totalPages), totalPages),
+            child: const Text('后20页'),
+          ),
+        ),
+      );
+    }
+    return Wrap(
+      alignment: WrapAlignment.center,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: children,
+    );
+  }
+
+  List<int?> _computeVisiblePages(int current, int total) {
+    if (total <= 7) {
+      return [for (var i = 1; i <= total; i++) i];
+    }
+    final pages = <int?>[];
+    pages.add(1);
+    final left = (current - 1).clamp(2, total - 1);
+    final right = (current + 1).clamp(2, total - 1);
+    if (left > 2) pages.add(null);
+    for (var i = left; i <= right; i++) pages.add(i);
+    if (right < total - 1) pages.add(null);
+    pages.add(total);
+    return pages;
+  }
+
+  void _gotoPage(int page, int totalPages) {
+    final target = page.clamp(1, totalPages);
+    if (target != _searchPageNotifier.value) {
+      _searchPageNotifier.value = target;
+    }
+  }
+
+  void _submitJump(int totalPages) {
+    var v = int.tryParse(_jumpPageController.text.trim()) ?? 1;
+    if (v < 1) v = 1;
+    if (v > totalPages) v = totalPages;
+    _jumpPageController.text = '$v';
+    _gotoPage(v, totalPages);
+  }
+
+  Widget _buildJumpToPage(int totalPages) {
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: theme.dividerColor.withValues(alpha: 0.3),
+            ),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 36,
+                child: TextField(
+                  controller: _jumpPageController,
+                  focusNode: _jumpFocus,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                  ],
+                  textAlign: TextAlign.center,
+                  onSubmitted: (_) => _submitJump(totalPages),
+                  onChanged: (val) {
+                    final v = int.tryParse(val);
+                    if (v != null) {
+                      if (v < 1) {
+                        _jumpPageController.text = '1';
+                        _jumpPageController.selection =
+                            TextSelection.collapsed(offset: 1);
+                      } else if (v > totalPages) {
+                        _jumpPageController.text = '$totalPages';
+                        _jumpPageController.selection = TextSelection.collapsed(
+                          offset: '$totalPages'.length,
+                        );
+                      }
+                    }
+                  },
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+              Text(
+                ' / $totalPages',
+                style: TextStyle(color: theme.hintColor, fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 6),
+        TextButton(
+          onPressed: () => _submitJump(totalPages),
+          child: const Text('跳转'),
+        ),
+      ],
     );
   }
 
