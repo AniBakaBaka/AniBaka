@@ -1,10 +1,10 @@
-import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/source/models/source_search_result.dart';
 import 'package:baka/services/source/source_repository.dart';
 import 'dart:async';
 
 import 'package:baka/instance.dart';
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/pages/source/source_management_page.dart';
 import 'package:baka/pages/search/search_controller.dart';
 import 'package:baka/app/navigation.dart';
@@ -42,6 +42,10 @@ class _SearchPageState extends State<SearchPage> {
   final ValueNotifier<int> _searchPageNotifier = ValueNotifier<int>(1);
   final TextEditingController _jumpPageController = TextEditingController();
   final FocusNode _jumpFocus = FocusNode();
+  // 跳页框当前是否处于“只输入了 0、被钳为占位 ‘1’”的状态。
+  // 该状态下继续输入的 0 一律忽略（不记入数字），直到出现第一个非 0 数字，
+  // 才从那个数字开始真正记录；其后的 0 作为正常位数参与比较。
+  bool _jumpClamped = false;
 
   bool get _isWindows => Instances.isDesktopPlatform;
 
@@ -819,6 +823,7 @@ class _SearchPageState extends State<SearchPage> {
     if (v < 1) v = 1;
     if (v > totalPages) v = totalPages;
     _jumpPageController.text = '$v';
+    _jumpClamped = false;
     _gotoPage(v, totalPages);
   }
 
@@ -852,21 +857,67 @@ class _SearchPageState extends State<SearchPage> {
                   onSubmitted: (_) => _submitJump(totalPages),
                   onChanged: (val) {
                     final raw = val.trim();
-                    if (raw.isEmpty) return; // 允许清空输入框
-                    final v = int.tryParse(raw);
-                    if (v == null) return;
-                    if (v < 1) {
-                      // 0 / 00 / 000 … 一律按 0 处理，钳为 1。
-                      // 光标置于开头，使后续再输入的 0 插在最前（变成 "01"）
-                      // 而被重新钳回 1，避免 "0"→"1" 后再追 0 变成 "10" 乃至越界成总页数。
+                    if (raw.isEmpty) {
+                      // 用户清空输入框：退出钳位占位，等待重新输入。
+                      _jumpClamped = false;
+                      return;
+                    }
+                    if (_jumpClamped) {
+                      // 当前显示的是钳位占位的 “1”。此时 raw = "1" + 用户新输入的内容。
+                      // 占位 “1” 不是真实数字，要把它剥离后再判断。
+                      final userPart =
+                          raw.length > 1 ? raw.substring(1) : '';
+                      // 后续只输入了 0（含清空后未输入）：这些 0 是“前导零”，
+                      // 不记入数字，继续保留占位 “1”。
+                      if (RegExp(r'^0*$').hasMatch(userPart)) {
+                        _jumpPageController.text = '1';
+                        _jumpPageController.selection =
+                            TextSelection.collapsed(offset: 1);
+                        return;
+                      }
+                      // 出现了第一个非 0 数字：退出钳位，从 userPart 去前导零后的
+                      // 部分作为真正要记录的数字。例：00010 -> userPart="0010" -> "10"。
+                      final stripped =
+                          userPart.replaceAll(RegExp(r'^0+'), '');
+                      final v = int.tryParse(stripped);
+                      if (v == null) return;
+                      _jumpClamped = false;
+                      if (v > totalPages) {
+                        _jumpPageController.text = '$totalPages';
+                        _jumpPageController.selection =
+                            TextSelection.collapsed(
+                          offset: '$totalPages'.length,
+                        );
+                      } else {
+                        _jumpPageController.text = stripped;
+                        _jumpPageController.selection =
+                            TextSelection.collapsed(offset: stripped.length);
+                      }
+                      return;
+                    }
+                    // 非钳位状态：正常记录数字。先去掉前导零再判断。
+                    final stripped = raw.replaceAll(RegExp(r'^0+'), '');
+                    if (stripped.isEmpty) {
+                      // 输入的全是 0（0 / 00 / 000 …）：钳为占位 “1”。
                       _jumpPageController.text = '1';
                       _jumpPageController.selection =
-                          TextSelection.collapsed(offset: 0);
-                    } else if (v > totalPages) {
+                          TextSelection.collapsed(offset: 1);
+                      _jumpClamped = true;
+                      return;
+                    }
+                    final v = int.tryParse(stripped);
+                    if (v == null) return;
+                    if (v > totalPages) {
                       _jumpPageController.text = '$totalPages';
-                      _jumpPageController.selection = TextSelection.collapsed(
+                      _jumpPageController.selection =
+                          TextSelection.collapsed(
                         offset: '$totalPages'.length,
                       );
+                    } else if (stripped != raw) {
+                      // 去掉了前导零（如 01 -> 1），归一化显示。
+                      _jumpPageController.text = stripped;
+                      _jumpPageController.selection =
+                          TextSelection.collapsed(offset: stripped.length);
                     }
                   },
                   decoration: const InputDecoration(
