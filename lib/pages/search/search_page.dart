@@ -851,18 +851,22 @@ class _SearchPageState extends State<SearchPage> {
                   textAlign: TextAlign.center,
                   onSubmitted: (_) => _submitJump(totalPages),
                   onChanged: (val) {
-                    final v = int.tryParse(val);
-                    if (v != null) {
-                      if (v < 1) {
-                        _jumpPageController.text = '1';
-                        _jumpPageController.selection =
-                            TextSelection.collapsed(offset: 1);
-                      } else if (v > totalPages) {
-                        _jumpPageController.text = '$totalPages';
-                        _jumpPageController.selection = TextSelection.collapsed(
-                          offset: '$totalPages'.length,
-                        );
-                      }
+                    final raw = val.trim();
+                    if (raw.isEmpty) return; // 允许清空输入框
+                    final v = int.tryParse(raw);
+                    if (v == null) return;
+                    if (v < 1) {
+                      // 0 / 00 / 000 … 一律按 0 处理，钳为 1。
+                      // 光标置于开头，使后续再输入的 0 插在最前（变成 "01"）
+                      // 而被重新钳回 1，避免 "0"→"1" 后再追 0 变成 "10" 乃至越界成总页数。
+                      _jumpPageController.text = '1';
+                      _jumpPageController.selection =
+                          TextSelection.collapsed(offset: 0);
+                    } else if (v > totalPages) {
+                      _jumpPageController.text = '$totalPages';
+                      _jumpPageController.selection = TextSelection.collapsed(
+                        offset: '$totalPages'.length,
+                      );
                     }
                   },
                   decoration: const InputDecoration(
