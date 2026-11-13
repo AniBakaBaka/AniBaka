@@ -18,7 +18,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # In iOS, build-name is used as CFBundleShortVersionString while build-number used as CFBundleVersion.
 # Read more about iOS versioning at
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
-version: 5.2.4+1101
+version: 5.2.5+261113
 
 environment:
   sdk: '>=3.12.0 <4.0.0'
@@ -122,9 +122,18 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
-# The cross-platform libs package requests its Windows package from pub.dev.
-# Override that source so both Windows packages use the same verified fork.
+# Keep the Apple SwiftPM libraries and Windows runtime on the renderer's fork.
 dependency_overrides:
+  media_kit_libs_ios_video:
+    git:
+      url: https://github.com/AniBakaBaka/media-kit.git
+      ref: 9a7ecb383359d014ac681f68d6435e60b82f2e01
+      path: libs/ios/media_kit_libs_ios_video
+  media_kit_libs_macos_video:
+    git:
+      url: https://github.com/AniBakaBaka/media-kit.git
+      ref: 9a7ecb383359d014ac681f68d6435e60b82f2e01
+      path: libs/macos/media_kit_libs_macos_video
   media_kit_libs_windows_video:
     git:
       url: https://github.com/AniBakaBaka/media-kit.git

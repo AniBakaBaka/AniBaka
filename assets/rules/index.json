@@ -40,10 +40,10 @@
       "key": "akianime",
       "title": "AkiAnime",
       "by": "anibaka",
-      "rev": 7,
-      "intro": "萌番 AkiAnime 动漫源，源网址 https://www.akianime.cc/",
-      "site": "https://www.akianime.cc/",
-      "badge": "https://www.akianime.cc/template/dsn2/static/img/ico.png",
+      "rev": 8,
+      "intro": "萌番 AkiAnime 动漫源，源网址 https://www.akianime.com/",
+      "site": "https://www.akianime.com/",
+      "badge": "https://www.akianime.com/template/dsn2/static/img/ico.png",
       "labels": [
         "anime",
         "无广告",
@@ -51,7 +51,7 @@
       ],
       "ref": "akianime.json",
       "engine": "anx-rule/2",
-      "sha256": "95c6703047397114da2de34c5efb9938b7222ca5b2cf60d24666e57e50b54bfc"
+      "sha256": "d0c50f9a83da3a0d5c3bdc50fa0fae0124bbd2e689e1031c13811fb65fd92073"
     },
     {
       "key": "dm84",
@@ -124,7 +124,7 @@
       "key": "ios_mifun",
       "title": "MiFun",
       "by": "auto-generator",
-      "rev": 8,
+      "rev": 9,
       "intro": "MiFun在线动漫专注于资源收集整理，海量有效的高质量动漫资源在线观看，完全免费。",
       "site": "https://ios.mifun.org/",
       "badge": "https://ugc.hitv.com/1/230324151010E2CA349174CE432E9353E29DE5C0EQ0NF/sVoWeL0.png?mxtheme/images/favicon.png",
@@ -135,7 +135,7 @@
       ],
       "ref": "ios_mifun.json",
       "engine": "anx-rule/2",
-      "sha256": "1c25ef84baaa3ec41994ac35a160c9f5a6fd19b03f88963e4e42434cbf39aeec"
+      "sha256": "7cf5bba60a26873ca717777957952d09d47570381a10846151240f91d610c4b4"
     },
     {
       "key": "lm6",
@@ -175,7 +175,7 @@
       "key": "moonci",
       "title": "Moonci",
       "by": "anibaka",
-      "rev": 4,
+      "rev": 5,
       "intro": "Moonci 动漫视频源。",
       "site": "https://www.moonci.com/",
       "badge": "https://www.moonci.com/favicon.ico",
@@ -186,7 +186,7 @@
       ],
       "ref": "moonci.json",
       "engine": "anx-rule/2",
-      "sha256": "ceef44aaffb0b26390dccbabf84065772191dd8a351367fc708e6622236e8d92"
+      "sha256": "4b752182ae9a50baa7fa5f2523ed14b67e69b27f779a4358097806ded0c555f4"
     },
     {
       "key": "silisili",

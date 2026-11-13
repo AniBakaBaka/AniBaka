@@ -9,6 +9,7 @@ import 'package:baka/api/auth_api.dart';
 import 'package:baka/api/bangumi_account_api.dart';
 import 'package:baka/app/platform_setup.dart';
 import 'package:baka/app/navigation.dart';
+import 'package:baka/app/page_routes.dart';
 import 'package:baka/app/usage_tracker.dart';
 import 'package:baka/app/watch_party_links.dart';
 import 'package:baka/app_state.dart';
@@ -173,6 +174,12 @@ class AppRuntime {
       boxes: AppStorage.startupBoxes,
     );
     await platformSetup();
+    // Desktop pages use their own transitions; only mobile grows pages out of
+    // the pressed component.
+    if (!Instances.isDesktopPlatform) {
+      TapOrigin.install();
+      _cleanup.add(TapOrigin.uninstall);
+    }
     await DlssGlobalPlayback.instance.initialize();
     _cleanup.add(DlssGlobalPlayback.instance.close);
     await AnimeJaNaiService.instance.initialize();
@@ -190,13 +197,7 @@ class AppRuntime {
         label: '前往缓存中心',
         onPressed: () {
           final context = Instances.navigatorKey.currentContext;
-          if (context != null) {
-            Navigator.of(context).push(
-              PageRouteBuilder(
-                pageBuilder: (_, _, _) => const DownloadManagerPage(),
-              ),
-            );
-          }
+          if (context != null) DownloadManagerPage.show(context);
         },
       ),
     );

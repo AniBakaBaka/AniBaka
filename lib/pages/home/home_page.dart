@@ -1,10 +1,9 @@
+import 'package:baka/app/navigation.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/anime_filter.dart';
 import 'package:baka/core/account_session.dart';
-import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/pages/home/miniapp_page.dart';
-import 'package:baka/pages/search/search_page.dart';
 import 'package:baka/pages/home/home_controller.dart';
 import 'package:baka/app/update_presenter.dart';
 import 'package:baka/utils/reg_utils.dart';
@@ -31,8 +30,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage>
     with SingleTickerProviderStateMixin {
-  late final HomeController _svc = HomeController();
-  late final AppState _appState = Get.find<AppState>();
+  final _svc = HomeController();
 
   final GlobalKey _rankSectionKey = GlobalKey();
   final GlobalKey _tagSectionKey = GlobalKey();
@@ -41,36 +39,19 @@ class _HomePageState extends State<HomePage>
     length: 2,
     vsync: this,
   );
-  late final ScrollController _scrollController = ScrollController();
-  double _lastScrollOffset = 0;
 
   @override
   void initState() {
     super.initState();
-    if (!Instances.isTV && !Instances.isDesktopPlatform) {
-      _scrollController.addListener(_onScroll);
-    }
-    // 先让各板块订阅数据源，再执行首次刷新，避免启动阶段的结果早于页面挂载。
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _refresh(force: false);
-    });
+    _refresh(force: false);
     VersionService.checkAndShowUpdate().catchError((_) {});
   }
 
   @override
   void dispose() {
-    _scrollController.dispose();
     _tabController.dispose();
     _svc.dispose();
     super.dispose();
-  }
-
-  void _onScroll() {
-    final offset = _scrollController.offset;
-    if ((offset - _lastScrollOffset).abs() > 100) {
-      _appState.updateScrollDirection(offset > _lastScrollOffset);
-      _lastScrollOffset = offset;
-    }
   }
 
   /// 服务会同步恢复缓存；刷新只更新真正变化的数据。
@@ -81,10 +62,6 @@ class _HomePageState extends State<HomePage>
       if (!Instances.isTV) _svc.loadSwipers(force: force),
       if (Instances.isDesktopPlatform) _svc.loadSchedule(force: force),
     ]);
-  }
-
-  void _push(Widget page) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => page));
   }
 
   @override
@@ -111,7 +88,6 @@ class _HomePageState extends State<HomePage>
         loadMoreResetListenable: _svc.filter,
         showInitialIndicator: false,
         child: CustomScrollView(
-          controller: _scrollController,
           scrollCacheExtent: const ScrollCacheExtent.pixels(500),
           physics: const BouncingScrollPhysics(),
           slivers: [
@@ -159,14 +135,15 @@ class _HomePageState extends State<HomePage>
           const SizedBox(width: 12),
           _buildIconButton(
             'assets/li-font.svg',
-            () => _push(
+            () => NavigationService.push<void>(
+              context,
               const WebViewPage(url: 'https://www.bgm.tv', title: '里世界'),
             ),
           ),
           const SizedBox(width: 8),
           _buildIconButton(
             'assets/Search.svg',
-            () => _push(const SearchPage()),
+            () => NavigationService.toSearch(context),
             iconSize: 22,
           ),
           const SizedBox(width: 12),
@@ -274,8 +251,7 @@ class _HomePageState extends State<HomePage>
         onTap();
       },
       borderRadius: BorderRadius.circular(100),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
+      child: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: isDark
@@ -306,7 +282,7 @@ class _HomePageState extends State<HomePage>
         onLongPress: isLoggedIn ? _confirmLogout : null,
         onTap: () {
           HapticFeedback.selectionClick();
-          if (!isLoggedIn) Navigator.pushNamed(context, 'Baka://login');
+          if (!isLoggedIn) NavigationService.toLogin(context);
         },
         borderRadius: BorderRadius.circular(100),
         child: Container(

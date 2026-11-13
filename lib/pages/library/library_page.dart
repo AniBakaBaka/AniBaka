@@ -4,7 +4,7 @@ import 'package:baka/models/playback_request.dart';
 import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/collection.dart';
-import 'package:baka/pages/player/player_page.dart';
+import 'package:baka/app/navigation.dart';
 import 'package:baka/services/collection/collection_repository.dart';
 import 'package:baka/services/playback/history_repository.dart';
 import 'package:baka/widgets/anime/post_card.dart';
@@ -500,14 +500,11 @@ class _LibraryPageState extends State<LibraryPage> {
     );
   }
 
-  void _navigateToPlayer(PlaybackRequest request) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => PlayerPage(request: request)),
-    ).then((_) {
-      if (!mounted) return;
+  Future<void> _navigateToPlayer(PlaybackRequest request) async {
+    await NavigationService.toPlayback(context, request, autoMatch: false);
+    if (mounted) {
       setState(() => _historyList = historyRepository.getHistoryList());
-    });
+    }
   }
 }
 

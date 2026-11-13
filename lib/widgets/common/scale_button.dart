@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+/// Shrinks slightly while pressed.
+///
+/// The press animation is created on the first press, so lists of buttons
+/// do not each hold an animation controller and ticker.
 class ScaleButton extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
@@ -10,37 +14,51 @@ class ScaleButton extends StatefulWidget {
   State<ScaleButton> createState() => _ScaleButtonState();
 }
 
-class _ScaleButtonState extends State<ScaleButton> {
-  static const Duration _pressDuration = Duration(milliseconds: 100);
-  static const double _pressedScale = 0.95;
+class _ScaleButtonState extends State<ScaleButton>
+    with SingleTickerProviderStateMixin {
+  static final _pressedScale = Tween<double>(
+    begin: 1,
+    end: 0.95,
+  ).chain(CurveTween(curve: Curves.easeOut));
 
-  bool _pressed = false;
+  AnimationController? _press;
+  Animation<double> _scale = kAlwaysCompleteAnimation;
 
-  void _setPressed(bool value) {
-    if (_pressed != value) setState(() => _pressed = value);
+  void _setPressed(bool pressed) {
+    final press = _press;
+    if (press != null) {
+      pressed ? press.forward() : press.reverse();
+    } else if (pressed) {
+      final created = _press = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 100),
+      )..forward();
+      setState(() => _scale = created.drive(_pressedScale));
+    }
   }
 
   @override
   void didUpdateWidget(covariant ScaleButton oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.onTap == null) _pressed = false;
+    if (widget.onTap == null) _press?.value = 0;
+  }
+
+  @override
+  void dispose() {
+    _press?.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final bool isEnabled = widget.onTap != null;
+    final enabled = widget.onTap != null;
     return GestureDetector(
-      onTapDown: isEnabled ? (_) => _setPressed(true) : null,
-      onTapUp: isEnabled ? (_) => _setPressed(false) : null,
-      onTapCancel: isEnabled ? () => _setPressed(false) : null,
+      onTapDown: enabled ? (_) => _setPressed(true) : null,
+      onTapUp: enabled ? (_) => _setPressed(false) : null,
+      onTapCancel: enabled ? () => _setPressed(false) : null,
       onTap: widget.onTap,
       behavior: HitTestBehavior.translucent,
-      child: AnimatedScale(
-        scale: _pressed ? _pressedScale : 1,
-        duration: _pressDuration,
-        curve: Curves.easeOut,
-        child: widget.child,
-      ),
+      child: ScaleTransition(scale: _scale, child: widget.child),
     );
   }
 }

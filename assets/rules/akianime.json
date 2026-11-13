@@ -2,14 +2,14 @@
   "format": "anx-rule/2",
   "id": "akianime",
   "name": "萌番 AkiAnime",
-  "baseUrl": "https://www.akianime.cc/",
-  "iconUrl": "https://www.akianime.cc/template/dsn2/static/img/ico.png",
-  "description": "萌番 AkiAnime 动漫源，源网址 https://www.akianime.cc/",
+  "baseUrl": "https://www.akianime.com/",
+  "iconUrl": "https://www.akianime.com/template/dsn2/static/img/ico.png",
+  "description": "萌番 AkiAnime 动漫源，源网址 https://www.akianime.com/",
   "pipeline": {
     "headers": {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
       "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Referer": "https://www.akianime.cc/"
+      "Referer": "https://www.akianime.com/"
     },
     "search": [
       {
@@ -32,7 +32,7 @@
       {
         "op": "follow",
         "headers": {
-          "Referer": "https://www.akianime.cc/"
+          "Referer": "https://www.akianime.com/"
         }
       },
       {
@@ -50,7 +50,7 @@
       {
         "op": "follow",
         "headers": {
-          "Referer": "https://www.akianime.cc/"
+          "Referer": "https://www.akianime.com/"
         }
       },
       {
@@ -108,7 +108,7 @@
               "op": "fetch",
               "url": "/static/js/playerconfig.js",
               "headers": {
-                "Referer": "https://www.akianime.cc/"
+                "Referer": "https://www.akianime.com/"
               }
             },
             {
@@ -144,7 +144,7 @@
               "op": "fetch",
               "url": "{parserBase:raw}{playerUrl:raw}",
               "headers": {
-                "Referer": "https://www.akianime.cc/"
+                "Referer": "https://www.akianime.com/"
               }
             },
             {

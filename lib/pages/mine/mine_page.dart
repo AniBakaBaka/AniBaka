@@ -1,3 +1,4 @@
+import 'package:baka/app/navigation.dart';
 import 'package:baka/core/account_session.dart';
 import 'dart:io';
 
@@ -140,10 +141,6 @@ class _MinePageState extends State<MinePage> {
     );
   }
 
-  void _navTo(Widget page) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => page));
-  }
-
   Widget _buildHeader(BuildContext context, bool isDark) {
     final bool isLogin = Get.find<AccountSession>().isLoggedIn;
     final bool hasIdentity = Get.find<AccountSession>().hasIdentity;
@@ -157,7 +154,7 @@ class _MinePageState extends State<MinePage> {
           child: Row(
             children: [
               ScaleButton(
-                onTap: () => Navigator.pushNamed(context, 'Baka://login'),
+                onTap: () => NavigationService.toLogin(context),
                 child: CircleAvatar(
                   radius: 30,
                   backgroundColor: isDark
@@ -249,13 +246,19 @@ class _MinePageState extends State<MinePage> {
                   if (isLogin && !Platform.isWindows)
                     _buildHeaderBtn(
                       icon: Icons.qr_code_scanner,
-                      onTap: () => _navTo(const QrScannerPage()),
+                      onTap: () => NavigationService.push<void>(
+                        context,
+                        const QrScannerPage(),
+                      ),
                       isDark: isDark,
                     ),
                   if (isLogin && !Platform.isWindows) const SizedBox(width: 6),
                   _buildHeaderBtn(
                     icon: Icons.settings_outlined,
-                    onTap: () => _navTo(const AppSettingsPage()),
+                    onTap: () => NavigationService.push<void>(
+                      context,
+                      const AppSettingsPage(),
+                    ),
                     isDark: isDark,
                   ),
                 ],
@@ -314,7 +317,10 @@ class _MinePageState extends State<MinePage> {
         Colors.blueAccent,
         () => widget.onOpenLibrary != null
             ? widget.onOpenLibrary!(0)
-            : _navTo(const LibraryPage(initialIndex: 0)),
+            : NavigationService.push<void>(
+                context,
+                const LibraryPage(initialIndex: 0),
+              ),
       ),
       _DashItem(
         '追番',
@@ -322,7 +328,10 @@ class _MinePageState extends State<MinePage> {
         Colors.pinkAccent,
         () => widget.onOpenLibrary != null
             ? widget.onOpenLibrary!(1)
-            : _navTo(const LibraryPage(initialIndex: 1)),
+            : NavigationService.push<void>(
+                context,
+                const LibraryPage(initialIndex: 1),
+              ),
       ),
       _DashItem(
         '下载',
@@ -612,7 +621,8 @@ class _MinePageState extends State<MinePage> {
             icon: Icons.video_library_outlined,
             color: Colors.indigoAccent,
             isDark: isDark,
-            onTap: () => _navTo(const MediaLibraryPage()),
+            onTap: () =>
+                NavigationService.push<void>(context, const MediaLibraryPage()),
           ),
         ),
         const SizedBox(width: 12),
@@ -629,7 +639,10 @@ class _MinePageState extends State<MinePage> {
                   : Icons.extension_outlined,
               color: Colors.deepOrangeAccent,
               isDark: isDark,
-              onTap: () => _navTo(const SourceManagementPage()),
+              onTap: () => NavigationService.push<void>(
+                context,
+                const SourceManagementPage(),
+              ),
             ),
           ),
         ),

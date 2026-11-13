@@ -1,8 +1,9 @@
+import 'package:baka/app/page_routes.dart';
+import 'package:baka/instance.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'instance.dart';
 
 class ThemeColors {
   static const primary = Color.fromRGBO(0, 119, 182, 1);
@@ -64,20 +65,10 @@ class AppFonts {
       Instances.sp.getInt(fontWeightKey) ?? defaultFontWeightIndex;
 }
 
-// Keep Flutter's gesture tracking/cancellation, but finish ordinary back
-// navigation promptly. The SDK default inherits the 450 ms forward duration.
-class _AppPredictiveBackPageTransitionsBuilder
-    extends PredictiveBackPageTransitionsBuilder {
-  const _AppPredictiveBackPageTransitionsBuilder();
-
-  @override
-  Duration get reverseTransitionDuration => const Duration(milliseconds: 220);
-}
-
 const _pageTransitionsTheme = PageTransitionsTheme(
   builders: {
-    TargetPlatform.android: _AppPredictiveBackPageTransitionsBuilder(),
-    TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+    TargetPlatform.android: ContainerPageTransitionsBuilder(),
+    TargetPlatform.iOS: ContainerPageTransitionsBuilder(),
     TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
     TargetPlatform.windows: ZoomPageTransitionsBuilder(),
   },

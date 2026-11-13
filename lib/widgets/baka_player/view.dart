@@ -13,7 +13,6 @@ import 'package:baka/models/skip_selection.dart';
 import 'package:baka/models/subtitle_config.dart';
 import 'package:baka/pages/search/search_controller.dart';
 import 'package:baka/utils/toast_utils.dart';
-import 'package:baka/app/platform_page_route.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:baka/widgets/common/platform_tooltip.dart';
@@ -136,11 +135,11 @@ class _BakaPlayerState extends State<BakaPlayer> {
         if (!mounted) return;
         widget.onFullScreenChanged?.call(true);
         await Navigator.of(context).push(
-          platformPageRoute<void>(
+          PageRouteBuilder<void>(
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
             allowSnapshotting: false,
-            builder: (_) => Scaffold(
+            pageBuilder: (_, _, _) => Scaffold(
               backgroundColor: Colors.black,
               body: BakaPlayer(
                 controller: widget.controller,

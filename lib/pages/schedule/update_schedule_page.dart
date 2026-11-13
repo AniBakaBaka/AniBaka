@@ -4,7 +4,6 @@ import 'package:baka/utils/bgm_utils.dart';
 import 'package:baka/app/navigation.dart';
 import 'package:baka/app_state.dart';
 import 'package:baka/core/content_filter.dart';
-import 'package:baka/instance.dart';
 import 'package:baka/models/anime_schedule.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/pages/schedule/schedule_service.dart';
@@ -39,8 +38,6 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
   bool _loading = true;
   String? _error;
   int _loadGeneration = 0;
-  double _lastScrollOffset = 0;
-  AppState? _appState;
 
   DateTime _now() => widget.now?.call() ?? DateTime.now();
 
@@ -49,12 +46,6 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     contentFilter.addListener(_filterChanged);
-    if (!Instances.isDesktopPlatform &&
-        !Instances.isTV &&
-        Get.isRegistered<AppState>()) {
-      _appState = Get.find<AppState>();
-      _scrollController.addListener(_onScroll);
-    }
     unawaited(_loadSchedule());
   }
 
@@ -70,15 +61,6 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && scheduleToday(_now()) != _today) {
       unawaited(_loadSchedule(force: true));
-    }
-  }
-
-  void _onScroll() {
-    if (!_scrollController.hasClients) return;
-    final offset = _scrollController.offset;
-    if ((offset - _lastScrollOffset).abs() > 50) {
-      _appState?.updateScrollDirection(offset > _lastScrollOffset);
-      _lastScrollOffset = offset;
     }
   }
 
@@ -141,9 +123,8 @@ class _UpdateSchedulePageState extends State<UpdateSchedulePage>
       _selectedDay = day;
       _updateEntries();
     });
-    _lastScrollOffset = 0;
     if (_scrollController.hasClients) _scrollController.jumpTo(0);
-    _appState?.updateScrollDirection(false);
+    if (Get.isRegistered<AppState>()) Get.find<AppState>().showBottomNav(true);
   }
 
   @override
@@ -705,7 +686,7 @@ class _ScheduleRowState extends State<_ScheduleRow> {
       if (entry.bgmId == null) {
         NavigationService.toSearch(context, keyword: entry.title);
       } else {
-        navigateToDetail(context, entry.post, heroTag: heroTag);
+        NavigationService.toDetail(context, entry.post, heroTag: heroTag);
       }
     }
 

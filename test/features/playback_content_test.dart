@@ -180,9 +180,12 @@ void main() {
           () => content.data['title'] = 'mutation',
           throwsUnsupportedError,
         );
-        final projection = content.buildDetailData()..['title'] = 'view only';
+        final projection = content.detailData;
         expect(projection.containsKey('videoList'), isFalse);
-        expect(projection['title'], 'view only');
+        expect(projection['title'], 'One');
+        // Rebuilds see the same read-only item until its inputs change.
+        expect(identical(content.detailData, projection), isTrue);
+        expect(() => projection['title'] = 'view', throwsUnsupportedError);
         expect(identical(content.request.episodes, handoff.episodes), isTrue);
         expect(identical(content.data, handoff.metadata), isTrue);
         expect(content.title, 'One');

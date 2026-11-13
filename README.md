@@ -119,7 +119,8 @@ fvm flutter build ios --release --no-codesign
 ### 组织维护的依赖
 
 `media_kit_video` 和 `screen_brightness` 通过 pub 的 Git 依赖引用组织 fork，
-`media_kit_libs_windows_video` 通过 Git 覆盖固定到同一 media-kit 提交。
+`media_kit_libs_ios_video`、`media_kit_libs_macos_video` 和 `media_kit_libs_windows_video`
+通过 Git 覆盖固定到与 `media_kit_video` 相同的提交。Apple 平台的原生库提供视频渲染插件需要的 SwiftPM 依赖。
 `pubspec.yaml` 固定提交，`pubspec.lock` 记录解析结果。运行 `fvm flutter pub get`
 即可获取，无需复制 `third_party` 或修改 Pub 缓存。
 

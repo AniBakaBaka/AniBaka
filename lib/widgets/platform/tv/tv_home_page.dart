@@ -1,3 +1,4 @@
+import 'package:baka/app/navigation.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/anime_filter.dart';
 import 'package:baka/models/bgm.dart';
@@ -563,7 +564,8 @@ class _TvPosterCard extends StatelessWidget {
       onFocusChange: (focused) {
         if (focused) onFocused();
       },
-      onPressed: () => navigateToDetail(context, data, posIndex: data['index']),
+      onPressed: () =>
+          NavigationService.toDetail(context, data, posIndex: data['index']),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: buildCachedImage(data, double.infinity, double.infinity),

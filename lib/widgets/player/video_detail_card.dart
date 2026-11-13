@@ -1,3 +1,4 @@
+import 'package:baka/app/navigation.dart';
 import 'package:baka/services/playback/playback_content.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -240,10 +241,7 @@ class _TagChip extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
 
     return ScaleButton(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => TagPage(tag, 0)),
-      ),
+      onTap: () => NavigationService.push<void>(context, TagPage(tag, 0)),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(

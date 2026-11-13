@@ -1,3 +1,4 @@
+import 'package:baka/app/page_routes.dart';
 import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/bgm.dart';
@@ -23,9 +24,13 @@ class TvAnimeDetailPlaceholder extends StatefulWidget {
   final Map data;
   final List<PlaybackEpisode>? episodes;
 
+  /// The episode playback starts from, when the card remembers one.
+  final int? episodeIndex;
+
   const TvAnimeDetailPlaceholder({
     required this.data,
     this.episodes,
+    this.episodeIndex,
     super.key,
   });
 
@@ -46,16 +51,20 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   int? get _subjectId => _bgmInfo.subjectId;
 
   // Enrich only at the navigation boundary; rendering shares the input data.
-  PlaybackRequest get _playbackRequest => PlaybackRequest.fromMap(
-    widget.data,
-    metadataUpdates: {
-      'nsfw': _detail.nsfw,
-      if (_subjectId != null) 'bgmId': _subjectId,
-      if (_bgmInfo.score != null) 'score': _bgmInfo.score,
-      if (_bgmInfo.imageUrl != null) 'bgmImageUrl': _bgmInfo.imageUrl,
-      if (_detail.logoUrl.isNotEmpty) 'logoUrl': _detail.logoUrl,
-    },
-  );
+  PlaybackRequest get _playbackRequest {
+    final request = PlaybackRequest.fromMap(
+      widget.data,
+      metadataUpdates: {
+        'nsfw': _detail.nsfw,
+        if (_subjectId != null) 'bgmId': _subjectId,
+        if (_bgmInfo.score != null) 'score': _bgmInfo.score,
+        if (_bgmInfo.imageUrl != null) 'bgmImageUrl': _bgmInfo.imageUrl,
+        if (_detail.logoUrl.isNotEmpty) 'logoUrl': _detail.logoUrl,
+      },
+    );
+    if (widget.episodeIndex case final index?) request.episodeIndex = index;
+    return request;
+  }
 
   int? get _validPostId => AnimeCollection.postIdFrom(widget.data);
 
@@ -113,7 +122,9 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
             ),
         ];
       }
-      setState(() => _detail = detail);
+      // The page is a snapshot while its transition runs.
+      await pageSettled(context);
+      if (mounted) setState(() => _detail = detail);
     } catch (e) {
       Log.w('TvDetail', '获取番剧数据失败: $e');
     }

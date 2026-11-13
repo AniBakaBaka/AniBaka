@@ -108,6 +108,13 @@ class RuleValidator {
             'aes-gcm',
           };
           if (!algos.contains(algo)) errors.add('$at: 未知 algo: $algo');
+          if (step.flag('ivPrefix') &&
+              (algo != 'aes-cbc' ||
+                  (step.str('mode') ?? 'decrypt').toLowerCase() != 'decrypt' ||
+                  step.params.containsKey('iv') ||
+                  step.params.containsKey('ivRandom'))) {
+            errors.add('$at: ivPrefix 仅用于未另设 IV 的 AES-CBC 解密');
+          }
           break;
         case 'baseN':
           final alphabet = step.str('alphabet') ?? '';

@@ -203,6 +203,57 @@ void main() {
     },
   );
 
+  test('HLS segments stream with repeated upstream response headers', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final base = 'http://127.0.0.1:${server.port}';
+    server.listen((request) async {
+      final response = request.response;
+      if (request.uri.path == '/index.m3u8') {
+        response.write(_manifest);
+      } else {
+        response.headers
+          ..contentType = ContentType('video', 'mp2t')
+          ..noFolding(HttpHeaders.lastModifiedHeader)
+          ..noFolding(HttpHeaders.cacheControlHeader)
+          ..add(HttpHeaders.lastModifiedHeader, 'Mon, 09 Nov 2026 12:00:00 GMT')
+          ..add(HttpHeaders.lastModifiedHeader, 'Tue, 10 Nov 2026 12:00:00 GMT')
+          ..add(HttpHeaders.cacheControlHeader, 'public')
+          ..add(HttpHeaders.cacheControlHeader, 'max-age=60');
+        response.add([1, 2, 3]);
+      }
+      await response.close();
+    });
+    final adapter = _adapter(base, proxyMedia: true);
+    final dio = Dio();
+    addTearDown(() async {
+      adapter.dispose();
+      dio.close(force: true);
+      await server.close(force: true);
+    });
+
+    final media = await adapter.preparePlaybackMedia((
+      url: '$base/index.m3u8',
+      httpHeaders: const {},
+    ), filterHlsAds: false);
+    final manifest = (await dio.get<String>(media.url)).data!;
+    final segment = manifest
+        .split('\n')
+        .firstWhere((s) => s.startsWith('http'));
+    final response = await dio.get<List<int>>(
+      segment,
+      options: Options(responseType: ResponseType.bytes),
+    );
+    expect(response.statusCode, HttpStatus.ok);
+    expect(response.data, [1, 2, 3]);
+    expect(response.headers.value(HttpHeaders.contentTypeHeader), 'video/mp2t');
+    expect(response.headers[HttpHeaders.lastModifiedHeader], isNull);
+    final cacheControl = response.headers[HttpHeaders.cacheControlHeader]!.join(
+      ',',
+    );
+    expect(cacheControl, contains('public'));
+    expect(cacheControl, contains('max-age=60'));
+  });
+
   test('late A cannot replace B proxy or its media headers', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final base = 'http://127.0.0.1:${server.port}';

@@ -1,3 +1,4 @@
+import 'package:baka/app/navigation.dart';
 import 'package:flutter/material.dart';
 
 import 'package:baka/widgets/anime/post_card.dart';
@@ -162,17 +163,9 @@ class RankSection extends StatelessWidget {
       ),
     );
     if (item == null) return card;
-    return Builder(
-      builder: (cardContext) => GestureDetector(
-        onTap: () => navigateToDetail(
-          context,
-          item,
-          heroTag: heroTag,
-          cardContext: cardContext,
-          cardPreview: card,
-        ),
-        child: card,
-      ),
+    return GestureDetector(
+      onTap: () => NavigationService.toDetail(context, item, heroTag: heroTag),
+      child: card,
     );
   }
 

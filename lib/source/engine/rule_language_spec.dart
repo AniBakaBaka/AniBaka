@@ -57,6 +57,9 @@ with an op field. Supported recipes: maccms, player_aaaa.
 Supported operations:
 $ops
 
+For AES-CBC decryption, crypto can read the first 16 decoded input bytes as
+the IV with ivPrefix: true. Omit iv and ivRandom when using this option.
+
 Stage flags are optional booleans on play-stage steps (branch steps included):
 - proxyMedia: stream HTTP media through the app's network client, preserving
   the source's proxy/DoH/ECH policy as well as Range and HEAD requests for files.

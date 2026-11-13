@@ -1,3 +1,4 @@
+import 'package:baka/app/navigation.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/theme.dart';
 import 'package:baka/widgets/anime/post_card.dart';
@@ -920,7 +921,7 @@ class _WindowsPosterTileState extends State<WindowsPosterTile> {
     }
     final tile = _TileGesture(
       onHover: (value) => setState(() => _hovered = value),
-      onTap: () => navigateToDetail(
+      onTap: () => NavigationService.toDetail(
         context,
         data,
         posIndex: widget.posIndex,

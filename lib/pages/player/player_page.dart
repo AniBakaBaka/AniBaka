@@ -242,7 +242,7 @@ class _PlayerPageState extends State<PlayerPage>
     _failure = null;
     late final VideoSourceSearchController search;
     search = VideoSourceSearchController(
-      seedData: _content.buildDetailData(),
+      seedData: _content.detailData,
       autoMatchMode: true,
       targetEpisodeIndex: _content.currPlayIndex,
       onMatchFound: (request) {
@@ -603,9 +603,7 @@ class _PlayerPageState extends State<PlayerPage>
         content.stopAdapterPlaybackKeepAlive();
       }
 
-      final search = _sourceSearch ??= _newSourceSearch(
-        content.buildDetailData(),
-      );
+      final search = _sourceSearch ??= _newSourceSearch(content.detailData);
       if (search.results.isEmpty) await search.startSearch();
       while (mounted) {
         final next = await search.findNextPlayableCandidate(
@@ -742,7 +740,7 @@ class _PlayerPageState extends State<PlayerPage>
   Future<void> _openSourceSheet() async {
     final content = _content;
     if (content.isLocalSource) return;
-    final seedData = content.buildDetailData();
+    final seedData = content.detailData;
     final selection = await VideoSourceSearchSheet.show(
       context,
       seedData: seedData,
@@ -773,7 +771,7 @@ class _PlayerPageState extends State<PlayerPage>
       videoId: '${content.data['id']}',
       isFullScreen:
           _fullscreen && (downloadMode || !Instances.isDesktopPlatform),
-      postDetail: content.buildDetailData(),
+      postDetail: content.detailData,
       urlResolver: content.resolveEpisodeUrl,
       startInDownloadMode: downloadMode,
       currentLineIndex: downloadMode ? null : content.currUrl,
@@ -845,10 +843,10 @@ class _PlayerPageState extends State<PlayerPage>
         _failure == null) {
       return Instances.isTV
           ? TvAnimeDetailPlaceholder(
-              data: content.buildDetailData(),
+              data: content.detailData,
               episodes: content.videoList,
             )
-          : AnimeDetailPlaceholder(data: content.buildDetailData());
+          : AnimeDetailPlaceholder(data: content.detailData);
     }
     if (Instances.isTV) {
       return TvPlayerLayout(

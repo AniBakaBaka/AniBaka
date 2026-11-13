@@ -1,19 +1,17 @@
-import 'package:baka/models/playback_request.dart';
-import 'package:baka/app/app_runtime.dart';
-import 'package:baka/core/account_session.dart';
 import 'dart:io';
 import 'dart:ui' show PointerDeviceKind;
 
+import 'package:baka/app/app_runtime.dart';
 import 'package:baka/app_state.dart';
+import 'package:baka/core/account_session.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/pages/home/home_page.dart';
 import 'package:baka/pages/library/library_page.dart';
-import 'package:baka/pages/login/login_page.dart';
 import 'package:baka/pages/mine/mine_page.dart';
 import 'package:baka/pages/player/download_page.dart';
-import 'package:baka/pages/player/player_page.dart';
 import 'package:baka/pages/schedule/update_schedule_page.dart';
 import 'package:baka/pages/thread/thread_page.dart';
+import 'package:baka/theme.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/navigation/bottom_navigation.dart';
 import 'package:baka/widgets/platform/macos/macos_title_bar.dart';
@@ -21,11 +19,10 @@ import 'package:baka/widgets/platform/windows/windows_sidebar.dart';
 import 'package:baka/widgets/platform/windows/windows_title_bar.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:get/get.dart' hide ContextExtensionss;
-
-import 'package:baka/theme.dart';
 
 class AppScrollBehavior extends MaterialScrollBehavior {
   const AppScrollBehavior();
@@ -43,32 +40,6 @@ class AppScrollBehavior extends MaterialScrollBehavior {
 
 class BakaApp extends StatelessWidget {
   const BakaApp({super.key});
-
-  Route? _onGenerateRoute(RouteSettings settings) {
-    switch (settings.name) {
-      case 'Baka://home':
-        return MaterialPageRoute<void>(
-          settings: settings,
-          builder: (_) => const HomePage(),
-        );
-      case 'Baka://player':
-        final args = settings.arguments as Map<String, dynamic>?;
-        if (args?['data'] != null) {
-          return MaterialPageRoute<void>(
-            settings: settings,
-            builder: (_) =>
-                PlayerPage(request: PlaybackRequest.fromMap(args!['data'])),
-          );
-        }
-        return null;
-      case 'Baka://login':
-        return MaterialPageRoute<void>(
-          settings: settings,
-          builder: (_) => const Login(),
-        );
-    }
-    return null;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -94,7 +65,6 @@ class BakaApp extends StatelessWidget {
           darkTheme: themes.dark,
           home: const MyHomePage(),
           title: 'Baka',
-          onGenerateRoute: _onGenerateRoute,
           builder: (context, child) => Obx(() {
             final mediaQuery = MediaQuery.of(context);
             return MediaQuery(
@@ -104,7 +74,7 @@ class BakaApp extends StatelessWidget {
                     mediaQuery.disableAnimations ||
                     appState.reduceVisualEffects,
               ),
-              child: child ?? const SizedBox.shrink(),
+              child: child!,
             );
           }),
         );
@@ -128,8 +98,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     AppNavItem(iconPath: 'assets/smiling-face', label: '我的'),
   ];
 
-  late final List<Widget?> _pages;
-  late final AppState _appState;
+  final _appState = Get.find<AppState>();
+
+  /// Tab pages are built on first visit and then kept.
+  final _pages = List<Widget?>.filled(
+    Instances.isDesktopPlatform ? 6 : 4,
+    null,
+  );
 
   int _lastBackPressTime = 0;
 
@@ -137,9 +112,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _appState = Get.find<AppState>();
-
-    _pages = List<Widget?>.filled(Instances.isDesktopPlatform ? 6 : 4, null);
   }
 
   @override
@@ -152,23 +124,32 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       Get.find<AppRuntime>().checkSourceUpdates();
-    }
-    if (state == AppLifecycleState.detached) {
-      _clearCacheOnExit();
+    } else if (state == AppLifecycleState.detached) {
+      Get.find<AppRuntime>().close();
     }
   }
 
-  Future<void> _clearCacheOnExit() => Get.find<AppRuntime>().close();
-
-  void _onPopInvoked(bool didPop, dynamic result) {
+  void _onPopInvoked(bool didPop, Object? result) {
     if (didPop) return;
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now - _lastBackPressTime > 1000) {
       showSnackBar('再按一次退出应用', gravity: ToastGravity.CENTER);
       _lastBackPressTime = now;
     } else {
-      _clearCacheOnExit().whenComplete(SystemNavigator.pop);
+      Get.find<AppRuntime>().close().whenComplete(SystemNavigator.pop);
     }
+  }
+
+  /// Hides the navigation bar while content scrolls down. User scroll
+  /// notifications only arrive when the drag direction changes.
+  bool _onUserScroll(UserScrollNotification notification) {
+    if (notification.metrics.axis == Axis.vertical &&
+        notification.direction != ScrollDirection.idle) {
+      _appState.showBottomNav(
+        notification.direction == ScrollDirection.forward,
+      );
+    }
+    return false;
   }
 
   Widget _pageAt(int index) {
@@ -212,28 +193,36 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       );
     }
 
-    final theme = Theme.of(context);
-    final reduceVisualEffects = context.reduceMotion;
-    final navigationDuration = reduceVisualEffects
-        ? Duration.zero
-        : const Duration(milliseconds: 300);
+    final desktop = Instances.isDesktopPlatform;
+    final pages = Obx(() {
+      final current = _appState.currentPageIndex.value;
+      return IndexedStack(
+        index: current,
+        children: [
+          for (var i = 0; i < _pages.length; i++)
+            TickerMode(
+              enabled: i == current,
+              child: i == current
+                  ? _pageAt(i)
+                  : _pages[i] ?? const SizedBox.shrink(),
+            ),
+        ],
+      );
+    });
 
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: _onPopInvoked,
       child: Scaffold(
-        extendBody: !Instances.isDesktopPlatform,
-        body: Stack(
-          children: [
-            Column(
-              children: [
-                if (Platform.isWindows && Instances.isDesktopPlatform)
-                  const WindowsTitleBar(),
-                if (Platform.isMacOS) const MacOSTitleBar(title: 'Baka'),
-                Expanded(
-                  child: Row(
-                    children: [
-                      if (Instances.isDesktopPlatform)
+        extendBody: !desktop,
+        body: desktop
+            ? Column(
+                children: [
+                  if (Platform.isWindows) const WindowsTitleBar(),
+                  if (Platform.isMacOS) const MacOSTitleBar(title: 'Baka'),
+                  Expanded(
+                    child: Row(
+                      children: [
                         Obx(() {
                           Get.find<AccountSession>().user.value;
                           return WindowsSidebar(
@@ -241,104 +230,26 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                             onPageChange: _appState.changePage,
                           );
                         }),
-                      Expanded(
-                        child: Obx(() {
-                          final currentIndex = _appState.currentPageIndex.value;
-                          return IndexedStack(
-                            index: currentIndex,
-                            children: [
-                              for (
-                                var index = 0;
-                                index < _pages.length;
-                                index++
-                              )
-                                TickerMode(
-                                  enabled: index == currentIndex,
-                                  child: index == currentIndex
-                                      ? _pageAt(index)
-                                      : (_pages[index] ??
-                                            const SizedBox.shrink()),
-                                ),
-                            ],
-                          );
-                        }),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            if (!Instances.isDesktopPlatform)
-              Obx(() {
-                if (_appState.currentPageIndex.value != 2) {
-                  return const SizedBox.shrink();
-                }
-                // 底栏总高 = 70 + max(系统底部安全区, 10)：FAB 必须跟着安全区抬升，
-                // 否则在手势条/三键导航设备上会叠进半透明栏里被模糊。
-                final safeBottom = MediaQuery.paddingOf(context).bottom;
-                final navBarBottom = 70 + (safeBottom < 10 ? 10.0 : safeBottom);
-                return Positioned(
-                  right: 24,
-                  bottom: navBarBottom + 16,
-                  child: AnimatedSlide(
-                    duration: navigationDuration,
-                    curve: Curves.easeOutCubic,
-                    offset: _appState.isBottomNavVisible.value
-                        ? Offset.zero
-                        : const Offset(0, 3),
-                    child: ExcludeSemantics(
-                      excluding: !_appState.isBottomNavVisible.value,
-                      child: _buildPostButton(theme),
+                        Expanded(child: pages),
+                      ],
                     ),
                   ),
-                );
-              }),
-          ],
-        ),
-        bottomNavigationBar: !Instances.isDesktopPlatform
-            ? Obx(
+                ],
+              )
+            : NotificationListener<UserScrollNotification>(
+                onNotification: _onUserScroll,
+                child: pages,
+              ),
+        bottomNavigationBar: desktop
+            ? null
+            : Obx(
                 () => AppBottomNavigation(
                   visible: _appState.isBottomNavVisible.value,
                   currentIndex: _appState.currentPageIndex.value,
                   onTap: _appState.changePage,
                   items: _navItems,
                 ),
-              )
-            : null,
-      ),
-    );
-  }
-
-  Widget _buildPostButton(ThemeData theme) {
-    const radius = BorderRadius.all(Radius.circular(28));
-    final reduceVisualEffects = context.reduceMotion;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          HapticFeedback.mediumImpact();
-          _appState.triggerSendComment();
-        },
-        borderRadius: radius,
-        child: Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primary,
-            borderRadius: radius,
-            // 光晕减淡：按钮悬在毛玻璃底栏上方，重阴影会被玻璃取样成彩色涂抹。
-            boxShadow: reduceVisualEffects
-                ? null
-                : [
-                    BoxShadow(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.22),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-          ),
-          child: const Icon(Icons.edit_rounded, color: Colors.white, size: 24),
-        ),
+              ),
       ),
     );
   }

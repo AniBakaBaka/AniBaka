@@ -7,7 +7,6 @@ import 'package:baka/utils/title_matcher.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/utils/json_values.dart';
 
-
 import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/api/bgm.dart';
 import 'package:baka/api/post.dart';
@@ -242,10 +241,29 @@ class PlaybackContent {
   String? _logoUrl;
   String get logoUrl => _logoUrl ?? AnimeDetailViewData.resolveLogoUrl(data);
 
-  /// A fresh projection for old views/search sheets; never shared writable state.
-  Map<String, dynamic> buildDetailData() {
+  ({
+    PlaybackRequest request,
+    BgmInfo bgmInfo,
+    Map<String, dynamic>? bgmDetail,
+    String? logo,
+  })?
+  _detailInputs;
+  Map<String, dynamic>? _detailData;
+
+  /// The item as the detail page and source search read it. One map is kept
+  /// until the request or its Bangumi metadata changes, so widgets given it
+  /// see the same item across rebuilds.
+  Map<String, dynamic> get detailData {
+    final inputs = (
+      request: request,
+      bgmInfo: bgmInfo,
+      bgmDetail: bgmDetailData,
+      logo: _logoUrl,
+    );
+    if (_detailData != null && _detailInputs == inputs) return _detailData!;
+    _detailInputs = inputs;
     final logo = logoUrl;
-    return {
+    return _detailData = Map.unmodifiable({
       ...data,
       'source': request.source,
       'bgmId': ?bgmInfo.subjectId,
@@ -253,7 +271,7 @@ class PlaybackContent {
       'bgmImageUrl': ?coverImageUrl,
       'bgmDetailData': ?bgmDetailData,
       if (logo.isNotEmpty) 'logoUrl': logo,
-    };
+    });
   }
 
   PlaybackMediaInfo get currentMediaInfo {

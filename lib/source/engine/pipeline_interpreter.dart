@@ -561,6 +561,7 @@ class PipelineInterpreter {
   ///   前端拼接后 base64）用 `template` 先拼好、`keyEncoding: base64` 即可。
   /// - `ivRandom`：整数，忽略 `iv` 改用 N 字节安全随机 IV（GCM 加密必需）。
   /// - `ivVar`：把本次使用的 IV（base64）写入该变量，供后续构造请求体引用。
+  /// - `ivPrefix`：AES-CBC 解密时，从输入字节的前 16 字节读取 IV。
   /// - `inputEncoding`：AES 解密时输入密文的编码（`base64` 默认 / `hex`）。
   /// - `outputEncoding`：AES 加密输出编码（`base64` 默认 / `hex`）；
   ///   AES 解密输出按明文文本处理。
@@ -641,9 +642,25 @@ class PipelineInterpreter {
       (step.str('keyEncoding') ?? 'utf8').toLowerCase(),
     );
 
+    Uint8List? cipherBytes = mode == 'encrypt'
+        ? null
+        : _decodeBytes(
+            input,
+            (step.str('inputEncoding') ?? 'base64').toLowerCase(),
+          );
     final ivRandom = step.intValue('ivRandom');
     final enc.IV ivObj;
-    if (ivRandom != null && ivRandom > 0) {
+    if (step.flag('ivPrefix')) {
+      const blockSize = 16;
+      if (aesMode != enc.AESMode.cbc ||
+          cipherBytes == null ||
+          cipherBytes.length < 2 * blockSize ||
+          cipherBytes.length % blockSize != 0) {
+        throw const FormatException('无效的 AES-CBC IV 前缀或密文长度');
+      }
+      ivObj = enc.IV(Uint8List.sublistView(cipherBytes, 0, blockSize));
+      cipherBytes = Uint8List.sublistView(cipherBytes, blockSize);
+    } else if (ivRandom != null && ivRandom > 0) {
       ivObj = enc.IV.fromSecureRandom(ivRandom);
     } else {
       ivObj = enc.IV(
@@ -673,11 +690,7 @@ class PipelineInterpreter {
           ? encrypted.base16
           : encrypted.base64;
     }
-    final cipherBytes = _decodeBytes(
-      input,
-      (step.str('inputEncoding') ?? 'base64').toLowerCase(),
-    );
-    return encrypter.decrypt(enc.Encrypted(cipherBytes), iv: ivObj).trim();
+    return encrypter.decrypt(enc.Encrypted(cipherBytes!), iv: ivObj).trim();
   }
 
   /// `baseN`：整数 ↔ 自定义字母表进制串（小端），可加固定前后缀。
@@ -1726,7 +1739,6 @@ class PipelineInterpreter {
     } catch (_) {}
     return false;
   }
-
 
   Map<String, String> _renderMap(Object? raw, _PipelineContext ctx) {
     if (raw is! Map) return const <String, String>{};

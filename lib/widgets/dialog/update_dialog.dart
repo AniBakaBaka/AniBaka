@@ -212,7 +212,7 @@ Future<bool> showAnnouncementDialog({
   required String content,
   required UpdateInfo updateInfo,
 }) async {
-  final context = Instances.currentContext;
+  final context = Instances.navigatorKey.currentContext;
   if (context == null) return false;
   final hasUpdate = updateInfo.hasUpdate;
   final forceUpdate = updateInfo.forceUpdate;

@@ -14,6 +14,7 @@ import 'package:baka/models/playback_request.dart';
 import 'package:baka/services/collection/collection_repository.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/app/navigation.dart';
+import 'package:baka/app/page_routes.dart';
 
 import 'dart:async';
 import 'package:url_launcher/url_launcher_string.dart';
@@ -27,9 +28,21 @@ import 'package:baka/widgets/anime_detail/anime_detail_comments.dart';
 import 'package:baka/widgets/anime_detail/anime_detail_related.dart';
 
 class AnimeDetailPlaceholder extends StatefulWidget {
-  final Map<String, dynamic> data;
+  /// The item that opened the page; read only, never copied.
+  final Map data;
 
-  const AnimeDetailPlaceholder({required this.data, super.key});
+  /// The desktop cover flight's tag; defaults to the card's own.
+  final Object? heroTag;
+
+  /// The episode playback starts from, when the card remembers one.
+  final int? episodeIndex;
+
+  const AnimeDetailPlaceholder({
+    required this.data,
+    this.heroTag,
+    this.episodeIndex,
+    super.key,
+  });
 
   @override
   State<AnimeDetailPlaceholder> createState() => _AnimeDetailPlaceholderState();
@@ -57,6 +70,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
       bgmInfo: _bgmInfo,
       anibaka: _anibakaData,
       bgm: _detailData,
+      heroTag: widget.heroTag,
     );
   }
 
@@ -99,72 +113,60 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   }
 
   void _startWatching() {
-    NavigationService.toPlayback(
-      context,
-      PlaybackRequest.fromMap(
-        widget.data,
-        metadataUpdates: {
-          if (_subjectId != null) 'bgmId': _subjectId,
-          if (_bgmInfo.score != null) 'score': _bgmInfo.score,
-          if (_bgmInfo.imageUrl != null) 'bgmImageUrl': _bgmInfo.imageUrl,
-          if (_detailData != null) 'bgmDetailData': _detailData,
-          if (_detail.logoUrl.isNotEmpty) 'logoUrl': _detail.logoUrl,
-        },
-      ),
+    final request = PlaybackRequest.fromMap(
+      widget.data,
+      metadataUpdates: {
+        if (_subjectId != null) 'bgmId': _subjectId,
+        if (_bgmInfo.score != null) 'score': _bgmInfo.score,
+        if (_bgmInfo.imageUrl != null) 'bgmImageUrl': _bgmInfo.imageUrl,
+        if (_detailData != null) 'bgmDetailData': _detailData,
+        if (_detail.logoUrl.isNotEmpty) 'logoUrl': _detail.logoUrl,
+      },
     );
+    if (widget.episodeIndex case final index?) request.episodeIndex = index;
+    NavigationService.toPlayback(context, request);
+  }
+
+  /// Applies loaded data once the page is at rest: while its transition runs
+  /// the page is drawn from a snapshot, so a rebuild then only costs frames.
+  Future<void> _apply(int generation, VoidCallback update) async {
+    await pageSettled(context);
+    if (!mounted || generation != _loadGeneration) return;
+    setState(() {
+      update();
+      _rebuildDetail();
+    });
   }
 
   Future<void> _loadInitialData(int generation) async {
-    var resolved = _bgmInfo;
     final collectionRevision = _collectionRevision;
-    if (_subjectId == null) {
+    var bgmId = _subjectId;
+    if (bgmId == null) {
       try {
-        resolved = await resolveBgmFromData(widget.data);
+        final resolved = await resolveBgmFromData(widget.data);
         if (!mounted || generation != _loadGeneration) return;
-        setState(() {
-          _bgmInfo = resolved;
-          _rebuildDetail();
-        });
+        bgmId = resolved.subjectId;
+        unawaited(_apply(generation, () => _bgmInfo = resolved));
       } catch (e) {
         Log.w('Detail', '解析bgmId失败: $e');
       }
     }
-
-    if (!mounted || generation != _loadGeneration) return;
-    final bgmId = resolved.subjectId;
     if (bgmId == null) return;
 
     if (_anibakaData == null) {
       unawaited(
-        AniBakaApi.getAnimeDetail(bgmId)
-            .then((data) {
-              if (!mounted || generation != _loadGeneration || data == null) {
-                return;
-              }
-              setState(() {
-                _anibakaData = data;
-                _rebuildDetail();
-              });
-            })
-            .catchError((Object e) {
-              Log.w('Detail', '获取 AniBaka 详情失败: $e');
-            }),
+        AniBakaApi.getAnimeDetail(bgmId).then((data) async {
+          if (data != null) await _apply(generation, () => _anibakaData = data);
+        }, onError: (Object e) => Log.w('Detail', '获取 AniBaka 详情失败: $e')),
       );
     }
 
     if (_detailData == null) {
       unawaited(
-        getBgmSubject(bgmId)
-            .then((data) {
-              if (!mounted || generation != _loadGeneration) return;
-              setState(() {
-                _detailData = data;
-                _rebuildDetail();
-              });
-            })
-            .catchError((Object e) {
-              Log.w('Detail', '获取 BGM 条目失败: $e');
-            }),
+        getBgmSubject(bgmId).then(
+          (data) => _apply(generation, () => _detailData = data),
+          onError: (Object e) => Log.w('Detail', '获取 BGM 条目失败: $e'),
+        ),
       );
     }
 
@@ -557,8 +559,10 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
         (_) => _wrapTabContent(
           AnimeDetailRelatedSection(
             subjectId: subjectId,
-            onAnimeTap: (data) =>
-                NavigationService.toPlayer(context, data, fade: true),
+            onAnimeTap: (data) => NavigationService.toPlayback(
+              context,
+              PlaybackRequest.fromMap(data),
+            ),
           ),
         ),
       ));

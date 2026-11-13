@@ -8,8 +8,8 @@ import 'package:get/get.dart' hide ContextExtensionss;
 import 'package:baka/app_state.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/watch_party.dart';
+import 'package:baka/app/navigation.dart';
 import 'package:baka/pages/login/qr_scanner_page.dart';
-import 'package:baka/pages/player/player_page.dart';
 import 'package:baka/pages/thread/thread_controller.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/comment/comment_widget.dart';
@@ -23,7 +23,6 @@ class _ThreadTab {
   final String name;
   final ThreadController data;
   final ScrollController scroll = ScrollController();
-  double lastOffset = 0;
 
   Future<void> reply(String text, int rid, String runame) async {
     if (await sendComment(data.pid, text, rid: rid, runame: runame)) {
@@ -44,8 +43,7 @@ class ThreadPage extends StatefulWidget {
   State<ThreadPage> createState() => _ThreadPageState();
 }
 
-class _ThreadPageState extends State<ThreadPage>
-    with AutomaticKeepAliveClientMixin {
+class _ThreadPageState extends State<ThreadPage> {
   static final _gvRegex = RegExp(r'^gv(\d+)$');
   final _tabs = [
     _ThreadTab('#茶馆', 6),
@@ -61,12 +59,9 @@ class _ThreadPageState extends State<ThreadPage>
   );
   final _joiningRoomCode = ValueNotifier('');
   Completer<void>? _watchRoomsAbort;
-  late final Worker _commentWorker;
 
-  int _index = 0;
-
-  @override
-  bool get wantKeepAlive => true;
+  /// Only the header depends on the selected tab; the pages do not rebuild.
+  final _index = ValueNotifier(0);
 
   @override
   void initState() {
@@ -75,14 +70,10 @@ class _ThreadPageState extends State<ThreadPage>
       if (tab != null) tab.scroll.addListener(() => _onScroll(tab));
     }
     _tabs.first!.data.load();
-    _commentWorker = ever(Get.find<AppState>().sendCommentTrigger, (_) {
-      _sendComment();
-    });
   }
 
   @override
   void dispose() {
-    _commentWorker.dispose();
     _pageController.dispose();
     for (final tab in _tabs) {
       tab?.dispose();
@@ -90,27 +81,22 @@ class _ThreadPageState extends State<ThreadPage>
     _watchRoomsAbort?.complete();
     _watchRooms.dispose();
     _joiningRoomCode.dispose();
+    _index.dispose();
     super.dispose();
   }
 
   void _onScroll(_ThreadTab tab) {
-    if (tab != _tabs[_index] || !tab.scroll.hasClients) return;
-    if (tab.data.canLoadMore && tab.scroll.position.extentAfter < 400) {
+    if (tab.data.canLoadMore &&
+        tab == _tabs[_index.value] &&
+        tab.scroll.position.extentAfter < 400) {
       tab.data.load();
     }
-    if (Instances.isDesktopPlatform) return;
-    final offset = tab.scroll.offset;
-    if ((offset - tab.lastOffset).abs() <= 50) return;
-    Get.find<AppState>().updateScrollDirection(offset > tab.lastOffset);
-    tab.lastOffset = offset;
   }
 
   void _switch(int i, {bool fromPage = false}) {
-    if (i == _index) return;
-    setState(() => _index = i);
-    if (!fromPage) {
-      _pageController.jumpToPage(i);
-    }
+    if (i == _index.value) return;
+    _index.value = i;
+    if (!fromPage) _pageController.jumpToPage(i);
     final tab = _tabs[i];
     if (tab == null) {
       _refreshWatchRooms();
@@ -120,7 +106,8 @@ class _ThreadPageState extends State<ThreadPage>
   }
 
   Future<void> _sendComment() async {
-    final tab = _tabs[_index];
+    HapticFeedback.mediumImpact();
+    final tab = _tabs[_index.value];
     if (tab == null) {
       showSnackBar('一起看房间页不支持发帖');
       return;
@@ -163,10 +150,10 @@ class _ThreadPageState extends State<ThreadPage>
     try {
       final data = await getPostDetail(int.parse(match.group(1)!));
       if (mounted) {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => PlayerPage(request: PlaybackRequest.fromMap(data)),
-          ),
+        NavigationService.toPlayback(
+          context,
+          PlaybackRequest.fromMap(data),
+          autoMatch: false,
         );
       }
     } catch (e) {
@@ -176,37 +163,50 @@ class _ThreadPageState extends State<ThreadPage>
 
   @override
   Widget build(BuildContext context) {
-    super.build(context);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
+    final body = Column(
+      children: [
+        _header(theme, isDark),
+        Expanded(
+          child: PageView.builder(
+            controller: _pageController,
+            itemCount: _tabs.length,
+            onPageChanged: (i) => _switch(i, fromPage: true),
+            itemBuilder: (_, i) {
+              final tab = _tabs[i];
+              return tab == null
+                  ? ValueListenableBuilder(
+                      valueListenable: _watchRooms,
+                      builder: (_, snapshot, _) =>
+                          _watchPartyPage(theme, snapshot),
+                    )
+                  : ListenableBuilder(
+                      listenable: tab.data,
+                      builder: (_, _) => _page(tab, theme),
+                    );
+            },
+          ),
+        ),
+      ],
+    );
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
-      body: Column(
-        children: [
-          _header(theme, isDark),
-          Expanded(
-            child: PageView.builder(
-              controller: _pageController,
-              itemCount: _tabs.length,
-              onPageChanged: (i) => _switch(i, fromPage: true),
-              itemBuilder: (_, i) {
-                final tab = _tabs[i];
-                return tab == null
-                    ? ValueListenableBuilder(
-                        valueListenable: _watchRooms,
-                        builder: (_, snapshot, _) =>
-                            _watchPartyPage(theme, snapshot),
-                      )
-                    : ListenableBuilder(
-                        listenable: tab.data,
-                        builder: (_, _) => _page(tab, theme),
-                      );
-              },
+      body: Instances.isDesktopPlatform
+          ? body
+          : Stack(
+              children: [
+                body,
+                Positioned(
+                  right: 24,
+                  // The shell's navigation bar is the bottom inset here.
+                  bottom: MediaQuery.paddingOf(context).bottom + 22,
+                  child: _PostButton(onTap: _sendComment),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -463,11 +463,8 @@ class _ThreadPageState extends State<ThreadPage>
     }
   }
 
-  Future<void> _scanWatchParty() async {
-    await Navigator.of(
-      context,
-    ).push<void>(MaterialPageRoute(builder: (_) => const QrScannerPage()));
-  }
+  Future<void> _scanWatchParty() =>
+      NavigationService.push<void>(context, const QrScannerPage());
 
   Widget _header(ThemeData theme, bool isDark) {
     final top = MediaQuery.paddingOf(context).top;
@@ -486,18 +483,21 @@ class _ThreadPageState extends State<ThreadPage>
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 6, 10, 10),
-        child: Row(
-          children: [
-            Expanded(child: _tabBar(theme, isDark, chipBg)),
-            const SizedBox(width: 8),
-            _refreshBtn(theme, isDark, chipBg),
-          ],
+        child: ValueListenableBuilder(
+          valueListenable: _index,
+          builder: (_, index, _) => Row(
+            children: [
+              Expanded(child: _tabBar(theme, isDark, chipBg, index)),
+              const SizedBox(width: 8),
+              _refreshBtn(theme, isDark, chipBg, index),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _tabBar(ThemeData theme, bool isDark, Color chipBg) {
+  Widget _tabBar(ThemeData theme, bool isDark, Color chipBg, int index) {
     return Container(
       height: 40,
       padding: const EdgeInsets.all(3),
@@ -510,15 +510,15 @@ class _ThreadPageState extends State<ThreadPage>
         physics: const BouncingScrollPhysics(),
         child: Row(
           children: [
-            for (var i = 0; i < _tabs.length; i++) _tabChip(i, theme, isDark),
+            for (var i = 0; i < _tabs.length; i++)
+              _tabChip(i, i == index, theme, isDark),
           ],
         ),
       ),
     );
   }
 
-  Widget _tabChip(int i, ThemeData theme, bool isDark) {
-    final selected = _index == i;
+  Widget _tabChip(int i, bool selected, ThemeData theme, bool isDark) {
     final muted = isDark
         ? Colors.white54
         : theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.55) ??
@@ -552,12 +552,12 @@ class _ThreadPageState extends State<ThreadPage>
     );
   }
 
-  Widget _refreshBtn(ThemeData theme, bool isDark, Color chipBg) {
+  Widget _refreshBtn(ThemeData theme, bool isDark, Color chipBg, int index) {
     final iconColor = isDark
         ? Colors.white60
         : theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.5);
 
-    final tab = _tabs[_index]?.data;
+    final tab = _tabs[index]?.data;
     return ListenableBuilder(
       listenable: tab ?? _watchRooms,
       builder: (_, _) {
@@ -657,5 +657,56 @@ class _EndIndicator extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Floats above the shell's navigation bar and slides away with it.
+class _PostButton extends StatelessWidget {
+  const _PostButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const radius = BorderRadius.all(Radius.circular(28));
+    final appState = Get.find<AppState>();
+    final primary = Theme.of(context).colorScheme.primary;
+    final reduceMotion = context.reduceMotion;
+    final button = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: radius,
+        child: Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            color: primary,
+            borderRadius: radius,
+            boxShadow: reduceMotion
+                ? null
+                : [
+                    BoxShadow(
+                      color: primary.withValues(alpha: 0.22),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+          ),
+          child: const Icon(Icons.edit_rounded, color: Colors.white, size: 24),
+        ),
+      ),
+    );
+    return Obx(() {
+      final visible = appState.isBottomNavVisible.value;
+      return AnimatedSlide(
+        duration: reduceMotion
+            ? Duration.zero
+            : const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+        offset: visible ? Offset.zero : const Offset(0, 3),
+        child: ExcludeSemantics(excluding: !visible, child: button),
+      );
+    });
   }
 }

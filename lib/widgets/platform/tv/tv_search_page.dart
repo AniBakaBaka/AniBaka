@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:baka/source/source_registry.dart';
 import 'package:baka/pages/search/search_controller.dart';
 import 'package:baka/app/navigation.dart';
+import 'package:baka/models/playback_request.dart';
 import 'package:baka/widgets/platform/tv/tv_focusable.dart';
 import 'package:baka/widgets/platform/tv/tv_theme_util.dart';
 import 'package:baka/widgets/anime/post_card.dart';
@@ -467,12 +468,13 @@ class _TvSearchPageState extends State<TvSearchPage> {
       imageUrl = item['bgmImageUrl'] as String?;
       sourceName = 'BGM';
       score = item['score'] as double?;
-      onPressed = () => NavigationService.toPlayer(context, item);
+      onPressed = () =>
+          NavigationService.toPlayback(context, PlaybackRequest.fromMap(item));
     } else if (!AdapterRegistry.isAdapterSource(sourceKey)) {
       title = item['title'] as String;
       imageUrl = item['image'] as String?;
       sourceName = '站内';
-      onPressed = () => navigateToDetail(context, item);
+      onPressed = () => NavigationService.toDetail(context, item);
     } else {
       title = item['title'] as String;
       imageUrl = item['image'] as String?;

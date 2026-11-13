@@ -1222,6 +1222,31 @@ void main() {
       expect(url, direct);
     });
 
+    test('crypto aes-cbc decrypts a payload with a prefixed IV', () async {
+      const key = '0123456789abcdef';
+      const plain = 'https://cdn.example.com/episode.mp4';
+      final iv = encrypt.IV.fromUtf8('abcdef0123456789');
+      final cipher = encrypt.Encrypter(
+        encrypt.AES(encrypt.Key.fromUtf8(key), mode: encrypt.AESMode.cbc),
+      ).encrypt(plain, iv: iv);
+      final rule = SourceRule.fromJson({
+        'format': kSourceRuleFormatV2,
+        'id': 's',
+        'name': 'S',
+        'baseUrl': 'https://example.com',
+        'play': [
+          {'op': 'crypto', 'algo': 'aes-cbc', 'key': key, 'ivPrefix': true},
+        ],
+      });
+      final host = FakeHost(const {});
+      final input = base64.encode([...iv.bytes, ...cipher.bytes]);
+      expect(await interp.runPlay(rule, host, input), plain);
+      expect(
+        await interp.runPlay(rule, host, base64.encode(iv.bytes)),
+        isEmpty,
+      );
+    });
+
     test('crypto aes-gcm：base64 密钥 + 随机 IV 加密后可解密回明文', () async {
       final host = FakeHost(const {});
       // 16 字节密钥 "0123456789abcdef" 的 base64。

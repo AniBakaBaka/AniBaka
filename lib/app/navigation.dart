@@ -1,160 +1,96 @@
 import 'package:baka/instance.dart';
 import 'package:baka/models/playback_request.dart';
-import 'package:flutter/material.dart';
-import 'package:baka/pages/anime_detail/anime_detail_page.dart';
+import 'package:baka/pages/login/login_page.dart';
 import 'package:baka/pages/player/player_page.dart';
 import 'package:baka/pages/search/search_page.dart';
 import 'package:baka/pages/source/source_management_page.dart';
-import 'package:baka/app/platform_page_route.dart';
-import 'package:baka/app/card_page_route.dart';
+import 'package:baka/widgets/anime_detail/anime_detail_placeholder.dart';
+import 'package:baka/widgets/platform/tv/tv_anime_detail.dart';
+import 'package:flutter/material.dart';
 
-/// 集中管理页面导航，解耦 Widget 对具体 Page 的直接依赖。
-class NavigationService {
-  NavigationService._();
+/// Opens the app's pages. Pages use [MaterialPageRoute], so transitions and
+/// back gestures come from the theme's [PageTransitionsTheme].
+abstract final class NavigationService {
+  static final _desktopFade = CurveTween(curve: Curves.easeInOutCubic);
 
-  static PageRoute<void> _pageRoute(Widget page) =>
-      platformPageRoute<void>(builder: (_) => page);
+  static Future<T?> push<T>(BuildContext context, Widget page) =>
+      Navigator.of(context).push<T>(MaterialPageRoute<T>(builder: (_) => page));
 
-  /// 导航到番剧详情页，并保留当前页面以便正常返回。
+  /// Opens the detail page of [data], which it reads without copying.
   ///
-  /// [cardContext] and [cardPreview] describe the card that was tapped. They
-  /// drive the card route on touch platforms and are ignored on desktop, where
-  /// the cover is animated by its own Hero flight instead.
+  /// On mobile the page grows out of the pressed card like every other page.
+  /// Desktop fades it in while the cover flies as a [Hero] tagged [heroTag].
   static void toDetail(
     BuildContext context,
     Map data, {
     int? posIndex,
-    bool autoMatch = false,
-    BuildContext? cardContext,
-    Widget? cardPreview,
+    Object? heroTag,
   }) {
-    if (autoMatch) {
-      final request = PlaybackRequest.fromMap(data);
-      if (posIndex != null) request.episodeIndex = posIndex;
-      toPlayback(context, request, posIndex: posIndex);
-      return;
-    }
-    // Detail and later playback enrich their route data independently. Keep
-    // those mutations away from the source card while retaining its episode.
-    final routeData = Map<String, dynamic>.from(data);
-    if (posIndex != null) routeData['currPlayIndex'] = posIndex;
-    final page = AnimeDetailPage(data: routeData);
     final navigator = Navigator.of(context);
-    Rect? sourceRect() {
-      if (cardContext == null || !cardContext.mounted) return null;
-      final box = cardContext.findRenderObject();
-      final overlay = navigator.overlay?.context.findRenderObject();
-      if (box is! RenderBox ||
-          !box.attached ||
-          !box.hasSize ||
-          overlay is! RenderBox ||
-          !overlay.hasSize) {
-        return null;
-      }
-      final rect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
-      if (!rect.isFinite ||
-          rect.isEmpty ||
-          !(Offset.zero & overlay.size).overlaps(rect)) {
-        return null;
-      }
-      return rect;
-    }
-
-    final origin = Instances.isDesktopPlatform ? null : sourceRect();
-    final preview = cardPreview;
-    final PageRoute<void> route;
-    // Desktop keeps the Hero flight between the card and the detail header, so
-    // the surface is only built where the cover has no flight of its own.
-    if (origin != null && preview != null) {
-      route = CardPageRoute<void>(
-        builder: (_) => page,
-        sourceRect: origin,
-        resolveSourceRect: sourceRect,
-        preview: preview,
-        reduceMotion: MediaQuery.disableAnimationsOf(context),
-      );
-    } else if (Instances.isDesktopPlatform) {
-      final duration = MediaQuery.disableAnimationsOf(context)
-          ? Duration.zero
-          : const Duration(milliseconds: 300);
-      route = platformPageRoute<void>(
-        builder: (_) => page,
-        transitionDuration: duration,
-        reverseTransitionDuration: duration,
-        // The cover flies in the Hero overlay. Fade the remaining detail
-        // surface with the same route animation so it clears as the card lands.
-        transitionsBuilder: (_, animation, _, child) => FadeTransition(
-          opacity: animation.drive(CurveTween(curve: Curves.easeInOutCubic)),
-          child: child,
+    if (Instances.isTV) {
+      navigator.push(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              TvAnimeDetailPlaceholder(data: data, episodeIndex: posIndex),
         ),
       );
-    } else {
-      route = _pageRoute(page);
+      return;
     }
-    navigator.push(route);
-  }
-
-  static void toPlayer(
-    BuildContext context,
-    Map data, {
-    int? posIndex,
-    bool popFirst = false,
-    bool fade = false,
-    bool autoMatch = true,
-  }) => toPlayback(
-    context,
-    PlaybackRequest.fromMap(data),
-    posIndex: posIndex,
-    popFirst: popFirst,
-    fade: fade,
-    autoMatch: autoMatch,
-  );
-
-  static void toPlayback(
-    BuildContext context,
-    PlaybackRequest request, {
-    int? posIndex,
-    bool popFirst = false,
-    bool fade = false,
-    bool autoMatch = true,
-  }) {
-    final navigator = Navigator.of(context);
-    if (popFirst) navigator.pop();
-    final page = PlayerPage(
-      request: request,
-      posIndex: posIndex,
-      autoMatch: autoMatch,
+    final page = AnimeDetailPlaceholder(
+      data: data,
+      heroTag: heroTag,
+      episodeIndex: posIndex,
     );
-    final PageRoute<void> route = fade
-        ? platformPageRoute<void>(
-            builder: (_) => page,
-            transitionsBuilder: (_, anim, _, child) =>
-                FadeTransition(opacity: anim, child: child),
-            transitionDuration: const Duration(milliseconds: 300),
-          )
-        : _pageRoute(page);
-    navigator.push(route);
-  }
-
-  /// 导航到搜索页面
-  static void toSearch(
-    BuildContext context, {
-    String? keyword,
-    int? initialSource,
-  }) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => SearchPage(k: keyword, initialSource: initialSource),
+    if (!Instances.isDesktopPlatform) {
+      navigator.push(MaterialPageRoute<void>(builder: (_) => page));
+      return;
+    }
+    final duration = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : const Duration(milliseconds: 300);
+    navigator.push(
+      PageRouteBuilder<void>(
+        transitionDuration: duration,
+        reverseTransitionDuration: duration,
+        pageBuilder: (_, _, _) => page,
+        transitionsBuilder: (_, animation, _, child) => FadeTransition(
+          opacity: animation.drive(_desktopFade),
+          child: child,
+        ),
       ),
     );
   }
 
-  /// 导航到源管理页面
-  static void toSourceManagement(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const SourceManagementPage()),
+  static Future<void> toPlayback(
+    BuildContext context,
+    PlaybackRequest request, {
+    int? posIndex,
+    bool popFirst = false,
+    bool autoMatch = true,
+  }) {
+    final navigator = Navigator.of(context);
+    if (popFirst) navigator.pop();
+    return navigator.push(
+      MaterialPageRoute<void>(
+        builder: (_) => PlayerPage(
+          request: request,
+          posIndex: posIndex,
+          autoMatch: autoMatch,
+        ),
+      ),
     );
   }
+
+  static void toSearch(
+    BuildContext context, {
+    String? keyword,
+    int? initialSource,
+  }) =>
+      push<void>(context, SearchPage(k: keyword, initialSource: initialSource));
+
+  static void toSourceManagement(BuildContext context) =>
+      push<void>(context, const SourceManagementPage());
+
+  static void toLogin(BuildContext context) =>
+      push<void>(context, const Login());
 }

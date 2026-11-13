@@ -100,6 +100,14 @@ android {
     }
 }
 
+// Flutter's --split-per-abi offsets each ABI's versionCode (abiIndex * 1000 + base).
+// These APKs ship outside Play Store splits, so every ABI reports the same versionCode.
+android.applicationVariants.configureEach { variant ->
+    variant.outputs.each { output ->
+        output.versionCodeOverride = variant.versionCode
+    }
+}
+
 flutter {
     source '../..'
 }

@@ -80,6 +80,7 @@ class AnimeDetailViewData {
     required BgmInfo bgmInfo,
     Map<String, dynamic>? anibaka,
     Map<String, dynamic>? bgm,
+    Object? heroTag,
   }) {
     final titles = anibaka?['title'] as Map<String, dynamic>?;
     final cnTitle = trimmed(titles?['cn'] as String?);
@@ -166,7 +167,7 @@ class AnimeDetailViewData {
           '暂无简介',
       coverUrl: cover,
       logoUrl: resolveLogoUrl(anibaka),
-      heroTag: coverHeroTag(source),
+      heroTag: heroTag ?? coverHeroTag(source),
       updateTime: trimmed(source['time'] as String?),
       category: trimmed(source['sort'] as String?),
       tags: rawTags.toList(growable: false),

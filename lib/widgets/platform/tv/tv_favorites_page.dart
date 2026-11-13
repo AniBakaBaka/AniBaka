@@ -1,3 +1,4 @@
+import 'package:baka/app/navigation.dart';
 import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:flutter/material.dart';
@@ -67,7 +68,7 @@ class _TvFavoritesPageState extends State<TvFavoritesPage> {
       'bgmImageUrl': item.bgmImage,
       'score': item.bgmRating,
     };
-    navigateToDetail(context, data);
+    NavigationService.toDetail(context, data);
   }
 
   @override

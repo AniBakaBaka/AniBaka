@@ -113,25 +113,6 @@ String coverHeroTag(Map data) {
   return '${base}_${data.hashCode}';
 }
 
-void navigateToDetail(
-  BuildContext context,
-  Map data, {
-  int? posIndex,
-  Object? heroTag,
-  BuildContext? cardContext,
-  Widget? cardPreview,
-}) {
-  final detailData = Map<String, dynamic>.from(data);
-  detailData['_heroTag'] = heroTag ?? coverHeroTag(data);
-  NavigationService.toDetail(
-    context,
-    detailData,
-    posIndex: posIndex,
-    cardContext: cardContext,
-    cardPreview: cardContext == null ? null : (cardPreview ?? PostCard(data)),
-  );
-}
-
 Widget buildCachedImage(
   Map data,
   double width,
@@ -203,13 +184,7 @@ class PostCard extends StatelessWidget {
     final meta = resolvePostCardMeta(data);
 
     return GestureDetector(
-      onTap:
-          onTap ??
-          () => navigateToDetail(
-            context,
-            data,
-            cardContext: Instances.isTV ? null : context,
-          ),
+      onTap: onTap ?? () => NavigationService.toDetail(context, data),
       child: Instances.isDesktopPlatform
           ? WindowsCard(
               data: data,

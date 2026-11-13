@@ -1,3 +1,4 @@
+import 'package:baka/app/navigation.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -147,9 +148,6 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
     showSnackBar('已切换至 ${_session.currentHost}，重启生效');
   }
 
-  Future<void> _push(Widget page) =>
-      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => page));
-
   @override
   Widget build(BuildContext context) {
     return SettingsPage(
@@ -186,21 +184,27 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                   value: user.recoveryEmail.isNotEmpty
                       ? user.recoveryEmail
                       : '修改密码 · 可选绑定邮箱',
-                  onTap: () => _push(const AccountSecurityPage()),
+                  onTap: () => NavigationService.push<void>(
+                    context,
+                    const AccountSecurityPage(),
+                  ),
                 ),
               ] else
                 SettingsTile(
                   icon: Icons.account_circle_outlined,
                   title: 'AniBaka 账号',
                   value: '未登录',
-                  onTap: () => Navigator.pushNamed(context, 'Baka://login'),
+                  onTap: () => NavigationService.toLogin(context),
                 ),
               SettingsTile(
                 icon: Icons.sync_alt_rounded,
                 title: 'Bangumi 同步',
                 value: bangumiSession.account?.nickname ?? '未关联',
                 onTap: () async {
-                  await _push(const BangumiSyncPage());
+                  await NavigationService.push<void>(
+                    context,
+                    const BangumiSyncPage(),
+                  );
                   _session.user.refresh();
                 },
               ),
@@ -220,7 +224,10 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
             SettingsTile(
               icon: Icons.play_circle_outline_rounded,
               title: '播放设置',
-              onTap: () => _push(const PlaybackSettingsPage()),
+              onTap: () => NavigationService.push<void>(
+                context,
+                const PlaybackSettingsPage(),
+              ),
             ),
             ListenableBuilder(
               listenable: ruleRepository,
@@ -230,19 +237,28 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                 value: ruleRepository.updateCount > 0
                     ? '${ruleRepository.updateCount} 个更新'
                     : null,
-                onTap: () => _push(const SourceManagementPage()),
+                onTap: () => NavigationService.push<void>(
+                  context,
+                  const SourceManagementPage(),
+                ),
               ),
             ),
             SettingsTile(
               icon: Icons.auto_awesome_outlined,
               title: 'AI 规则编写',
-              onTap: () => _push(const AiRuleSettingsPage()),
+              onTap: () => NavigationService.push<void>(
+                context,
+                const AiRuleSettingsPage(),
+              ),
             ),
             if (Platform.isWindows)
               SettingsTile(
                 icon: Icons.science_outlined,
                 title: '实验室',
-                onTap: () => _push(const LabsSettingsPage()),
+                onTap: () => NavigationService.push<void>(
+                  context,
+                  const LabsSettingsPage(),
+                ),
               ),
           ],
         ),
@@ -332,7 +348,10 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
             SettingsTile(
               icon: Icons.security_outlined,
               title: '网络设置',
-              onTap: () => _push(const NetworkSettingsPage()),
+              onTap: () => NavigationService.push<void>(
+                context,
+                const NetworkSettingsPage(),
+              ),
             ),
           ],
         ),

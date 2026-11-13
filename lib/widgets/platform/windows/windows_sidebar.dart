@@ -486,7 +486,7 @@ class _AccountCard extends StatelessWidget {
         child: PlatformTooltip(
           message: session.isLoggedIn ? '账号与 Bangumi' : '登录',
           child: InkResponse(
-            onTap: () => Navigator.pushNamed(context, 'Baka://login'),
+            onTap: () => NavigationService.toLogin(context),
             radius: 22,
             child: avatar,
           ),
@@ -504,7 +504,7 @@ class _AccountCard extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: () => Navigator.pushNamed(context, 'Baka://login'),
+          onTap: () => NavigationService.toLogin(context),
           splashFactory: NoSplash.splashFactory,
           overlayColor: _itemOverlay(colors),
           child: Padding(
