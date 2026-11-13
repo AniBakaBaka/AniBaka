@@ -144,6 +144,7 @@ class _WindowsSidebarState extends State<WindowsSidebar> {
     return [
       _SectionLabel('浏览', showLabel: showLabels),
       page(0, Icons.explore_outlined, Icons.explore_rounded, '番组'),
+      page(6, Icons.grid_view_outlined, Icons.grid_view_rounded, '浏览'),
       page(1, Icons.forum_outlined, Icons.forum_rounded, 'C 岛'),
       _SectionLabel('我的', showLabel: showLabels),
       page(2, Icons.person_outline_rounded, Icons.person_rounded, '个人中心'),
