@@ -222,7 +222,22 @@
       }
     ],
     "useWebview": true,
-    "mediaValidationTimeoutMs": 30000
+    "mediaValidationTimeoutMs": 30000,
+    "home": [
+      {
+        "op": "fetch",
+        "url": "/"
+      },
+      {
+        "op": "searchList",
+        "selectors": [
+          ".search-list",
+          ".vod-detail",
+          "#dataList .public-list-box"
+        ],
+        "detailPattern": "/bgmdetail/"
+      }
+    ]
   },
   "enabled": true,
   "createdAt": "2026-09-10T14:26:51.355801",

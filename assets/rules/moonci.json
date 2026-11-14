@@ -81,5 +81,20 @@
       ]
     }
   ],
-  "useWebview": true
+  "useWebview": true,
+  "home": [
+    {
+      "op": "fetch",
+      "url": "/"
+    },
+    {
+      "op": "searchList",
+      "selectors": [
+        ".search-item",
+        ".module-item",
+        "a[href*=\"/anime/\"]"
+      ],
+      "detailPattern": "/anime/"
+    }
+  ]
 }

@@ -132,5 +132,27 @@
       "op": "json",
       "path": "url"
     }
+  ],
+  "home": [
+    {
+      "op": "fetch",
+      "url": "/"
+    },
+    {
+      "op": "searchList",
+      "selectors": [
+        ".search-list .item",
+        ".video-list li",
+        ".drama-module li",
+        ".module-items .module-item",
+        ".module-search-item",
+        ".stui-vodlist__box",
+        ".list-item",
+        "ul.items li",
+        "div.item",
+        "li.video-item"
+      ],
+      "detailPattern": "/v/"
+    }
   ]
 }

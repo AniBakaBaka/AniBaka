@@ -116,5 +116,19 @@
         ]
       ]
     }
+  ],
+  "home": [
+    {
+      "op": "fetch",
+      "url": "/"
+    },
+    {
+      "op": "searchList",
+      "selectors": [
+        ".vod-detail.search-list",
+        ".public-list-box"
+      ],
+      "detailPattern": "/GV"
+    }
   ]
 }

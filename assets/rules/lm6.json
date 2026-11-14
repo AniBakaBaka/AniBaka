@@ -34,14 +34,21 @@
             "op": "sniff",
             "goal": "html",
             "url": "/index.php/vod/search/wd/{keyword}.html",
-            "readyContains": ["video-img-box"],
-            "rejectContains": ["身份验证", "安全验证"],
+            "readyContains": [
+              "video-img-box"
+            ],
+            "rejectContains": [
+              "身份验证",
+              "安全验证"
+            ],
             "timeoutMs": 30000,
             "settleMs": 2000
           },
           {
             "op": "searchList",
-            "selectors": [".video-img-box .detail"],
+            "selectors": [
+              ".video-img-box .detail"
+            ],
             "detailPattern": "/detail/"
           }
         ]
@@ -69,8 +76,13 @@
             "op": "sniff",
             "goal": "html",
             "url": "{seriesId:raw}",
-            "readyContains": ["module-player-list"],
-            "rejectContains": ["身份验证", "安全验证"],
+            "readyContains": [
+              "module-player-list"
+            ],
+            "rejectContains": [
+              "身份验证",
+              "安全验证"
+            ],
             "timeoutMs": 30000,
             "settleMs": 2000
           },
@@ -359,6 +371,19 @@
           }
         ]
       ]
+    }
+  ],
+  "home": [
+    {
+      "op": "fetch",
+      "url": "/"
+    },
+    {
+      "op": "searchList",
+      "selectors": [
+        ".video-img-box .detail"
+      ],
+      "detailPattern": "/detail/"
     }
   ]
 }

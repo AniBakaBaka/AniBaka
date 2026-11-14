@@ -137,5 +137,17 @@
         "Accept": "*/*"
       }
     }
+  ],
+  "home": [
+    {
+      "op": "fetch",
+      "url": "/"
+    },
+    {
+      "op": "searchList",
+      "selectors": [
+        ".module-card-item, .module-poster-item, .module-search-item, a[href*=\"/voddetail/\"]"
+      ]
+    }
   ]
 }

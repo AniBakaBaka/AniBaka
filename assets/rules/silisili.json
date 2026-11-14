@@ -143,5 +143,20 @@
       ]
     }
   ],
-  "useWebview": true
+  "useWebview": true,
+  "home": [
+    {
+      "op": "fetch",
+      "url": "/"
+    },
+    {
+      "op": "searchList",
+      "selectors": [
+        "#content article",
+        "main article",
+        "article"
+      ],
+      "detailPattern": "/voddetail/"
+    }
+  ]
 }

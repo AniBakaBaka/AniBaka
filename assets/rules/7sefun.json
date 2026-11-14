@@ -150,5 +150,17 @@
         "Referer": "https://www.7sefun.top/"
       }
     }
+  ],
+  "home": [
+    {
+      "op": "fetch",
+      "url": "/"
+    },
+    {
+      "op": "searchList",
+      "selectors": [
+        "a.video-wrapper[href*=\"/voddetail/\"], .module-card-item, .module-poster-item, .module-search-item, .stui-vodlist__box, .stui-vodlist li, a[href*=\"/voddetail/\"], a[href*=\"/vod/detail/\"], a[href*=\"/detail/\"]"
+      ]
+    }
   ]
 }
