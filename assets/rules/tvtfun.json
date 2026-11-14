@@ -135,12 +135,27 @@
     },
     {
       "op": "setMediaHeaders",
-      "headers": { "Referer": "" },
+      "headers": {
+        "Referer": ""
+      },
       "jsonPath": "data.headers"
     },
     {
       "op": "json",
       "path": "data.url"
+    }
+  ],
+  "home": [
+    {
+      "op": "fetch",
+      "url": "/"
+    },
+    {
+      "op": "searchList",
+      "selectors": [
+        "a.legacy-video-card"
+      ],
+      "detailPattern": "/anime/"
     }
   ]
 }
