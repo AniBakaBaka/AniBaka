@@ -96,5 +96,14 @@
       ],
       "detailPattern": "/anime/"
     }
+  ],
+  "categories": [
+    { "id": "20", "name": "新番" },
+    { "id": "21", "name": "番剧" },
+    { "id": "22", "name": "剧场" }
+  ],
+  "category": [
+    { "op": "fetch", "url": "/type/{categoryId}.html" },
+    { "op": "searchList", "selectors": [".hl-list-item"], "detailPattern": "/anime/" }
   ]
 }

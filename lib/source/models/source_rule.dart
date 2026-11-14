@@ -92,6 +92,7 @@ class SourceRule {
     this.play = const [],
     this.home = const [],
     this.category = const [],
+    this.categories = const [],
     this.useWebview = false,
     this.directConnection = false,
     this.mediaValidationTimeoutMs = 0,
@@ -125,6 +126,10 @@ class SourceRule {
   /// 分类管线：输入 categoryId，产出该分类下的卡片列表。
   /// 为空表示本源暂未配置分类浏览。
   final List<PipelineStep> category;
+
+  /// 分类清单：本源可供「浏览」页展示的分类入口（id + 名称）。
+  /// 为空表示本源暂不提供分类浏览，UI 不渲染分类 chips。
+  final List<SourceCategory> categories;
 
   /// 是否使用 WebView 渲染/嗅探。
   final bool useWebview;
@@ -171,6 +176,15 @@ class SourceRule {
       play: steps(json['play']),
       home: steps(json['home']),
       category: steps(json['category']),
+      categories: switch (json['categories']) {
+        final List raw => List.unmodifiable(
+            raw
+                .whereType<Map>()
+                .map((e) => SourceCategory.fromJson(e.cast<String, dynamic>()))
+                .where((c) => c.id.isNotEmpty),
+          ),
+        _ => const [],
+      },
       useWebview: json['useWebview'] == true,
       directConnection: json['directConnection'] == true,
       mediaValidationTimeoutMs:
@@ -198,6 +212,8 @@ class SourceRule {
     if (home.isNotEmpty) 'home': [for (final step in home) step.toJson()],
     if (category.isNotEmpty)
       'category': [for (final step in category) step.toJson()],
+    if (categories.isNotEmpty)
+      'categories': [for (final c in categories) c.toJson()],
     if (useWebview) 'useWebview': true,
     if (directConnection) 'directConnection': true,
     if (mediaValidationTimeoutMs > 0)
@@ -215,6 +231,7 @@ class SourceRule {
     List<PipelineStep>? play,
     List<PipelineStep>? home,
     List<PipelineStep>? category,
+    List<SourceCategory>? categories,
   }) => SourceRule(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -228,8 +245,27 @@ class SourceRule {
     play: play ?? this.play,
     home: home ?? this.home,
     category: category ?? this.category,
+    categories: categories ?? this.categories,
     useWebview: useWebview,
     directConnection: directConnection,
     mediaValidationTimeoutMs: mediaValidationTimeoutMs,
   );
+}
+
+/// 源的一个分类入口：`id` 传给 `category` 管线做 `{categoryId}` 模板，
+/// `name` 是「浏览」页展示给用户的分类名。
+class SourceCategory {
+  const SourceCategory({required this.id, required this.name});
+
+  final String id;
+  final String name;
+
+  factory SourceCategory.fromJson(Map<String, dynamic> json) => SourceCategory(
+    id: (json['id'] ?? json['key'] ?? json['value'] ?? '').toString().trim(),
+    name: (json['name'] ?? json['title'] ?? json['label'] ?? '')
+        .toString()
+        .trim(),
+  );
+
+  Map<String, dynamic> toJson() => {'id': id, 'name': name};
 }
