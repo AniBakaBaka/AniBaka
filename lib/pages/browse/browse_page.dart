@@ -126,7 +126,7 @@ class _SourceSectionState extends State<_SourceSection> {
                 scrollDirection: Axis.horizontal,
                 itemCount: items.length,
                 padding: EdgeInsets.zero,
-                separatorBuilder: (_) => const SizedBox(width: 12),
+                separatorBuilder: (_, _) => const SizedBox(width: 12),
                 itemBuilder: (context, index) =>
                     _SeriesCard(series: items[index]),
               ),
