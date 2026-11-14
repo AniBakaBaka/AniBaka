@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import 'package:baka/source/models/series.dart';
-import 'package:baka/source/source_adapter.dart';
 import 'package:baka/source/source_registry.dart';
 
 /// 浏览：按源看内容。首版为「聚合首页」——每个内置源一个区块，区块内通过
@@ -127,7 +126,7 @@ class _SourceSectionState extends State<_SourceSection> {
                 scrollDirection: Axis.horizontal,
                 itemCount: items.length,
                 padding: EdgeInsets.zero,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                separatorBuilder: (_) => const SizedBox(width: 12),
                 itemBuilder: (context, index) =>
                     _SeriesCard(series: items[index]),
               ),
@@ -191,7 +190,7 @@ class _SeriesCard extends StatelessWidget {
                       series.image!,
                       fit: BoxFit.cover,
                       width: double.infinity,
-                      errorBuilder: (_, __, ___) => _posterFallback(colors),
+                      errorBuilder: (_, _, _) => _posterFallback(colors),
                     )
                   : _posterFallback(colors),
             ),
