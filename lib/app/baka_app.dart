@@ -1,4 +1,4 @@
-import 'package:baka/models/playback_request.dart';
+﻿import 'package:baka/models/playback_request.dart';
 import 'package:baka/app/app_runtime.dart';
 import 'package:baka/core/account_session.dart';
 import 'dart:io';
@@ -186,7 +186,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             ),
             3 => const LibraryPage(initialIndex: 1, embedded: true),
             4 => const LibraryPage(embedded: true),
-            _             6 => const BrowsePage(),
+            6 => const BrowsePage(),
             _ => const DownloadManagerPage(embedded: true),
           }
         : switch (index) {
@@ -345,3 +345,4 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     );
   }
 }
+

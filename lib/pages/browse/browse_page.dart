@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 import 'package:baka/source/source_registry.dart';
 
@@ -10,9 +10,6 @@ class BrowsePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    final textTheme = theme.textTheme;
     return Scaffold(
       appBar: AppBar(
         title: const Text('浏览'),
@@ -100,3 +97,4 @@ class _SourceSection extends StatelessWidget {
     );
   }
 }
+
