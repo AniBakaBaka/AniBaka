@@ -90,6 +90,8 @@ class SourceRule {
     this.search = const [],
     this.detail = const [],
     this.play = const [],
+    this.home = const [],
+    this.category = const [],
     this.useWebview = false,
     this.directConnection = false,
     this.mediaValidationTimeoutMs = 0,
@@ -115,6 +117,14 @@ class SourceRule {
 
   /// 播放管线：输入 episodeId，产出可播放直链。
   final List<PipelineStep> play;
+
+  /// 首页管线：产出「浏览」页聚合首页的卡片列表（最近更新 / 推荐等）。
+  /// 为空表示本源暂未配置首页，UI 回退到占位。
+  final List<PipelineStep> home;
+
+  /// 分类管线：输入 categoryId，产出该分类下的卡片列表。
+  /// 为空表示本源暂未配置分类浏览。
+  final List<PipelineStep> category;
 
   /// 是否使用 WebView 渲染/嗅探。
   final bool useWebview;
@@ -159,6 +169,8 @@ class SourceRule {
       search: steps(json['search']),
       detail: steps(json['detail']),
       play: steps(json['play']),
+      home: steps(json['home']),
+      category: steps(json['category']),
       useWebview: json['useWebview'] == true,
       directConnection: json['directConnection'] == true,
       mediaValidationTimeoutMs:
@@ -183,6 +195,9 @@ class SourceRule {
     'search': [for (final step in search) step.toJson()],
     'detail': [for (final step in detail) step.toJson()],
     'play': [for (final step in play) step.toJson()],
+    if (home.isNotEmpty) 'home': [for (final step in home) step.toJson()],
+    if (category.isNotEmpty)
+      'category': [for (final step in category) step.toJson()],
     if (useWebview) 'useWebview': true,
     if (directConnection) 'directConnection': true,
     if (mediaValidationTimeoutMs > 0)
@@ -198,6 +213,8 @@ class SourceRule {
     List<PipelineStep>? search,
     List<PipelineStep>? detail,
     List<PipelineStep>? play,
+    List<PipelineStep>? home,
+    List<PipelineStep>? category,
   }) => SourceRule(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -209,6 +226,8 @@ class SourceRule {
     search: search ?? this.search,
     detail: detail ?? this.detail,
     play: play ?? this.play,
+    home: home ?? this.home,
+    category: category ?? this.category,
     useWebview: useWebview,
     directConnection: directConnection,
     mediaValidationTimeoutMs: mediaValidationTimeoutMs,

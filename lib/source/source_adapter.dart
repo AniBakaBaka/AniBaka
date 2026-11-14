@@ -220,6 +220,54 @@ class SourceAdapter implements PipelineHost {
         return series;
       });
 
+  /// 拉取「浏览」页聚合首页：运行源规则的 home 管线，产出卡片列表。
+  ///
+  /// 与 [search] 同款地用 BGM 信息补全封面 / 简介 / 评分。home 段为空或运行
+  /// 失败均返回空列表，由 UI 回退到占位。
+  Future<List<Series>> fetchHome({bool enhanceWithBgm = true}) =>
+      runOperation(() async {
+        final series = await _interpreter.runHome(rule, this);
+        if (!enhanceWithBgm) return series;
+        await runConcurrent(series.length, 5, (index) async {
+          final item = series[index];
+          try {
+            final subject = await resolveBgmSubject(title: item.name);
+            SourceOperation.check();
+            item.image = subject?.imageUrl ?? item.image;
+            item.description = subject?.summary ?? item.description ?? '暂无简介';
+            item.bgmId = subject?.subjectId ?? item.bgmId;
+            item.score = subject?.score ?? item.score;
+          } catch (_) {
+            SourceOperation.check();
+          }
+        });
+        return series;
+      });
+
+  /// 拉取某个分类下的卡片列表，[categoryId] 会作为 `{categoryId}` 传入管线。
+  Future<List<Series>> fetchCategory(
+    String categoryId, {
+    bool enhanceWithBgm = true,
+  }) =>
+      runOperation(() async {
+        final series = await _interpreter.runCategory(rule, this, categoryId);
+        if (!enhanceWithBgm) return series;
+        await runConcurrent(series.length, 5, (index) async {
+          final item = series[index];
+          try {
+            final subject = await resolveBgmSubject(title: item.name);
+            SourceOperation.check();
+            item.image = subject?.imageUrl ?? item.image;
+            item.description = subject?.summary ?? item.description ?? '暂无简介';
+            item.bgmId = subject?.subjectId ?? item.bgmId;
+            item.score = subject?.score ?? item.score;
+          } catch (_) {
+            SourceOperation.check();
+          }
+        });
+        return series;
+      });
+
   Future<PlaybackCatalog> getPlaybackCatalog(String seriesId) => runOperation(
     () async => PlaybackCatalog.fromSources(
       await _interpreter.runDetail(rule, this, seriesId),

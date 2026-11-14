@@ -246,6 +246,44 @@ class PipelineInterpreter {
     );
   }
 
+  /// 运行首页管线，产出「浏览」页聚合首页的卡片列表。
+  ///
+  /// 复用 search 同款的 [searchList] / [jsonSeries] 等操作产出 [Series] 卡片，
+  /// 因此 home 段与 search 段同构，只是没有关键词输入。
+  Future<List<Series>> runHome(
+    SourceRule rule,
+    PipelineHost host,
+  ) async {
+    final ctx = _PipelineContext(
+      host: host,
+      baseUrl: rule.baseUrl,
+      inputName: 'home',
+      input: '',
+      priority: RequestPriority.search,
+    );
+    await _runSteps(rule.home, ctx);
+    return ctx.seriesOut;
+  }
+
+  /// 运行分类管线：输入 [categoryId]，产出该分类下的卡片列表。
+  ///
+  /// 管线内可用 `{categoryId}` 模板引用分类标识。
+  Future<List<Series>> runCategory(
+    SourceRule rule,
+    PipelineHost host,
+    String categoryId,
+  ) async {
+    final ctx = _PipelineContext(
+      host: host,
+      baseUrl: rule.baseUrl,
+      inputName: 'categoryId',
+      input: categoryId,
+      priority: RequestPriority.search,
+    );
+    await _runSteps(rule.category, ctx);
+    return ctx.seriesOut;
+  }
+
   Future<void> _runSteps(List<PipelineStep> steps, _PipelineContext ctx) async {
     for (final step in steps) {
       SourceOperation.check();
