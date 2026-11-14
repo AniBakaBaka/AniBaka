@@ -83,4 +83,19 @@
   ],
   "useWebview": true,
   "directConnection": true
+,
+  "home":   [
+    {
+      "op": "fetch",
+      "url": "/api.php/provide/vod/?ac=list&pg=1"
+    },
+    {
+      "op": "jsonSeries",
+      "listPath": "list",
+      "idKey": "vod_id",
+      "nameKey": "vod_name",
+      "imageKey": "vod_pic",
+      "descKey": "vod_remarks"
+    }
+  ]
 }

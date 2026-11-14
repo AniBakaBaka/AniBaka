@@ -137,4 +137,23 @@
       ]
     }
   ]
+,
+  "home":   [
+    {
+      "op": "fetch",
+      "url": "/ajax/suggest?mid=1&wd=a&limit=30",
+      "headers": {
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": "https://www.mgnacg.com/"
+      }
+    },
+    {
+      "op": "jsonSeries",
+      "listPath": "list",
+      "idKey": "id",
+      "nameKey": "name",
+      "imageKey": "pic",
+      "detailUrlTemplate": "/media/{id}/"
+    }
+  ]
 }

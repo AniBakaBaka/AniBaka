@@ -108,4 +108,30 @@
       "remove": ["Referer"]
     }
   ]
+,
+  "home":   [
+    {
+      "op": "fetch",
+      "url": "https://api.xifanacg.com/rest/v1/rpc/search_animes",
+      "method": "POST",
+      "contentType": "application/json",
+      "headers": {
+        "Accept": "application/json",
+        "apikey": "sb_publishable_OBIVAWACIX6lPXrO98_z24_HcsmalkA",
+        "Authorization": "Bearer sb_publishable_OBIVAWACIX6lPXrO98_z24_HcsmalkA",
+        "Origin": "https://next.xifanacg.com"
+      },
+      "body": {
+        "search_term": ""
+      }
+    },
+    {
+      "op": "jsonSeries",
+      "idKey": "id",
+      "nameKey": "title",
+      "imageKey": "cover_url",
+      "descKey": "description",
+      "detailUrlTemplate": "/anime/{id}"
+    }
+  ]
 }

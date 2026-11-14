@@ -55,4 +55,24 @@
       "proxyMedia": true
     }
   ]
+,
+  "home":   [
+    {
+      "op": "fetch",
+      "url": "https://m3u8.girigirilove.com/api.php/Vod/get_list?offset=0&limit=100",
+      "headers": {
+        "Referer": "https://beta.girigirilove.com/",
+        "Origin": "https://beta.girigirilove.com"
+      }
+    },
+    {
+      "op": "jsonSeries",
+      "listPath": "info.rows",
+      "idKey": "vod_id",
+      "nameKey": "vod_name",
+      "imageKey": "vod_pic",
+      "descKey": "vod_blurb",
+      "detailUrlTemplate": "/detail/{id}"
+    }
+  ]
 }

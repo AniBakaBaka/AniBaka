@@ -109,4 +109,23 @@
       ]
     }
   ]
+,
+  "home":   [
+    {
+      "op": "fetch",
+      "url": "/ajax/suggest?mid=1&wd=a&limit=30",
+      "headers": {
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": "https://ios.mifun.org/"
+      }
+    },
+    {
+      "op": "jsonSeries",
+      "listPath": "list",
+      "idKey": "id",
+      "nameKey": "name",
+      "imageKey": "pic",
+      "detailUrlTemplate": "/voddetail/{id}/"
+    }
+  ]
 }
