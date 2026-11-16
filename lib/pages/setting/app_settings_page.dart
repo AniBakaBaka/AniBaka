@@ -1,6 +1,7 @@
 import 'package:baka/app/navigation.dart';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart' hide ContextExtensionss;
 import 'package:open_filex/open_filex.dart';
@@ -103,6 +104,22 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
     } else {
       showSnackBar('已是最新版本');
     }
+  });
+
+  Future<void> _importFont() => _run('导入字体', () async {
+    final result = await FilePicker.pickFiles(
+      type: Platform.isAndroid ? FileType.any : FileType.custom,
+      allowedExtensions: Platform.isAndroid ? null : const ['ttf', 'otf'],
+      lockParentWindow: true,
+    );
+    if (result == null) return;
+    final selected = result.files.single;
+    final path = selected.path;
+    final extension = selected.extension?.toLowerCase();
+    if (path == null || (extension != 'ttf' && extension != 'otf')) {
+      throw const FormatException('请选择 TTF 或 OTF 字体文件');
+    }
+    _appState.setFontFamily(await AppFonts.importFont(File(path)));
   });
 
   Future<void> _editUser(String title, String field) async {
@@ -285,6 +302,13 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                 value: _appState.fontFamily,
                 options: AppFonts.fontOptions,
                 onChanged: _appState.setFontFamily,
+              ),
+              SettingsTile(
+                icon: Icons.file_upload_outlined,
+                title: '导入字体',
+                value: 'TTF / OTF',
+                busy: _busy == '导入字体',
+                onTap: _importFont,
               ),
               SettingsSelectTile<int>(
                 icon: Icons.format_bold_rounded,

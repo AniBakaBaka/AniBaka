@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/gestures.dart';
@@ -8,6 +9,28 @@ import 'package:flutter/services.dart';
 
 const _forwardDuration = Duration(milliseconds: 320);
 const _reverseDuration = Duration(milliseconds: 280);
+
+/// The visible rounded surface within a tile that opens a page.
+class TransitionOriginClip extends ClipRRect {
+  const TransitionOriginClip({
+    required super.borderRadius,
+    required super.child,
+  });
+
+  @override
+  RenderClipRRect createRenderObject(BuildContext context) =>
+      _RenderTransitionOriginClip(
+        borderRadius: borderRadius,
+        textDirection: Directionality.maybeOf(context),
+      );
+}
+
+class _RenderTransitionOriginClip extends RenderClipRRect {
+  _RenderTransitionOriginClip({
+    required super.borderRadius,
+    required super.textDirection,
+  });
+}
 
 /// The component under the latest press. The page that press opens grows out
 /// of it and collapses back into it.
@@ -45,6 +68,21 @@ abstract final class TapOrigin {
     _pressed = null;
   }
 
+  /// Uses the marked surface even when the user taps the tile's caption.
+  static void useClip(BuildContext context) {
+    final clip =
+        context.findAncestorRenderObjectOfType<_RenderTransitionOriginClip>() ??
+        _findClip(context.findRenderObject());
+    if (clip != null) _pressed = WeakReference(clip);
+  }
+
+  static _RenderTransitionOriginClip? _findClip(RenderObject? node) {
+    if (node is _RenderTransitionOriginClip) return node;
+    _RenderTransitionOriginClip? clip;
+    node?.visitChildren((child) => clip ??= _findClip(child));
+    return clip;
+  }
+
   /// Hands the pressed component to one page only.
   static RenderBox? take() {
     final box = _pressed?.target;
@@ -68,7 +106,23 @@ Rect? _rectIn(NavigatorState navigator, RenderBox box) {
     node = node.parent;
   }
   if (node == null) return null;
-  final rect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
+  var rect = MatrixUtils.transformRect(
+    box.getTransformTo(overlay),
+    Offset.zero & box.size,
+  );
+  if (box is _RenderTransitionOriginClip) {
+    RenderObject child = box;
+    while (child != overlay) {
+      final parent = child.parent!;
+      final clip = parent.describeApproximatePaintClip(child);
+      if (clip != null) {
+        rect = rect.intersect(
+          MatrixUtils.transformRect(parent.getTransformTo(overlay), clip),
+        );
+      }
+      child = parent;
+    }
+  }
   return rect.isFinite &&
           !rect.isEmpty &&
           (Offset.zero & overlay.size).overlaps(rect)
@@ -224,8 +278,7 @@ class ContainerPageTransitionsBuilder extends PageTransitionsBuilder {
 }
 
 /// Morphs the page between the component it was opened from and the full
-/// screen, fading through the page background. The page is animated from a
-/// snapshot, and heroes stay grounded so the container is the only motion.
+/// screen. The page stays laid out at its final size throughout the motion.
 class _ContainerTransition extends StatefulWidget {
   const _ContainerTransition({
     required this.route,
@@ -241,17 +294,23 @@ class _ContainerTransition extends StatefulWidget {
   State<_ContainerTransition> createState() => _ContainerTransitionState();
 }
 
+typedef _OriginGeometry = ({Rect rect, BorderRadius? clipRadius});
+
 class _ContainerTransitionState extends State<_ContainerTransition> {
-  static const _curve = Curves.easeOutCubic;
-  static const _containerFade = Interval(0, 0.1);
-  static const _contentFade = Interval(0.1, 0.45);
+  static const _curve = Curves.easeOut;
+  static const _cardSettlePoint = 0.08;
+  static const _cardShape = Interval(_cardSettlePoint, 1);
+  static const _cardFade = Interval(0, _cardSettlePoint);
+  static const _surfaceIn = Interval(0, 0.24);
+  static const _surfaceOut = Interval(0.6, 0.9);
+  static const _contentFade = Interval(0.08, 0.55);
   static const _originRadius = BorderRadius.all(Radius.circular(12));
 
   final _snapshot = SnapshotController();
   WeakReference<RenderBox>? _origin;
 
-  /// The component's rect; null grows the page from the screen center.
-  Rect? _rect;
+  /// The component's geometry; null grows the page from the screen center.
+  _OriginGeometry? _geometry;
 
   /// Where the page was when a pop interrupted the push.
   ({double visual, double value})? _fold;
@@ -265,8 +324,10 @@ class _ContainerTransitionState extends State<_ContainerTransition> {
     // Built in the frame of the push, while the pressed component is still
     // laid out on the previous page.
     final box = TapOrigin.take();
-    if (box != null) _origin = WeakReference(box);
-    _rect = _locate();
+    if (box != null) {
+      _origin = WeakReference(box);
+      _geometry = _locate();
+    }
     _animation.addStatusListener(_onStatus);
   }
 
@@ -277,17 +338,25 @@ class _ContainerTransitionState extends State<_ContainerTransition> {
     super.dispose();
   }
 
-  Rect? _locate() {
+  _OriginGeometry? _locate() {
     final box = _origin?.target;
     final navigator = _route.navigator;
-    return box == null || navigator == null ? null : _rectIn(navigator, box);
+    if (box == null || navigator == null) return null;
+    final rect = _rectIn(navigator, box);
+    if (rect == null) return null;
+    return (
+      rect: rect,
+      clipRadius: box is _RenderTransitionOriginClip
+          ? box.borderRadius.resolve(box.textDirection)
+          : null,
+    );
   }
 
   void _onStatus(AnimationStatus status) {
     if (!status.isAnimating) return;
     // Pops and gestures leave the completed state: aim at where the component
     // is now, since the list behind the page may have scrolled.
-    _rect = _locate() ?? _rect;
+    _geometry = _locate() ?? _geometry;
     final value = _animation.value;
     _fold =
         status == AnimationStatus.reverse &&
@@ -323,71 +392,97 @@ class _ContainerTransitionState extends State<_ContainerTransition> {
   Widget build(BuildContext context) {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final progress = reduceMotion ? 1.0 : _progress;
-    _snapshot.allowSnapshotting = !reduceMotion && _animation.isAnimating;
-    final surfaceOpacity = 1 - _contentFade.transform(progress);
+    final clipRadius = _geometry?.clipRadius;
+    final shapeProgress = clipRadius == null
+        ? progress
+        : _cardShape.transform(progress);
+    final returning =
+        _fold == null &&
+        (_animation.status == AnimationStatus.reverse ||
+            _route.popGestureInProgress);
+    final surfaceIn = returning && clipRadius != null ? _cardFade : _surfaceIn;
+    _snapshot.allowSnapshotting =
+        !reduceMotion &&
+        (_animation.isAnimating || _route.popGestureInProgress);
+    final surfaceOpacity =
+        surfaceIn.transform(progress) * (1 - _surfaceOut.transform(progress));
     final fullRadius =
         MediaQuery.displayCornerRadiiOf(context) ?? BorderRadius.zero;
     final background = Theme.of(context).scaffoldBackgroundColor;
+    final content = SnapshotWidget(
+      controller: _snapshot,
+      mode: SnapshotMode.permissive,
+      autoresize: true,
+      child: HeroMode(
+        enabled: false,
+        child: _PageMotion(route: _route, child: widget.child),
+      ),
+    );
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final window = Offset.zero & constraints.biggest;
-        final origin =
-            _rect ??
-            Rect.fromCenter(
-              center: window.center,
-              width: window.width * 0.85,
-              height: window.height * 0.85,
-            );
-        return Stack(
-          children: [
-            Positioned.fromRect(
-              rect: Rect.lerp(origin, window, progress)!,
-              child: ClipRRect(
-                borderRadius: BorderRadius.lerp(
-                  _originRadius,
-                  fullRadius,
-                  progress,
-                )!,
-                // A settled page must not keep a clip layer while scrolling.
-                clipBehavior: progress < 1 ? Clip.antiAlias : Clip.none,
-                child: Opacity(
-                  opacity: _containerFade.transform(progress),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      FittedBox(
-                        fit: BoxFit.cover,
-                        alignment: Alignment.topCenter,
-                        child: SizedBox.fromSize(
-                          size: window.size,
-                          child: SnapshotWidget(
-                            controller: _snapshot,
-                            mode: SnapshotMode.permissive,
-                            autoresize: true,
-                            child: HeroMode(
-                              enabled: false,
-                              child: _PageMotion(
-                                route: _route,
-                                child: widget.child,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      if (surfaceOpacity > 0)
-                        Opacity(
-                          opacity: surfaceOpacity,
-                          child: ColoredBox(color: background),
-                        ),
-                    ],
-                  ),
-                ),
+        final moving = progress < 1 && !window.isEmpty;
+        final origin = _geometry?.rect.intersect(window);
+        final start = origin != null && !origin.isEmpty
+            ? origin
+            : Rect.fromCenter(
+                center: window.center,
+                width: window.width * 0.85,
+                height: window.height * 0.85,
+              );
+        final rect = moving ? Rect.lerp(start, window, shapeProgress)! : window;
+        // Keep the page and its snapshot at viewport size. Only the paint
+        // transform and clip change as the card opens.
+        final scale = moving
+            ? math.max(rect.width / window.width, rect.height / window.height)
+            : 1.0;
+        final transform = Matrix4.diagonal3Values(scale, scale, 1)
+          ..setTranslationRaw(
+            rect.center.dx - window.center.dx * scale,
+            rect.top,
+            0,
+          );
+        final radius = BorderRadius.lerp(
+          clipRadius ?? _originRadius,
+          fullRadius,
+          shapeProgress,
+        )!;
+        return ClipRRect(
+          clipBehavior: moving ? Clip.antiAlias : Clip.none,
+          clipper: moving ? _ContainerClipper(radius.toRRect(rect)) : null,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: surfaceOpacity > 0
+                  ? background.withValues(alpha: background.a * surfaceOpacity)
+                  : null,
+            ),
+            child: Transform(
+              transform: transform,
+              child: Opacity(
+                opacity: _contentFade.transform(progress),
+                child: SizedBox.expand(child: content),
               ),
             ),
-          ],
+          ),
         );
       },
     );
   }
+}
+
+class _ContainerClipper extends CustomClipper<RRect> {
+  const _ContainerClipper(this.bounds);
+
+  final RRect bounds;
+
+  @override
+  RRect getClip(Size size) => bounds;
+
+  @override
+  Rect getApproximateClipRect(Size size) => bounds.outerRect;
+
+  @override
+  bool shouldReclip(_ContainerClipper oldClipper) =>
+      bounds != oldClipper.bounds;
 }

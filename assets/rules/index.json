@@ -141,7 +141,7 @@
       "key": "lm6",
       "title": "路漫漫动漫",
       "by": "anibaka",
-      "rev": 5,
+      "rev": 6,
       "intro": "路漫漫在线动漫提供日本动漫、国产动漫、动画电影等免费在线观看。",
       "site": "https://m.lm6.net/",
       "badge": "https://m.lm6.net/template/jable/statics/icon/favicon-32x32.png",
@@ -152,7 +152,7 @@
       ],
       "ref": "lm6.json",
       "engine": "anx-rule/2",
-      "sha256": "2cc3e54935af2adb97f2dea282c98112e05733198df597b472f39bee1160b343"
+      "sha256": "615b134883aa17927cf6f1fbdc1ed289e1b0fc9461c50ba56bab91a8988d4190"
     },
     {
       "key": "mgnacg",

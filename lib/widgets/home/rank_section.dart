@@ -1,4 +1,5 @@
 import 'package:baka/app/navigation.dart';
+import 'package:baka/app/page_routes.dart';
 import 'package:flutter/material.dart';
 
 import 'package:baka/widgets/anime/post_card.dart';
@@ -108,10 +109,6 @@ class RankSection extends StatelessWidget {
       3 => const Color(0xFFCD7F32),
       _ => const Color(0xCC607D8B),
     };
-    // The rank row carries its own tag: the feed below it may hold a card for
-    // the same cover, and two heroes sharing one tag in a route is an error.
-    final heroTag = item == null ? null : 'rank_${coverHeroTag(item)}';
-
     final card = Padding(
       padding: const EdgeInsets.only(right: 12, top: 4),
       child: SizedBox(
@@ -123,22 +120,16 @@ class RankSection extends StatelessWidget {
               height: _cardHeight,
               child: Stack(
                 children: [
-                  ClipRRect(
+                  TransitionOriginClip(
                     borderRadius: BorderRadius.circular(8),
                     child: AspectRatio(
                       aspectRatio: _cardAspectRatio,
-                      // Desktop flies this cover onto the cover the detail
-                      // page opens with. Touch platforms animate the card
-                      // route instead and suppress the flight.
                       child: item == null
                           ? const ColoredBox(color: Colors.white)
-                          : Hero(
-                              tag: heroTag!,
-                              child: buildCachedImage(
-                                item,
-                                double.infinity,
-                                double.infinity,
-                              ),
+                          : buildCachedImage(
+                              item,
+                              double.infinity,
+                              double.infinity,
                             ),
                     ),
                   ),
@@ -163,9 +154,14 @@ class RankSection extends StatelessWidget {
       ),
     );
     if (item == null) return card;
-    return GestureDetector(
-      onTap: () => NavigationService.toDetail(context, item, heroTag: heroTag),
-      child: card,
+    return Builder(
+      builder: (context) => GestureDetector(
+        onTap: () {
+          TapOrigin.useClip(context);
+          NavigationService.toDetail(context, item);
+        },
+        child: card,
+      ),
     );
   }
 

@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:baka/app/navigation.dart';
+import 'package:baka/app/page_routes.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/anime_filter.dart';
 import 'package:baka/core/account_session.dart';
@@ -9,6 +12,7 @@ import 'package:baka/app/update_presenter.dart';
 import 'package:baka/utils/reg_utils.dart';
 import 'package:baka/widgets/anime/post_card.dart';
 import 'package:baka/widgets/common/refresh.dart';
+import 'package:baka/widgets/home/poster_grid.dart';
 import 'package:baka/widgets/home/rank_section.dart';
 import 'package:baka/widgets/home/swiper_banner.dart';
 import 'package:baka/widgets/search/tag_filter_sheet.dart';
@@ -34,6 +38,7 @@ class _HomePageState extends State<HomePage>
 
   final GlobalKey _rankSectionKey = GlobalKey();
   final GlobalKey _tagSectionKey = GlobalKey();
+  ({bool enabled, Duration offset})? _previousTouchSampling;
 
   late final TabController _tabController = TabController(
     length: 2,
@@ -48,7 +53,39 @@ class _HomePageState extends State<HomePage>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (Platform.isAndroid && !Instances.isTV) {
+      _setTouchResampling(
+        TickerMode.valuesOf(context).enabled &&
+            ModalRoute.isCurrentOf(context) != false,
+      );
+    }
+  }
+
+  void _setTouchResampling(bool enabled) {
+    final previous = _previousTouchSampling;
+    if (enabled == (previous != null)) return;
+
+    final binding = WidgetsBinding.instance;
+    if (previous == null) {
+      _previousTouchSampling = (
+        enabled: binding.resamplingEnabled,
+        offset: binding.samplingOffset,
+      );
+      
+      binding.samplingOffset = const Duration(milliseconds: -8);
+      binding.resamplingEnabled = true;
+    } else {
+      binding.samplingOffset = previous.offset;
+      binding.resamplingEnabled = previous.enabled;
+      _previousTouchSampling = null;
+    }
+  }
+
+  @override
   void dispose() {
+    _setTouchResampling(false);
     _tabController.dispose();
     _svc.dispose();
     super.dispose();
@@ -353,7 +390,7 @@ class _HomePageState extends State<HomePage>
               vertical: 8,
             ),
             child: RepaintBoundary(
-              child: ClipRRect(
+              child: TransitionOriginClip(
                 borderRadius: radius,
                 child: AspectRatio(
                   aspectRatio: isTablet ? 24 / 9 : 16 / 9.5,
@@ -484,7 +521,7 @@ class _HomePageState extends State<HomePage>
 
         return SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          sliver: SliverGrid(
+          sliver: HomePosterGrid(
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: columns,
               mainAxisSpacing: 12,
@@ -497,6 +534,7 @@ class _HomePageState extends State<HomePage>
                 return PostCard(
                   item,
                   key: ValueKey('feed_${item['bgmId'] ?? item['id'] ?? index}'),
+                  useCoverHero: false,
                 );
               },
               childCount: items.length,

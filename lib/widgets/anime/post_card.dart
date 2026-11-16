@@ -3,6 +3,7 @@ import 'package:baka/source/source_registry.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/app/navigation.dart';
+import 'package:baka/app/page_routes.dart';
 import 'package:baka/utils/reg_utils.dart';
 import 'package:baka/widgets/platform/windows/windows_post_card.dart';
 import 'package:flutter/material.dart';
@@ -176,16 +177,23 @@ Widget buildNetworkImage(
 class PostCard extends StatelessWidget {
   final Map data;
   final VoidCallback? onTap;
+  final bool useCoverHero;
 
-  const PostCard(this.data, {super.key, this.onTap});
+  const PostCard(this.data, {super.key, this.onTap, this.useCoverHero = true});
 
   @override
   Widget build(BuildContext context) {
     final meta = resolvePostCardMeta(data);
+    final desktop = Instances.isDesktopPlatform;
 
     return GestureDetector(
-      onTap: onTap ?? () => NavigationService.toDetail(context, data),
-      child: Instances.isDesktopPlatform
+      onTap:
+          onTap ??
+          () {
+            if (!desktop && !Instances.isTV) TapOrigin.useClip(context);
+            NavigationService.toDetail(context, data);
+          },
+      child: desktop
           ? WindowsCard(
               data: data,
               tagText: meta.tagText,
@@ -198,6 +206,7 @@ class PostCard extends StatelessWidget {
   }
 
   Widget _buildMobileCard(BuildContext context, PostCardMeta meta) {
+    final image = buildCachedImage(data, double.infinity, double.infinity);
     final label = meta.tagText.isNotEmpty
         ? (meta.scoreText == null
               ? meta.tagText
@@ -205,15 +214,12 @@ class PostCard extends StatelessWidget {
         : (meta.scoreText == null ? '' : '评分 ${meta.scoreText}');
     final cover = AspectRatio(
       aspectRatio: 2 / 3,
-      child: ClipRRect(
+      child: TransitionOriginClip(
         borderRadius: BorderRadius.circular(12.0),
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Hero(
-              tag: coverHeroTag(data),
-              child: buildCachedImage(data, double.infinity, double.infinity),
-            ),
+            useCoverHero ? Hero(tag: coverHeroTag(data), child: image) : image,
             if (label.isNotEmpty)
               Positioned(
                 left: 0,

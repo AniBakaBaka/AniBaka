@@ -117,7 +117,7 @@
           },
           {
             "op": "regex",
-            "pattern": "var\\s+player_aaaa\\s*=\\s*\\{[^}]*?\"from\"\\s*:\\s*\"([^\"]*)\"",
+            "pattern": "var\\s+player_aaaa\\s*=\\s*\\{[^<]*?\"from\"\\s*:\\s*\"([^\"]+)\"",
             "group": 1
           },
           {
@@ -221,7 +221,7 @@
           },
           {
             "op": "template",
-            "value": "https://yun.92cj.com/{dir:raw}/?type={type:raw}&vid={vid:raw}&referer={playref:raw}"
+            "value": "https://yun.92cj.com/{dir:raw}/?type={type}&vid={vid}&referer={playref}"
           },
           {
             "op": "fetch"
@@ -316,8 +316,8 @@
             "algo": "aes-cbc",
             "mode": "decrypt",
             "input": "{token:raw}",
-            "key": "OG2)9Cc%0_mADSCL",
-            "iv": "5re6a)@&wfDCMS^A"
+            "key": "&_MP&GzFSu8M_jkp",
+            "iv": "4wcyIgh+#gKDv(RC"
           },
           {
             "op": "setVar",
@@ -333,6 +333,7 @@
             "method": "POST",
             "contentType": "form",
             "headers": {
+              "Origin": "https://yun.92cj.com",
               "X-Requested-With": "XMLHttpRequest"
             },
             "body": {

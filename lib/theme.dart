@@ -1,9 +1,14 @@
+import 'dart:io';
+import 'dart:ui' show loadFontFromList;
+
 import 'package:baka/app/page_routes.dart';
 import 'package:baka/instance.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:path_provider/path_provider.dart';
 
 class ThemeColors {
   static const primary = Color.fromRGBO(0, 119, 182, 1);
@@ -17,7 +22,7 @@ class AppFonts {
   static const String defaultFont = 'Noto Serif SC';
   static const String spKey = 'app_font_family';
 
-  static const fontOptions = {
+  static const _builtInFonts = {
     systemFont: '系统默认',
     'Noto Sans SC': '思源黑体',
     'M PLUS Rounded 1c': 'M PLUS 圆体',
@@ -28,6 +33,13 @@ class AppFonts {
     'ZCOOL KuaiLe': '站酷快乐体',
     'ZCOOL XiaoWei': '站酷小薇体',
     'ZCOOL QingKe HuangYou': '站酷庆科黄油体',
+  };
+
+  static String? _importedFont;
+
+  static Map<String, String> get fontOptions => {
+    ..._builtInFonts,
+    ?_importedFont: '自定义字体',
   };
 
   static const String fontScaleKey = 'app_font_scale';
@@ -50,11 +62,51 @@ class AppFonts {
   ];
 
   static bool isSystemFont(String fontName) => fontName == systemFont;
+  static bool isImportedFont(String fontName) => fontName == _importedFont;
 
   static String normalizeFont(String? fontName) =>
-      fontName != null && fontOptions.containsKey(fontName)
+      fontName != null &&
+          (_builtInFonts.containsKey(fontName) || isImportedFont(fontName))
       ? fontName
       : defaultFont;
+
+  static Future<File> _importedFontFile() async {
+    final directory = await getApplicationSupportDirectory();
+    return File.fromUri(directory.uri.resolve('app-font'));
+  }
+
+  static Future<void> restoreImportedFont() async {
+    final file = await _importedFontFile();
+    if (await file.exists()) await _loadFont(file);
+  }
+
+  static Future<String> importFont(File source) async =>
+      _loadFont(source, destination: await _importedFontFile());
+
+  static Future<String> _loadFont(File source, {File? destination}) async {
+    if (await source.length() > 64 * 1024 * 1024) {
+      throw const FormatException('字体文件不能超过 64 MB');
+    }
+    final bytes = await source.readAsBytes();
+    final data = ByteData.sublistView(bytes);
+    const signatures = {0x00010000, 0x4f54544f, 0x74727565};
+    if (bytes.length < 12 ||
+        !signatures.contains(data.getUint32(0)) ||
+        data.getUint16(4) == 0 ||
+        12 + 16 * data.getUint16(4) > bytes.length) {
+      throw const FormatException('字体文件无效或已损坏');
+    }
+    final family = 'baka-custom-${sha256.convert(bytes)}';
+    if (!isImportedFont(family)) {
+      await loadFontFromList(bytes, fontFamily: family);
+    }
+    if (destination != null) {
+      final staged = File('${destination.path}.tmp');
+      await staged.writeAsBytes(bytes, flush: true);
+      await staged.rename(destination.path);
+    }
+    return _importedFont = family;
+  }
 
   static String getSavedFont() => normalizeFont(Instances.sp.getString(spKey));
 
@@ -124,9 +176,12 @@ class AppTheme {
     String fontFamily,
     FontWeight fontWeight,
   ) {
-    var textTheme = AppFonts.isSystemFont(fontFamily)
-        ? base.textTheme
-        : GoogleFonts.getTextTheme(fontFamily, base.textTheme);
+    var textTheme = base.textTheme;
+    if (AppFonts.isImportedFont(fontFamily)) {
+      textTheme = textTheme.apply(fontFamily: fontFamily);
+    } else if (!AppFonts.isSystemFont(fontFamily)) {
+      textTheme = GoogleFonts.getTextTheme(fontFamily, textTheme);
+    }
     if (fontWeight != FontWeight.w400) {
       TextStyle? apply(TextStyle? style) =>
           style?.copyWith(fontWeight: fontWeight);

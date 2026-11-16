@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:baka/instance.dart';
 
 import 'package:baka/app/navigation.dart';
+import 'package:baka/app/page_routes.dart';
 import 'package:baka/widgets/dialog/input_dialog.dart';
 import 'package:baka/widgets/anime/post_card.dart';
 import 'package:flutter/material.dart';
@@ -221,7 +222,10 @@ class _SwiperBannerState extends State<SwiperBanner> {
                 _currentIndexNotifier.value = index;
               },
               itemBuilder: (_, index) => GestureDetector(
-                onTap: () => openBannerItem(context, widget.swiperData[index]),
+                onTap: () {
+                  TapOrigin.useClip(context);
+                  openBannerItem(context, widget.swiperData[index]);
+                },
                 child: buildNetworkImage(
                   widget.swiperData[index]['bannerImageUrl'] as String,
                   double.infinity,

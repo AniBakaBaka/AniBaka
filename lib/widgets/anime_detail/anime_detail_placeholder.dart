@@ -130,6 +130,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   /// Applies loaded data once the page is at rest: while its transition runs
   /// the page is drawn from a snapshot, so a rebuild then only costs frames.
   Future<void> _apply(int generation, VoidCallback update) async {
+    if (!mounted || generation != _loadGeneration) return;
     await pageSettled(context);
     if (!mounted || generation != _loadGeneration) return;
     setState(() {

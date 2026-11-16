@@ -30,6 +30,7 @@ import 'package:baka/services/playback/animejanai_playback.dart';
 import 'package:baka/services/playback/watch_party.dart';
 import 'package:baka/services/source/source_repository.dart';
 import 'package:baka/core/app_logger.dart';
+import 'package:baka/theme.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -184,6 +185,11 @@ class AppRuntime {
     _cleanup.add(DlssGlobalPlayback.instance.close);
     await AnimeJaNaiService.instance.initialize();
     _cleanup.add(AnimeJaNaiService.instance.close);
+    try {
+      await AppFonts.restoreImportedFont();
+    } catch (error, stack) {
+      Log.w('Fonts', '无法加载自定义字体', error, stack);
+    }
     Get.put(this, permanent: true);
     Get.put(account, permanent: true);
     Get.put(apiTransport, permanent: true);

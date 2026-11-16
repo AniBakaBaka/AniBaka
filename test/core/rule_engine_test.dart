@@ -3,6 +3,7 @@ import 'package:baka/source/html_parser.dart';
 import 'package:html/parser.dart' as html;
 import 'package:baka/source/runtime/source_operation.dart';
 import 'dart:convert';
+import 'dart:io';
 import 'package:baka/models/custom_source_config.dart';
 import 'package:baka/source/engine/pipeline_host.dart';
 import 'package:baka/source/engine/pipeline_interpreter.dart';
@@ -1221,6 +1222,55 @@ void main() {
       final url = await interp.runPlay(rule, host, '/player');
       expect(url, direct);
     });
+
+    test(
+      'bundled lm6 rule preserves encoded player IDs and decodes the token',
+      () async {
+        final rule = SourceRule.fromJson(
+          jsonDecode(File('assets/rules/lm6.json').readAsStringSync())
+              as Map<String, dynamic>,
+        );
+        const episode = 'https://m.lm6.net/play/6046_1_166.html';
+        const vid = 'fixture+id/=';
+        const token =
+            '4uOkSoteAreu7396bZhOlGA5l2mo/qz2aI8uvnAkIxamBqw7CSlI5NIilxd9EzgT';
+        const player =
+            'https://yun.92cj.com/yunbox/?type=ecvod&vid=fixture%2Bid%2F%3D'
+            '&referer=https%3A%2F%2Fm.lm6.net%2Fplay%2F6046_1_166.html';
+        const api = 'https://yun.92cj.com/yunbox/ecvod.php';
+        const direct =
+            'https://cdn.example.com/video/tos/episode?signature=abc%2B';
+        final host = FakeHost({
+          episode:
+              '<script>var player_aaaa = '
+              '{"encrypt":0,"vod_data":{"vod_name":"仙逆"},'
+              '"url":"$vid&t=ecvod","from":"ykbox"};</script>',
+          player:
+              '''
+          var vid = "$vid";
+          var t = "1794832750";
+          var token = "$token";
+          var act = "0";
+          var play = "1";
+          \$.post("ecvod.php", {});
+        ''',
+          api: jsonEncode({'code': 200, 'ext': 'mp4', 'url': direct}),
+        });
+
+        expect(await interp.runPlay(rule, host, episode), direct);
+        expect(host.fetched, [episode, player, api]);
+        final request = host.requests.last;
+        expect(request.method, 'POST');
+        expect(request.contentType, 'form');
+        expect(request.body, {
+          'vid': vid,
+          't': '1794832750',
+          'token': '0123456789abcdef0123456789abcdef',
+          'act': '0',
+          'play': '1',
+        });
+      },
+    );
 
     test('crypto aes-cbc decrypts a payload with a prefixed IV', () async {
       const key = '0123456789abcdef';
