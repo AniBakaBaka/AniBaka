@@ -157,7 +157,7 @@ class RankSection extends StatelessWidget {
     return Builder(
       builder: (context) => GestureDetector(
         onTap: () {
-          TapOrigin.useClip(context);
+          MobileRouteBinding.useClip(context);
           NavigationService.toDetail(context, item);
         },
         child: card,

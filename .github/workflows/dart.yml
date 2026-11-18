@@ -362,6 +362,11 @@ jobs:
           $match = [regex]::Match($env:RELEASE_VERSION, '^(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?$')
           if (-not $match.Success) { throw "Invalid release version: $env:RELEASE_VERSION" }
           $buildNumber = if ($match.Groups[4].Success) { [int]$match.Groups[4].Value } else { [int]$env:GITHUB_RUN_NUMBER }
+          if ($buildNumber -gt 65535 -and $match.Groups[4].Value -match '^[0-9]{6}$') {
+            # Encode YYMMDD as elapsed days above the legacy four-digit revisions.
+            $buildDate = [datetime]::ParseExact("20$($match.Groups[4].Value)", 'yyyyMMdd', [cultureinfo]::InvariantCulture)
+            $buildNumber = 10000 + ($buildDate - [datetime]::new(2000, 1, 1)).Days
+          }
           $parts = @(
             [int]$match.Groups[1].Value
             [int]$match.Groups[2].Value

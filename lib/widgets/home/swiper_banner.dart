@@ -223,7 +223,7 @@ class _SwiperBannerState extends State<SwiperBanner> {
               },
               itemBuilder: (_, index) => GestureDetector(
                 onTap: () {
-                  TapOrigin.useClip(context);
+                  MobileRouteBinding.useClip(context);
                   openBannerItem(context, widget.swiperData[index]);
                 },
                 child: buildNetworkImage(

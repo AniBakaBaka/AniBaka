@@ -3,7 +3,6 @@ import 'dart:ui' show PointerDeviceKind;
 
 import 'package:baka/app/app_runtime.dart';
 import 'package:baka/app_state.dart';
-import 'package:baka/core/account_session.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/pages/home/home_page.dart';
 import 'package:baka/pages/library/library_page.dart';
@@ -100,7 +99,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
   final _appState = Get.find<AppState>();
 
-  /// Tab pages are built on first visit and then kept.
+  /// Keep visited tabs mounted during normal navigation.
   final _pages = List<Widget?>.filled(
     Instances.isDesktopPlatform ? 6 : 4,
     null,
@@ -118,6 +117,16 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didHaveMemoryPressure() {
+    final current = _appState.currentPageIndex.value;
+    setState(() {
+      for (var i = 1; i < _pages.length; i++) {
+        if (i != current) _pages[i] = null;
+      }
+    });
   }
 
   @override
@@ -223,13 +232,12 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   Expanded(
                     child: Row(
                       children: [
-                        Obx(() {
-                          Get.find<AccountSession>().user.value;
-                          return WindowsSidebar(
+                        Obx(
+                          () => WindowsSidebar(
                             currentPageIndex: _appState.currentPageIndex.value,
                             onPageChange: _appState.changePage,
-                          );
-                        }),
+                          ),
+                        ),
                         Expanded(child: pages),
                       ],
                     ),

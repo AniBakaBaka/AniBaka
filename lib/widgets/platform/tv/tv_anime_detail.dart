@@ -122,7 +122,6 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
             ),
         ];
       }
-      // The page is a snapshot while its transition runs.
       await pageSettled(context);
       if (mounted) setState(() => _detail = detail);
     } catch (e) {

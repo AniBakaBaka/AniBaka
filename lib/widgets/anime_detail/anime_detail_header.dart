@@ -299,15 +299,18 @@ class AnimeDetailHeader extends StatelessWidget {
           borderRadius: const BorderRadius.all(Radius.circular(11.5)),
           child: imageUrl.isEmpty
               ? fallback
-              : CachedNetworkImage(
-                  imageUrl: imageUrl,
+              : Image(
+                  image: ResizeImage.resizeIfNeeded(
+                    width > 150 ? (width * 2).round() : 300,
+                    null,
+                    CachedNetworkImageProvider(imageUrl),
+                  ),
                   fit: BoxFit.cover,
-                  useOldImageOnUrlChange: true,
-                  fadeInDuration: Duration.zero,
-                  fadeOutDuration: Duration.zero,
-                  memCacheWidth: width > 150 ? (width * 2).round() : 300,
-                  placeholder: (_, _) => fallback,
-                  errorWidget: (_, _, _) => fallback,
+                  filterQuality: FilterQuality.low,
+                  gaplessPlayback: true,
+                  frameBuilder: (_, child, frame, sync) =>
+                      sync || frame != null ? child : fallback,
+                  errorBuilder: (_, _, _) => fallback,
                 ),
         ),
       ),

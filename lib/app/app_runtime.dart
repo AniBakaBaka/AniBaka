@@ -1,20 +1,17 @@
-import 'package:baka/services/playback/history_repository.dart';
-import 'package:baka/services/playback/danmaku_controller.dart';
-import 'package:baka/services/source/rule_repository_service.dart';
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
+
 import 'package:baka/api/api_config.dart';
 import 'package:baka/api/auth_api.dart';
 import 'package:baka/api/bangumi_account_api.dart';
-import 'package:baka/app/platform_setup.dart';
 import 'package:baka/app/navigation.dart';
-import 'package:baka/app/page_routes.dart';
+import 'package:baka/app/platform_setup.dart';
 import 'package:baka/app/usage_tracker.dart';
 import 'package:baka/app/watch_party_links.dart';
 import 'package:baka/app_state.dart';
 import 'package:baka/core/account_session.dart';
 import 'package:baka/core/api_transport.dart';
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/app_storage.dart';
 import 'package:baka/core/network_service.dart';
 import 'package:baka/instance.dart';
@@ -23,36 +20,34 @@ import 'package:baka/services/account/bangumi_session.dart';
 import 'package:baka/services/collection/bangumi_sync.dart';
 import 'package:baka/services/collection/collection_repository.dart';
 import 'package:baka/services/download/download_manager.dart';
+import 'package:baka/services/playback/animejanai_playback.dart';
+import 'package:baka/services/playback/danmaku_controller.dart';
+import 'package:baka/services/playback/dlss_global_playback.dart';
+import 'package:baka/services/playback/history_repository.dart';
 import 'package:baka/services/playback/media_session.dart';
 import 'package:baka/services/playback/playback_settings.dart';
-import 'package:baka/services/playback/dlss_global_playback.dart';
-import 'package:baka/services/playback/animejanai_playback.dart';
 import 'package:baka/services/playback/watch_party.dart';
+import 'package:baka/services/source/rule_repository_service.dart';
 import 'package:baka/services/source/source_repository.dart';
-import 'package:baka/core/app_logger.dart';
 import 'package:baka/theme.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:file/file.dart' as cached_file;
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:get/get.dart' hide ContextExtensionss;
 import 'package:hive_flutter/hive_flutter.dart';
 
 /// Composition root and owner of application-lifetime resources.
 class AppRuntime {
-  AppRuntime({Future<void> Function()? platformSetup, this.incomingLinks})
-    : platformSetup = platformSetup ?? configurePlatform;
+  AppRuntime({this.platformSetup = configurePlatform, this.incomingLinks});
   final Future<void> Function() platformSetup;
   final Stream<Uri>? incomingLinks;
   final _cleanup = <FutureOr<void> Function()>[];
   bool _ready = false;
-  String? _notifiedSourceUpdates;
+  Map<String, int> _notifiedSourceUpdates = const {};
   Future<void>? _initializing, _closing;
-  Set<PlaybackController>? _playbacks;
-  Set<PlaybackController> get playbacks =>
-      _playbacks ??= <PlaybackController>{};
+  final playbacks = <PlaybackController>{};
   late AccountSession account;
   late WatchPartyService party;
   late WatchPartyLinks links;
@@ -97,14 +92,16 @@ class AppRuntime {
     );
     final previousImageCache = CachedNetworkImageProvider.defaultCacheManager;
     final imageClient = NetworkService.createClient();
-    final privateImageCache = CacheManager(
+    final imageCache = MonitoredImageCache(
       Config(
         'libCachedImageData',
         fileService: HttpFileService(httpClient: imageClient),
       ),
+      networkNotices,
     );
-    final imageCache = MonitoredImageCache(privateImageCache, networkNotices);
     CachedNetworkImageProvider.defaultCacheManager = imageCache;
+    _cleanup.add(imageClient.close);
+    _cleanup.add(imageCache.dispose);
     _cleanup.add(() {
       networkNotices.dispose();
       if (identical(
@@ -113,10 +110,6 @@ class AppRuntime {
       )) {
         CachedNetworkImageProvider.defaultCacheManager = previousImageCache;
       }
-    });
-    _cleanup.add(() async {
-      await privateImageCache.dispose();
-      imageClient.close();
     });
     final client = NetworkService.createClient();
     _cleanup.add(client.close);
@@ -145,7 +138,7 @@ class AppRuntime {
     ruleRepository = RuleRepositoryService(sourceRepository, sourceCatalog);
     downloads = DownloadService();
     party = WatchPartyService(session: account);
-    links = WatchPartyLinks(party, incoming: incomingLinks)..initializeLinks();
+    links = WatchPartyLinks(party, incoming: incomingLinks);
     _cleanup.addAll([
       account.close,
       bangumiSession.api.close,
@@ -175,12 +168,6 @@ class AppRuntime {
       boxes: AppStorage.startupBoxes,
     );
     await platformSetup();
-    // Desktop pages use their own transitions; only mobile grows pages out of
-    // the pressed component.
-    if (!Instances.isDesktopPlatform) {
-      TapOrigin.install();
-      _cleanup.add(TapOrigin.uninstall);
-    }
     await DlssGlobalPlayback.instance.initialize();
     _cleanup.add(DlssGlobalPlayback.instance.close);
     await AnimeJaNaiService.instance.initialize();
@@ -210,10 +197,10 @@ class AppRuntime {
   }
 
   void markReady() {
-    if (_closing != null) return;
+    if (_ready || _closing != null) return;
     _ready = true;
     links.markReady();
-    unawaited(DauTracker.track());
+    unawaited(trackDailyUsage());
     unawaited(checkSourceUpdates());
   }
 
@@ -221,14 +208,16 @@ class AppRuntime {
     if (!_ready || _closing != null) return;
     await ruleRepository.checkForUpdates();
     if (!_ready || _closing != null || ruleRepository.updateCount == 0) return;
-    final versions =
-        ruleRepository.hubCatalog.updates
-            .map((rule) => '${rule.item.id}:${rule.item.version}')
-            .toList()
-          ..sort();
-    final signature = versions.join(',');
-    if (_notifiedSourceUpdates == signature) return;
-    _notifiedSourceUpdates = signature;
+    final updates = ruleRepository.hubCatalog.updates;
+    if (updates.length == _notifiedSourceUpdates.length &&
+        updates.every(
+          (rule) => _notifiedSourceUpdates[rule.item.id] == rule.item.version,
+        )) {
+      return;
+    }
+    _notifiedSourceUpdates = {
+      for (final rule in updates) rule.item.id: rule.item.version,
+    };
     showSnackBar(
       '${ruleRepository.updateCount} 个源有更新，可修复搜索或播放问题',
       action: SnackBarAction(
@@ -274,53 +263,10 @@ class AppRuntime {
   }
 }
 
-/// Observes the shared image cache, preserving its storage and resize behavior.
-class MonitoredImageCache extends BaseCacheManager with ImageCacheManager {
-  MonitoredImageCache(this.delegate, this.notices);
-
-  final BaseCacheManager delegate;
+/// Observe the final image stream, including hits on disk-resized variants.
+class MonitoredImageCache extends CacheManager with ImageCacheManager {
+  MonitoredImageCache(super.config, this.notices);
   final NetworkNotices notices;
-
-  Stream<FileResponse> _observe(
-    String url,
-    Stream<FileResponse> responses,
-  ) async* {
-    notices.reportImageStarted(url);
-    var hasImage = false;
-    try {
-      await for (final response in responses) {
-        if (response is FileInfo && !hasImage) {
-          hasImage = true;
-          notices.reportImageResult(url, succeeded: true);
-        }
-        yield response;
-      }
-    } catch (error) {
-      // A failed refresh must not flag an image already displayed from cache.
-      // Local storage errors are also unrelated to regional connectivity.
-      if (!hasImage &&
-          (error is HttpException || NetworkNotices.isNetworkError(error))) {
-        notices.reportImageResult(url, succeeded: false);
-      }
-      rethrow;
-    }
-  }
-
-  @override
-  Stream<FileResponse> getFileStream(
-    String url, {
-    String? key,
-    Map<String, String>? headers,
-    bool withProgress = false,
-  }) => _observe(
-    url,
-    delegate.getFileStream(
-      url,
-      key: key,
-      headers: headers,
-      withProgress: withProgress,
-    ),
-  );
 
   @override
   Stream<FileResponse> getImageFile(
@@ -331,115 +277,41 @@ class MonitoredImageCache extends BaseCacheManager with ImageCacheManager {
     int? maxHeight,
     int? maxWidth,
   }) {
-    final cache = delegate;
-    if (cache is ImageCacheManager) {
-      return _observe(
-        url,
-        cache.getImageFile(
-          url,
-          key: key,
-          headers: headers,
-          withProgress: withProgress,
-          maxHeight: maxHeight,
-          maxWidth: maxWidth,
-        ),
-      );
-    }
-    return super.getImageFile(
-      url,
-      key: key,
-      headers: headers,
-      withProgress: withProgress,
-      maxHeight: maxHeight,
-      maxWidth: maxWidth,
+    final responses = maxHeight == null && maxWidth == null
+        ? getFileStream(
+            url,
+            key: key,
+            headers: headers,
+            withProgress: withProgress,
+          )
+        : super.getImageFile(
+            url,
+            key: key,
+            headers: headers,
+            withProgress: withProgress,
+            maxHeight: maxHeight,
+            maxWidth: maxWidth,
+          );
+    notices.reportImageStarted(url);
+    var hasImage = false;
+    return responses.transform(
+      StreamTransformer.fromHandlers(
+        handleData: (response, sink) {
+          if (!hasImage && response is FileInfo) {
+            hasImage = true;
+            notices.reportImageResult(url, succeeded: true);
+          }
+          sink.add(response);
+        },
+        handleError: (error, stack, sink) {
+          if (!hasImage &&
+              (error is HttpException ||
+                  NetworkNotices.isNetworkError(error))) {
+            notices.reportImageResult(url, succeeded: false);
+          }
+          sink.addError(error, stack);
+        },
+      ),
     );
   }
-
-  @override
-  Future<cached_file.File> getSingleFile(
-    String url, {
-    String? key,
-    Map<String, String>? headers,
-  }) => delegate.getSingleFile(
-    url,
-    key: key ?? url,
-    headers: headers ?? const {},
-  );
-
-  @override
-  Stream<FileInfo> getFile(
-    String url, {
-    String? key,
-    Map<String, String>? headers,
-  }) => getFileStream(
-    url,
-    key: key,
-    headers: headers,
-  ).where((r) => r is FileInfo).cast<FileInfo>();
-
-  @override
-  Future<FileInfo> downloadFile(
-    String url, {
-    String? key,
-    Map<String, String>? authHeaders,
-    bool force = false,
-  }) => delegate.downloadFile(
-    url,
-    key: key,
-    authHeaders: authHeaders,
-    force: force,
-  );
-
-  @override
-  Future<FileInfo?> getFileFromCache(
-    String key, {
-    bool ignoreMemCache = false,
-  }) => delegate.getFileFromCache(key, ignoreMemCache: ignoreMemCache);
-
-  @override
-  Future<FileInfo?> getFileFromMemory(String key) =>
-      delegate.getFileFromMemory(key);
-
-  @override
-  Future<cached_file.File> putFile(
-    String url,
-    Uint8List fileBytes, {
-    String? key,
-    String? eTag,
-    Duration maxAge = const Duration(days: 30),
-    String fileExtension = 'file',
-  }) => delegate.putFile(
-    url,
-    fileBytes,
-    key: key,
-    eTag: eTag,
-    maxAge: maxAge,
-    fileExtension: fileExtension,
-  );
-
-  @override
-  Future<cached_file.File> putFileStream(
-    String url,
-    Stream<List<int>> source, {
-    String? key,
-    String? eTag,
-    Duration maxAge = const Duration(days: 30),
-    String fileExtension = 'file',
-  }) => delegate.putFileStream(
-    url,
-    source,
-    key: key,
-    eTag: eTag,
-    maxAge: maxAge,
-    fileExtension: fileExtension,
-  );
-
-  @override
-  Future<void> removeFile(String key) => delegate.removeFile(key);
-
-  @override
-  Future<void> emptyCache() => delegate.emptyCache();
-
-  @override
-  Future<void> dispose() => delegate.dispose();
 }

@@ -669,7 +669,7 @@ class _MinePageState extends State<MinePage> {
       final info = await VersionService.checkUpdateInfo();
       if (mounted) {
         if (info.hasUpdate) {
-          VersionService.checkAndShowUpdate();
+          await VersionService.checkAndShowUpdate(info);
         } else {
           showSnackBar('当前已是最新版本 (v${Instances.appVersion})');
         }

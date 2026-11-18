@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -32,40 +31,28 @@ class _RenderTransitionOriginClip extends RenderClipRRect {
   });
 }
 
-/// The component under the latest press. The page that press opens grows out
-/// of it and collapses back into it.
-abstract final class TapOrigin {
+/// Uses the existing pointer hit test to find the surface opening a mobile route.
+class MobileRouteBinding extends WidgetsFlutterBinding {
   static WeakReference<RenderBox>? _pressed;
-  static AppLifecycleListener? _lifecycle;
 
-  static void install() {
-    if (_lifecycle != null) return;
-    GestureBinding.instance.pointerRouter.addGlobalRoute(_onPointer);
-    // A press made before the app was hidden cannot open what comes after.
-    _lifecycle = AppLifecycleListener(onHide: () => _pressed = null);
-  }
-
-  static void uninstall() {
-    if (_lifecycle == null) return;
-    GestureBinding.instance.pointerRouter.removeGlobalRoute(_onPointer);
-    _lifecycle!.dispose();
-    _lifecycle = null;
-    _pressed = null;
-  }
-
-  static void _onPointer(PointerEvent event) {
-    if (event is! PointerDownEvent) return;
-    final result = HitTestResult();
-    WidgetsBinding.instance.hitTestInView(result, event.position, event.viewId);
-    // The path runs from the most specific target outwards, so the first
-    // gesture detector is the pressed button, tile or card.
-    for (final entry in result.path) {
-      if (entry.target case final RenderPointerListener box) {
-        _pressed = WeakReference(box);
-        return;
+  @override
+  void dispatchEvent(PointerEvent event, HitTestResult? hitTestResult) {
+    if (event is PointerDownEvent && hitTestResult != null) {
+      _pressed = null;
+      for (final entry in hitTestResult.path) {
+        if (entry.target case final RenderPointerListener box) {
+          _pressed = WeakReference(box);
+          break;
+        }
       }
     }
-    _pressed = null;
+    super.dispatchEvent(event, hitTestResult);
+  }
+
+  @override
+  void handleAppLifecycleStateChanged(AppLifecycleState state) {
+    if (state == AppLifecycleState.hidden) _pressed = null;
+    super.handleAppLifecycleStateChanged(state);
   }
 
   /// Uses the marked surface even when the user taps the tile's caption.
@@ -82,13 +69,6 @@ abstract final class TapOrigin {
     node?.visitChildren((child) => clip ??= _findClip(child));
     return clip;
   }
-
-  /// Hands the pressed component to one page only.
-  static RenderBox? take() {
-    final box = _pressed?.target;
-    _pressed = null;
-    return box;
-  }
 }
 
 /// [box]'s rect in [navigator]'s overlay; null once it is detached, outside
@@ -101,28 +81,29 @@ Rect? _rectIn(NavigatorState navigator, RenderBox box) {
       !overlay.hasSize) {
     return null;
   }
+  final path = <RenderObject>[];
   RenderObject? node = box;
   while (node != null && node != overlay) {
+    path.add(node);
     node = node.parent;
   }
   if (node == null) return null;
-  var rect = MatrixUtils.transformRect(
-    box.getTransformTo(overlay),
-    Offset.zero & box.size,
-  );
-  if (box is _RenderTransitionOriginClip) {
-    RenderObject child = box;
-    while (child != overlay) {
-      final parent = child.parent!;
+  final transform = Matrix4.identity();
+  Rect? visible;
+  RenderObject parent = overlay;
+  for (final child in path.reversed) {
+    if (box is _RenderTransitionOriginClip) {
       final clip = parent.describeApproximatePaintClip(child);
       if (clip != null) {
-        rect = rect.intersect(
-          MatrixUtils.transformRect(parent.getTransformTo(overlay), clip),
-        );
+        final bounds = MatrixUtils.transformRect(transform, clip);
+        visible = visible?.intersect(bounds) ?? bounds;
       }
-      child = parent;
     }
+    parent.applyPaintTransform(child, transform);
+    parent = child;
   }
+  var rect = MatrixUtils.transformRect(transform, Offset.zero & box.size);
+  if (visible != null) rect = rect.intersect(visible);
   return rect.isFinite &&
           !rect.isEmpty &&
           (Offset.zero & overlay.size).overlaps(rect)
@@ -131,10 +112,6 @@ Rect? _rectIn(NavigatorState navigator, RenderBox box) {
 }
 
 /// Completes once the transition of [context]'s page is at rest.
-///
-/// A page in a container transition is drawn from a snapshot while it moves,
-/// so rebuilding it then only costs frames. Data arriving mid-transition can
-/// wait for this; pages of other routes complete at once.
 Future<void> pageSettled(BuildContext context) {
   final route = context.getInheritedWidgetOfExactType<_PageMotion>()?.route;
   // A pushed route's first frame is built offstage at its end state.
@@ -167,34 +144,121 @@ class _PageMotion extends InheritedWidget {
 /// animation value then, and whether the route pops. Null while dragging.
 typedef _Release = ({double value, bool commit});
 
-/// Hands Android predictive back gestures to [route].
-///
-/// A route rebuilds its transitions on every animation tick and the gesture
-/// moves the route animation, so [builder] runs once per gesture frame.
-class _PredictiveBack extends StatefulWidget {
-  const _PredictiveBack({required this.route, required this.builder});
-
-  final PageRoute<dynamic> route;
-  final Widget Function(BuildContext context, _Release? release) builder;
+/// Mobile pages grow out of the component that opened them and collapse back
+/// into it: on pop, along an Android predictive back gesture and along the
+/// iOS edge swipe.
+class ContainerPageTransitionsBuilder extends PageTransitionsBuilder {
+  const ContainerPageTransitionsBuilder();
 
   @override
-  State<_PredictiveBack> createState() => _PredictiveBackState();
+  Duration get transitionDuration => _forwardDuration;
+
+  @override
+  Duration get reverseTransitionDuration => _reverseDuration;
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    final ios = Theme.of(context).platform == TargetPlatform.iOS;
+    final page = _ContainerTransition(route: route, ios: ios, child: child);
+    return ios
+        ? CupertinoRouteTransitionMixin.buildPageTransitions<T>(
+            route,
+            context,
+            kAlwaysCompleteAnimation,
+            kAlwaysDismissedAnimation,
+            page,
+          )
+        : page;
+  }
 }
 
-class _PredictiveBackState extends State<_PredictiveBack>
+/// Morphs the page between the component it was opened from and the full
+/// screen. The page stays laid out at its final size throughout the motion.
+class _ContainerTransition extends StatefulWidget {
+  const _ContainerTransition({
+    required this.route,
+    required this.ios,
+    required this.child,
+  });
+
+  final PageRoute<dynamic> route;
+  final bool ios;
+  final Widget child;
+
+  @override
+  State<_ContainerTransition> createState() => _ContainerTransitionState();
+}
+
+typedef _OriginGeometry = ({Rect rect, BorderRadius? clipRadius});
+
+class _ContainerTransitionState extends State<_ContainerTransition>
     with WidgetsBindingObserver {
+  static const _curve = Curves.easeOut;
+  static const _originRadius = BorderRadius.all(Radius.circular(12));
+  static final _identity = Matrix4.identity();
+
+  final _snapshot = SnapshotController();
+  late final CurvedAnimation _motion;
   _Release? _release;
+  WeakReference<RenderBox>? _origin;
+
+  /// The component's geometry; null grows the page from the screen center.
+  _OriginGeometry? _geometry;
+
+  PageRoute<dynamic> get _route => widget.route;
+  Animation<double> get _animation => _route.animation!;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
+    // Built in the frame of the push, while the pressed component is still
+    // laid out on the previous page.
+    _origin = MobileRouteBinding._pressed;
+    MobileRouteBinding._pressed = null;
+    _geometry = _locate();
+    _motion = CurvedAnimation(
+      parent: _animation,
+      curve: _curve,
+      reverseCurve: _curve.flipped,
+    );
+    if (!widget.ios) WidgetsBinding.instance.addObserver(this);
+    _animation.addStatusListener(_onStatus);
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
+    _animation.removeStatusListener(_onStatus);
+    _motion.dispose();
+    _snapshot.dispose();
+    if (!widget.ios) WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  _OriginGeometry? _locate() {
+    final box = _origin?.target;
+    final navigator = _route.navigator;
+    if (box == null || navigator == null) return null;
+    final rect = _rectIn(navigator, box);
+    if (rect == null) return null;
+    return (
+      rect: rect,
+      clipRadius: box is _RenderTransitionOriginClip
+          ? box.borderRadius.resolve(box.textDirection)
+          : null,
+    );
+  }
+
+  void _onStatus(AnimationStatus status) {
+    if (!status.isAnimating) return;
+    // Pops and gestures leave the completed state: aim at where the component
+    // is now, since the list behind the page may have scrolled.
+    _geometry = _locate() ?? _geometry;
   }
 
   @override
@@ -231,145 +295,10 @@ class _PredictiveBackState extends State<_PredictiveBack>
     if (!route.popGestureInProgress && mounted) setState(() => _release = null);
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (!widget.route.popGestureInProgress) _release = null;
-    return widget.builder(context, _release);
-  }
-}
-
-/// Mobile pages grow out of the component that opened them and collapse back
-/// into it: on pop, along an Android predictive back gesture and along the
-/// iOS edge swipe.
-class ContainerPageTransitionsBuilder extends PageTransitionsBuilder {
-  const ContainerPageTransitionsBuilder();
-
-  @override
-  Duration get transitionDuration => _forwardDuration;
-
-  @override
-  Duration get reverseTransitionDuration => _reverseDuration;
-
-  @override
-  Widget buildTransitions<T>(
-    PageRoute<T> route,
-    BuildContext context,
-    Animation<double> animation,
-    Animation<double> secondaryAnimation,
-    Widget child,
-  ) {
-    if (Theme.of(context).platform != TargetPlatform.iOS) {
-      return _PredictiveBack(
-        route: route,
-        builder: (context, release) =>
-            _ContainerTransition(route: route, release: release, child: child),
-      );
-    }
-    // Keep the iOS edge swipe. With settled animations Cupertino's own slide
-    // stays out of the way and only its gesture detector is added.
-    return CupertinoRouteTransitionMixin.buildPageTransitions<T>(
-      route,
-      context,
-      kAlwaysCompleteAnimation,
-      kAlwaysDismissedAnimation,
-      _ContainerTransition(route: route, release: null, child: child),
-    );
-  }
-}
-
-/// Morphs the page between the component it was opened from and the full
-/// screen. The page stays laid out at its final size throughout the motion.
-class _ContainerTransition extends StatefulWidget {
-  const _ContainerTransition({
-    required this.route,
-    required this.release,
-    required this.child,
-  });
-
-  final PageRoute<dynamic> route;
-  final _Release? release;
-  final Widget child;
-
-  @override
-  State<_ContainerTransition> createState() => _ContainerTransitionState();
-}
-
-typedef _OriginGeometry = ({Rect rect, BorderRadius? clipRadius});
-
-class _ContainerTransitionState extends State<_ContainerTransition> {
-  static const _curve = Curves.easeOut;
-  static const _cardSettlePoint = 0.08;
-  static const _cardShape = Interval(_cardSettlePoint, 1);
-  static const _cardFade = Interval(0, _cardSettlePoint);
-  static const _surfaceIn = Interval(0, 0.24);
-  static const _surfaceOut = Interval(0.6, 0.9);
-  static const _contentFade = Interval(0.08, 0.55);
-  static const _originRadius = BorderRadius.all(Radius.circular(12));
-
-  final _snapshot = SnapshotController();
-  WeakReference<RenderBox>? _origin;
-
-  /// The component's geometry; null grows the page from the screen center.
-  _OriginGeometry? _geometry;
-
-  /// Where the page was when a pop interrupted the push.
-  ({double visual, double value})? _fold;
-
-  PageRoute<dynamic> get _route => widget.route;
-  Animation<double> get _animation => _route.animation!;
-
-  @override
-  void initState() {
-    super.initState();
-    // Built in the frame of the push, while the pressed component is still
-    // laid out on the previous page.
-    final box = TapOrigin.take();
-    if (box != null) {
-      _origin = WeakReference(box);
-      _geometry = _locate();
-    }
-    _animation.addStatusListener(_onStatus);
-  }
-
-  @override
-  void dispose() {
-    _animation.removeStatusListener(_onStatus);
-    _snapshot.dispose();
-    super.dispose();
-  }
-
-  _OriginGeometry? _locate() {
-    final box = _origin?.target;
-    final navigator = _route.navigator;
-    if (box == null || navigator == null) return null;
-    final rect = _rectIn(navigator, box);
-    if (rect == null) return null;
-    return (
-      rect: rect,
-      clipRadius: box is _RenderTransitionOriginClip
-          ? box.borderRadius.resolve(box.textDirection)
-          : null,
-    );
-  }
-
-  void _onStatus(AnimationStatus status) {
-    if (!status.isAnimating) return;
-    // Pops and gestures leave the completed state: aim at where the component
-    // is now, since the list behind the page may have scrolled.
-    _geometry = _locate() ?? _geometry;
-    final value = _animation.value;
-    _fold =
-        status == AnimationStatus.reverse &&
-            !_route.popGestureInProgress &&
-            value < 1
-        ? (visual: _curve.transform(value), value: value)
-        : null;
-  }
-
   /// 0 is the component, 1 the full page.
   double get _progress {
     final value = _animation.value;
-    final release = widget.release;
+    final release = _release;
     if (release != null) {
       final from = release.value;
       if (release.commit) return from * (1 - _curve.transform(1 - value));
@@ -379,36 +308,17 @@ class _ContainerTransitionState extends State<_ContainerTransition> {
     }
     // The finger drives the page directly.
     if (_route.popGestureInProgress) return value;
-    final fold = _fold;
-    if (fold != null) {
-      return fold.visual * (1 - _curve.transform(1 - value / fold.value));
-    }
-    return _animation.status == AnimationStatus.reverse
-        ? 1 - _curve.transform(1 - value)
-        : _curve.transform(value);
+    return _motion.value;
   }
 
   @override
   Widget build(BuildContext context) {
-    final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final progress = reduceMotion ? 1.0 : _progress;
-    final clipRadius = _geometry?.clipRadius;
-    final shapeProgress = clipRadius == null
-        ? progress
-        : _cardShape.transform(progress);
-    final returning =
-        _fold == null &&
-        (_animation.status == AnimationStatus.reverse ||
-            _route.popGestureInProgress);
-    final surfaceIn = returning && clipRadius != null ? _cardFade : _surfaceIn;
-    _snapshot.allowSnapshotting =
-        !reduceMotion &&
-        (_animation.isAnimating || _route.popGestureInProgress);
-    final surfaceOpacity =
-        surfaceIn.transform(progress) * (1 - _surfaceOut.transform(progress));
+    if (!_route.popGestureInProgress) _release = null;
+    final progress = MediaQuery.disableAnimationsOf(context) ? 1.0 : _progress;
     final fullRadius =
         MediaQuery.displayCornerRadiiOf(context) ?? BorderRadius.zero;
-    final background = Theme.of(context).scaffoldBackgroundColor;
+    // A back gesture belongs to the navigator. Only snapshot the moving route.
+    _snapshot.allowSnapshotting = progress < 1 && _route.allowSnapshotting;
     final content = SnapshotWidget(
       controller: _snapshot,
       mode: SnapshotMode.permissive,
@@ -422,49 +332,39 @@ class _ContainerTransitionState extends State<_ContainerTransition> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final window = Offset.zero & constraints.biggest;
-        final moving = progress < 1 && !window.isEmpty;
-        final origin = _geometry?.rect.intersect(window);
-        final start = origin != null && !origin.isEmpty
-            ? origin
-            : Rect.fromCenter(
-                center: window.center,
-                width: window.width * 0.85,
-                height: window.height * 0.85,
-              );
-        final rect = moving ? Rect.lerp(start, window, shapeProgress)! : window;
-        // Keep the page and its snapshot at viewport size. Only the paint
-        // transform and clip change as the card opens.
-        final scale = moving
-            ? math.max(rect.width / window.width, rect.height / window.height)
-            : 1.0;
-        final transform = Matrix4.diagonal3Values(scale, scale, 1)
-          ..setTranslationRaw(
-            rect.center.dx - window.center.dx * scale,
-            rect.top,
-            0,
+        var transform = _identity;
+        _ContainerClipper? clipper;
+        if (progress < 1 && !window.isEmpty) {
+          final origin = _geometry?.rect.intersect(window);
+          final start = origin != null && !origin.isEmpty
+              ? origin
+              : Rect.fromCenter(
+                  center: window.center,
+                  width: window.width * 0.85,
+                  height: window.height * 0.85,
+                );
+          final rect = Rect.lerp(start, window, progress)!;
+          final scale = math.max(
+            rect.width / window.width,
+            rect.height / window.height,
           );
-        final radius = BorderRadius.lerp(
-          clipRadius ?? _originRadius,
-          fullRadius,
-          shapeProgress,
-        )!;
+          transform = Matrix4.diagonal3Values(scale, scale, 1)
+            ..setTranslationRaw(
+              rect.center.dx - window.center.dx * scale,
+              rect.top,
+              0,
+            );
+          final radius = BorderRadius.lerp(
+            _geometry?.clipRadius ?? _originRadius,
+            fullRadius,
+            progress,
+          )!;
+          clipper = _ContainerClipper(radius.toRRect(rect));
+        }
         return ClipRRect(
-          clipBehavior: moving ? Clip.antiAlias : Clip.none,
-          clipper: moving ? _ContainerClipper(radius.toRRect(rect)) : null,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: surfaceOpacity > 0
-                  ? background.withValues(alpha: background.a * surfaceOpacity)
-                  : null,
-            ),
-            child: Transform(
-              transform: transform,
-              child: Opacity(
-                opacity: _contentFade.transform(progress),
-                child: SizedBox.expand(child: content),
-              ),
-            ),
-          ),
+          clipBehavior: clipper == null ? Clip.none : Clip.antiAlias,
+          clipper: clipper,
+          child: Transform(transform: transform, child: content),
         );
       },
     );

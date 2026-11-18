@@ -58,21 +58,19 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
   late BgmInfo _bgmInfo;
   Map<String, dynamic>? _detailData;
   Map<String, dynamic>? _anibakaData;
-  late AnimeDetailViewData _detail;
+  AnimeDetailViewData? _cachedDetail;
 
   int? get _subjectId => _bgmInfo.subjectId;
   int? get _postId => toInt(widget.data['id']);
   int? get _validPostId => AnimeCollection.postIdFrom(widget.data);
 
-  void _rebuildDetail() {
-    _detail = AnimeDetailViewData.from(
-      source: widget.data,
-      bgmInfo: _bgmInfo,
-      anibaka: _anibakaData,
-      bgm: _detailData,
-      heroTag: widget.heroTag,
-    );
-  }
+  AnimeDetailViewData get _detail => _cachedDetail ??= AnimeDetailViewData.from(
+    source: widget.data,
+    bgmInfo: _bgmInfo,
+    anibaka: _anibakaData,
+    bgm: _detailData,
+    heroTag: widget.heroTag,
+  );
 
   @override
   void initState() {
@@ -101,7 +99,7 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
         (widget.data['bgmDetailData'] as Map<String, dynamic>?) ??
         (subjectId == null ? null : peekBgmSubject(subjectId));
     _bgmInfo = bgmInfo;
-    _rebuildDetail();
+    _cachedDetail = null;
 
     unawaited(_loadInitialData(_loadGeneration));
   }
@@ -127,15 +125,14 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
     NavigationService.toPlayback(context, request);
   }
 
-  /// Applies loaded data once the page is at rest: while its transition runs
-  /// the page is drawn from a snapshot, so a rebuild then only costs frames.
+  /// Defer rebuilding details until the opening motion settles.
   Future<void> _apply(int generation, VoidCallback update) async {
     if (!mounted || generation != _loadGeneration) return;
     await pageSettled(context);
     if (!mounted || generation != _loadGeneration) return;
     setState(() {
       update();
-      _rebuildDetail();
+      _cachedDetail = null;
     });
   }
 

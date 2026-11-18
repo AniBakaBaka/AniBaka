@@ -60,6 +60,7 @@ class NetworkNotices {
   final void Function() onImageFailures;
   final DateTime Function() _now;
   final _images = <String, ({DateTime at, bool? succeeded})>{};
+  int _failedImages = 0;
   DateTime? _lastNetworkNotice, _lastImageNotice;
   Timer? _imageTimer;
   bool _disposed = false;
@@ -100,12 +101,11 @@ class NetworkNotices {
     _pruneImages(now);
     // Rebuilds, retries and different widgets showing one URL count only once.
     final key = uri.removeFragment().toString();
-    final result = (at: now, succeeded: succeeded);
-    if (succeeded == null) {
-      _images.putIfAbsent(key, () => result);
-    } else {
-      _images[key] = result;
-    }
+    if (succeeded == null && _images.containsKey(key)) return;
+    // Reinsert the URL at the end so expiry only visits the oldest entries.
+    if (_images.remove(key)?.succeeded == false) _failedImages--;
+    _images[key] = (at: now, succeeded: succeeded);
+    if (succeeded == false) _failedImages++;
     if (succeeded == false &&
         _imageTimer == null &&
         !_coolingDown(_lastImageNotice, imageCooldown, now) &&
@@ -115,15 +115,18 @@ class NetworkNotices {
     }
   }
 
-  void _pruneImages(DateTime now) => _images.removeWhere(
-    (_, result) => now.difference(result.at) >= imageWindow,
-  );
-
-  bool get _hasWidespreadImageFailures {
-    final failures = _images.values.where((r) => r.succeeded == false).length;
-    return failures >= minImageFailures &&
-        failures / _images.length >= minImageFailureRatio;
+  void _pruneImages(DateTime now) {
+    final cutoff = now.subtract(imageWindow);
+    while (_images.isNotEmpty) {
+      final key = _images.keys.first;
+      if (_images[key]!.at.isAfter(cutoff)) break;
+      if (_images.remove(key)!.succeeded == false) _failedImages--;
+    }
   }
+
+  bool get _hasWidespreadImageFailures =>
+      _failedImages >= minImageFailures &&
+      _failedImages >= _images.length * minImageFailureRatio;
 
   void _checkImageFailures() {
     _imageTimer = null;

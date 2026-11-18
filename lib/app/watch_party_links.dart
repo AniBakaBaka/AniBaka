@@ -2,19 +2,28 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:app_links/app_links.dart';
-import 'package:baka/instance.dart';
 import 'package:baka/app/navigation.dart';
 import 'package:baka/core/app_logger.dart';
+import 'package:baka/instance.dart';
 import 'package:baka/models/playback_request.dart';
+import 'package:baka/services/playback/watch_party.dart';
 import 'package:baka/widgets/watch_party/watch_party_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:win32_registry/win32_registry.dart';
 
-import 'package:baka/services/playback/watch_party.dart';
-
 class WatchPartyLinks {
-  WatchPartyLinks(this.party, {this.incoming});
-  final Stream<Uri>? incoming;
+  WatchPartyLinks(this.party, {Stream<Uri>? incoming}) {
+    _linkSubscription = (incoming ?? AppLinks().uriLinkStream).listen(
+      (uri) {
+        final code = _inviteCodeFromUri(uri);
+        if (code != null) unawaited(joinInviteLink(code));
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        Log.w('WatchParty', 'Unable to process app link', error, stackTrace);
+      },
+    );
+  }
+
   final WatchPartyService party;
   static final _inviteCodePattern = RegExp(r'^[A-Za-z0-9_-]{6,128}$');
   final _ready = Completer<void>();
@@ -27,44 +36,28 @@ class WatchPartyLinks {
   Future<void> close() async {
     _closed = true;
     markReady();
-    await _linkSubscription?.cancel();
-    _linkSubscription = null;
+    await _linkSubscription.cancel();
   }
 
-  StreamSubscription<Uri>? _linkSubscription;
+  late final StreamSubscription<Uri> _linkSubscription;
   bool _handlingLink = false;
-
-  /// 初始化 AppLinks 监听。
-  void initializeLinks() {
-    if (_closed || _linkSubscription != null) return;
-    _linkSubscription = (incoming ?? AppLinks().uriLinkStream).listen(
-      (uri) {
-        final code = _inviteCodeFromUri(uri);
-        if (code != null) unawaited(joinInviteLink(code));
-      },
-      onError: (Object error, StackTrace stackTrace) {
-        Log.w('WatchParty', 'Unable to process app link', error, stackTrace);
-      },
-    );
-  }
 
   /// 从字符串解析邀请码（支持 URL、URI 或纯邀请码）
   static String? inviteCodeFromValue(String value) {
     final normalized = value.trim();
-    if (normalized.isEmpty) return null;
+    if (_inviteCodePattern.hasMatch(normalized)) return normalized;
     final uri = Uri.tryParse(normalized);
-    final fromUri = uri == null ? null : _inviteCodeFromUri(uri);
-    return fromUri ?? _validInviteCode(normalized);
+    return uri == null ? null : _inviteCodeFromUri(uri);
   }
 
   /// 通过邀请码加入房间并自动引导播放器与弹窗
   Future<void> joinInviteLink(String code) async {
-    await _ready.future;
-    if (_closed) return;
     final normalized = code.trim();
-    if (normalized.isEmpty || _handlingLink) return;
+    if (_closed || normalized.isEmpty || _handlingLink) return;
     _handlingLink = true;
     try {
+      await _ready.future;
+      if (_closed) return;
       await party.joinInvite(normalized);
       if (_closed) return;
       final context = Instances.navigatorKey.currentContext;

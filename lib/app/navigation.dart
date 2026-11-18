@@ -26,13 +26,10 @@ abstract final class NavigationService {
     int? posIndex,
     Object? heroTag,
   }) {
-    final navigator = Navigator.of(context);
     if (Instances.isTV) {
-      navigator.push(
-        MaterialPageRoute<void>(
-          builder: (_) =>
-              TvAnimeDetailPlaceholder(data: data, episodeIndex: posIndex),
-        ),
+      push<void>(
+        context,
+        TvAnimeDetailPlaceholder(data: data, episodeIndex: posIndex),
       );
       return;
     }
@@ -42,13 +39,13 @@ abstract final class NavigationService {
       episodeIndex: posIndex,
     );
     if (!Instances.isDesktopPlatform) {
-      navigator.push(MaterialPageRoute<void>(builder: (_) => page));
+      push<void>(context, page);
       return;
     }
     final duration = MediaQuery.disableAnimationsOf(context)
         ? Duration.zero
         : const Duration(milliseconds: 300);
-    navigator.push(
+    Navigator.of(context).push(
       PageRouteBuilder<void>(
         transitionDuration: duration,
         reverseTransitionDuration: duration,

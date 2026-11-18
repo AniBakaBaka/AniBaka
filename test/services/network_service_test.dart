@@ -231,13 +231,12 @@ void main() {
     addTearDown(policy.dispose);
     final file = MemoryFileSystem().file('/cover.jpg');
     final offline = http.ClientException('offline');
-    final delegate = _ImageCache((url) async* {
-      if (url.contains('/cached/')) {
-        yield FileInfo(file, FileSource.Cache, DateTime.utc(2020), url);
-      }
-      throw offline;
-    });
-    final cache = MonitoredImageCache(delegate, policy);
+    final cache = _ImageCache(
+      policy,
+      FileInfo(file, FileSource.Cache, DateTime.utc(2020), 'cover'),
+      offline,
+    );
+    addTearDown(cache.dispose);
     for (var i = 0; i < 8; i++) {
       await expectLater(
         cache.getImageFile('https://images.test/cached/$i.jpg', maxWidth: 300),
@@ -248,7 +247,7 @@ void main() {
     expect(imageNotices, 0);
     for (var i = 0; i < 20; i++) {
       await expectLater(
-        cache.getFileStream('https://images.test/failed/$i.jpg'),
+        cache.getImageFile('https://images.test/failed/$i.jpg'),
         emitsInOrder([emitsError(same(offline)), emitsDone]),
       );
     }
@@ -1252,9 +1251,26 @@ class _StreamingClient extends http.BaseClient {
       handle(request);
 }
 
-class _ImageCache extends Fake implements BaseCacheManager, ImageCacheManager {
-  _ImageCache(this.responses);
-  final Stream<FileResponse> Function(String url) responses;
+class _ImageCache extends MonitoredImageCache {
+  _ImageCache(NetworkNotices notices, this.file, this.offline)
+    : super(
+        Config(
+          'test-images',
+          repo: NonStoringObjectProvider(),
+          fileSystem: _UnusedFileSystem(),
+        ),
+        notices,
+      );
+
+  final FileInfo file;
+  final http.ClientException offline;
+
+  @override
+  Future<FileInfo?> getFileFromCache(
+    String key, {
+    bool ignoreMemCache = false,
+  }) async =>
+      key.startsWith('resized_w300_') && key.contains('/cached/') ? file : null;
 
   @override
   Stream<FileResponse> getFileStream(
@@ -1262,15 +1278,7 @@ class _ImageCache extends Fake implements BaseCacheManager, ImageCacheManager {
     String? key,
     Map<String, String>? headers,
     bool withProgress = false,
-  }) => responses(url);
-
-  @override
-  Stream<FileResponse> getImageFile(
-    String url, {
-    String? key,
-    Map<String, String>? headers,
-    bool withProgress = false,
-    int? maxHeight,
-    int? maxWidth,
-  }) => responses(url);
+  }) => Stream.error(offline);
 }
+
+class _UnusedFileSystem extends Fake implements FileSystem {}

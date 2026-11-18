@@ -190,7 +190,9 @@ class PostCard extends StatelessWidget {
       onTap:
           onTap ??
           () {
-            if (!desktop && !Instances.isTV) TapOrigin.useClip(context);
+            if (!desktop && !Instances.isTV) {
+              MobileRouteBinding.useClip(context);
+            }
             NavigationService.toDetail(context, data);
           },
       child: desktop

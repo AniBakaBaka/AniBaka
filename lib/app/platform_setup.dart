@@ -1,5 +1,6 @@
-import 'package:baka/app/watch_party_links.dart';
 import 'dart:io';
+
+import 'package:baka/app/watch_party_links.dart';
 import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/core/app_logger.dart';
@@ -15,7 +16,6 @@ Future<void> configurePlatform() async {
 
   if (Platform.isAndroid) {
     const platformChannel = MethodChannel('baka/platform');
-    Map<String, dynamic>? displayDiagnostics;
     try {
       Instances.isTV =
           await platformChannel.invokeMethod<bool>('isTV') ?? false;
@@ -29,25 +29,7 @@ Future<void> configurePlatform() async {
       );
     }
 
-    try {
-      displayDiagnostics = await platformChannel
-          .invokeMapMethod<String, dynamic>('getDisplayDiagnostics');
-      Log.i('Display', 'Android display diagnostics: $displayDiagnostics');
-    } catch (error, stackTrace) {
-      Log.w(
-        'Display',
-        'Unable to read Android display diagnostics',
-        error,
-        stackTrace,
-      );
-    }
-
     if (Instances.isTV) {
-      Log.i(
-        'Display',
-        'TV rendering policy: system display mode, '
-            'impeller=${displayDiagnostics?['impellerEnabled']}',
-      );
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
       SystemChrome.setPreferredOrientations(const [
         DeviceOrientation.landscapeLeft,
