@@ -87,17 +87,35 @@ class PlaybackContent {
     if (videoList.isEmpty) return null;
     final numbering = episodeNumbering;
     final current = numbering.numberAt(currPlayIndex);
-    if (current != null) return numbering.nextIndex(currPlayIndex);
-    // 标题里读不出集号时保留原来的顺序播放。
-    return currPlayIndex + 1 < videoList.length ? currPlayIndex + 1 : null;
+    if (current == null) {
+      // 标题里读不出集号时保留原来的顺序播放。
+      return currPlayIndex + 1 < videoList.length ? currPlayIndex + 1 : null;
+    }
+    final byNumber = numbering.nextIndex(currPlayIndex);
+    if (byNumber != null) return byNumber;
+    // 末尾可能挂着没有编号的条目（特别篇、OVA）。它们不会让集号倒退，
+    // 所以允许顺序前进；有编号的条目则一律按集号判断。
+    final following = currPlayIndex + 1;
+    if (following < videoList.length && numbering.numberAt(following) == null) {
+      return following;
+    }
+    return null;
   }
 
   int? previousEpisodeIndex() {
     if (videoList.isEmpty) return null;
     final numbering = episodeNumbering;
     final current = numbering.numberAt(currPlayIndex);
-    if (current != null) return numbering.previousIndex(currPlayIndex);
-    return currPlayIndex > 0 ? currPlayIndex - 1 : null;
+    if (current == null) {
+      return currPlayIndex > 0 ? currPlayIndex - 1 : null;
+    }
+    final byNumber = numbering.previousIndex(currPlayIndex);
+    if (byNumber != null) return byNumber;
+    final preceding = currPlayIndex - 1;
+    if (preceding >= 0 && numbering.numberAt(preceding) == null) {
+      return preceding;
+    }
+    return null;
   }
 
   bool get hasNextEpisode => nextEpisodeIndex() != null;
