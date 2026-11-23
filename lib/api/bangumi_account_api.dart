@@ -9,8 +9,6 @@ import 'package:baka/core/api_transport.dart';
 import 'package:baka/core/network_service.dart';
 import 'package:http/http.dart' as http;
 
-const _bangumiApiBase = 'https://api.bgm.tv';
-
 class BangumiSyncException implements Exception {
   const BangumiSyncException(this.message, {this.statusCode});
 
@@ -274,12 +272,7 @@ class BangumiApi {
       '/v0/users/-/collections/$subjectId/episodes?episode_type=0&limit=1000',
       token: token,
     );
-    final episodes = (page['data'] as List).cast<Map<String, dynamic>>()
-      ..sort(
-        (a, b) => ((a['episode'] as Map)['sort'] as num).compareTo(
-          (b['episode'] as Map)['sort'] as num,
-        ),
-      );
+    final episodes = _sortedEpisodes(page);
 
     final watchedCount = watched.clamp(0, episodes.length);
     final doneIds = <int>[];
@@ -302,6 +295,44 @@ class BangumiApi {
     }
   }
 
+  /// 按集号标记/取消标记单集。集号是 Bangumi 的 `sort`，不是播放源的数组下标。
+  ///
+  /// 找不到这一集时返回 false（例如源的一半集在 Bangumi 上并不存在），
+  /// 调用方据此提示用户而不是静默成功。
+  Future<bool> setEpisodeWatched(
+    String token,
+    int subjectId,
+    num episodeNumber, {
+    required bool watched,
+  }) async {
+    final page = await _request<Map<String, dynamic>>(
+      'GET',
+      '/v0/users/-/collections/$subjectId/episodes?episode_type=0&limit=1000',
+      token: token,
+    );
+    final target = episodeNumber.toDouble();
+    int? episodeId;
+    for (final item in _sortedEpisodes(page)) {
+      final sort = (item['episode'] as Map)['sort'];
+      if (sort is num && (sort.toDouble() - target).abs() < 0.001) {
+        episodeId = (item['episode'] as Map)['id'] as int;
+        break;
+      }
+    }
+    if (episodeId == null) return false;
+    await _putEpisodes(token, subjectId, [episodeId], watched ? 2 : 0);
+    return true;
+  }
+
+  static List<Map<String, dynamic>> _sortedEpisodes(
+    Map<String, dynamic> page,
+  ) => (page['data'] as List).cast<Map<String, dynamic>>()
+    ..sort(
+      (a, b) => ((a['episode'] as Map)['sort'] as num).compareTo(
+        (b['episode'] as Map)['sort'] as num,
+      ),
+    );
+
   Future<void> _putEpisodes(
     String token,
     int subjectId,
@@ -323,22 +354,30 @@ class BangumiApi {
     Map<String, dynamic>? body,
     Future<void>? abortTrigger,
   }) async {
+    final uri = Uri.parse('${ApiConfig.bgmApiBase}$path');
     try {
       final response = await sendHttp(
         _client,
         method,
-        Uri.parse('$_bangumiApiBase$path'),
+        uri,
         headers: {
           HttpHeaders.authorizationHeader: 'Bearer $token',
           HttpHeaders.acceptHeader: 'application/json',
           HttpHeaders.userAgentHeader: _userAgent,
         },
         data: body,
+        timeout: _requestTimeout,
         abortTrigger: abortTrigger,
       );
       // Bangumi mutation endpoints may successfully return 204 with no body.
       if (response.body.isEmpty && null is T) return null as T;
       return decodeJson<T>(response.body);
+    } on TimeoutException {
+      throw BangumiSyncException(_unreachableMessage(uri), statusCode: 0);
+    } on http.ClientException {
+      throw BangumiSyncException(_unreachableMessage(uri), statusCode: 0);
+    } on SocketException {
+      throw BangumiSyncException(_unreachableMessage(uri), statusCode: 0);
     } on ApiException catch (error) {
       final status = error.statusCode;
       if (status == 401 || status == 403) {
@@ -353,7 +392,19 @@ class BangumiApi {
       );
     }
   }
+
+  /// 直连失败时给出可操作的提示，而不是让用户在无反馈的等待里猜。
+  String _unreachableMessage(Uri uri) {
+    if (ApiConfig.bgmApiBase != ApiConfig.defaultBgmApiBase) {
+      return '无法连接 Bangumi API（${uri.host}），'
+          '请检查「设置 → Bangumi 同步 → API 地址」是否可用';
+    }
+    return '无法连接 Bangumi（api.bgm.tv 在当前网络下不可达）。'
+        '可在「设置 → Bangumi 同步 → API 地址」里填写可访问的地址后重试';
+  }
 }
+
+const _requestTimeout = Duration(seconds: 15);
 
 String localCollectionFingerprint(AnimeCollection collection) {
   final tags = collection.tags;

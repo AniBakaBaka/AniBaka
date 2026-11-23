@@ -11,6 +11,7 @@ class PlaybackProgress {
     required Duration start,
     this.bgmId,
     this.cover,
+    this.bgmEpisodeOrdinalOf,
   }) : request = request.copyWith(),
        _pendingStart = start;
 
@@ -19,6 +20,11 @@ class PlaybackProgress {
   final String videoKey;
   final int? bgmId;
   final String? cover;
+
+  /// 这一集在 Bangumi 上是第几集（1 起算）。源的下标与 Bangumi 的集号
+  /// 并不总是相等，进度一律按它上报；为 null 时不上报，避免写错格子。
+  /// 用回调是因为 Bangumi 分集列表可能晚于播放就绪才加载完。
+  final int? Function()? bgmEpisodeOrdinalOf;
   Duration _pendingStart;
   ({Duration position, Duration duration, bool rememberPosition})? _lastSave;
   Future<void>? _saving;
@@ -62,6 +68,7 @@ class PlaybackProgress {
           durationMs: timeline.duration.inMilliseconds,
           bgmId: bgmId,
           cover: cover,
+          bgmEpisodeOrdinal: bgmEpisodeOrdinalOf?.call(),
         ),
     ]).then<void>((_) {});
     _lastSave = snapshot;

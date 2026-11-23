@@ -16,6 +16,7 @@ import 'package:baka/pages/player/bgm_detail_page.dart';
 import 'package:baka/pages/player/dlna_page.dart';
 import 'package:baka/pages/setting/player_settings_page.dart';
 import 'package:baka/pages/source/ai_rule_authoring_page.dart';
+import 'package:baka/services/account/bangumi_session.dart';
 import 'package:baka/services/collection/collection_repository.dart';
 import 'package:baka/services/matching/match_memory_service.dart';
 import 'package:baka/services/playback/danmaku_controller.dart';
@@ -114,7 +115,7 @@ class _PlayerPageState extends State<PlayerPage>
   bool _updatingFollow = false;
 
   bool get _hidden => contentFilter.value && _content.isNsfw;
-  bool get _hasNext => _content.currPlayIndex + 1 < _content.videoList.length;
+  bool get _hasNext => _content.hasNextEpisode;
   bool _isStale(int id) => !mounted || id != _generation;
 
   void _refresh() {
@@ -333,12 +334,13 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   void _playNext() {
-    if (_hasNext) unawaited(_switchEpisode(_content.currPlayIndex + 1));
+    final next = _content.nextEpisodeIndex();
+    if (next != null) unawaited(_switchEpisode(next));
   }
 
   void _playPrevious() {
-    final index = _content.currPlayIndex;
-    if (index > 0) unawaited(_switchEpisode(index - 1));
+    final previous = _content.previousEpisodeIndex();
+    if (previous != null) unawaited(_switchEpisode(previous));
   }
 
   Future<void> _reloadHlsFilter(bool enabled) {
@@ -488,6 +490,7 @@ class _PlayerPageState extends State<PlayerPage>
         start: start,
         bgmId: bgmId,
         cover: content.coverImageUrl,
+        bgmEpisodeOrdinalOf: () => content.currentBgmOrdinal,
       );
       await ctr.open(
         url,
@@ -777,8 +780,38 @@ class _PlayerPageState extends State<PlayerPage>
       currentLineIndex: downloadMode ? null : content.currUrl,
       sourceNames: downloadMode ? null : content.sourceNames,
       onLineChanged: downloadMode ? null : _changeLine,
+      onSetEpisodeWatched:
+          downloadMode ||
+              content.bgmInfo.subjectId == null ||
+              !bangumiSession.isConnected
+          ? null
+          : _setEpisodeWatched,
     );
     if (index != null) unawaited(_switchEpisode(index));
+  }
+
+  /// 手动点格子：集号取自分集标题，而不是源数组下标（见 EpisodeNumbering）。
+  Future<bool> _setEpisodeWatched(int episodeIndex, bool watched) async {
+    final subjectId = _content.bgmInfo.subjectId;
+    if (subjectId == null) return false;
+    final number =
+        _content.episodeNumbering.numberAt(episodeIndex) ?? episodeIndex + 1;
+    try {
+      final ok = await bangumiSession.setEpisodeWatched(
+        subjectId: subjectId,
+        episodeNumber: number,
+        watched: watched,
+      );
+      if (!ok) {
+        showSnackBar('Bangumi 上找不到第 $number 集，无法标记', isError: true);
+        return false;
+      }
+      showSnackBar(watched ? '已标记第 $number 集为看过' : '已取消第 $number 集的看过标记');
+      return true;
+    } catch (error) {
+      showSnackBar('$error', isError: true);
+      return false;
+    }
   }
 
   void _showCast() {

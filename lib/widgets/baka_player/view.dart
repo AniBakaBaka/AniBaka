@@ -13,6 +13,7 @@ import 'package:baka/models/skip_selection.dart';
 import 'package:baka/models/subtitle_config.dart';
 import 'package:baka/pages/search/search_controller.dart';
 import 'package:baka/utils/toast_utils.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:baka/widgets/common/platform_tooltip.dart';
@@ -577,35 +578,54 @@ class _BakaPlayerState extends State<BakaPlayer> {
             focusNode: _playerFocusNode,
             autofocus: true,
             onKeyEvent: (node, event) => _handleKeyEvent(event),
-            child: GestureDetector(
-              onTap: controller.toggleControls,
-              onDoubleTapDown: (details) {
-                _handleDoubleTap(
-                  details.localPosition.dx,
-                  MediaQuery.sizeOf(context).width,
-                );
-              },
-              onLongPressStart: (_) => controller.setDoubleSpeed(true),
-              onLongPressMoveUpdate: (details) => controller
-                  .updateDoubleSpeedOffset(details.offsetFromOrigin.dx),
-              onLongPressEnd: (_) => controller.setDoubleSpeed(false),
-              onLongPressCancel: () => controller.setDoubleSpeed(false),
-              onHorizontalDragStart: _handleHorizontalDragStart,
-              onHorizontalDragUpdate: _handleHorizontalDragUpdate,
-              onHorizontalDragEnd: (_) {
-                final target = controller.timeline.value.previewPosition;
-                controller.endSeekPreview();
-                controller.seek(target);
-              },
-              onHorizontalDragCancel: controller.endSeekPreview,
-              onVerticalDragStart: _handleVerticalDragStart,
-              onVerticalDragUpdate: _handleVerticalDragUpdate,
-              onVerticalDragEnd: (_) => _endVerticalDrag(),
-              onVerticalDragCancel: _endVerticalDrag,
+            child: Listener(
+              // 滚轮调音量：mpv / PotPlayer 的习惯，桌面上比拖滑块顺手。
+              onPointerSignal: _handlePointerSignal,
+              child: GestureDetector(
+                onTap: controller.toggleControls,
+                onDoubleTapDown: (details) {
+                  _handleDoubleTap(
+                    details.localPosition.dx,
+                    MediaQuery.sizeOf(context).width,
+                  );
+                },
+                onLongPressStart: (_) => controller.setDoubleSpeed(true),
+                onLongPressMoveUpdate: (details) => controller
+                    .updateDoubleSpeedOffset(details.offsetFromOrigin.dx),
+                onLongPressEnd: (_) => controller.setDoubleSpeed(false),
+                onLongPressCancel: () => controller.setDoubleSpeed(false),
+                onHorizontalDragStart: _handleHorizontalDragStart,
+                onHorizontalDragUpdate: _handleHorizontalDragUpdate,
+                onHorizontalDragEnd: (_) {
+                  final target = controller.timeline.value.previewPosition;
+                  controller.endSeekPreview();
+                  controller.seek(target);
+                },
+                onHorizontalDragCancel: controller.endSeekPreview,
+                onVerticalDragStart: _handleVerticalDragStart,
+                onVerticalDragUpdate: _handleVerticalDragUpdate,
+                onVerticalDragEnd: (_) => _endVerticalDrag(),
+                onVerticalDragCancel: _endVerticalDrag,
+              ),
             ),
           ),
         ),
       ),
+    );
+  }
+
+  /// 滚轮上下调音量；只在桌面端且用户开启时生效，避免和外层滚动打架。
+  void _handlePointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    final controller = widget.controller;
+    if (!controller.preferences.value.wheelVolume) return;
+    if (!Instances.isDesktopPlatform || Instances.isTV) return;
+    final delta = event.scrollDelta.dy;
+    if (delta == 0) return;
+    _setVerticalLevel(
+      _VerticalControl.volume,
+      controller.overlay.value.volume +
+          (delta > 0 ? -_volumeStep : _volumeStep),
     );
   }
 

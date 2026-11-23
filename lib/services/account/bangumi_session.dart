@@ -221,6 +221,44 @@ class BangumiSession {
     ensureCurrent(revision);
   }
 
+  /// 手动标记/取消标记单集。返回 false 表示 Bangumi 上没有这一集
+  /// （源的分集编号与条目对不上），调用方应提示用户而不是当作成功。
+  Future<bool> setEpisodeWatched({
+    required int subjectId,
+    required num episodeNumber,
+    required bool watched,
+  }) async {
+    final revision = generation;
+    final token = await accessToken();
+    ensureCurrent(revision);
+    final ok = await api.setEpisodeWatched(
+      token,
+      subjectId,
+      episodeNumber,
+      watched: watched,
+    );
+    ensureCurrent(revision);
+    if (ok) _syncAutoProgress(subjectId, episodeNumber, watched: watched);
+    return ok;
+  }
+
+  /// 手动标记后让「自动点格子」不要再用更低的集数覆盖它。
+  void _syncAutoProgress(
+    int subjectId,
+    num episodeNumber, {
+    required bool watched,
+  }) {
+    final progress = _loadAutoProgress();
+    if (watched) {
+      final current = progress['$subjectId'] ?? 0;
+      final next = episodeNumber.round();
+      if (next > current) progress['$subjectId'] = next;
+    } else {
+      progress.remove('$subjectId');
+    }
+    unawaited(preferences.setString(_autoProgressKey, jsonEncode(progress)));
+  }
+
   /// 播放完成后把集数推进到 Bangumi。相同或更早集数不会重复请求。
   Future<void> markEpisodeWatched({
     required int subjectId,

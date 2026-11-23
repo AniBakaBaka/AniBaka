@@ -6,6 +6,7 @@ import 'package:baka/models/download_task.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/api/bgm.dart';
 import 'package:baka/services/download/download_manager.dart';
+import 'package:baka/services/playback/episode_numbering.dart';
 import 'package:baka/services/playback/history_repository.dart';
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/widgets/episode/episode_widgets.dart';
@@ -26,6 +27,7 @@ Future<int?> showEpisodeListDialog({
   int? currentLineIndex,
   List<String>? sourceNames,
   ValueChanged<int>? onLineChanged,
+  Future<bool> Function(int episodeIndex, bool watched)? onSetEpisodeWatched,
 }) {
   final panel = EpisodeListDialog(
     videoList: videoList,
@@ -38,6 +40,7 @@ Future<int?> showEpisodeListDialog({
     currentLineIndex: currentLineIndex,
     sourceNames: sourceNames,
     onLineChanged: onLineChanged,
+    onSetEpisodeWatched: onSetEpisodeWatched,
   );
 
   if (isFullScreen) {
@@ -77,6 +80,10 @@ class EpisodeListDialog extends StatefulWidget {
   final List<String>? sourceNames;
   final ValueChanged<int>? onLineChanged;
 
+  /// 手动点格子。为 null 表示当前不可用（未登录 Bangumi 或不是 Bangumi 条目）。
+  final Future<bool> Function(int episodeIndex, bool watched)?
+  onSetEpisodeWatched;
+
   bool get canDownload => postDetail != null && urlResolver != null;
 
   const EpisodeListDialog({
@@ -91,6 +98,7 @@ class EpisodeListDialog extends StatefulWidget {
     this.currentLineIndex,
     this.sourceNames,
     this.onLineChanged,
+    this.onSetEpisodeWatched,
   });
 
   @override
@@ -105,6 +113,13 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
   final Set<int> _selected = {};
 
   Set<int>? _queuedIndexes;
+  late final EpisodeNumbering _numbering = EpisodeNumbering(
+    widget.videoList.map((episode) => episode.title),
+  );
+
+  /// 本次会话里手动点过的格子，用于列表即时反馈。
+  final Set<int> _watchedNumbers = {};
+  final Set<int> _marking = {};
   late final String _taskIdPrefix;
   List<int>? _visibleIndexes;
   late final List<int> _lineIndexes =
@@ -302,6 +317,56 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
         ),
       ),
     );
+  }
+
+  /// 集号：Bangumi 与弹幕都按它记账，而不是源数组的下标。
+  int _episodeNumber(int index) => _numbering.numberAt(index) ?? index + 1;
+
+  bool _isWatched(int index) =>
+      _watchedNumbers.contains(_episodeNumber(index)) ||
+      HistoryRepository.isEpisodeWatched(widget.videoId, index);
+
+  Future<void> _showMarkMenu(int index) async {
+    final number = _episodeNumber(index);
+    final watched = _isWatched(index);
+    final mark = await showModalBottomSheet<bool>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text('第 $number 集'),
+              subtitle: Text(widget.videoList[index].title),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: Icon(
+                watched ? Icons.remove_done_rounded : Icons.done_all_rounded,
+              ),
+              title: Text(watched ? '取消看过标记' : '标记为看过'),
+              subtitle: const Text('同步到 Bangumi 收藏进度'),
+              onTap: () => Navigator.pop(sheetContext, !watched),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (mark == null || _marking.contains(index)) return;
+    setState(() => _marking.add(index));
+    try {
+      final ok = await widget.onSetEpisodeWatched!(index, mark);
+      if (!mounted || !ok) return;
+      setState(() {
+        if (mark) {
+          _watchedNumbers.add(number);
+        } else {
+          _watchedNumbers.remove(number);
+        }
+      });
+    } finally {
+      if (mounted) setState(() => _marking.remove(index));
+    }
   }
 
   Widget _buildBody(Color? textColor) {
@@ -535,9 +600,12 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
       index: index,
       rawTitle: rawTitle,
       isSelected: index == widget.currentIndex,
-      isWatched: HistoryRepository.isEpisodeWatched(widget.videoId, index),
+      isWatched: _isWatched(index),
       textColor: textColor,
       onTap: () => Navigator.pop(context, index),
+      onLongPress: widget.onSetEpisodeWatched == null
+          ? null
+          : () => _showMarkMenu(index),
     );
   }
 }

@@ -25,7 +25,10 @@ class HistoryRepository {
   static const _resumeKey = 'resume';
   static const _maxHistoryCount = 50;
   static const _minPositionToSaveMs = 10000;
-  static const _completionThreshold = 0.95;
+
+  /// 正片播完就算看完。24 分钟正片 + 90 秒 ED 时正片结束约 93%，
+  /// 旧阈值 95% 会要求把 ED 也播掉大半，与 Animeko（90%）的体感不一致。
+  static const _completionThreshold = 0.90;
   static const _platform = 'app';
 
   final Map<String, List<Map<String, dynamic>>> _memory = {};
@@ -275,6 +278,7 @@ class HistoryRepository {
     required int urlIndex,
     String? cover,
     int? bgmId,
+    int? bgmEpisodeOrdinal,
   }) async {
     if (durationMs <= 0 || positionMs < 0) return;
 
@@ -327,13 +331,16 @@ class HistoryRepository {
     }
 
     final subjectId = toInt(record['bgmId']);
+    // 拿不到 Bangumi 集序时宁可不点格子：写错会把整季进度带偏。
+    final watched = bgmEpisodeOrdinal;
     if (record['isFinished'] == true &&
         subjectId != null &&
+        watched != null &&
         bangumi.isConnected &&
         bangumi.autoMarkEpisode) {
       unawaited(
         bangumi
-            .markEpisodeWatched(subjectId: subjectId, watched: episodeIndex + 1)
+            .markEpisodeWatched(subjectId: subjectId, watched: watched)
             .catchError((Object error, StackTrace stackTrace) {
               Log.w('History', '更新 Bangumi 集数失败: $error');
             }),

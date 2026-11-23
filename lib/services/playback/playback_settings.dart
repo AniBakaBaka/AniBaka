@@ -32,6 +32,7 @@ class PlaybackSettingsService {
   static const _hwdecModeKey = 'player_hwdecMode';
   static const _videoRendererKey = 'player_videoRenderer';
   static const _filterHlsAdsKey = 'player_filterHlsAds';
+  static const _wheelVolumeKey = 'player_wheelVolume';
 
   static const _tvHwdecModeLabels = <String, String>{
     'auto-safe': '安全模式',
@@ -202,6 +203,7 @@ class PlaybackSettingsService {
       hwdecMode: normalizeHwdecMode(sp.getString(_hwdecModeKey)),
       videoRenderer: normalizeVideoRenderer(sp.getString(_videoRendererKey)),
       filterHlsAds: sp.getBool(_filterHlsAdsKey) ?? _defaults.filterHlsAds,
+      wheelVolume: sp.getBool(_wheelVolumeKey) ?? Instances.isDesktopPlatform,
     );
   }
 
@@ -275,6 +277,7 @@ class PlaybackSettingsService {
     write(_hwdecModeKey, previous.hwdecMode, next.hwdecMode);
     write(_videoRendererKey, previous.videoRenderer, next.videoRenderer);
     write(_filterHlsAdsKey, previous.filterHlsAds, next.filterHlsAds);
+    write(_wheelVolumeKey, previous.wheelVolume, next.wheelVolume);
 
     if (previous.subtitleConfig != next.subtitleConfig) {
       (writes ??= []).add(

@@ -18,6 +18,7 @@ import 'package:baka/models/playback_request.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/services/collection/collection_repository.dart';
 import 'package:baka/services/playback/danmaku_controller.dart';
+import 'package:baka/services/playback/episode_numbering.dart';
 import 'package:baka/services/playback/history_repository.dart';
 import 'package:baka/services/source/source_repository.dart';
 import 'package:baka/services/torrent/torrent_service.dart';
@@ -68,6 +69,84 @@ class PlaybackContent {
   int get currPlayIndex => request.episodeIndex ?? 0;
   int get currUrl => request.lineIndex ?? 1;
   List<String>? get sourceNames => request.sourceNames;
+
+  EpisodeNumbering? _numbering;
+  List<PlaybackEpisode>? _numberingSource;
+
+  /// 源分集标题里的集号。源可能倒序、缺集，下标并不等于集号。
+  EpisodeNumbering get episodeNumbering {
+    if (!identical(_numberingSource, videoList)) {
+      _numberingSource = videoList;
+      _numbering = EpisodeNumbering(videoList.map((episode) => episode.title));
+    }
+    return _numbering!;
+  }
+
+  /// 播放顺序上的下一集。按集号走，而不是按数组下标走。
+  int? nextEpisodeIndex() {
+    if (videoList.isEmpty) return null;
+    final numbering = episodeNumbering;
+    final current = numbering.numberAt(currPlayIndex);
+    if (current != null) return numbering.nextIndex(currPlayIndex);
+    // 标题里读不出集号时保留原来的顺序播放。
+    return currPlayIndex + 1 < videoList.length ? currPlayIndex + 1 : null;
+  }
+
+  int? previousEpisodeIndex() {
+    if (videoList.isEmpty) return null;
+    final numbering = episodeNumbering;
+    final current = numbering.numberAt(currPlayIndex);
+    if (current != null) return numbering.previousIndex(currPlayIndex);
+    return currPlayIndex > 0 ? currPlayIndex - 1 : null;
+  }
+
+  bool get hasNextEpisode => nextEpisodeIndex() != null;
+
+  /// 当前集在 Bangumi 上的集号（`sort`）。用于弹幕分集与 OP/ED 跳过记录。
+  int? get currentBgmEpisodeNumber {
+    final number = episodeNumbering.numberAt(currPlayIndex);
+    if (number != null) return number;
+    if (bgmEpisodes.isEmpty || bgmEpisodes.length == videoList.length) {
+      return currPlayIndex + 1;
+    }
+    return null;
+  }
+
+  /// 当前集在 Bangumi 上是「第几集」，用于收藏进度的已看集数。
+  ///
+  /// 两者在集号有缺口时不同（`sort` 是 1、3、5 时第三集是第 3 集而不是第 5 集），
+  /// 进度写错会把整季的格子都点错。
+  int? get currentBgmOrdinal {
+    final number = episodeNumbering.numberAt(currPlayIndex);
+    if (bgmEpisodes.isNotEmpty && number != null) {
+      return BgmEpisodeOrder.ordinalOf(bgmEpisodes, number);
+    }
+    if (number != null) return number;
+    if (bgmEpisodes.isEmpty || bgmEpisodes.length == videoList.length) {
+      return currPlayIndex + 1;
+    }
+    return null;
+  }
+
+  /// Bangumi 条目的本篇总集数；未知时返回 null，不要拿源的分集数冒充。
+  int? get bgmEpisodeCount {
+    if (bgmEpisodes.isNotEmpty) return bgmEpisodes.length;
+    final total = toInt(
+      bgmDetailData?['eps'] ?? bgmDetailData?['total_episodes'],
+    );
+    return total != null && total > 0 ? total : null;
+  }
+
+  /// 源下标 → Bangumi 分集条目。集号对不上时返回 null，宁可退回首集标题
+  /// 也不要把别的一集的标题贴到当前画面上。
+  Map<String, dynamic>? _bgmEpisodeForSource(int index) {
+    final number = episodeNumbering.numberAt(index);
+    if (number != null && bgmEpisodes.isNotEmpty) {
+      return BgmEpisodeOrder.byNumber(bgmEpisodes, number);
+    }
+    if (index >= 0 && index < bgmEpisodes.length) return bgmEpisodes[index];
+    return null;
+  }
 
   bool get isLocalSource => request.source == '_local';
   bool get isAdapter {
@@ -136,8 +215,8 @@ class PlaybackContent {
   }
 
   String? get bgmEpisodeTitle {
-    if (currPlayIndex < 0 || currPlayIndex >= bgmEpisodes.length) return null;
-    final ep = bgmEpisodes[currPlayIndex];
+    final ep = _bgmEpisodeForSource(currPlayIndex);
+    if (ep == null) return null;
     return (ep['name_cn']?.toString().isNotEmpty == true
             ? ep['name_cn']
             : ep['name'])
@@ -211,6 +290,7 @@ class PlaybackContent {
       ]),
       timelineKey: timelineKey,
       episodeNumber:
+          episodeNumbering.numberAt(currPlayIndex)?.toDouble() ??
           skipEpisodeNumber(currentEpisodeTitle) ??
           (currPlayIndex + 1).toDouble(),
       seriesKey: SkipContext.sourceIdentity([
@@ -302,7 +382,17 @@ class PlaybackContent {
         lineIndex: (lineIndex ?? currUrl) > 0 ? (lineIndex ?? currUrl) : 1,
       );
     }
-    final normalizedEpisodeIndex = episodeIndex.clamp(0, videoList.length - 1);
+    var target = episodeIndex;
+    if (target < 0 || target >= videoList.length) {
+      // 越界多半是把 Bangumi 的集号当成了源下标。按标题里的集号反查，
+      // 找不到才退回夹取，避免静默跳到别的集。
+      final mapped = episodeNumbering.indexOfNumber(target + 1);
+      if (mapped != null) {
+        Log.w('Playback', '剧集下标 $episodeIndex 越界，按集号映射到第 ${target + 1} 集');
+        target = mapped;
+      }
+    }
+    final normalizedEpisodeIndex = target.clamp(0, videoList.length - 1);
     final preferred = lineIndex ?? currUrl;
     final episode = videoList[normalizedEpisodeIndex];
     return (
@@ -688,9 +778,12 @@ class PlaybackContent {
     final detach = lifetime.token.onCancel(cancel);
     final detachOuter = SourceOperation.current?.token.onCancel(cancel);
     try {
+      // `p` 是集号，不是源分集的数组下标：源倒序或缺集时下标会整集错位。
+      final episodeNumber =
+          episodeNumbering.numberAt(episodeIndex) ?? episodeIndex + 1;
       return await DanmakuController.fetchDanmaku(
         subjectId: bgmId,
-        episodeIndex: episodeIndex + 1,
+        episodeIndex: episodeNumber,
         titles: searchTitles,
         abortTrigger: abortTrigger == null
             ? abort.future
@@ -743,7 +836,10 @@ class PlaybackContent {
     }
 
     final detail = bgmDetailData;
-    final epCount = videoList.isEmpty ? null : videoList.length;
+    // 总集数与已看集数都以 Bangumi 为准：源的分集数只代表这一条线路有多少集。
+    final epCount =
+        bgmEpisodeCount ?? (videoList.isEmpty ? null : videoList.length);
+    final watched = currentBgmOrdinal;
     final result = await collections.addOrUpdate(
       AnimeCollection(
         postId: validPostId,
@@ -751,7 +847,7 @@ class PlaybackContent {
         status: CollectionStatus.doing.value,
         nsfw: isNsfw,
         epTotal: epCount,
-        epWatched: epCount == null ? null : currPlayIndex + 1,
+        epWatched: watched,
         postTitle: title,
         postCover: coverImageUrl,
         bgmImage: bgmInfo.imageUrl,

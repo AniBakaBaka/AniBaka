@@ -18,6 +18,7 @@ class EpisodeItem extends StatelessWidget {
   final bool isQueued;
   final bool isDownloadSelected;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final Color? textColor;
 
   const EpisodeItem({
@@ -30,6 +31,7 @@ class EpisodeItem extends StatelessWidget {
     this.isQueued = false,
     this.isDownloadSelected = false,
     this.onTap,
+    this.onLongPress,
     this.textColor,
   });
 
@@ -57,6 +59,7 @@ class EpisodeItem extends StatelessWidget {
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
         onTap: (isDownloadMode && isQueued) ? null : onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(8),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
