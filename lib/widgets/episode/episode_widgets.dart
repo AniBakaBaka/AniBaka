@@ -88,6 +88,13 @@ class EpisodeItem extends StatelessWidget {
                       size: 13,
                       color: foreground,
                     ),
+                  ] else if (isWatched) ...[
+                    const SizedBox(width: 3),
+                    Icon(
+                      Icons.done_rounded,
+                      size: 12,
+                      color: base.withValues(alpha: 0.45),
+                    ),
                   ],
                 ],
               ),
@@ -179,6 +186,7 @@ Widget buildWindowsEpisodeList({
   required List<PlaybackEpisode> videoList,
   required bool ascending,
   required int currPlayIndex,
+  required String videoId,
   required Function(int) onEpisodeChanged,
 }) {
   return SliverMainAxisGroup(
@@ -217,6 +225,7 @@ Widget buildWindowsEpisodeList({
             index: index,
             rawTitle: videoList[index].title,
             isSelected: index == currPlayIndex,
+            isWatched: HistoryRepository.isEpisodeWatched(videoId, index),
             onTap: () => onEpisodeChanged(index),
           );
         },

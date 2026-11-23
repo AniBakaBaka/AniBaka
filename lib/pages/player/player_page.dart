@@ -724,11 +724,6 @@ class _PlayerPageState extends State<PlayerPage>
       episodeIndex,
       lineIndex ?? content.currUrl,
     );
-    Log.i(
-      'Playback',
-      '切换剧集: 目标 $episodeIndex -> ${selection.episodeIndex} / '
-          '共 ${content.videoList.length} 集, 线路 ${selection.lineIndex}',
-    );
     if (selection.episodeIndex == content.currPlayIndex &&
         selection.lineIndex == content.currUrl) {
       return Future<void>.value();
@@ -783,22 +778,29 @@ class _PlayerPageState extends State<PlayerPage>
       urlResolver: content.resolveEpisodeUrl,
       startInDownloadMode: downloadMode,
       currentLineIndex: downloadMode ? null : content.currUrl,
+      bgmSubjectId: content.bgmInfo.subjectId,
+      bgmEpisodes: content.bgmEpisodes,
       sourceNames: downloadMode ? null : content.sourceNames,
       onLineChanged: downloadMode ? null : _changeLine,
-      onSetEpisodeWatched:
-          downloadMode ||
-              content.bgmInfo.subjectId == null ||
-              !bangumiSession.isConnected
-          ? null
-          : _setEpisodeWatched,
+      onSetEpisodeWatched: downloadMode ? null : _setEpisodeWatched,
     );
     if (index != null) unawaited(_switchEpisode(index));
   }
 
-  /// 手动点格子：集号取自分集标题，而不是源数组下标（见 EpisodeNumbering）。
+  /// 手动点格子：先记本地，连着 Bangumi 时再同步过去。
   Future<bool> _setEpisodeWatched(int episodeIndex, bool watched) async {
+    await historyRepository.setEpisodeWatched(
+      '${_content.data['id']}',
+      episodeIndex,
+      watched,
+    );
+
     final subjectId = _content.bgmInfo.subjectId;
-    if (subjectId == null) return false;
+    if (subjectId == null || !bangumiSession.isConnected) {
+      showSnackBar(watched ? '已标记为看过' : '已取消看过标记');
+      return true;
+    }
+
     final number =
         _content.episodeNumbering.numberAt(episodeIndex) ?? episodeIndex + 1;
     try {
@@ -807,16 +809,16 @@ class _PlayerPageState extends State<PlayerPage>
         episodeNumber: number,
         watched: watched,
       );
-      if (!ok) {
-        showSnackBar('Bangumi 上找不到第 $number 集，无法标记', isError: true);
-        return false;
-      }
-      showSnackBar(watched ? '已标记第 $number 集为看过' : '已取消第 $number 集的看过标记');
-      return true;
+      showSnackBar(
+        ok
+            ? (watched ? '已标记第 $number 集为看过' : '已取消第 $number 集的看过标记')
+            : 'Bangumi 上没有第 $number 集，只记在本地',
+        isError: !ok,
+      );
     } catch (error) {
-      showSnackBar('$error', isError: true);
-      return false;
+      showSnackBar('已记在本地，Bangumi 同步失败：$error', isError: true);
     }
+    return true;
   }
 
   void _showCast() {
@@ -910,6 +912,7 @@ class _PlayerPageState extends State<PlayerPage>
           isSearching: _autoMatch != null,
           onSourceTap: _openSourceSheet,
           onEpisodeChanged: _switchEpisode,
+          onSetEpisodeWatched: _setEpisodeWatched,
           onCastPressed: _showCast,
           onWatchPartyPressed: _showWatchParty,
           onPickEpisode: _showEpisodePicker,
@@ -1270,6 +1273,7 @@ class _PlayerPageState extends State<PlayerPage>
                     videoList: content.videoList,
                     ascending: ascending,
                     currPlayIndex: content.currPlayIndex,
+                    videoId: videoId,
                     onEpisodeChanged: _switchEpisode,
                   )
                 : SliverToBoxAdapter(

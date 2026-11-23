@@ -21,6 +21,7 @@ class WindowsPlayerLayout extends StatefulWidget {
   final ValueNotifier<bool> followNotifier;
   final VoidCallback onSourceTap;
   final void Function(int) onEpisodeChanged;
+  final Future<bool> Function(int, bool) onSetEpisodeWatched;
   final VoidCallback onCastPressed;
   final VoidCallback onWatchPartyPressed;
   final VoidCallback onPickEpisode;
@@ -41,6 +42,7 @@ class WindowsPlayerLayout extends StatefulWidget {
     required this.followNotifier,
     required this.onSourceTap,
     required this.onEpisodeChanged,
+    required this.onSetEpisodeWatched,
     required this.onCastPressed,
     required this.onWatchPartyPressed,
     required this.onPickEpisode,
@@ -112,9 +114,7 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
 
   Widget _buildPlayerArea(BuildContext context) {
     final content = widget.content;
-    // 下一集按集号走：源可能倒序排版或缺集，currPlayIndex + 1 会跳错集。
-    final nextIndex = content.nextEpisodeIndex();
-    final hasNextEpisode = nextIndex != null;
+    final hasNextEpisode = content.nextEpisodeIndex() != null;
     return Container(
       color: Colors.black,
       child: Stack(
@@ -129,9 +129,13 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
               full: false,
               onPickEpisode: widget.onPickEpisode,
               hasNextEpisode: hasNextEpisode,
-              onNextEpisode: nextIndex == null
-                  ? null
-                  : () => widget.onEpisodeChanged(nextIndex),
+              // 目标集在点击时才算：连点之间可能没有 rebuild，闭包会拿到旧值。
+              onNextEpisode: hasNextEpisode
+                  ? () {
+                      final target = content.nextEpisodeIndex();
+                      if (target != null) widget.onEpisodeChanged(target);
+                    }
+                  : null,
               onFullScreenChanged: (full) {
                 setState(() => _isFullScreen = full);
                 widget.onFullScreenChanged(full);
@@ -417,6 +421,7 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
                   child: WindowsEpisodeList(
                     content: widget.content,
                     onEpisodeSelected: widget.onEpisodeChanged,
+                    onSetEpisodeWatched: widget.onSetEpisodeWatched,
                     onDownloadPressed: widget.onDownloadPressed,
                     onUrlChanged: widget.onUrlChanged,
                     followNotifier: widget.followNotifier,

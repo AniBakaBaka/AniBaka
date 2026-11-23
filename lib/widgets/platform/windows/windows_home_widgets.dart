@@ -168,6 +168,18 @@ class _WindowsHeroBannerState extends State<WindowsHeroBanner>
                       bottom: 28,
                       child: _buildControls(context),
                     ),
+                    if (widget.items.length > 1) ...[
+                      _buildOverlayArrow(
+                        height: height,
+                        count: widget.items.length,
+                        right: false,
+                      ),
+                      _buildOverlayArrow(
+                        height: height,
+                        count: widget.items.length,
+                        right: true,
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -175,6 +187,38 @@ class _WindowsHeroBannerState extends State<WindowsHeroBanner>
           ),
         );
       },
+    );
+  }
+
+  /// 压在横幅左右两侧、垂直居中的翻页按钮，鼠标移入才淡入。
+  Widget _buildOverlayArrow({
+    required double height,
+    required int count,
+    required bool right,
+  }) {
+    return Positioned(
+      top: (height - _WindowsShelfState._arrowSize) / 2,
+      left: right ? null : 18,
+      right: right ? 18 : null,
+      child: ValueListenableBuilder<bool>(
+        valueListenable: _hovered,
+        builder: (context, hovered, _) => IgnorePointer(
+          ignoring: !hovered,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 150),
+            curve: Curves.easeOut,
+            opacity: hovered ? 1 : 0,
+            child: _OverlayPageButton(
+              icon: right
+                  ? Icons.chevron_right_rounded
+                  : Icons.chevron_left_rounded,
+              tooltip: right ? '下一个' : '上一个',
+              onTap: () =>
+                  _goTo(right ? _index + 1 : _index - 1 + count),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -190,30 +234,6 @@ class _WindowsHeroBannerState extends State<WindowsHeroBanner>
             progress: _progress,
             onTap: () => _goTo(i),
           ),
-        const SizedBox(width: 10),
-        ValueListenableBuilder<bool>(
-          valueListenable: _hovered,
-          builder: (context, hovered, child) => AnimatedOpacity(
-            opacity: hovered ? 1 : 0,
-            duration: _motion(context, 180),
-            child: IgnorePointer(ignoring: !hovered, child: child),
-          ),
-          child: Row(
-            children: [
-              _GlassButton(
-                icon: Icons.chevron_left_rounded,
-                tooltip: '上一个',
-                onTap: () => _goTo(_index - 1 + count),
-              ),
-              const SizedBox(width: 8),
-              _GlassButton(
-                icon: Icons.chevron_right_rounded,
-                tooltip: '下一个',
-                onTap: () => _goTo(_index + 1),
-              ),
-            ],
-          ),
-        ),
       ],
     );
   }
@@ -426,38 +446,6 @@ class _BannerProgress extends CustomPainter {
       oldDelegate.progress != progress;
 }
 
-class _GlassButton extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  const _GlassButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return PlatformTooltip(
-      message: tooltip,
-      child: IconButton(
-        onPressed: onTap,
-        style: IconButton.styleFrom(
-          backgroundColor: Colors.black.withValues(alpha: 0.35),
-          foregroundColor: Colors.white,
-          hoverColor: Colors.white.withValues(alpha: 0.12),
-          fixedSize: const Size(36, 36),
-          minimumSize: const Size(36, 36),
-          padding: EdgeInsets.zero,
-          side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
-        ),
-        icon: Icon(icon, size: 22),
-      ),
-    );
-  }
-}
-
 // ---------------------------------------------------------------------------
 // 分区标题、分段选择与横向货架
 // ---------------------------------------------------------------------------
@@ -639,7 +627,7 @@ class _Segment extends StatelessWidget {
   }
 }
 
-/// 横向货架：标题栏右侧提供翻页按钮，弥补鼠标滚轮无法横向滚动的问题。
+/// 横向货架：两侧提供翻页按钮，弥补鼠标滚轮无法横向滚动的问题。
 class WindowsShelf extends StatefulWidget {
   final String title;
   final String? subtitle;
@@ -675,8 +663,11 @@ class WindowsShelf extends StatefulWidget {
 }
 
 class _WindowsShelfState extends State<WindowsShelf> {
+  static const double _arrowSize = 40;
+
   final ScrollController _controller = ScrollController();
   final ValueNotifier<(bool, bool)> _edges = ValueNotifier((false, false));
+  final ValueNotifier<bool> _hover = ValueNotifier(false);
 
   @override
   void didUpdateWidget(covariant WindowsShelf oldWidget) {
@@ -690,6 +681,7 @@ class _WindowsShelfState extends State<WindowsShelf> {
   void dispose() {
     _controller.dispose();
     _edges.dispose();
+    _hover.dispose();
     super.dispose();
   }
 
@@ -724,6 +716,41 @@ class _WindowsShelfState extends State<WindowsShelf> {
   @override
   Widget build(BuildContext context) {
     final placeholder = widget.placeholder;
+    final overlay = widget.itemCount > 0;
+    Widget content = widget.itemCount == 0 && placeholder != null
+        ? Padding(
+            padding: EdgeInsets.symmetric(horizontal: widget.gutter),
+            child: placeholder,
+          )
+        : NotificationListener<ScrollMetricsNotification>(
+            onNotification: (n) => _onMetrics(n.metrics),
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (n) => _onMetrics(n.metrics),
+              child: ListView.separated(
+                controller: _controller,
+                scrollDirection: Axis.horizontal,
+                padding: EdgeInsets.symmetric(horizontal: widget.gutter),
+                itemCount: widget.itemCount,
+                addAutomaticKeepAlives: false,
+                separatorBuilder: (_, _) => SizedBox(width: widget.spacing),
+                itemBuilder: widget.itemBuilder,
+              ),
+            ),
+          );
+    if (overlay) {
+      content = MouseRegion(
+        onEnter: (_) => _hover.value = true,
+        onExit: (_) => _hover.value = false,
+        child: Stack(
+          children: [
+            Positioned.fill(child: content),
+            _buildOverlayArrow(right: false),
+            _buildOverlayArrow(right: true),
+          ],
+        ),
+      );
+    }
+    final actions = widget.actions;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -733,85 +760,112 @@ class _WindowsShelfState extends State<WindowsShelf> {
             title: widget.title,
             subtitle: widget.subtitle,
             trailing: [
-              for (final action in widget.actions) ...[
-                action,
-                const SizedBox(width: 12),
+              for (var i = 0; i < actions.length; i++) ...[
+                actions[i],
+                if (i < actions.length - 1) const SizedBox(width: 12),
               ],
-              ValueListenableBuilder<(bool, bool)>(
-                valueListenable: _edges,
-                builder: (context, edges, _) => Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _PageButton(
-                      icon: Icons.chevron_left_rounded,
-                      tooltip: '向前',
-                      onTap: edges.$1 ? () => _page(-1) : null,
-                    ),
-                    const SizedBox(width: 6),
-                    _PageButton(
-                      icon: Icons.chevron_right_rounded,
-                      tooltip: '向后',
-                      onTap: edges.$2 ? () => _page(1) : null,
-                    ),
-                  ],
-                ),
-              ),
             ],
           ),
         ),
         const SizedBox(height: 16),
-        SizedBox(
-          height: widget.height,
-          child: widget.itemCount == 0 && placeholder != null
-              ? Padding(
-                  padding: EdgeInsets.symmetric(horizontal: widget.gutter),
-                  child: placeholder,
-                )
-              : NotificationListener<ScrollMetricsNotification>(
-                  onNotification: (n) => _onMetrics(n.metrics),
-                  child: NotificationListener<ScrollNotification>(
-                    onNotification: (n) => _onMetrics(n.metrics),
-                    child: ListView.separated(
-                      controller: _controller,
-                      scrollDirection: Axis.horizontal,
-                      padding: EdgeInsets.symmetric(horizontal: widget.gutter),
-                      itemCount: widget.itemCount,
-                      addAutomaticKeepAlives: false,
-                      separatorBuilder: (_, _) =>
-                          SizedBox(width: widget.spacing),
-                      itemBuilder: widget.itemBuilder,
-                    ),
-                  ),
-                ),
-        ),
+        SizedBox(height: widget.height, child: content),
       ],
+    );
+  }
+
+  /// 压在列表左右两侧的翻页按钮，鼠标在货架内且该方向还能翻页时才出现。
+  Widget _buildOverlayArrow({required bool right}) {
+    // 一半压在留白里、一半压在封面上，不遮挡封面主体内容。
+    final inset = (widget.gutter - _arrowSize / 2).clamp(6.0, 64.0);
+    return Positioned(
+      top: (widget.height - _arrowSize) / 2,
+      left: right ? null : inset,
+      right: right ? inset : null,
+      child: ValueListenableBuilder<bool>(
+        valueListenable: _hover,
+        builder: (context, hovered, _) => ValueListenableBuilder<(bool, bool)>(
+          valueListenable: _edges,
+          builder: (context, edges, _) {
+            final visible = hovered && (right ? edges.$2 : edges.$1);
+            return IgnorePointer(
+              ignoring: !visible,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 150),
+                curve: Curves.easeOut,
+                opacity: visible ? 1 : 0,
+                child: _OverlayPageButton(
+                  icon: right
+                      ? Icons.chevron_right_rounded
+                      : Icons.chevron_left_rounded,
+                  tooltip: right ? '向后' : '向前',
+                  onTap: () => _page(right ? 1 : -1),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
 }
 
-class _PageButton extends StatelessWidget {
+/// 压在封面上的圆形翻页按钮。
+class _OverlayPageButton extends StatefulWidget {
   final IconData icon;
   final String tooltip;
-  final VoidCallback? onTap;
+  final VoidCallback onTap;
 
-  const _PageButton({required this.icon, required this.tooltip, this.onTap});
+  const _OverlayPageButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  State<_OverlayPageButton> createState() => _OverlayPageButtonState();
+}
+
+class _OverlayPageButtonState extends State<_OverlayPageButton> {
+  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return PlatformTooltip(
-      message: tooltip,
-      child: IconButton(
-        onPressed: onTap,
-        style: IconButton.styleFrom(
-          fixedSize: const Size(32, 32),
-          minimumSize: const Size(32, 32),
-          padding: EdgeInsets.zero,
-          foregroundColor: colors.onSurface,
-          disabledForegroundColor: colors.onSurface.withValues(alpha: 0.25),
-          side: BorderSide(color: colors.outlineVariant.withValues(alpha: 0.7)),
+      message: widget.tooltip,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            width: _WindowsShelfState._arrowSize,
+            height: _WindowsShelfState._arrowSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _hovered
+                  ? colors.primary
+                  : Colors.black.withValues(alpha: 0.55),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: _hovered ? 0.9 : 0.28),
+              ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x4D000000),
+                  blurRadius: 12,
+                  offset: Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Icon(
+              widget.icon,
+              size: 22,
+              color: Colors.white.withValues(alpha: _hovered ? 1 : 0.9),
+            ),
+          ),
         ),
-        icon: Icon(icon, size: 20),
       ),
     );
   }

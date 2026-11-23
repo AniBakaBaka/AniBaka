@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:baka/widgets/common/platform_tooltip.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:baka/models/playback_episode.dart';
+import 'package:baka/services/playback/history_repository.dart';
 import 'package:baka/widgets/platform/windows/windows_line_selector.dart';
 import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/services/playback/danmaku_controller.dart';
@@ -17,6 +18,7 @@ class WindowsEpisodeList extends StatefulWidget {
     required this.content,
     required this.onEpisodeSelected,
     required this.onUrlChanged,
+    this.onSetEpisodeWatched,
     super.key,
     this.followNotifier,
     this.onFollowPressed,
@@ -29,6 +31,7 @@ class WindowsEpisodeList extends StatefulWidget {
   final PlaybackContent content;
   final ValueChanged<int> onEpisodeSelected;
   final ValueChanged<int> onUrlChanged;
+  final Future<bool> Function(int, bool)? onSetEpisodeWatched;
   final VoidCallback? onDownloadPressed;
   final ValueNotifier<bool>? followNotifier;
   final VoidCallback? onFollowPressed;
@@ -73,9 +76,17 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: historyRepository.revision,
+      builder: (context, _, _) => _buildContent(context),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     final content = widget.content;
     final videoList = content.videoList;
     final currentIndex = content.currPlayIndex;
+    final videoId = '${content.data['id']}';
     final primaryColor = Theme.of(context).colorScheme.primary;
     final source = trimmed(content.sourceName) ?? '切换播放源';
     final line = trimmed(content.lineName);
@@ -87,12 +98,14 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
         final i = _filteredList?[position] ?? position;
         final item = videoList[i];
         final isPlaying = i == currentIndex;
+        final watched = HistoryRepository.isEpisodeWatched(videoId, i);
         if (_isGridView) {
           return Material(
             color: Colors.transparent,
             borderRadius: BorderRadius.circular(6),
             child: InkWell(
               onTap: () => widget.onEpisodeSelected(i),
+              onLongPress: _markHandler(i, watched),
               borderRadius: BorderRadius.circular(6),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 160),
@@ -111,22 +124,50 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                 ),
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                 alignment: Alignment.center,
-                child: Text(
-                  item.title,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontWeight: isPlaying ? FontWeight.bold : FontWeight.w500,
-                    fontSize: 12.5,
-                    color: isPlaying ? primaryColor : Colors.white70,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (watched && !isPlaying) ...[
+                      const Icon(
+                        Icons.done_rounded,
+                        size: 12,
+                        color: Colors.white38,
+                      ),
+                      const SizedBox(width: 3),
+                    ],
+                    Flexible(
+                      child: Text(
+                        item.title,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontWeight: isPlaying
+                              ? FontWeight.bold
+                              : FontWeight.w500,
+                          fontSize: 12.5,
+                          color: isPlaying
+                              ? primaryColor
+                              : watched
+                              ? Colors.white38
+                              : Colors.white70,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
           );
         }
-        return _buildEpisodeRow(context, i, item, isPlaying, primaryColor);
+        return _buildEpisodeRow(
+          context,
+          i,
+          item,
+          isPlaying,
+          watched,
+          primaryColor,
+        );
       },
       childCount: itemCount,
       addAutomaticKeepAlives: false,
@@ -467,11 +508,81 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
     );
   }
 
+  VoidCallback? _markHandler(int index, bool watched) {
+    final setter = widget.onSetEpisodeWatched;
+    if (setter == null) return null;
+    return () => setter(index, !watched);
+  }
+
+  Future<void> _showOverview(
+    BuildContext context,
+    String title,
+    String overview,
+  ) {
+    return showDialog<void>(
+      context: context,
+      barrierColor: Colors.black38,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: const Color(0xFF26262C),
+        surfaceTintColor: Colors.transparent,
+        elevation: 14,
+        shadowColor: Colors.black87,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: Colors.white12, width: 0.8),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 460, maxHeight: 420),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 10),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      overview,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        height: 1.6,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('关闭'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildEpisodeRow(
     BuildContext context,
     int index,
     PlaybackEpisode item,
     bool isPlaying,
+    bool watched,
     Color primaryColor,
   ) {
     final content = widget.content;
@@ -484,7 +595,14 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
           )
         : null;
     if (stillFuture == null) {
-      return _buildEpisodeRowContent(index, item, isPlaying, primaryColor, null);
+      return _buildEpisodeRowContent(
+        index,
+        item,
+        isPlaying,
+        watched,
+        primaryColor,
+        null,
+      );
     }
     return FutureBuilder<Map<String, dynamic>?>(
       future: stillFuture,
@@ -492,6 +610,7 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
         index,
         item,
         isPlaying,
+        watched,
         primaryColor,
         snapshot.data,
       ),
@@ -502,6 +621,7 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
     int index,
     PlaybackEpisode item,
     bool isPlaying,
+    bool watched,
     Color primaryColor,
     Map<String, dynamic>? still,
   ) {
@@ -553,6 +673,7 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
         color: Colors.transparent,
         child: InkWell(
           onTap: () => widget.onEpisodeSelected(index),
+          onLongPress: _markHandler(index, watched),
           borderRadius: BorderRadius.circular(8),
           child: Padding(
             padding: const EdgeInsets.all(10),
@@ -599,6 +720,29 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                                   ),
                                 ),
                               ),
+                            if (watched)
+                              Positioned(
+                                top: 4,
+                                right: 4,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 1.5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.66),
+                                    borderRadius: BorderRadius.circular(3),
+                                  ),
+                                  child: const Text(
+                                    '已看过',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      height: 1.1,
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -620,6 +764,8 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                                         : FontWeight.w600,
                                     color: isPlaying
                                         ? primaryColor
+                                        : watched
+                                        ? Colors.white60
                                         : Colors.white,
                                     height: 1.25,
                                   ),
@@ -667,15 +813,44 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                           ],
                           if (overview.isNotEmpty) ...[
                             const SizedBox(height: 4),
-                            Text(
-                              overview,
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                color: Colors.white60,
-                                height: 1.35,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    overview,
+                                    style: const TextStyle(
+                                      fontSize: 11.5,
+                                      color: Colors.white60,
+                                      height: 1.35,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (overview.length > 30) ...[
+                                  const SizedBox(width: 4),
+                                  InkWell(
+                                    onTap: () =>
+                                        _showOverview(context, title, overview),
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 2,
+                                        vertical: 1,
+                                      ),
+                                      child: Text(
+                                        '全文',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: primaryColor,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ],
                         ],

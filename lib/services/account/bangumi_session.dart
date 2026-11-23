@@ -221,8 +221,7 @@ class BangumiSession {
     ensureCurrent(revision);
   }
 
-  /// 手动标记/取消标记单集。返回 false 表示 Bangumi 上没有这一集
-  /// （源的分集编号与条目对不上），调用方应提示用户而不是当作成功。
+  /// 手动标记单集。返回 false 表示 Bangumi 上没有这一集。
   Future<bool> setEpisodeWatched({
     required int subjectId,
     required num episodeNumber,

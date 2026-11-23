@@ -37,8 +37,9 @@ class PlaybackContent {
     required this.sources,
     required this.collections,
     required this.history,
-    this.posIndex,
+    int? posIndex,
   }) : _request = request.copyWith() {
+    _posIndex = posIndex;
     if (!isLocalSource) {
       bgmInfo = BgmInfo.fromData(data);
       bgmDetailData = data['bgmDetailData'] as Map<String, dynamic>?;
@@ -49,7 +50,7 @@ class PlaybackContent {
         bgmId: bgmInfo.subjectId,
       );
       _request.episodeIndex =
-          posIndex ?? request.episodeIndex ?? remembered?.episodeIndex;
+          _takePosIndex() ?? request.episodeIndex ?? remembered?.episodeIndex;
       _request.lineIndex = request.lineIndex ?? remembered?.lineIndex;
     }
   }
@@ -63,7 +64,15 @@ class PlaybackContent {
   final CollectionRepository collections;
   final HistoryRepository history;
   Map<String, dynamic> get data => request.metadata;
-  final int? posIndex;
+
+  /// 打开播放页时指定的集下标，只用一次。留着它会让 loadDetail 把选择拨回这一集。
+  int? _posIndex;
+
+  int? _takePosIndex() {
+    final value = _posIndex;
+    _posIndex = null;
+    return value;
+  }
 
   List<PlaybackEpisode> get videoList => request.episodes;
   int get currPlayIndex => request.episodeIndex ?? 0;
@@ -82,37 +91,39 @@ class PlaybackContent {
     return _numbering!;
   }
 
-  /// 播放顺序上的下一集。按集号走，而不是按数组下标走。
+  /// 播放顺序上的下一集，按集号而不是数组下标。
   int? nextEpisodeIndex() {
     if (videoList.isEmpty) return null;
     final numbering = episodeNumbering;
-    final current = numbering.numberAt(currPlayIndex);
-    if (current == null) {
-      // 标题里读不出集号时保留原来的顺序播放。
-      return currPlayIndex + 1 < videoList.length ? currPlayIndex + 1 : null;
+    final current = numbering.isUsable
+        ? numbering.numberAt(currPlayIndex)
+        : null;
+    if (current != null) {
+      final byNumber = numbering.nextIndex(currPlayIndex);
+      if (byNumber != null) return byNumber;
     }
-    final byNumber = numbering.nextIndex(currPlayIndex);
-    if (byNumber != null) return byNumber;
-    // 末尾可能挂着没有编号的条目（特别篇、OVA）。它们不会让集号倒退，
-    // 所以允许顺序前进；有编号的条目则一律按集号判断。
     final following = currPlayIndex + 1;
-    if (following < videoList.length && numbering.numberAt(following) == null) {
-      return following;
-    }
+    if (following >= videoList.length) return null;
+    // 下一项没编号（特别篇）或集号更大，才允许顺序前进；倒序源在这里被挡住。
+    final next = numbering.numberAt(following);
+    if (current == null || next == null || next > current) return following;
     return null;
   }
 
   int? previousEpisodeIndex() {
     if (videoList.isEmpty) return null;
     final numbering = episodeNumbering;
-    final current = numbering.numberAt(currPlayIndex);
-    if (current == null) {
-      return currPlayIndex > 0 ? currPlayIndex - 1 : null;
+    final current = numbering.isUsable
+        ? numbering.numberAt(currPlayIndex)
+        : null;
+    if (current != null) {
+      final byNumber = numbering.previousIndex(currPlayIndex);
+      if (byNumber != null) return byNumber;
     }
-    final byNumber = numbering.previousIndex(currPlayIndex);
-    if (byNumber != null) return byNumber;
     final preceding = currPlayIndex - 1;
-    if (preceding >= 0 && numbering.numberAt(preceding) == null) {
+    if (preceding < 0) return null;
+    final previous = numbering.numberAt(preceding);
+    if (current == null || previous == null || previous < current) {
       return preceding;
     }
     return null;
@@ -120,20 +131,8 @@ class PlaybackContent {
 
   bool get hasNextEpisode => nextEpisodeIndex() != null;
 
-  /// 当前集在 Bangumi 上的集号（`sort`）。用于弹幕分集与 OP/ED 跳过记录。
-  int? get currentBgmEpisodeNumber {
-    final number = episodeNumbering.numberAt(currPlayIndex);
-    if (number != null) return number;
-    if (bgmEpisodes.isEmpty || bgmEpisodes.length == videoList.length) {
-      return currPlayIndex + 1;
-    }
-    return null;
-  }
-
-  /// 当前集在 Bangumi 上是「第几集」，用于收藏进度的已看集数。
-  ///
-  /// 两者在集号有缺口时不同（`sort` 是 1、3、5 时第三集是第 3 集而不是第 5 集），
-  /// 进度写错会把整季的格子都点错。
+  /// 当前集在 Bangumi 上是「第几集」，用于收藏进度。集号有缺口时它不等于
+  /// 集号（`sort` 1、3、5 的第三集是第 3 集），写错会把整季格子点错。
   int? get currentBgmOrdinal {
     final number = episodeNumbering.numberAt(currPlayIndex);
     if (bgmEpisodes.isNotEmpty && number != null) {
@@ -155,8 +154,8 @@ class PlaybackContent {
     return total != null && total > 0 ? total : null;
   }
 
-  /// 源下标 → Bangumi 分集条目。集号对不上时返回 null，宁可退回首集标题
-  /// 也不要把别的一集的标题贴到当前画面上。
+  /// 源下标 → Bangumi 分集条目。集号对不上时返回 null，而不是把别的一集的
+  /// 标题贴到当前画面上。
   Map<String, dynamic>? _bgmEpisodeForSource(int index) {
     final number = episodeNumbering.numberAt(index);
     if (number != null && bgmEpisodes.isNotEmpty) {
@@ -468,12 +467,12 @@ class PlaybackContent {
           ],
         );
       }
-      final preferred = posIndex ?? currPlayIndex;
+      final preferred = _takePosIndex() ?? currPlayIndex;
       applySelection(normalizeSelection(preferred, currUrl));
       return;
     }
 
-    final explicitEpisodeIndex = posIndex ?? request.episodeIndex;
+    final explicitEpisodeIndex = _takePosIndex() ?? request.episodeIndex;
     final explicitLineIndex = request.lineIndex;
 
     // Bangumi 条目的 `id` 是 BGM 条目 id，拿去查贴文只会拿到 null 或别人的贴文。

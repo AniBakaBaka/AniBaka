@@ -121,6 +121,9 @@ class _BakaPlayerState extends State<BakaPlayer> {
   bool _verticalFrameScheduled = false;
   bool _autoFullscreenTriggered = false;
   bool _showPlayerInfoHud = false;
+  bool _cursorHidden = false;
+  Timer? _cursorHideTimer;
+  DateTime? _lastCursorWake;
 
   // 设备类型判断 - 在 dispose 时需要用到但无法访问 context
   bool _isTablet = false;
@@ -183,8 +186,26 @@ class _BakaPlayerState extends State<BakaPlayer> {
     });
     if (widget.full) _applyFullScreenMode();
     _initializeControls();
+    _revealCursor();
     widget.controller.core.addListener(_maybeAutoEnterFullscreen);
     _maybeAutoEnterFullscreen();
+  }
+
+  /// 全屏时鼠标静止一会儿就藏起来，一动就回来。
+  void _revealCursor() {
+    if (!widget.full || !Instances.isDesktopPlatform) return;
+    if (_cursorHidden) setState(() => _cursorHidden = false);
+    final now = DateTime.now();
+    final last = _lastCursorWake;
+    if (last != null && now.difference(last) < const Duration(milliseconds: 200)) {
+      return;
+    }
+    _lastCursorWake = now;
+    _cursorHideTimer?.cancel();
+    _cursorHideTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      setState(() => _cursorHidden = true);
+    });
   }
 
   void _maybeAutoEnterFullscreen() {
@@ -240,8 +261,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
     if (widget.full) return;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      // 桌面端音量由播放器自己管（mpv 0–100），不去读写系统音量，
-      // 否则同一个滑块会同时压系统音量和播放器音量。
+      // 桌面端音量由播放器自己管，不去读写系统音量，否则两者会互相覆盖。
       if (!Instances.isDesktopPlatform) {
         try {
           FlutterVolumeController.updateShowSystemUI(true);
@@ -317,6 +337,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
     _indicatorTimer?.cancel();
     _doubleSpeedTimer?.cancel();
     _seekTimer?.cancel();
+    _cursorHideTimer?.cancel();
     _indicatorRevision.dispose();
 
     if (widget.full) {
@@ -370,54 +391,57 @@ class _BakaPlayerState extends State<BakaPlayer> {
             ((Instances.isDesktopPlatform || _isTablet) &&
                 constraints.maxWidth >= 720);
 
-        return Listener(
-          // 滚轮调音量：mpv / PotPlayer 的习惯，桌面上比拖滑块顺手。
-          // 挂在播放器整棵树的顶层，避免被上层控件挡掉命中。
-          behavior: HitTestBehavior.translucent,
-          onPointerSignal: _handlePointerSignal,
-          child: Stack(
-            fit: StackFit.passthrough,
-            children: <Widget>[
-              RepaintBoundary(
-                key: _videoCaptureKey,
-                child: _buildVideoPlayer(),
-              ),
-              PlayerLoadingIndicator(controller: widget.controller),
-              PlayerToastIndicators(controller: widget.controller),
-              Positioned.fill(
-                child: ListenableBuilder(
-                  listenable: _indicatorRevision,
-                  builder: (context, _) => Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      PlayerVolumeBrightnessIndicators(
-                        controller: widget.controller,
-                        volumeVisible:
-                            _visibleVerticalIndicator ==
-                            _VerticalControl.volume,
-                        brightnessVisible:
-                            _visibleVerticalIndicator ==
-                            _VerticalControl.brightness,
-                      ),
-                      PlayerSeekIndicator(seconds: _pendingSeekSeconds),
-                    ],
-                  ),
+        final player = Stack(
+          fit: StackFit.passthrough,
+          children: <Widget>[
+            RepaintBoundary(key: _videoCaptureKey, child: _buildVideoPlayer()),
+            PlayerLoadingIndicator(controller: widget.controller),
+            PlayerToastIndicators(controller: widget.controller),
+            Positioned.fill(
+              child: ListenableBuilder(
+                listenable: _indicatorRevision,
+                builder: (context, _) => Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    PlayerVolumeBrightnessIndicators(
+                      controller: widget.controller,
+                      volumeVisible:
+                          _visibleVerticalIndicator == _VerticalControl.volume,
+                      brightnessVisible:
+                          _visibleVerticalIndicator ==
+                          _VerticalControl.brightness,
+                    ),
+                    PlayerSeekIndicator(seconds: _pendingSeekSeconds),
+                  ],
                 ),
               ),
-              _buildDanmaku(),
-              _buildGestureDetector(),
-              _buildControlsOverlay(isWide),
-              _buildLockButton(),
-              _buildPlayerInfoHud(isWide),
-              PlayerErrorIndicator(
-                controller: widget.controller,
-                canSearchSource: widget.canSearchSource,
-                onSearch: _navigateToSearch,
-                show: widget.showPlaybackError,
-                onAiRepair: widget.onAiRepair,
-              ),
-              _buildDanmakuInputOverlay(),
-            ],
+            ),
+            _buildDanmaku(),
+            _buildGestureDetector(),
+            _buildControlsOverlay(isWide),
+            _buildLockButton(),
+            _buildPlayerInfoHud(isWide),
+            PlayerErrorIndicator(
+              controller: widget.controller,
+              canSearchSource: widget.canSearchSource,
+              onSearch: _navigateToSearch,
+              show: widget.showPlaybackError,
+              onAiRepair: widget.onAiRepair,
+            ),
+            _buildDanmakuInputOverlay(),
+          ],
+        );
+        // 滚轮监听挂在整棵树的顶层，避免被上层控件挡掉命中。
+        return MouseRegion(
+          cursor: _cursorHidden
+              ? SystemMouseCursors.none
+              : MouseCursor.defer,
+          onHover: (_) => _revealCursor(),
+          child: Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerSignal: _handlePointerSignal,
+            onPointerDown: (_) => _revealCursor(),
+            child: player,
           ),
         );
       },

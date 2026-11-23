@@ -2,8 +2,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
-import 'package:baka/api/api_config.dart';
-import 'package:baka/instance.dart';
 import 'package:baka/services/account/bangumi_session.dart';
 import 'package:baka/services/collection/bangumi_sync.dart';
 import 'package:baka/utils/format_utils.dart';
@@ -20,29 +18,6 @@ class BangumiSyncPage extends StatefulWidget {
 
 class _BangumiSyncPageState extends State<BangumiSyncPage> {
   String? _progress;
-  late final TextEditingController _apiBase = TextEditingController(
-    text: Instances.sp.getString(ApiConfig.bgmApiBaseKey) ?? '',
-  );
-
-  @override
-  void dispose() {
-    _apiBase.dispose();
-    super.dispose();
-  }
-
-  Future<void> _saveApiBase() async {
-    final raw = _apiBase.text.trim();
-    final normalized = ApiConfig.normalizeBgmApiBase(raw);
-    if (raw.isNotEmpty && normalized == null) {
-      showSnackBar('地址需要以 http:// 或 https:// 开头', isError: true);
-      return;
-    }
-    await ApiConfig.setBgmApiBase(normalized);
-    if (!mounted) return;
-    setState(() {});
-    _apiBase.text = normalized ?? '';
-    showSnackBar('已保存，之后的请求使用 ${ApiConfig.bgmApiBase}');
-  }
 
   Future<void> _run(String progress, Future<void> Function() task) async {
     setState(() => _progress = progress);
@@ -170,44 +145,13 @@ class _BangumiSyncPageState extends State<BangumiSyncPage> {
             ),
           ],
         ),
-        SettingsSection(
-          title: '网络',
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: TextField(
-                controller: _apiBase,
-                autocorrect: false,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
-                  labelText: 'Bangumi API 地址',
-                  hintText: ApiConfig.defaultBgmApiBase,
-                  helperText:
-                      '留空则使用官方地址。当前网络无法直连 api.bgm.tv 时，'
-                      '可填写能访问的镜像地址；该地址需要支持 /v0 的全部接口，'
-                      '包括收藏与进度写入，只读镜像会导致追番和点格子失败。',
-                  helperMaxLines: 4,
-                  border: OutlineInputBorder(),
-                ),
-                onSubmitted: (_) => _saveApiBase(),
-              ),
-            ),
-            SettingsTile(
-              icon: Icons.save_outlined,
-              title: '保存地址',
-              subtitle: '当前：${ApiConfig.bgmApiBase}',
-              onTap: _saveApiBase,
-            ),
-          ],
-        ),
         if (account != null)
           SettingsSection(
             children: [
               SettingsTile(
                 icon: Icons.cloud_sync_outlined,
                 title: '立即同步',
-                subtitle:
-                    _progress ?? (lastSync == null ? '尚未同步' : '上次同步 $lastSync'),
+                subtitle: _progress ?? (lastSync == null ? '尚未同步' : '上次同步 $lastSync'),
                 busy: busy,
                 onTap: _sync,
               ),

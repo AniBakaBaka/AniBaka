@@ -42,7 +42,6 @@ void main() {
   group('EpisodeNumbering', () {
     test('顺序排版的下一集就是下标 + 1', () {
       final numbering = EpisodeNumbering(['第1集', '第2集', '第3集']);
-      expect(numbering.isSequential, isTrue);
       expect(numbering.nextIndex(0), 1);
       expect(numbering.previousIndex(2), 1);
       expect(numbering.nextIndex(2), isNull);
@@ -55,7 +54,6 @@ void main() {
       expect(numbering.numberAt(0), 3);
       expect(numbering.nextIndex(2), 1, reason: '第1集的下一集是第2集');
       expect(numbering.previousIndex(0), 1, reason: '第3集的上一集是第2集');
-      expect(numbering.isSequential, isFalse);
     });
 
     test('源缺集时跳过缺口', () {
@@ -69,8 +67,13 @@ void main() {
 
     test('读不出集号时按顺序播放', () {
       final numbering = EpisodeNumbering(['第一话', '第二话', '第三话']);
-      expect(numbering.hasNumbers, isFalse);
+      expect(numbering.isUsable, isFalse);
       expect(numbering.nextIndex(0), isNull);
+    });
+
+    test('集号重复时判定不可用', () {
+      final numbering = EpisodeNumbering(['第1集', '第1集', '第1集']);
+      expect(numbering.isUsable, isFalse);
     });
   });
 

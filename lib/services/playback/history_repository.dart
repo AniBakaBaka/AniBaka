@@ -4,6 +4,7 @@ import 'package:baka/models/playback_request.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/utils/json_values.dart';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
 
 import 'package:baka/api/anibaka_api.dart';
@@ -26,12 +27,14 @@ class HistoryRepository {
   static const _maxHistoryCount = 50;
   static const _minPositionToSaveMs = 10000;
 
-  /// 正片播完就算看完。24 分钟正片 + 90 秒 ED 时正片结束约 93%，
-  /// 旧阈值 95% 会要求把 ED 也播掉大半，与 Animeko（90%）的体感不一致。
+  /// 正片播完即算看完；95% 会要求把 ED 也播掉大半。
   static const _completionThreshold = 0.90;
   static const _platform = 'app';
 
   final Map<String, List<Map<String, dynamic>>> _memory = {};
+
+  /// 每次落盘后自增，供首页「继续观看」刷新。
+  final ValueNotifier<int> revision = ValueNotifier(0);
 
   void _logUploadFailure(Object error) =>
       Log.w('History', '上传播放历史失败（本地已保存）', error);
@@ -139,6 +142,7 @@ class HistoryRepository {
 
   Future<void> _write(String key, List<Map<String, dynamic>> list) {
     _memory[key] = list;
+    if (key == _historyKey) revision.value++;
     return AppStorage.playHistoryBox.put(key, list);
   }
 
@@ -332,15 +336,15 @@ class HistoryRepository {
 
     final subjectId = toInt(record['bgmId']);
     // 拿不到 Bangumi 集序时宁可不点格子：写错会把整季进度带偏。
-    final watched = bgmEpisodeOrdinal;
+    final ordinal = bgmEpisodeOrdinal;
     if (record['isFinished'] == true &&
         subjectId != null &&
-        watched != null &&
+        ordinal != null &&
         bangumi.isConnected &&
         bangumi.autoMarkEpisode) {
       unawaited(
         bangumi
-            .markEpisodeWatched(subjectId: subjectId, watched: watched)
+            .markEpisodeWatched(subjectId: subjectId, watched: ordinal)
             .catchError((Object error, StackTrace stackTrace) {
               Log.w('History', '更新 Bangumi 集数失败: $error');
             }),
@@ -348,8 +352,57 @@ class HistoryRepository {
     }
   }
 
-  static bool isEpisodeWatched(String videoId, int episodeIndex) =>
-      readProgress('${videoId}_${episodeIndex}_1').inSeconds > 30;
+  static String _watchedKey(String videoId, int episodeIndex) =>
+      '${videoId}_${episodeIndex}_watched';
+
+  /// 任何一条线路上进度最远的那条记录；只播了几秒不算看过。
+  static bool isEpisodeWatched(String videoId, int episodeIndex) {
+    if (Hive.isBoxOpen(AppStorage.videoProgressBoxName)) {
+      final raw = AppStorage.videoProgressBox.get(
+        _watchedKey(videoId, episodeIndex),
+      );
+      final flag = raw is Map ? raw['watched'] : null;
+      if (flag is bool) return flag;
+    }
+    final progress = _furthestProgress(videoId, episodeIndex);
+    final position = toInt(progress?['positionMs']) ?? 0;
+    if (position <= 0) return false;
+    final duration = toInt(progress?['durationMs']) ?? 0;
+    if (duration <= 0) return position >= 30000;
+    return position / duration >= _completionThreshold;
+  }
+
+  static Map? _furthestProgress(String videoId, int episodeIndex) {
+    if (!Hive.isBoxOpen(AppStorage.videoProgressBoxName)) return null;
+    final box = AppStorage.videoProgressBox;
+    final prefix = '${videoId}_${episodeIndex}_';
+    Map? best;
+    var bestPosition = -1;
+    for (final key in box.keys) {
+      if (key is! String || !key.startsWith(prefix)) continue;
+      final item = box.get(key);
+      if (item is! Map) continue;
+      final position = toInt(item['positionMs']) ?? 0;
+      if (position > bestPosition) {
+        bestPosition = position;
+        best = item;
+      }
+    }
+    return best;
+  }
+
+  Future<void> setEpisodeWatched(
+    String videoId,
+    int episodeIndex,
+    bool watched,
+  ) async {
+    if (!Hive.isBoxOpen(AppStorage.videoProgressBoxName)) return;
+    await AppStorage.videoProgressBox.put(_watchedKey(videoId, episodeIndex), {
+      'watched': watched,
+      'updateTime': DateTime.now().millisecondsSinceEpoch,
+    });
+    revision.value = revision.value + 1;
+  }
 
   static Map? _readProgress(String key) =>
       Hive.isBoxOpen(AppStorage.videoProgressBoxName)

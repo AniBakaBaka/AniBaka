@@ -366,8 +366,7 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
 
   Widget _buildPlayer() {
     final content = widget.content;
-    final nextIndex = content.currPlayIndex + 1;
-    final hasNextEpisode = nextIndex < content.videoList.length;
+    final hasNextEpisode = content.nextEpisodeIndex() != null;
     return ValueSelector<PlaybackCoreState, bool>(
       valueListenable: ctr.core,
       select: (core) => core.failed,
@@ -386,8 +385,12 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
           focusNode: _playerFocusNode,
           showPrompts: _panel == _Panel.none,
           hasNextEpisode: hasNextEpisode,
+          // 目标集在点击时才算：连点之间可能没有 rebuild，闭包会拿到旧值。
           onNextEpisode: hasNextEpisode
-              ? () => widget.onEpisodeChanged(nextIndex)
+              ? () {
+                  final target = content.nextEpisodeIndex();
+                  if (target != null) widget.onEpisodeChanged(target);
+                }
               : null,
         );
       },
