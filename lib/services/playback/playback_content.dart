@@ -833,22 +833,27 @@ class PlaybackContent {
     if (!_disposed && revision == _collectionRevision) collection = current;
   }
 
+  /// 先改本地状态让界面立刻响应，网络请求失败再回滚。
   Future<void> toggleFollow() async {
-    await refreshCollection();
-    if (_disposed) return;
+    final previous = collection;
 
     if (isFollow()) {
       final current = collection!;
       final postId = current.postId ?? validPostId;
       final bgmId =
           current.bgmId ?? (postId == null ? bgmInfo.subjectId : null);
-      final success = bgmId != null
-          ? await collections.deleteByBgmId(bgmId)
-          : postId != null
-          ? await collections.delete(postId)
-          : false;
-      if (!success) throw Exception('取消追番失败');
       collection = null;
+      try {
+        final success = bgmId != null
+            ? await collections.deleteByBgmId(bgmId)
+            : postId != null
+            ? await collections.delete(postId)
+            : false;
+        if (!success) throw Exception('取消追番失败');
+      } catch (error) {
+        collection = previous;
+        rethrow;
+      }
       return;
     }
 
@@ -856,25 +861,28 @@ class PlaybackContent {
     // 总集数与已看集数都以 Bangumi 为准：源的分集数只代表这一条线路有多少集。
     final epCount =
         bgmEpisodeCount ?? (videoList.isEmpty ? null : videoList.length);
-    final watched = currentBgmOrdinal;
-    final result = await collections.addOrUpdate(
-      AnimeCollection(
-        postId: validPostId,
-        bgmId: bgmInfo.subjectId,
-        status: CollectionStatus.doing.value,
-        nsfw: isNsfw,
-        epTotal: epCount,
-        epWatched: watched,
-        postTitle: title,
-        postCover: coverImageUrl,
-        bgmImage: bgmInfo.imageUrl,
-        bgmTitle:
-            detail?['name_cn']?.toString() ??
-            detail?['name']?.toString() ??
-            title,
-      ),
+    final optimistic = AnimeCollection(
+      postId: validPostId,
+      bgmId: bgmInfo.subjectId,
+      status: CollectionStatus.doing.value,
+      nsfw: isNsfw,
+      epTotal: epCount,
+      epWatched: currentBgmOrdinal,
+      postTitle: title,
+      postCover: coverImageUrl,
+      bgmImage: bgmInfo.imageUrl,
+      bgmTitle:
+          detail?['name_cn']?.toString() ??
+          detail?['name']?.toString() ??
+          title,
     );
-    collection = result;
+    collection = optimistic;
+    try {
+      collection = await collections.addOrUpdate(optimistic);
+    } catch (error) {
+      collection = previous;
+      rethrow;
+    }
   }
 
   Future<void>? _disposing;

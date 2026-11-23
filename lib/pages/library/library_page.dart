@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/playback_request.dart';
@@ -612,12 +614,23 @@ class _CollectionCard extends StatelessWidget {
   };
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      ValueListenableBuilder<int>(
+        valueListenable: historyRepository.revision,
+        builder: (context, _, _) => _buildCard(context),
+      );
+
+  Widget _buildCard(BuildContext context) {
     final statusColor = _statusColors[collection.status] ?? Colors.grey;
     final statusText =
         CollectionStatus.fromValue(collection.status)?.label ?? '';
     final title = collection.displayTitle;
-    final hasEp = collection.epWatched != null && collection.epWatched! > 0;
+    // Bangumi 没同步上的标记也算数，本地记过的集数以多的为准。
+    final localWatched = collection.bgmId == null
+        ? 0
+        : HistoryRepository.watchedCountForBgm(collection.bgmId!);
+    final epWatched = math.max(collection.epWatched ?? 0, localWatched);
+    final hasEp = epWatched > 0;
     final hasTotal = collection.epTotal != null && collection.epTotal! > 0;
 
     final mapData = {
@@ -628,13 +641,13 @@ class _CollectionCard extends StatelessWidget {
     };
 
     String? remainingText;
-    if (hasTotal && hasEp && collection.epTotal! >= collection.epWatched!) {
-      final remain = collection.epTotal! - collection.epWatched!;
+    if (hasTotal && hasEp && collection.epTotal! >= epWatched) {
+      final remain = collection.epTotal! - epWatched;
       remainingText = remain > 0 ? '剩 $remain 集' : '已看完';
     } else if (hasTotal) {
       remainingText = '全 ${collection.epTotal} 集';
     } else if (hasEp) {
-      remainingText = '已看 ${collection.epWatched} 集';
+      remainingText = '已看 $epWatched 集';
     }
 
     return Stack(

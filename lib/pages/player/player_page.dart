@@ -854,11 +854,17 @@ class _PlayerPageState extends State<PlayerPage>
   Future<void> _toggleFollow() async {
     if (_updatingFollow) return;
     _updatingFollow = true;
+    final before = _followed.value;
+    // toggleFollow 在第一个 await 之前就改好本地状态，这里可以立刻读回。
+    final task = _content.toggleFollow();
+    if (mounted) _followed.value = _content.isFollow();
     try {
-      await _content.toggleFollow();
-      if (mounted) _followed.value = _content.isFollow();
+      await task;
     } catch (e) {
-      if (mounted) showSnackBar(e.toString(), isError: true);
+      if (mounted) {
+        _followed.value = before;
+        showSnackBar(e.toString(), isError: true);
+      }
     } finally {
       _updatingFollow = false;
     }

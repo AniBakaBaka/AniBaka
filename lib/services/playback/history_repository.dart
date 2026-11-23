@@ -372,6 +372,46 @@ class HistoryRepository {
     return position / duration >= _completionThreshold;
   }
 
+  /// 追番列表用：这部番在本地标记过看过的集数。
+  /// 同一集常有多条线路各存一份，按集下标去重。
+  static int watchedCountForBgm(int bgmId) {
+    if (bgmId <= 0 || !Hive.isBoxOpen(AppStorage.videoProgressBoxName)) {
+      return 0;
+    }
+    final videoIds = _videoIdsForBgm(bgmId);
+    if (videoIds.isEmpty) return 0;
+    final box = AppStorage.videoProgressBox;
+    final indexes = <int>{};
+    for (final key in box.keys) {
+      if (key is! String || !key.endsWith('_watched')) continue;
+      final body = key.substring(0, key.length - '_watched'.length);
+      final cut = body.lastIndexOf('_');
+      if (cut <= 0) continue;
+      final index = int.tryParse(body.substring(cut + 1));
+      if (index == null) continue;
+      if (!videoIds.contains(body.substring(0, cut))) continue;
+      final item = box.get(key);
+      if (item is! Map || item['watched'] != true) continue;
+      indexes.add(index);
+    }
+    return indexes.length;
+  }
+
+  /// 观看历史里记着每条记录的源 id 与 Bangumi 编号，用它把两者对上。
+  static Set<String> _videoIdsForBgm(int bgmId) {
+    if (!Hive.isBoxOpen(AppStorage.playHistoryBoxName)) return const {};
+    final raw = AppStorage.playHistoryBox.get(_resumeKey);
+    if (raw is! List) return const {};
+    final ids = <String>{};
+    for (final item in raw) {
+      if (item is! Map) continue;
+      if (toInt(item['bgmId']) != bgmId) continue;
+      final id = item['id'];
+      if (id != null) ids.add('$id');
+    }
+    return ids;
+  }
+
   static Map? _furthestProgress(String videoId, int episodeIndex) {
     if (!Hive.isBoxOpen(AppStorage.videoProgressBoxName)) return null;
     final box = AppStorage.videoProgressBox;
