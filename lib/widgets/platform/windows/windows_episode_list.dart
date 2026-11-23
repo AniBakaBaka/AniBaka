@@ -720,26 +720,21 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                                   ),
                                 ),
                               ),
-                            if (watched)
+                            if (watched && !isPlaying)
                               Positioned(
-                                top: 4,
                                 right: 4,
+                                bottom: 4,
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                    vertical: 1.5,
-                                  ),
+                                  width: 16,
+                                  height: 16,
                                   decoration: BoxDecoration(
-                                    color: Colors.black.withValues(alpha: 0.66),
-                                    borderRadius: BorderRadius.circular(3),
+                                    color: Colors.black.withValues(alpha: 0.55),
+                                    shape: BoxShape.circle,
                                   ),
-                                  child: const Text(
-                                    '已看过',
-                                    style: TextStyle(
-                                      fontSize: 9,
-                                      height: 1.1,
-                                      color: Colors.white70,
-                                    ),
+                                  child: const Icon(
+                                    Icons.check_rounded,
+                                    size: 11,
+                                    color: Colors.white,
                                   ),
                                 ),
                               ),

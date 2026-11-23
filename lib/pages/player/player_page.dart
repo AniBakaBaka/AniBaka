@@ -788,19 +788,30 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   /// 手动点格子：先记本地，连着 Bangumi 时再同步过去。
+  ///
+  /// 本地写完就返回。Bangumi 同步放后台跑，它的超时不该拖住长按的反馈。
   Future<bool> _setEpisodeWatched(int episodeIndex, bool watched) async {
     await historyRepository.setEpisodeWatched(
       '${_content.data['id']}',
       episodeIndex,
       watched,
     );
+    showSnackBar(watched ? '已标记为看过' : '已取消看过标记');
 
     final subjectId = _content.bgmInfo.subjectId;
-    if (subjectId == null || !bangumiSession.isConnected) {
-      showSnackBar(watched ? '已标记为看过' : '已取消看过标记');
-      return true;
+    if (subjectId != null && bangumiSession.isConnected) {
+      unawaited(
+        _syncEpisodeWatchedToBangumi(subjectId, episodeIndex, watched),
+      );
     }
+    return true;
+  }
 
+  Future<void> _syncEpisodeWatchedToBangumi(
+    int subjectId,
+    int episodeIndex,
+    bool watched,
+  ) async {
     final number =
         _content.episodeNumbering.numberAt(episodeIndex) ?? episodeIndex + 1;
     try {
@@ -809,16 +820,10 @@ class _PlayerPageState extends State<PlayerPage>
         episodeNumber: number,
         watched: watched,
       );
-      showSnackBar(
-        ok
-            ? (watched ? '已标记第 $number 集为看过' : '已取消第 $number 集的看过标记')
-            : 'Bangumi 上没有第 $number 集，只记在本地',
-        isError: !ok,
-      );
+      if (!ok) showSnackBar('Bangumi 上没有第 $number 集，只记在本地', isError: true);
     } catch (error) {
-      showSnackBar('已记在本地，Bangumi 同步失败：$error', isError: true);
+      showSnackBar('Bangumi 同步失败，已记在本地：$error', isError: true);
     }
-    return true;
   }
 
   void _showCast() {
