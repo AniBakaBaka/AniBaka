@@ -240,20 +240,24 @@ class _BakaPlayerState extends State<BakaPlayer> {
     if (widget.full) return;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      try {
-        FlutterVolumeController.updateShowSystemUI(true);
-        final volume = await FlutterVolumeController.getVolume();
-        if (!mounted) return;
-        widget.controller.setVolume(volume ?? 0.0);
-        if (!Platform.isAndroid) {
-          FlutterVolumeController.addListener((double value) {
-            if (mounted &&
-                _visibleVerticalIndicator != _VerticalControl.volume) {
-              widget.controller.setVolume(value);
-            }
-          });
-        }
-      } catch (_) {}
+      // 桌面端音量由播放器自己管（mpv 0–100），不去读写系统音量，
+      // 否则同一个滑块会同时压系统音量和播放器音量。
+      if (!Instances.isDesktopPlatform) {
+        try {
+          FlutterVolumeController.updateShowSystemUI(true);
+          final volume = await FlutterVolumeController.getVolume();
+          if (!mounted) return;
+          widget.controller.setVolume(volume ?? 0.0);
+          if (!Platform.isAndroid) {
+            FlutterVolumeController.addListener((double value) {
+              if (mounted &&
+                  _visibleVerticalIndicator != _VerticalControl.volume) {
+                widget.controller.setVolume(value);
+              }
+            });
+          }
+        } catch (_) {}
+      }
 
       if (_canAdjustScreenBrightness) {
         try {
@@ -290,13 +294,16 @@ class _BakaPlayerState extends State<BakaPlayer> {
       widget.controller.setBrightness(normalized);
     }
 
-    try {
-      if (control == _VerticalControl.volume) {
+    if (control == _VerticalControl.volume) {
+      if (Instances.isDesktopPlatform) return;
+      try {
         FlutterVolumeController.updateShowSystemUI(false);
         await FlutterVolumeController.setVolume(normalized);
-      } else {
-        await ScreenBrightness().setApplicationScreenBrightness(normalized);
-      }
+      } catch (_) {}
+      return;
+    }
+    try {
+      await ScreenBrightness().setApplicationScreenBrightness(normalized);
     } catch (_) {}
   }
 
@@ -363,45 +370,55 @@ class _BakaPlayerState extends State<BakaPlayer> {
             ((Instances.isDesktopPlatform || _isTablet) &&
                 constraints.maxWidth >= 720);
 
-        return Stack(
-          fit: StackFit.passthrough,
-          children: <Widget>[
-            RepaintBoundary(key: _videoCaptureKey, child: _buildVideoPlayer()),
-            PlayerLoadingIndicator(controller: widget.controller),
-            PlayerToastIndicators(controller: widget.controller),
-            Positioned.fill(
-              child: ListenableBuilder(
-                listenable: _indicatorRevision,
-                builder: (context, _) => Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    PlayerVolumeBrightnessIndicators(
-                      controller: widget.controller,
-                      volumeVisible:
-                          _visibleVerticalIndicator == _VerticalControl.volume,
-                      brightnessVisible:
-                          _visibleVerticalIndicator ==
-                          _VerticalControl.brightness,
-                    ),
-                    PlayerSeekIndicator(seconds: _pendingSeekSeconds),
-                  ],
+        return Listener(
+          // 滚轮调音量：mpv / PotPlayer 的习惯，桌面上比拖滑块顺手。
+          // 挂在播放器整棵树的顶层，避免被上层控件挡掉命中。
+          behavior: HitTestBehavior.translucent,
+          onPointerSignal: _handlePointerSignal,
+          child: Stack(
+            fit: StackFit.passthrough,
+            children: <Widget>[
+              RepaintBoundary(
+                key: _videoCaptureKey,
+                child: _buildVideoPlayer(),
+              ),
+              PlayerLoadingIndicator(controller: widget.controller),
+              PlayerToastIndicators(controller: widget.controller),
+              Positioned.fill(
+                child: ListenableBuilder(
+                  listenable: _indicatorRevision,
+                  builder: (context, _) => Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      PlayerVolumeBrightnessIndicators(
+                        controller: widget.controller,
+                        volumeVisible:
+                            _visibleVerticalIndicator ==
+                            _VerticalControl.volume,
+                        brightnessVisible:
+                            _visibleVerticalIndicator ==
+                            _VerticalControl.brightness,
+                      ),
+                      PlayerSeekIndicator(seconds: _pendingSeekSeconds),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            _buildDanmaku(),
-            _buildGestureDetector(),
-            _buildControlsOverlay(isWide),
-            _buildLockButton(),
-            _buildPlayerInfoHud(isWide),
-            PlayerErrorIndicator(
-              controller: widget.controller,
-              canSearchSource: widget.canSearchSource,
-              onSearch: _navigateToSearch,
-              show: widget.showPlaybackError,
-              onAiRepair: widget.onAiRepair,
-            ),
-            _buildDanmakuInputOverlay(),
-          ],
+              _buildDanmaku(),
+              _buildGestureDetector(),
+              _buildControlsOverlay(isWide),
+              _buildLockButton(),
+              _buildPlayerInfoHud(isWide),
+              PlayerErrorIndicator(
+                controller: widget.controller,
+                canSearchSource: widget.canSearchSource,
+                onSearch: _navigateToSearch,
+                show: widget.showPlaybackError,
+                onAiRepair: widget.onAiRepair,
+              ),
+              _buildDanmakuInputOverlay(),
+            ],
+          ),
         );
       },
     );
@@ -578,35 +595,31 @@ class _BakaPlayerState extends State<BakaPlayer> {
             focusNode: _playerFocusNode,
             autofocus: true,
             onKeyEvent: (node, event) => _handleKeyEvent(event),
-            child: Listener(
-              // 滚轮调音量：mpv / PotPlayer 的习惯，桌面上比拖滑块顺手。
-              onPointerSignal: _handlePointerSignal,
-              child: GestureDetector(
-                onTap: controller.toggleControls,
-                onDoubleTapDown: (details) {
-                  _handleDoubleTap(
-                    details.localPosition.dx,
-                    MediaQuery.sizeOf(context).width,
-                  );
-                },
-                onLongPressStart: (_) => controller.setDoubleSpeed(true),
-                onLongPressMoveUpdate: (details) => controller
-                    .updateDoubleSpeedOffset(details.offsetFromOrigin.dx),
-                onLongPressEnd: (_) => controller.setDoubleSpeed(false),
-                onLongPressCancel: () => controller.setDoubleSpeed(false),
-                onHorizontalDragStart: _handleHorizontalDragStart,
-                onHorizontalDragUpdate: _handleHorizontalDragUpdate,
-                onHorizontalDragEnd: (_) {
-                  final target = controller.timeline.value.previewPosition;
-                  controller.endSeekPreview();
-                  controller.seek(target);
-                },
-                onHorizontalDragCancel: controller.endSeekPreview,
-                onVerticalDragStart: _handleVerticalDragStart,
-                onVerticalDragUpdate: _handleVerticalDragUpdate,
-                onVerticalDragEnd: (_) => _endVerticalDrag(),
-                onVerticalDragCancel: _endVerticalDrag,
-              ),
+            child: GestureDetector(
+              onTap: controller.toggleControls,
+              onDoubleTapDown: (details) {
+                _handleDoubleTap(
+                  details.localPosition.dx,
+                  MediaQuery.sizeOf(context).width,
+                );
+              },
+              onLongPressStart: (_) => controller.setDoubleSpeed(true),
+              onLongPressMoveUpdate: (details) => controller
+                  .updateDoubleSpeedOffset(details.offsetFromOrigin.dx),
+              onLongPressEnd: (_) => controller.setDoubleSpeed(false),
+              onLongPressCancel: () => controller.setDoubleSpeed(false),
+              onHorizontalDragStart: _handleHorizontalDragStart,
+              onHorizontalDragUpdate: _handleHorizontalDragUpdate,
+              onHorizontalDragEnd: (_) {
+                final target = controller.timeline.value.previewPosition;
+                controller.endSeekPreview();
+                controller.seek(target);
+              },
+              onHorizontalDragCancel: controller.endSeekPreview,
+              onVerticalDragStart: _handleVerticalDragStart,
+              onVerticalDragUpdate: _handleVerticalDragUpdate,
+              onVerticalDragEnd: (_) => _endVerticalDrag(),
+              onVerticalDragCancel: _endVerticalDrag,
             ),
           ),
         ),

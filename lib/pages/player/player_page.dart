@@ -724,6 +724,11 @@ class _PlayerPageState extends State<PlayerPage>
       episodeIndex,
       lineIndex ?? content.currUrl,
     );
+    Log.i(
+      'Playback',
+      '切换剧集: 目标 $episodeIndex -> ${selection.episodeIndex} / '
+          '共 ${content.videoList.length} 集, 线路 ${selection.lineIndex}',
+    );
     if (selection.episodeIndex == content.currPlayIndex &&
         selection.lineIndex == content.currUrl) {
       return Future<void>.value();

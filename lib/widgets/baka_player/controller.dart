@@ -686,6 +686,10 @@ class PlaybackController {
     final next = value.clamp(0.0, 1.0);
     if (overlay.value.volume == next) return;
     overlay.value = overlay.value.copyWith(volume: next);
+    // 之前只改指示器，声音大小靠系统音量插件；桌面端改走播放器自己的音量，
+    // 这样调节是「这个播放器」的音量，也不会因为系统音量而静音。
+    final player = _player;
+    if (player != null) unawaited(player.setVolume(next * 100));
   }
 
   void setBrightness(double value) {

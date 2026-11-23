@@ -112,8 +112,9 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
 
   Widget _buildPlayerArea(BuildContext context) {
     final content = widget.content;
-    final nextIndex = content.currPlayIndex + 1;
-    final hasNextEpisode = nextIndex < content.videoList.length;
+    // 下一集按集号走：源可能倒序排版或缺集，currPlayIndex + 1 会跳错集。
+    final nextIndex = content.nextEpisodeIndex();
+    final hasNextEpisode = nextIndex != null;
     return Container(
       color: Colors.black,
       child: Stack(
@@ -128,9 +129,9 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
               full: false,
               onPickEpisode: widget.onPickEpisode,
               hasNextEpisode: hasNextEpisode,
-              onNextEpisode: hasNextEpisode
-                  ? () => widget.onEpisodeChanged(nextIndex)
-                  : null,
+              onNextEpisode: nextIndex == null
+                  ? null
+                  : () => widget.onEpisodeChanged(nextIndex),
               onFullScreenChanged: (full) {
                 setState(() => _isFullScreen = full);
                 widget.onFullScreenChanged(full);
