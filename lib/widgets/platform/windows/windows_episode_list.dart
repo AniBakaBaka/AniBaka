@@ -4,6 +4,7 @@ import 'package:baka/utils/json_values.dart';
 import 'package:flutter/material.dart';
 import 'package:baka/widgets/common/platform_tooltip.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:baka/models/collection.dart';
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/services/playback/history_repository.dart';
 import 'package:baka/widgets/platform/windows/windows_line_selector.dart';
@@ -33,7 +34,7 @@ class WindowsEpisodeList extends StatefulWidget {
   final ValueChanged<int> onUrlChanged;
   final Future<bool> Function(int, bool)? onSetEpisodeWatched;
   final VoidCallback? onDownloadPressed;
-  final ValueNotifier<bool>? followNotifier;
+  final ValueNotifier<CollectionStatus?>? followNotifier;
   final VoidCallback? onFollowPressed;
   final VoidCallback? onSourceTap;
   final bool isSearching;
@@ -50,7 +51,6 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
   bool _isGridView = false;
   bool _isEpisodesExpanded = true;
   List<int>? _filteredList;
-  int? _hoveredRow;
 
   @override
   void dispose() {
@@ -288,12 +288,12 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
           if (widget.followNotifier != null &&
               widget.onFollowPressed != null) ...[
             const SizedBox(width: 6),
-            ValueListenableBuilder<bool>(
+            ValueListenableBuilder<CollectionStatus?>(
               valueListenable: widget.followNotifier!,
-              builder: (context, isFollowed, _) => BgmFollowPill(
+              builder: (context, status, _) => BgmFollowPill(
                 title: title,
                 bgmInfo: content.bgmInfo,
-                isFollowed: isFollowed,
+                status: status,
                 onFollowPressed: widget.onFollowPressed!,
               ),
             ),
@@ -586,34 +586,27 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
     bool watched,
     Color primaryColor,
   ) {
-    final content = widget.content;
-    final bgmId = content.bgmInfo.subjectId;
-    final stillFuture = bgmId != null && bgmId > 0
-        ? AniBakaApi.getEpisodeStills(
-            bgmId: bgmId,
-            season: 1,
-            episode: index + 1,
-          )
-        : null;
-    if (stillFuture == null) {
-      return _buildEpisodeRowContent(
+    final bgmId = widget.content.bgmInfo.subjectId;
+    return _EpisodeRowTile(
+      key: ValueKey((bgmId, index)),
+      stillFuture: bgmId != null && bgmId > 0
+          ? AniBakaApi.getEpisodeStills(
+              bgmId: bgmId,
+              season: 1,
+              episode: index + 1,
+            )
+          : null,
+      isPlaying: isPlaying,
+      primaryColor: primaryColor,
+      onTap: () => widget.onEpisodeSelected(index),
+      onLongPress: _markHandler(index, watched),
+      builder: (still) => _buildEpisodeRowContent(
         index,
         item,
         isPlaying,
         watched,
         primaryColor,
-        null,
-      );
-    }
-    return FutureBuilder<Map<String, dynamic>?>(
-      future: stillFuture,
-      builder: (context, snapshot) => _buildEpisodeRowContent(
-        index,
-        item,
-        isPlaying,
-        watched,
-        primaryColor,
-        snapshot.data,
+        still,
       ),
     );
   }
@@ -654,31 +647,281 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
     const placeholder = Center(
       child: Icon(Icons.movie_outlined, size: 22, color: Colors.white24),
     );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                width: 126,
+                height: 71,
+                color: const Color(0xFF1E1E22),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (stillUrl.isNotEmpty)
+                      CachedNetworkImage(
+                        memCacheWidth: 260,
+                        imageUrl: stillUrl,
+                        fit: BoxFit.cover,
+                        fadeInDuration: const Duration(
+                          milliseconds: 150,
+                        ),
+                        fadeOutDuration: const Duration(
+                          milliseconds: 150,
+                        ),
+                        placeholder: (_, _) => placeholder,
+                        errorWidget: (_, _, _) => placeholder,
+                      )
+                    else
+                      placeholder,
+                    if (isPlaying)
+                      ColoredBox(
+                        color: Colors.black45,
+                        child: Center(
+                          child: Icon(
+                            Icons.play_circle_fill_rounded,
+                            color: primaryColor,
+                            size: 24,
+                          ),
+                        ),
+                      ),
+                    if (watched && !isPlaying)
+                      Positioned(
+                        right: 4,
+                        bottom: 4,
+                        child: Container(
+                          width: 16,
+                          height: 16,
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(
+                              alpha: 0.55,
+                            ),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.check_rounded,
+                            size: 11,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: isPlaying
+                                ? FontWeight.bold
+                                : FontWeight.w600,
+                            color: isPlaying
+                                ? primaryColor
+                                : watched
+                                ? Colors.white60
+                                : Colors.white,
+                            height: 1.25,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (lineCount > 1)
+                        Container(
+                          margin: const EdgeInsets.only(left: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: primaryColor.withValues(
+                              alpha: 0.15,
+                            ),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(
+                              color: primaryColor.withValues(
+                                alpha: 0.4,
+                              ),
+                              width: 0.8,
+                            ),
+                          ),
+                          child: Text(
+                            '$lineCount 线路',
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (airDate.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      airDate,
+                      style: const TextStyle(
+                        fontSize: 11.0,
+                        color: Colors.white38,
+                      ),
+                    ),
+                  ],
+                  if (overview.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            overview,
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              color: Colors.white60,
+                              height: 1.35,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (overview.length > 30) ...[
+                          const SizedBox(width: 4),
+                          InkWell(
+                            onTap: () => _showOverview(
+                              context,
+                              title,
+                              overview,
+                            ),
+                            borderRadius: BorderRadius.circular(4),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 2,
+                                vertical: 1,
+                              ),
+                              child: Text(
+                                '全文',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: primaryColor,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+        if (isPlaying && lineCount > 1) ...[
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Divider(
+              height: 1,
+              thickness: 0.6,
+              color: Colors.white12,
+            ),
+          ),
+          WindowsLineSelector(
+            availableLineIndexes: item.availableLineIndexes,
+            currUrl: content.currUrl,
+            onUrlChanged: widget.onUrlChanged,
+            sourceNames: content.sourceNames,
+          ),
+        ],
+      ],
+    );
+  }
+}
+/// 剧集行：悬停状态与剧照都留在自己这一层，
+/// 鼠标划过只重画这一行，不带着整张列表一起重建。
+class _EpisodeRowTile extends StatefulWidget {
+  const _EpisodeRowTile({
+    required this.stillFuture,
+    required this.isPlaying,
+    required this.primaryColor,
+    required this.onTap,
+    required this.onLongPress,
+    required this.builder,
+    super.key,
+  });
 
-    final hovered = _hoveredRow == index;
+  final Future<Map<String, dynamic>?>? stillFuture;
+  final bool isPlaying;
+  final Color primaryColor;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final Widget Function(Map<String, dynamic>? still) builder;
 
+  @override
+  State<_EpisodeRowTile> createState() => _EpisodeRowTileState();
+}
+
+class _EpisodeRowTileState extends State<_EpisodeRowTile> {
+  bool _hovered = false;
+  Map<String, dynamic>? _still;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStill();
+  }
+
+  @override
+  void didUpdateWidget(_EpisodeRowTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(widget.stillFuture, oldWidget.stillFuture)) _loadStill();
+  }
+
+  void _loadStill() {
+    _still = null;
+    final future = widget.stillFuture;
+    if (future == null) return;
+    future.then((data) {
+      if (!mounted || !identical(future, widget.stillFuture)) return;
+      setState(() => _still = data);
+    }, onError: (Object _) {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hovered = _hovered;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hoveredRow = index),
-      onExit: (_) {
-        if (_hoveredRow == index) setState(() => _hoveredRow = null);
-      },
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
       child: AnimatedContainer(
-        key: ValueKey((content.bgmInfo.subjectId, index)),
-        duration: const Duration(milliseconds: 160),
-        curve: Curves.easeOutCubic,
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOut,
         margin: const EdgeInsets.only(bottom: 8),
         transform: Matrix4.translationValues(hovered ? 2 : 0, 0, 0),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
-          color: isPlaying
+          color: widget.isPlaying
               ? const Color(0xFF222226)
               : hovered
               ? const Color(0xFF212127)
               : const Color(0xFF18181B),
           border: Border.all(
-            color: isPlaying
-                ? primaryColor.withValues(alpha: 0.6)
+            color: widget.isPlaying
+                ? widget.primaryColor.withValues(alpha: 0.6)
                 : hovered
                 ? Colors.white24
                 : Colors.white10,
@@ -688,212 +931,12 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            onTap: () => widget.onEpisodeSelected(index),
-            onLongPress: _markHandler(index, watched),
+            onTap: widget.onTap,
+            onLongPress: widget.onLongPress,
             borderRadius: BorderRadius.circular(8),
             child: Padding(
               padding: const EdgeInsets.all(10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: Container(
-                          width: 126,
-                          height: 71,
-                          color: const Color(0xFF1E1E22),
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              if (stillUrl.isNotEmpty)
-                                CachedNetworkImage(
-                                  memCacheWidth: 260,
-                                  imageUrl: stillUrl,
-                                  fit: BoxFit.cover,
-                                  fadeInDuration: const Duration(
-                                    milliseconds: 150,
-                                  ),
-                                  fadeOutDuration: const Duration(
-                                    milliseconds: 150,
-                                  ),
-                                  placeholder: (_, _) => placeholder,
-                                  errorWidget: (_, _, _) => placeholder,
-                                )
-                              else
-                                placeholder,
-                              if (isPlaying)
-                                ColoredBox(
-                                  color: Colors.black45,
-                                  child: Center(
-                                    child: Icon(
-                                      Icons.play_circle_fill_rounded,
-                                      color: primaryColor,
-                                      size: 24,
-                                    ),
-                                  ),
-                                ),
-                              if (watched && !isPlaying)
-                                Positioned(
-                                  right: 4,
-                                  bottom: 4,
-                                  child: Container(
-                                    width: 16,
-                                    height: 16,
-                                    decoration: BoxDecoration(
-                                      color: Colors.black.withValues(
-                                        alpha: 0.55,
-                                      ),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(
-                                      Icons.check_rounded,
-                                      size: 11,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    title,
-                                    style: TextStyle(
-                                      fontSize: 13.5,
-                                      fontWeight: isPlaying
-                                          ? FontWeight.bold
-                                          : FontWeight.w600,
-                                      color: isPlaying
-                                          ? primaryColor
-                                          : watched
-                                          ? Colors.white60
-                                          : Colors.white,
-                                      height: 1.25,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                if (lineCount > 1)
-                                  Container(
-                                    margin: const EdgeInsets.only(left: 6),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: primaryColor.withValues(
-                                        alpha: 0.15,
-                                      ),
-                                      borderRadius: BorderRadius.circular(4),
-                                      border: Border.all(
-                                        color: primaryColor.withValues(
-                                          alpha: 0.4,
-                                        ),
-                                        width: 0.8,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      '$lineCount 线路',
-                                      style: const TextStyle(
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            if (airDate.isNotEmpty) ...[
-                              const SizedBox(height: 3),
-                              Text(
-                                airDate,
-                                style: const TextStyle(
-                                  fontSize: 11.0,
-                                  color: Colors.white38,
-                                ),
-                              ),
-                            ],
-                            if (overview.isNotEmpty) ...[
-                              const SizedBox(height: 4),
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      overview,
-                                      style: const TextStyle(
-                                        fontSize: 11.5,
-                                        color: Colors.white60,
-                                        height: 1.35,
-                                      ),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  if (overview.length > 30) ...[
-                                    const SizedBox(width: 4),
-                                    InkWell(
-                                      onTap: () => _showOverview(
-                                        context,
-                                        title,
-                                        overview,
-                                      ),
-                                      borderRadius: BorderRadius.circular(4),
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 2,
-                                          vertical: 1,
-                                        ),
-                                        child: Text(
-                                          '全文',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                            color: primaryColor,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (isPlaying && lineCount > 1) ...[
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 8),
-                      child: Divider(
-                        height: 1,
-                        thickness: 0.6,
-                        color: Colors.white12,
-                      ),
-                    ),
-                    WindowsLineSelector(
-                      availableLineIndexes: item.availableLineIndexes,
-                      currUrl: content.currUrl,
-                      onUrlChanged: widget.onUrlChanged,
-                      sourceNames: content.sourceNames,
-                    ),
-                  ],
-                ],
-              ),
+              child: widget.builder(_still),
             ),
           ),
         ),

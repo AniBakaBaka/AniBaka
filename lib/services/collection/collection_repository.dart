@@ -64,6 +64,14 @@ class CollectionRepository {
     return collection;
   }
 
+  /// 只写本地。Bangumi 模式下写远端要等网络，调用方想先落盘时用这个。
+  Future<void> saveLocal(AnimeCollection collection) =>
+      storeAll([collection]);
+
+  /// 把本地改好的收藏状态推到 Bangumi，失败由调用方决定怎么记。
+  Future<void> syncToBangumi(AnimeCollection collection) =>
+      bangumi.updateCollection(collection);
+
   Future<PageData<AnimeCollection>> getList({
     int page = 1,
     int pageSize = 20,

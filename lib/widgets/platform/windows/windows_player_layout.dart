@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:baka/widgets/common/platform_tooltip.dart';
 
+import 'package:baka/models/collection.dart';
 import 'package:baka/services/playback/playback_content.dart';
 import 'package:baka/pages/setting/player_settings_page.dart';
 import 'package:baka/services/torrent/torrent_engine.dart';
@@ -18,7 +19,7 @@ class WindowsPlayerLayout extends StatefulWidget {
   final bool inited;
   final PlaybackController controller;
   final DanmakuController danmakuController;
-  final ValueNotifier<bool> followNotifier;
+  final ValueNotifier<CollectionStatus?> followNotifier;
   final VoidCallback onSourceTap;
   final void Function(int) onEpisodeChanged;
   final Future<bool> Function(int, bool) onSetEpisodeWatched;

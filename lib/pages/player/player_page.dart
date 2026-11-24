@@ -10,6 +10,7 @@ import 'package:baka/app/app_runtime.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/ai_rule_authoring.dart';
+import 'package:baka/models/collection.dart';
 import 'package:baka/models/playback_request.dart';
 import 'package:baka/models/skip_segment.dart';
 import 'package:baka/pages/player/bgm_detail_page.dart';
@@ -30,6 +31,7 @@ import 'package:baka/source/runtime/source_operation.dart';
 import 'package:baka/source/source_registry.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/anime_detail/anime_detail_placeholder.dart';
+import 'package:baka/widgets/anime_detail/collection_sheet.dart';
 import 'package:baka/widgets/anime_detail/controller/video_source_search_controller.dart';
 import 'package:baka/widgets/anime_detail/video_source_search_sheet.dart';
 import 'package:baka/widgets/baka_player/index.dart';
@@ -83,7 +85,7 @@ class _PlayerPageState extends State<PlayerPage>
   final _mediaSession = Get.find<MediaSessionService>();
   final ctr = PlaybackController();
   final _danmaku = DanmakuController();
-  final _followed = ValueNotifier(false);
+  final _followed = ValueNotifier<CollectionStatus?>(null);
   final _showDetail = ValueNotifier(false);
   final _sortAscending = ValueNotifier(true);
   final _failedSources = <String>{};
@@ -791,14 +793,15 @@ class _PlayerPageState extends State<PlayerPage>
   ///
   /// 本地写完就返回。Bangumi 同步放后台跑，它的超时不该拖住长按的反馈。
   Future<bool> _setEpisodeWatched(int episodeIndex, bool watched) async {
+    final subjectId = _content.bgmInfo.subjectId;
     await historyRepository.setEpisodeWatched(
       '${_content.data['id']}',
       episodeIndex,
       watched,
+      bgmId: subjectId,
     );
     showSnackBar(watched ? '已标记为看过' : '已取消看过标记');
 
-    final subjectId = _content.bgmInfo.subjectId;
     if (subjectId != null && bangumiSession.isConnected) {
       unawaited(
         _syncEpisodeWatchedToBangumi(subjectId, episodeIndex, watched),
@@ -845,21 +848,57 @@ class _PlayerPageState extends State<PlayerPage>
   Future<void> _loadFollowState() async {
     try {
       await _content.refreshCollection();
-      if (mounted) _followed.value = _content.isFollow();
+      if (mounted) _followed.value = _collectionStatus;
     } catch (error) {
       Log.w('Player', '读取追番状态失败: $error');
     }
   }
 
-  Future<void> _toggleFollow() async {
+  CollectionStatus? get _collectionStatus =>
+      CollectionStatus.fromValue(_content.collection?.status);
+
+  /// 追番按钮：弹出收藏状态，选完立刻写本地，网络请求放后台。
+  Future<void> _showCollectionSheet() async {
     if (_updatingFollow) return;
+    final current = _collectionStatus;
+    final wide = MediaQuery.sizeOf(context).width >= 700;
+    HapticFeedback.selectionClick();
+    final picked = await showModalBottomSheet<Object?>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final sheet = CollectionStatusSheet(
+          currentStatus: current,
+          onSelect: (status) => Navigator.pop(ctx, status),
+          onRemove: current == null
+              ? null
+              : () => Navigator.pop(ctx, _CollectionAction.remove),
+        );
+        // 桌面端别把状态卡铺满整屏。
+        return wide
+            ? Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [SizedBox(width: 460, child: sheet)],
+              )
+            : sheet;
+      },
+    );
+    if (!mounted || picked == null) return;
+    final status = picked is CollectionStatus ? picked : null;
+    if (status == current) return;
+
     _updatingFollow = true;
     final before = _followed.value;
-    // toggleFollow 在第一个 await 之前就改好本地状态，这里可以立刻读回。
-    final task = _content.toggleFollow();
-    if (mounted) _followed.value = _content.isFollow();
+    // setCollectionStatus 在第一个 await 之前就改好本地状态，这里能立刻读回。
+    final task = _content.setCollectionStatus(status);
+    if (mounted) _followed.value = _collectionStatus;
     try {
       await task;
+      if (mounted) {
+        showSnackBar(
+          status == null ? '已取消收藏' : '已标记为「${status.label}」',
+        );
+      }
     } catch (e) {
       if (mounted) {
         _followed.value = before;
@@ -931,7 +970,7 @@ class _PlayerPageState extends State<PlayerPage>
           onUrlChanged: _changeLine,
           onCommentLinkTap: _onCommentLink,
           onDownloadPressed: () => _showEpisodePicker(downloadMode: true),
-          onFollowPressed: _toggleFollow,
+          onFollowPressed: _showCollectionSheet,
           terminalPlaybackFailure: _failure != null,
           onAiRepair: _openAiRepair,
         ),
@@ -1231,7 +1270,7 @@ class _PlayerPageState extends State<PlayerPage>
           VideoDetailCard(
             content: content,
             followNotifier: _followed,
-            onFollowPressed: _toggleFollow,
+            onFollowPressed: _showCollectionSheet,
             onShowDetail: () => _showDetail.value = true,
             danmakuController: _danmaku,
             onSourceTap: _openSourceSheet,
@@ -1303,3 +1342,6 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 }
+
+/// 收藏弹窗里「取消收藏」不是一种状态，用独立标记带出来。
+enum _CollectionAction { remove }

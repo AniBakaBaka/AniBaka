@@ -372,27 +372,34 @@ class HistoryRepository {
     return position / duration >= _completionThreshold;
   }
 
-  /// 追番列表用：这部番在本地标记过看过的集数。
+  /// 追番列表用：这部番在本地算作看过的集数。
+  /// 标记记录里直接带 bgmId；旧记录没有，退回用观看历史里的源 id 对上。
   /// 同一集常有多条线路各存一份，按集下标去重。
   static int watchedCountForBgm(int bgmId) {
     if (bgmId <= 0 || !Hive.isBoxOpen(AppStorage.videoProgressBoxName)) {
       return 0;
     }
     final videoIds = _videoIdsForBgm(bgmId);
-    if (videoIds.isEmpty) return 0;
     final box = AppStorage.videoProgressBox;
     final indexes = <int>{};
+    final skipped = <int>{};
     for (final key in box.keys) {
-      if (key is! String || !key.endsWith('_watched')) continue;
-      final body = key.substring(0, key.length - '_watched'.length);
-      final cut = body.lastIndexOf('_');
-      if (cut <= 0) continue;
-      final index = int.tryParse(body.substring(cut + 1));
+      if (key is! String) continue;
+      final parts = key.split('_');
+      if (parts.length < 3) continue;
+      final index = int.tryParse(parts[parts.length - 2]);
       if (index == null) continue;
-      if (!videoIds.contains(body.substring(0, cut))) continue;
+      if (indexes.contains(index) || skipped.contains(index)) continue;
+      final videoId = parts.sublist(0, parts.length - 2).join('_');
       final item = box.get(key);
-      if (item is! Map || item['watched'] != true) continue;
-      indexes.add(index);
+      final ownBgm = item is Map ? toInt(item['bgmId']) : null;
+      if (ownBgm != bgmId && !videoIds.contains(videoId)) continue;
+      final flag = item is Map ? item['watched'] : null;
+      if (flag == false) {
+        skipped.add(index);
+        continue;
+      }
+      if (flag == true || isEpisodeWatched(videoId, index)) indexes.add(index);
     }
     return indexes.length;
   }
@@ -434,11 +441,13 @@ class HistoryRepository {
   Future<void> setEpisodeWatched(
     String videoId,
     int episodeIndex,
-    bool watched,
-  ) async {
+    bool watched, {
+    int? bgmId,
+  }) async {
     if (!Hive.isBoxOpen(AppStorage.videoProgressBoxName)) return;
     await AppStorage.videoProgressBox.put(_watchedKey(videoId, episodeIndex), {
       'watched': watched,
+      if (bgmId != null && bgmId > 0) 'bgmId': bgmId,
       'updateTime': DateTime.now().millisecondsSinceEpoch,
     });
     revision.value = revision.value + 1;

@@ -1,4 +1,6 @@
 import 'package:baka/models/bgm.dart';
+import 'package:baka/models/collection.dart';
+import 'package:baka/widgets/anime_detail/collection_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:baka/widgets/common/platform_tooltip.dart';
 
@@ -7,14 +9,14 @@ import 'package:baka/pages/player/bgm_detail_page.dart';
 class BgmFollowPill extends StatelessWidget {
   final String title;
   final BgmInfo bgmInfo;
-  final bool isFollowed;
+  final CollectionStatus? status;
   final VoidCallback onFollowPressed;
 
   const BgmFollowPill({
     required this.title,
     required this.bgmInfo,
-    required this.isFollowed,
     required this.onFollowPressed,
+    this.status,
     super.key,
   });
 
@@ -23,9 +25,10 @@ class BgmFollowPill extends StatelessWidget {
     final theme = Theme.of(context);
     final score = bgmInfo.score;
     final subjectId = bgmInfo.subjectId;
-    final followColor = isFollowed
-        ? const Color(0xFF34C759)
-        : theme.colorScheme.primary;
+    final visual = status == null ? null : collectionStatusVisuals[status];
+    final followColor = visual?.$1 ?? theme.colorScheme.primary;
+    final followIcon = visual?.$2 ?? Icons.add_rounded;
+    final followLabel = status?.label ?? '追番';
 
     return Container(
       height: 32,
@@ -87,7 +90,7 @@ class BgmFollowPill extends StatelessWidget {
             ),
           ],
           PlatformTooltip(
-            message: isFollowed ? '已追番，点击更新状态' : '追番',
+            message: status == null ? '追番' : '已标记为「${status!.label}」，点击修改',
             child: InkWell(
               onTap: onFollowPressed,
               borderRadius: BorderRadius.circular(6),
@@ -96,16 +99,10 @@ class BgmFollowPill extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      isFollowed
-                          ? Icons.play_circle_fill_rounded
-                          : Icons.add_rounded,
-                      size: 15,
-                      color: followColor,
-                    ),
+                    Icon(followIcon, size: 15, color: followColor),
                     const SizedBox(width: 4),
                     Text(
-                      isFollowed ? '在看' : '追番',
+                      followLabel,
                       style: TextStyle(
                         color: followColor,
                         fontSize: 13,

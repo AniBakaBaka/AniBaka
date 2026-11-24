@@ -835,48 +835,88 @@ class PlaybackContent {
 
   /// 先改本地状态让界面立刻响应，网络请求失败再回滚。
   Future<void> toggleFollow() async {
-    final previous = collection;
+    if (isFollow()) return removeFromCollection();
+    return setCollectionStatus(CollectionStatus.doing);
+  }
 
-    if (isFollow()) {
-      final current = collection!;
-      final postId = current.postId ?? validPostId;
-      final bgmId =
-          current.bgmId ?? (postId == null ? bgmInfo.subjectId : null);
-      collection = null;
-      try {
-        final success = bgmId != null
-            ? await collections.deleteByBgmId(bgmId)
-            : postId != null
-            ? await collections.delete(postId)
-            : false;
-        if (!success) throw Exception('取消追番失败');
-      } catch (error) {
-        collection = previous;
-        rethrow;
-      }
-      return;
+  /// 取消收藏。[collection] 先清空，请求失败再放回。
+  Future<void> removeFromCollection() async {
+    final previous = collection;
+    if (previous == null) return;
+    final postId = previous.postId ?? validPostId;
+    final bgmId = previous.bgmId ?? (postId == null ? bgmInfo.subjectId : null);
+    collection = null;
+    try {
+      final success = bgmId != null
+          ? await collections.deleteByBgmId(bgmId)
+          : postId != null
+          ? await collections.delete(postId)
+          : false;
+      if (!success) throw Exception('取消追番失败');
+    } catch (error) {
+      collection = previous;
+      rethrow;
     }
+  }
+
+  /// 切换收藏状态，[status] 为空表示取消收藏。
+  Future<void> setCollectionStatus(CollectionStatus? status) async {
+    if (status == null) return removeFromCollection();
+    final previous = collection;
+    if (CollectionStatus.fromValue(previous?.status) == status) return;
 
     final detail = bgmDetailData;
     // 总集数与已看集数都以 Bangumi 为准：源的分集数只代表这一条线路有多少集。
     final epCount =
         bgmEpisodeCount ?? (videoList.isEmpty ? null : videoList.length);
+    final bgmId = previous?.bgmId ?? bgmInfo.subjectId;
+    final localWatched = bgmId == null
+        ? 0
+        : HistoryRepository.watchedCountForBgm(bgmId);
+    final watched = currentBgmOrdinal ?? 0;
     final optimistic = AnimeCollection(
-      postId: validPostId,
-      bgmId: bgmInfo.subjectId,
-      status: CollectionStatus.doing.value,
-      nsfw: isNsfw,
-      epTotal: epCount,
-      epWatched: currentBgmOrdinal,
-      postTitle: title,
-      postCover: coverImageUrl,
-      bgmImage: bgmInfo.imageUrl,
+      postId: previous?.postId ?? validPostId,
+      bgmId: bgmId,
+      status: status.value,
+      rating: previous?.rating ?? 0,
+      comment: previous?.comment,
+      epTotal: previous?.epTotal ?? epCount,
+      epWatched: localWatched > watched ? localWatched : watched,
+      tags: previous?.tags ?? const [],
+      isPrivate: previous?.isPrivate ?? false,
+      nsfw: previous?.nsfw ?? isNsfw,
+      postTitle: previous?.postTitle ?? title,
+      postCover: previous?.postCover ?? coverImageUrl,
+      bgmRating: previous?.bgmRating,
+      bgmImage: previous?.bgmImage ?? bgmInfo.imageUrl,
       bgmTitle:
+          previous?.bgmTitle ??
           detail?['name_cn']?.toString() ??
           detail?['name']?.toString() ??
           title,
     );
     collection = optimistic;
+    // Bangumi 模式下写远端要等网络。先把本地写掉，同步丢后台，
+    // 不然一次超时十几秒，界面上的状态还会退回去。
+    if (collections.isLocalMode) {
+      try {
+        await collections.saveLocal(optimistic);
+      } catch (error) {
+        collection = previous;
+        rethrow;
+      }
+      if (collections.isBangumiMode) {
+        unawaited(
+          collections.syncToBangumi(optimistic).catchError((
+            Object error,
+            StackTrace stackTrace,
+          ) {
+            Log.w('Player', 'Bangumi 收藏状态同步失败', error);
+          }),
+        );
+      }
+      return;
+    }
     try {
       collection = await collections.addOrUpdate(optimistic);
     } catch (error) {
