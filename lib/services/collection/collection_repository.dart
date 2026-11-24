@@ -1,7 +1,9 @@
 import 'package:baka/api/bangumi_account_api.dart';
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:baka/api/anibaka_api.dart';
+import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/app_storage.dart';
 import 'package:baka/core/account_session.dart';
 import 'package:baka/services/account/bangumi_session.dart';
@@ -53,7 +55,13 @@ class CollectionRepository {
     if (!isLocalMode) {
       final saved = await AniBakaApi.saveCollection(collection);
       if (bangumi.isConnected) {
-        await bangumi.updateCollection(saved);
+        // Bangumi 只是镜像：它写失败（比如直连超时）不该把已经成功的
+        // 本站收藏回滚，否则界面上会显示成旧状态，退出重进又变回来。
+        unawaited(
+          bangumi.updateCollection(saved).catchError((Object error) {
+            Log.w('Collection', 'Bangumi 收藏同步失败', error);
+          }),
+        );
       }
       return saved;
     }

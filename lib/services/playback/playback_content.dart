@@ -843,6 +843,8 @@ class PlaybackContent {
   Future<void> removeFromCollection() async {
     final previous = collection;
     if (previous == null) return;
+    // 作废在途的初始读取，否则它回来会把刚清掉的收藏写回去。
+    ++_collectionRevision;
     final postId = previous.postId ?? validPostId;
     final bgmId = previous.bgmId ?? (postId == null ? bgmInfo.subjectId : null);
     collection = null;
@@ -864,6 +866,9 @@ class PlaybackContent {
     if (status == null) return removeFromCollection();
     final previous = collection;
     if (CollectionStatus.fromValue(previous?.status) == status) return;
+    // 作废在途的初始读取：它在网络回来后会把新状态覆盖回旧值，
+    // 表现就是点完不刷新、退出重进才看到。
+    ++_collectionRevision;
 
     final detail = bgmDetailData;
     // 总集数与已看集数都以 Bangumi 为准：源的分集数只代表这一条线路有多少集。

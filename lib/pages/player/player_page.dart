@@ -114,7 +114,10 @@ class _PlayerPageState extends State<PlayerPage>
   bool _wasPlaying = false;
   bool _fullscreen = false;
   bool _darkTheme = false;
-  bool _updatingFollow = false;
+
+  /// 状态卡还开着时不要再弹一张；写入过程本身不拦下一次点击，
+  /// 否则网络慢的时候按钮会像失效一样。
+  bool _collectionSheetOpen = false;
 
   bool get _hidden => contentFilter.value && _content.isNsfw;
   bool get _hasNext => _content.hasNextEpisode;
@@ -859,54 +862,69 @@ class _PlayerPageState extends State<PlayerPage>
 
   /// 追番按钮：弹出收藏状态，选完立刻写本地，网络请求放后台。
   Future<void> _showCollectionSheet() async {
-    if (_updatingFollow) return;
-    final current = _collectionStatus;
-    final wide = MediaQuery.sizeOf(context).width >= 700;
-    HapticFeedback.selectionClick();
-    final picked = await showModalBottomSheet<Object?>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        final sheet = CollectionStatusSheet(
-          currentStatus: current,
-          onSelect: (status) => Navigator.pop(ctx, status),
-          // Bangumi 没有取消收藏的接口，接了也只会在点下去时失败。
-          onRemove: current == null || bangumiSession.isConnected
-              ? null
-              : () => Navigator.pop(ctx, _CollectionAction.remove),
-        );
-        // 桌面端别把状态卡铺满整屏。
-        return wide
-            ? Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [SizedBox(width: 460, child: sheet)],
-              )
-            : sheet;
-      },
-    );
-    if (!mounted || picked == null) return;
-    final status = picked is CollectionStatus ? picked : null;
-    if (status == current) return;
-
-    _updatingFollow = true;
-    final before = _followed.value;
-    // setCollectionStatus 在第一个 await 之前就改好本地状态，这里能立刻读回。
-    final task = _content.setCollectionStatus(status);
-    if (mounted) _followed.value = _collectionStatus;
+    if (_collectionSheetOpen) return;
+    _collectionSheetOpen = true;
     try {
-      await task;
-      if (mounted) {
+      final current = _collectionStatus;
+      final wide = MediaQuery.sizeOf(context).width >= 700;
+      HapticFeedback.selectionClick();
+      final picked = await showModalBottomSheet<Object?>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) {
+          final sheet = CollectionStatusSheet(
+            currentStatus: current,
+            onSelect: (status) => Navigator.pop(ctx, status),
+            // Bangumi 没有取消收藏的接口，接了也只会在点下去时失败。
+            onRemove: current == null || bangumiSession.isConnected
+                ? null
+                : () => Navigator.pop(ctx, _CollectionAction.remove),
+          );
+          // 桌面端别把状态卡铺满整屏。
+          return wide
+              ? Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [SizedBox(width: 460, child: sheet)],
+                )
+              : sheet;
+        },
+      );
+      if (!mounted || picked == null) return;
+      final status = picked is CollectionStatus ? picked : null;
+      if (status == current) {
+        // 点已选中的状态不该像什么也没发生。
         showSnackBar(
-          status == null ? '已取消收藏' : '已标记为「${status.label}」',
+          current == null ? '还没有收藏' : '已经是「${current.label}」了',
         );
+        return;
       }
-    } catch (e) {
-      if (mounted) {
-        _followed.value = before;
-        showSnackBar(e.toString(), isError: true);
+
+      final before = _followed.value;
+      final task = _content.setCollectionStatus(status);
+      // 本地模式在第一个 await 之前就改好了 collection，这里能立刻刷新胶囊。
+      if (mounted) _followed.value = _collectionStatus;
+      try {
+        await task;
+        if (mounted) {
+          // 云端模式下 collection 要等请求回来才更新，这里补一次同步。
+          _followed.value = _collectionStatus;
+          Log.i(
+            'Player',
+            '追番写入 $status：collection=${_content.collection?.status} '
+                'followed=${_followed.value}',
+          );
+          showSnackBar(
+            status == null ? '已取消收藏' : '已标记为「${status.label}」',
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          _followed.value = before;
+          showSnackBar(e.toString(), isError: true);
+        }
       }
     } finally {
-      _updatingFollow = false;
+      _collectionSheetOpen = false;
     }
   }
 
