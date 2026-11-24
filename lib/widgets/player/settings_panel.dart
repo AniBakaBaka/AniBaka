@@ -108,7 +108,7 @@ Future<void> showPlayerSettingsPanel(BuildContext context, Widget child) {
           ? (screenWidth * (screenWidth < 600 ? 0.88 : 0.38))
                 .clamp(280.0, 340.0)
                 .clamp(0.0, screenWidth)
-          : (screenWidth * 0.55).clamp(400.0, 560.0);
+          : (screenWidth * 0.4).clamp(340.0, 440.0).clamp(0.0, screenWidth);
       final dialog = SafeArea(
         bottom: false,
         child: Dialog(
@@ -511,8 +511,8 @@ class PanelSliderTile extends StatelessWidget {
   final String valueLabel;
   final double min;
   final double max;
-  final int divisions;
-  final ValueChanged<double> onChanged;
+  final int? divisions;
+  final ValueChanged<double>? onChanged;
   final ValueChanged<double>? onChangeEnd;
 
   const PanelSliderTile({
@@ -521,8 +521,8 @@ class PanelSliderTile extends StatelessWidget {
     required this.valueLabel,
     required this.min,
     required this.max,
-    required this.divisions,
     required this.onChanged,
+    this.divisions,
     this.onChangeEnd,
     super.key,
   });
@@ -595,16 +595,16 @@ class PanelSliderTile extends StatelessWidget {
 }
 
 /// 面板里的下拉选择行，窄屏和长选项也能保持在面板内。
-class PanelSelectTile extends StatelessWidget {
+class PanelSelectTile<T> extends StatelessWidget {
   final String title;
-  final String value;
-  final Map<String, String> options;
-  final ValueChanged<String> onChanged;
+  final T value;
+  final Map<T, String> options;
+  final ValueChanged<T>? onChanged;
   const PanelSelectTile({
     required this.title,
     required this.value,
     required this.options,
-    required this.onChanged,
+    this.onChanged,
     super.key,
   });
 
@@ -636,7 +636,7 @@ class PanelSelectTile extends StatelessWidget {
               shape: const StadiumBorder(),
             ),
             child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
+              child: DropdownButton<T>(
                 value: value,
                 isExpanded: true,
                 dropdownColor: const Color(0xFF202833),
@@ -652,7 +652,7 @@ class PanelSelectTile extends StatelessWidget {
                 ),
                 items: [
                   for (final option in options.entries)
-                    DropdownMenuItem(
+                    DropdownMenuItem<T>(
                       value: option.key,
                       child: Text(
                         option.value,
@@ -661,9 +661,11 @@ class PanelSelectTile extends StatelessWidget {
                       ),
                     ),
                 ],
-                onChanged: (next) {
-                  if (next != null) onChanged(next);
-                },
+                onChanged: onChanged == null
+                    ? null
+                    : (next) {
+                        if (next != null) onChanged!(next);
+                      },
               ),
             ),
           ),
@@ -673,15 +675,106 @@ class PanelSelectTile extends StatelessWidget {
   );
 }
 
+/// 面板内的单选项行：点下去立刻生效，右侧标记当前值。
+class PanelOptionTile extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const PanelOptionTile({
+    required this.title,
+    required this.selected,
+    required this.onTap,
+    this.subtitle,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final bottom = isBottomPlayerPanel(context);
+    final compact = isCompactPlayerPanel(context);
+    final sub = subtitle;
+    return Semantics(
+      button: true,
+      selected: selected,
+      inMutuallyExclusiveGroup: true,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 44),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              vertical: compact ? 4 : 8,
+              horizontal: bottom ? 4 : 2,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: selected ? colors.primary : Colors.white,
+                          fontSize: bottom
+                              ? 16
+                              : compact
+                              ? 14
+                              : 15,
+                          fontWeight: selected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                        ),
+                      ),
+                      if (sub != null) ...[
+                        SizedBox(height: compact ? 2 : 3),
+                        Text(
+                          sub,
+                          style: const TextStyle(
+                            color: Color(0xFFD4DCE5),
+                            fontSize: 12,
+                            height: 1.25,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                selected
+                    ? Icon(
+                        Icons.check_circle_rounded,
+                        size: bottom ? 24 : 21,
+                        color: colors.primary,
+                      )
+                    : Icon(
+                        Icons.circle_outlined,
+                        size: bottom ? 24 : 21,
+                        color: Colors.white.withValues(alpha: 0.22),
+                      ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class PanelSwitchTile extends StatelessWidget {
   final String title;
   final bool value;
-  final ValueChanged<bool> onChanged;
+  final ValueChanged<bool>? onChanged;
   final String? subtitle;
   const PanelSwitchTile({
     required this.title,
     required this.value,
-    required this.onChanged,
+    this.onChanged,
     this.subtitle,
     super.key,
   });
@@ -690,7 +783,7 @@ class PanelSwitchTile extends StatelessWidget {
   Widget build(BuildContext context) => MergeSemantics(
     child: InkWell(
       borderRadius: BorderRadius.circular(20),
-      onTap: () => onChanged(!value),
+      onTap: onChanged == null ? null : () => onChanged!(!value),
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: 44),
         child: Padding(
