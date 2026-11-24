@@ -870,7 +870,8 @@ class _PlayerPageState extends State<PlayerPage>
         final sheet = CollectionStatusSheet(
           currentStatus: current,
           onSelect: (status) => Navigator.pop(ctx, status),
-          onRemove: current == null
+          // Bangumi 没有取消收藏的接口，接了也只会在点下去时失败。
+          onRemove: current == null || bangumiSession.isConnected
               ? null
               : () => Navigator.pop(ctx, _CollectionAction.remove),
         );
