@@ -261,7 +261,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
     if (widget.full) return;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      // 桌面端音量由播放器自己管，不去读写系统音量，否则两者会互相覆盖。
+      // 桌面端音量由播放器自己管理，不读写系统音量。
       if (!Instances.isDesktopPlatform) {
         try {
           FlutterVolumeController.updateShowSystemUI(true);
@@ -431,7 +431,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
             _buildDanmakuInputOverlay(),
           ],
         );
-        // 滚轮监听挂在整棵树的顶层，避免被上层控件挡掉命中。
+        // 滚轮监听挂在整棵树的顶层。
         return MouseRegion(
           cursor: _cursorHidden
               ? SystemMouseCursors.none
@@ -651,7 +651,7 @@ class _BakaPlayerState extends State<BakaPlayer> {
     );
   }
 
-  /// 滚轮上下调音量；只在桌面端且用户开启时生效，避免和外层滚动打架。
+  /// 滚轮上下调音量；只在桌面端且用户开启时生效。
   void _handlePointerSignal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent) return;
     final controller = widget.controller;

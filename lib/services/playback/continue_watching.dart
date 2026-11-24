@@ -62,7 +62,7 @@ List<ContinueWatchingEntry> buildContinueWatching(
     final duration = toInt(record['duration']) ?? 0;
     final position = toInt(record['position']) ?? 0;
     if (index == null || index < 0 || duration <= 0) continue;
-    // 点开没看几秒就退出的记录不该占一张卡。
+    // 不足 [minPositionMs] 的记录不展示。
     if (position < minPositionMs) continue;
 
     final entry = ContinueWatchingEntry(
@@ -84,7 +84,7 @@ List<ContinueWatchingEntry> buildContinueWatching(
   return entries.take(limit).toList(growable: false);
 }
 
-/// Bangumi 条目优先：同一部番换了源也还是同一张卡。
+/// 「继续观看」的聚合标识，优先用 Bangumi 条目。
 String _animeKey(Map record) {
   final bgmId = toInt(record['bgmId']);
   if (bgmId != null && bgmId > 0) return 'bgm_$bgmId';

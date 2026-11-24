@@ -149,7 +149,7 @@ class _ContinueCardState extends State<_ContinueCard> {
                     WindowsContinueWatching.cardHeight,
                   ),
                 ),
-                // 封面可能是浅色，底部压暗才能读清标题。
+                // 底部压暗，保证标题在浅色封面上可读。
                 const DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(

@@ -115,8 +115,7 @@ class _PlayerPageState extends State<PlayerPage>
   bool _fullscreen = false;
   bool _darkTheme = false;
 
-  /// 状态卡还开着时不要再弹一张；写入过程本身不拦下一次点击，
-  /// 否则网络慢的时候按钮会像失效一样。
+  /// 状态卡还开着时不再弹第二张；写入过程不拦下一次点击。
   bool _collectionSheetOpen = false;
 
   bool get _hidden => contentFilter.value && _content.isNsfw;
@@ -792,9 +791,7 @@ class _PlayerPageState extends State<PlayerPage>
     if (index != null) unawaited(_switchEpisode(index));
   }
 
-  /// 手动点格子：先记本地，连着 Bangumi 时再同步过去。
-  ///
-  /// 本地写完就返回。Bangumi 同步放后台跑，它的超时不该拖住长按的反馈。
+  /// 手动点格子：先记本地，连着 Bangumi 时再后台同步。
   Future<bool> _setEpisodeWatched(int episodeIndex, bool watched) async {
     final subjectId = _content.bgmInfo.subjectId;
     await historyRepository.setEpisodeWatched(
@@ -875,7 +872,7 @@ class _PlayerPageState extends State<PlayerPage>
           final sheet = CollectionStatusSheet(
             currentStatus: current,
             onSelect: (status) => Navigator.pop(ctx, status),
-            // Bangumi 没有取消收藏的接口，接了也只会在点下去时失败。
+            // Bangumi 没有取消收藏的接口。
             onRemove: current == null || bangumiSession.isConnected
                 ? null
                 : () => Navigator.pop(ctx, _CollectionAction.remove),
@@ -892,7 +889,7 @@ class _PlayerPageState extends State<PlayerPage>
       if (!mounted || picked == null) return;
       final status = picked is CollectionStatus ? picked : null;
       if (status == current) {
-        // 点已选中的状态不该像什么也没发生。
+        // 点已选中的状态时给出提示。
         showSnackBar(
           current == null ? '还没有收藏' : '已经是「${current.label}」了',
         );
@@ -901,18 +898,13 @@ class _PlayerPageState extends State<PlayerPage>
 
       final before = _followed.value;
       final task = _content.setCollectionStatus(status);
-      // 本地模式在第一个 await 之前就改好了 collection，这里能立刻刷新胶囊。
+      // setCollectionStatus 会先写乐观值，这里立即刷新胶囊。
       if (mounted) _followed.value = _collectionStatus;
       try {
         await task;
         if (mounted) {
-          // 云端模式下 collection 要等请求回来才更新，这里补一次同步。
+          // 请求返回后再同步一次胶囊状态。
           _followed.value = _collectionStatus;
-          Log.i(
-            'Player',
-            '追番写入 $status：collection=${_content.collection?.status} '
-                'followed=${_followed.value}',
-          );
           showSnackBar(
             status == null ? '已取消收藏' : '已标记为「${status.label}」',
           );
@@ -1362,5 +1354,5 @@ class _PlayerPageState extends State<PlayerPage>
   }
 }
 
-/// 收藏弹窗里「取消收藏」不是一种状态，用独立标记带出来。
+/// 收藏弹窗的返回值：用独立标记表示「取消收藏」。
 enum _CollectionAction { remove }

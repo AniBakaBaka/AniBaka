@@ -55,8 +55,7 @@ class CollectionRepository {
     if (!isLocalMode) {
       final saved = await AniBakaApi.saveCollection(collection);
       if (bangumi.isConnected) {
-        // Bangumi 只是镜像：它写失败（比如直连超时）不该把已经成功的
-        // 本站收藏回滚，否则界面上会显示成旧状态，退出重进又变回来。
+        // Bangumi 只做镜像同步：失败只记日志，不影响本站收藏结果。
         unawaited(
           bangumi.updateCollection(saved).catchError((Object error) {
             Log.w('Collection', 'Bangumi 收藏同步失败', error);
@@ -72,7 +71,7 @@ class CollectionRepository {
     return collection;
   }
 
-  /// 只写本地。Bangumi 模式下写远端要等网络，调用方想先落盘时用这个。
+  /// 只写本地。调用方需要先落盘时用这个。
   Future<void> saveLocal(AnimeCollection collection) =>
       storeAll([collection]);
 

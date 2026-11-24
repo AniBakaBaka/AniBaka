@@ -385,7 +385,7 @@ class _TvPlayerLayoutState extends State<TvPlayerLayout> {
           focusNode: _playerFocusNode,
           showPrompts: _panel == _Panel.none,
           hasNextEpisode: hasNextEpisode,
-          // 目标集在点击时才算：连点之间可能没有 rebuild，闭包会拿到旧值。
+          // 目标集在点击时再计算。
           onNextEpisode: hasNextEpisode
               ? () {
                   final target = content.nextEpisodeIndex();

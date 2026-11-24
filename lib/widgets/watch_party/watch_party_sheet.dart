@@ -898,7 +898,7 @@ class WatchPartySheet extends StatelessWidget {
         },
       ),
     );
-    // 底部面板形态下软键盘会盖住输入框，抬起来再排。
+    // 底部面板形态下按软键盘高度上移。
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     if (keyboard <= 0) return panel;
     return Padding(

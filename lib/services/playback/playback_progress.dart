@@ -21,8 +21,7 @@ class PlaybackProgress {
   final int? bgmId;
   final String? cover;
 
-  /// 这一集在 Bangumi 上是第几集（1 起算）；为 null 时不上报，避免写错格子。
-  /// 用回调是因为 Bangumi 分集列表可能晚于播放就绪才加载完。
+  /// 这一集在 Bangumi 上是第几集（1 起算）；为 null 时不上报。由回调提供。
   final int? Function()? bgmEpisodeOrdinalOf;
   Duration _pendingStart;
   ({Duration position, Duration duration, bool rememberPosition})? _lastSave;

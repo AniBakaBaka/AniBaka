@@ -291,7 +291,7 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                   ),
                 ),
                 const SizedBox(width: 2),
-                // 直接进播放页时也能回到番剧详情。
+                // 番剧详情入口。
                 PlatformTooltip(
                   message: '番剧详情',
                   child: InkResponse(
@@ -876,8 +876,7 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
     );
   }
 }
-/// 剧集行：悬停状态与剧照都留在自己这一层，
-/// 鼠标划过只重画这一行，不带着整张列表一起重建。
+/// 剧集行：悬停状态与剧照都留在行内。
 class _EpisodeRowTile extends StatefulWidget {
   const _EpisodeRowTile({
     required this.stillFuture,

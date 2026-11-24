@@ -97,7 +97,7 @@ class _WindowsHeroBannerState extends State<WindowsHeroBanner>
     _syncAutoplay(restart: true);
   }
 
-  /// 提前解码下一张横幅，避免交叉淡入时出现空白底色。
+  /// 提前解码下一张横幅。
   void _precache(int index) {
     final count = widget.items.length;
     if (count < 2 || _hidden || !_tickerEnabled || _reduceMotion) return;
@@ -627,7 +627,7 @@ class _Segment extends StatelessWidget {
   }
 }
 
-/// 横向货架：两侧提供翻页按钮，弥补鼠标滚轮无法横向滚动的问题。
+/// 横向货架：两侧提供翻页按钮。
 class WindowsShelf extends StatefulWidget {
   final String title;
   final String? subtitle;
@@ -775,7 +775,7 @@ class _WindowsShelfState extends State<WindowsShelf> {
 
   /// 压在列表左右两侧的翻页按钮，鼠标在货架内且该方向还能翻页时才出现。
   Widget _buildOverlayArrow({required bool right}) {
-    // 一半压在留白里、一半压在封面上，不遮挡封面主体内容。
+    // 一半压在留白里、一半压在封面上。
     final inset = (widget.gutter - _arrowSize / 2).clamp(6.0, 64.0);
     return Positioned(
       top: (widget.height - _arrowSize) / 2,

@@ -7,7 +7,7 @@ import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/player/settings_panel.dart';
 import '../controller.dart';
 
-/// 倍速：侧边面板，点一下即时生效，不用再确认。
+/// 倍速：侧边面板，点选即时生效。
 Future<void> showSpeedDialog(
   BuildContext context,
   PlaybackController controller,
@@ -19,7 +19,7 @@ Future<void> showVideoFitDialog(
   PlaybackController controller,
 ) => showPlayerSettingsPanel(context, _VideoPanel(controller: controller));
 
-/// 长按 Anime4K 按钮时只调档位，免得还要在画面面板里找。
+/// 长按 Anime4K 按钮时只调档位。
 Future<void> showVideoEnhancementModeDialog(
   BuildContext context,
   PlaybackController controller,
@@ -142,7 +142,7 @@ class _EnhancementPanel extends StatelessWidget {
   );
 }
 
-/// 档位行：画面面板和长按入口共用，避免两处各维护一份。
+/// 档位行：画面面板与长按入口共用。
 List<Widget> _enhancementTiles(
   PlaybackController controller,
   VideoEnhancementMode current,

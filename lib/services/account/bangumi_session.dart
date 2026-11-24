@@ -241,7 +241,7 @@ class BangumiSession {
     return ok;
   }
 
-  /// 手动标记后让「自动点格子」不要再用更低的集数覆盖它。
+  /// 手动标记的集数不被「自动点格子」以更低的集数覆盖。
   void _syncAutoProgress(
     int subjectId,
     num episodeNumber, {

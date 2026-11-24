@@ -1,4 +1,4 @@
-/// 源数组下标、标题里的集号、Bangumi 的集序是三套编号，源缺集或倒序时会错位。
+/// 集号解析：在源数组下标、标题里的集号与 Bangumi 的集序之间换算。
 library;
 
 /// 从分集标题里读集号；排除分辨率、年份这类数字。
@@ -27,8 +27,7 @@ class EpisodeNumbering {
   int? numberAt(int index) =>
       index >= 0 && index < _numbers.length ? _numbers[index] : null;
 
-  /// 集号能否用来决定播放顺序。同一集号出现两次说明标题里的数字不是集号
-  /// （整季标题重复的源），按集号导航会原地打转。
+  /// 集号能否用来决定播放顺序；集号有重复或全部缺失时返回 false。
   bool get isUsable {
     final seen = <int>{};
     for (final number in _numbers) {
@@ -38,7 +37,7 @@ class EpisodeNumbering {
     return seen.isNotEmpty;
   }
 
-  /// 播放顺序上的下一集：集号比当前大的最近一个。不用下标 + 1，倒序源会跳错。
+  /// 播放顺序上的下一集：集号比当前大的最近一个。
   int? nextIndex(int index) {
     final current = numberAt(index);
     if (current == null) return null;
@@ -120,17 +119,17 @@ bool _isPlausibleEpisode(int value, {required bool explicit}) {
   if (value < 1 || value > 999) return false;
   // 年份不是集号。
   if (value >= 1900 && value <= 2100) return false;
-  // 「第1080集」确实是集数，但光秃秃的 1080 更可能是分辨率。
+  // 分辨率数值不按集号处理。
   if (!explicit && _implausibleNumbers.contains(value)) return false;
   return true;
 }
 
-/// 顺序敏感：越靠前的写法越可信，命中即返回。
-/// 第二列表示「写法本身已经点明这是集号」，可以绕过分辨率黑名单。
+/// 正则按顺序尝试，命中即返回。
+/// 第二列为 true 表示写法本身已点明是集号，可跳过分辨率黑名单。
 final _patterns = <(RegExp, bool)>[
   // 第9集 / 第 12 话 / 第3話
   (RegExp(r'第\s*(\d{1,4})\s*[集话話回]'), true),
-  // EP09 / EP.09 / Episode 9 / E09（前面不能紧贴字母，避免把名字里的数字当集号）
+  // EP09 / EP.09 / Episode 9 / E09（前面不能紧贴字母）
   (
     RegExp(
       r'(?:^|[^A-Za-z0-9])(?:episode|ep|e)\s*\.?\s*(\d{1,4})(?![0-9])',

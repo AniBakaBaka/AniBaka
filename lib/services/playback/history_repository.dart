@@ -27,7 +27,7 @@ class HistoryRepository {
   static const _maxHistoryCount = 50;
   static const _minPositionToSaveMs = 10000;
 
-  /// 正片播完即算看完；95% 会要求把 ED 也播掉大半。
+  /// 正片播完即算看完。
   static const _completionThreshold = 0.90;
   static const _platform = 'app';
 
@@ -335,7 +335,7 @@ class HistoryRepository {
     }
 
     final subjectId = toInt(record['bgmId']);
-    // 拿不到 Bangumi 集序时宁可不点格子：写错会把整季进度带偏。
+    // 拿不到 Bangumi 集序时不上报集数。
     final ordinal = bgmEpisodeOrdinal;
     if (record['isFinished'] == true &&
         subjectId != null &&
@@ -355,7 +355,7 @@ class HistoryRepository {
   static String _watchedKey(String videoId, int episodeIndex) =>
       '${videoId}_${episodeIndex}_watched';
 
-  /// 任何一条线路上进度最远的那条记录；只播了几秒不算看过。
+  /// 任何一条线路上进度最远的那条记录。
   static bool isEpisodeWatched(String videoId, int episodeIndex) {
     if (Hive.isBoxOpen(AppStorage.videoProgressBoxName)) {
       final raw = AppStorage.videoProgressBox.get(
@@ -374,7 +374,7 @@ class HistoryRepository {
 
   /// 追番列表用：这部番在本地算作看过的集数。
   /// 标记记录里直接带 bgmId；旧记录没有，退回用观看历史里的源 id 对上。
-  /// 同一集常有多条线路各存一份，按集下标去重。
+  /// 同一集的多条线路记录按集下标去重。
   static int watchedCountForBgm(int bgmId) {
     if (bgmId <= 0 || !Hive.isBoxOpen(AppStorage.videoProgressBoxName)) {
       return 0;

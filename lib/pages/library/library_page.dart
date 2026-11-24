@@ -625,7 +625,7 @@ class _CollectionCard extends StatelessWidget {
     final statusText =
         CollectionStatus.fromValue(collection.status)?.label ?? '';
     final title = collection.displayTitle;
-    // Bangumi 没同步上的标记也算数，本地记过的集数以多的为准。
+    // 本地标记数与 Bangumi 进度取较大值。
     final localWatched = collection.bgmId == null
         ? 0
         : HistoryRepository.watchedCountForBgm(collection.bgmId!);

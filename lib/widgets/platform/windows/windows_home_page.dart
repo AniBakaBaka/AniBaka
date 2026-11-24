@@ -88,7 +88,7 @@ class WindowsHomePage extends StatelessWidget {
     );
   }
 
-  /// 「今日更新」取自已加载的每日放送，不为这个栏目额外发请求。
+  /// 「今日更新」取自已加载的每日放送数据。
   Widget _buildContinueWatching() {
     return ValueListenableBuilder<List<HomeItems>>(
       valueListenable: svc.schedule,

@@ -134,7 +134,7 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
   );
 
   /// 本次会话里手动点过的格子，用于列表即时反馈。
-  /// 长按后的即时状态。本地写入是异步的，靠它先让角标跟上手指。
+  /// 长按后的即时状态，用于本地写入完成前更新已看样式。
   final Map<int, bool> _watchedOverride = {};
   final Set<int> _marking = {};
   late final String _taskIdPrefix;
@@ -606,7 +606,7 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
     );
   }
 
-  /// 卡片标题优先用 Bangumi 的集名；源的分集标题往往只有编号。
+  /// 卡片标题优先用 Bangumi 的集名。
   String _episodeLabel(int index, String rawTitle) {
     final episodes = widget.bgmEpisodes;
     if (episodes.isNotEmpty) {

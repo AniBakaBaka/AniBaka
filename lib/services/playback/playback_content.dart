@@ -65,7 +65,7 @@ class PlaybackContent {
   final HistoryRepository history;
   Map<String, dynamic> get data => request.metadata;
 
-  /// 打开播放页时指定的集下标，只用一次。留着它会让 loadDetail 把选择拨回这一集。
+  /// 打开播放页时指定的集下标，只用一次。
   int? _posIndex;
 
   int? _takePosIndex() {
@@ -82,7 +82,7 @@ class PlaybackContent {
   EpisodeNumbering? _numbering;
   List<PlaybackEpisode>? _numberingSource;
 
-  /// 源分集标题里的集号。源可能倒序、缺集，下标并不等于集号。
+  /// 源分集标题里的集号。
   EpisodeNumbering get episodeNumbering {
     if (!identical(_numberingSource, videoList)) {
       _numberingSource = videoList;
@@ -104,7 +104,7 @@ class PlaybackContent {
     }
     final following = currPlayIndex + 1;
     if (following >= videoList.length) return null;
-    // 下一项没编号（特别篇）或集号更大，才允许顺序前进；倒序源在这里被挡住。
+    // 下一项没编号（特别篇）或集号更大时才顺序前进。
     final next = numbering.numberAt(following);
     if (current == null || next == null || next > current) return following;
     return null;
@@ -131,8 +131,7 @@ class PlaybackContent {
 
   bool get hasNextEpisode => nextEpisodeIndex() != null;
 
-  /// 当前集在 Bangumi 上是「第几集」，用于收藏进度。集号有缺口时它不等于
-  /// 集号（`sort` 1、3、5 的第三集是第 3 集），写错会把整季格子点错。
+  /// 当前集在 Bangumi 上是「第几集」，用于收藏进度。
   int? get currentBgmOrdinal {
     final number = episodeNumbering.numberAt(currPlayIndex);
     if (bgmEpisodes.isNotEmpty && number != null) {
@@ -145,7 +144,7 @@ class PlaybackContent {
     return null;
   }
 
-  /// Bangumi 条目的本篇总集数；未知时返回 null，不要拿源的分集数冒充。
+  /// Bangumi 条目的本篇总集数；未知时为 null。
   int? get bgmEpisodeCount {
     if (bgmEpisodes.isNotEmpty) return bgmEpisodes.length;
     final total = toInt(
@@ -154,8 +153,7 @@ class PlaybackContent {
     return total != null && total > 0 ? total : null;
   }
 
-  /// 源下标 → Bangumi 分集条目。集号对不上时返回 null，而不是把别的一集的
-  /// 标题贴到当前画面上。
+  /// 源下标 → Bangumi 分集条目；集号对不上时返回 null。
   Map<String, dynamic>? _bgmEpisodeForSource(int index) {
     final number = episodeNumbering.numberAt(index);
     if (number != null && bgmEpisodes.isNotEmpty) {
@@ -171,8 +169,7 @@ class PlaybackContent {
     return !isLocalSource && AdapterRegistry.isAdapterSource(source);
   }
 
-  /// Bangumi 条目没有对应的本站贴文：它的 `id` 是 BGM 条目 id。
-  /// 两个 id 不是同一命名空间，按贴文查询会命中别人的贴文或 null。
+  /// Bangumi 条目的 `id` 是 BGM 条目 id，与贴文 id 不在同一命名空间。
   bool get isBgmSubject => request.source.trim() == 'bgm';
 
   /// A cloud history record identifies the anime, not a source on this device.
@@ -200,6 +197,7 @@ class PlaybackContent {
   Future<BgmInfo>? _bgmInfoFuture;
   Future<void>? _bgmDetailFuture;
   AnimeCollection? collection;
+  /// 收藏读取的版本号；写入时自增，用来丢弃过期的读取结果。
   int _collectionRevision = 0;
 
   SourceAdapter? _playbackKeepAliveAdapter;
@@ -401,8 +399,7 @@ class PlaybackContent {
     }
     var target = episodeIndex;
     if (target < 0 || target >= videoList.length) {
-      // 越界多半是把 Bangumi 的集号当成了源下标。按标题里的集号反查，
-      // 找不到才退回夹取，避免静默跳到别的集。
+      // 越界时按标题里的集号反查源下标，找不到再夹取。
       final mapped = episodeNumbering.indexOfNumber(target + 1);
       if (mapped != null) {
         Log.w('Playback', '剧集下标 $episodeIndex 越界，按集号映射到第 ${target + 1} 集');
@@ -795,7 +792,7 @@ class PlaybackContent {
     final detach = lifetime.token.onCancel(cancel);
     final detachOuter = SourceOperation.current?.token.onCancel(cancel);
     try {
-      // `p` 是集号，不是源分集的数组下标：源倒序或缺集时下标会整集错位。
+      // `p` 是集号，不是源分集的数组下标。
       final episodeNumber =
           episodeNumbering.numberAt(episodeIndex) ?? episodeIndex + 1;
       return await DanmakuController.fetchDanmaku(
@@ -812,7 +809,7 @@ class PlaybackContent {
     }
   }
 
-  /// 贴文 id 只对本站条目成立；BGM 条目 id 一旦写进收藏的 post_id 就是串号。
+  /// 贴文 id 只对本站条目成立，BGM 条目 id 不能写进收藏的 post_id。
   int? get validPostId =>
       AnimeCollection.postIdFrom(data, source: request.source);
 
@@ -833,7 +830,7 @@ class PlaybackContent {
     if (!_disposed && revision == _collectionRevision) collection = current;
   }
 
-  /// 先改本地状态让界面立刻响应，网络请求失败再回滚。
+  /// 追番开关：已追番则取消，否则标记为「在看」。
   Future<void> toggleFollow() async {
     if (isFollow()) return removeFromCollection();
     return setCollectionStatus(CollectionStatus.doing);
@@ -843,7 +840,7 @@ class PlaybackContent {
   Future<void> removeFromCollection() async {
     final previous = collection;
     if (previous == null) return;
-    // 作废在途的初始读取，否则它回来会把刚清掉的收藏写回去。
+    // 进页面时的收藏读取如果还没返回，忽略它的结果。
     ++_collectionRevision;
     final postId = previous.postId ?? validPostId;
     final bgmId = previous.bgmId ?? (postId == null ? bgmInfo.subjectId : null);
@@ -862,16 +859,18 @@ class PlaybackContent {
   }
 
   /// 切换收藏状态，[status] 为空表示取消收藏。
+  ///
+  /// 本地模式先写本地、Bangumi 同步放后台；云端模式等本站保存返回后再更新。
+  /// Bangumi 只做镜像，失败不影响收藏结果。
   Future<void> setCollectionStatus(CollectionStatus? status) async {
     if (status == null) return removeFromCollection();
     final previous = collection;
     if (CollectionStatus.fromValue(previous?.status) == status) return;
-    // 作废在途的初始读取：它在网络回来后会把新状态覆盖回旧值，
-    // 表现就是点完不刷新、退出重进才看到。
+    // 进页面时的收藏读取如果还没返回，忽略它的结果。
     ++_collectionRevision;
 
     final detail = bgmDetailData;
-    // 总集数与已看集数都以 Bangumi 为准：源的分集数只代表这一条线路有多少集。
+    // 总集数与已看集数都以 Bangumi 为准。
     final epCount =
         bgmEpisodeCount ?? (videoList.isEmpty ? null : videoList.length);
     final bgmId = previous?.bgmId ?? bgmInfo.subjectId;
@@ -901,8 +900,7 @@ class PlaybackContent {
           title,
     );
     collection = optimistic;
-    // Bangumi 模式下写远端要等网络。先把本地写掉，同步丢后台，
-    // 不然一次超时十几秒，界面上的状态还会退回去。
+    // 本地先落盘，Bangumi 同步放后台。
     if (collections.isLocalMode) {
       try {
         await collections.saveLocal(optimistic);
