@@ -1,6 +1,7 @@
 import 'package:baka/services/playback/playback_content.dart';
 import 'package:baka/theme.dart';
 import 'package:baka/utils/json_values.dart';
+import 'package:baka/app/navigation.dart';
 import 'package:flutter/material.dart';
 import 'package:baka/widgets/common/platform_tooltip.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -273,16 +274,41 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(
-            child: Text(
-              title.isNotEmpty ? title : '番剧详情',
-              style: const TextStyle(
-                fontSize: 19,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-                letterSpacing: -0.2,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    title.isNotEmpty ? title : '番剧详情',
+                    style: const TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                      letterSpacing: -0.2,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 2),
+                // 直接进播放页时也能回到番剧详情。
+                PlatformTooltip(
+                  message: '番剧详情',
+                  child: InkResponse(
+                    radius: 16,
+                    onTap: () =>
+                        NavigationService.toDetail(context, content.detailData),
+                    child: const Padding(
+                      padding: EdgeInsets.all(3),
+                      child: Icon(
+                        Icons.info_outline_rounded,
+                        size: 15,
+                        color: Colors.white54,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           if (widget.followNotifier != null &&
