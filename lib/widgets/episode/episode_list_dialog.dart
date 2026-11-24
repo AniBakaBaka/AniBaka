@@ -30,6 +30,7 @@ Future<int?> showEpisodeListDialog({
   int? currentLineIndex,
   int? bgmSubjectId,
   List<Map<String, dynamic>> bgmEpisodes = const [],
+  String? coverUrl,
   List<String>? sourceNames,
   ValueChanged<int>? onLineChanged,
   Future<bool> Function(int episodeIndex, bool watched)? onSetEpisodeWatched,
@@ -45,6 +46,7 @@ Future<int?> showEpisodeListDialog({
     currentLineIndex: currentLineIndex,
     bgmSubjectId: bgmSubjectId,
     bgmEpisodes: bgmEpisodes,
+    coverUrl: coverUrl,
     sourceNames: sourceNames,
     onLineChanged: onLineChanged,
     onSetEpisodeWatched: onSetEpisodeWatched,
@@ -91,6 +93,9 @@ class EpisodeListDialog extends StatefulWidget {
   final int? currentLineIndex;
   final int? bgmSubjectId;
   final List<Map<String, dynamic>> bgmEpisodes;
+
+  /// 没有剧照时的封面图。
+  final String? coverUrl;
   final List<String>? sourceNames;
   final ValueChanged<int>? onLineChanged;
 
@@ -112,6 +117,7 @@ class EpisodeListDialog extends StatefulWidget {
     this.currentLineIndex,
     this.bgmSubjectId,
     this.bgmEpisodes = const [],
+    this.coverUrl,
     this.sourceNames,
     this.onLineChanged,
     this.onSetEpisodeWatched,
@@ -597,6 +603,7 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
               season: 1,
               episode: _episodeNumber(index),
             ),
+      cover: widget.coverUrl,
       base: textColor ?? theme.colorScheme.onSurface,
       accent: theme.colorScheme.primary,
       onTap: () => Navigator.pop(context, index),
@@ -666,6 +673,7 @@ class _EpisodeCard extends StatefulWidget {
     required this.selected,
     required this.watched,
     required this.still,
+    required this.cover,
     required this.base,
     required this.accent,
     required this.onTap,
@@ -677,6 +685,7 @@ class _EpisodeCard extends StatefulWidget {
   final bool selected;
   final bool watched;
   final Future<Map<String, dynamic>?>? still;
+  final String? cover;
   final Color base;
   final Color accent;
   final VoidCallback onTap;
@@ -715,23 +724,38 @@ class _EpisodeCardState extends State<_EpisodeCard>
         color: widget.base.withValues(alpha: 0.28),
       ),
     );
+    final fallback = _buildCover(placeholder);
     final future = widget.still;
-    if (future == null) return placeholder;
+    if (future == null) return fallback;
     return FutureBuilder<Map<String, dynamic>?>(
       future: future,
       builder: (context, snapshot) {
         final data = snapshot.data;
         final url = (data?['still_thumb'] ?? data?['still_url']) as String?;
-        if (url == null || url.isEmpty) return placeholder;
+        if (url == null || url.isEmpty) return fallback;
         return CachedNetworkImage(
           imageUrl: url,
           fit: BoxFit.cover,
           memCacheWidth: 320,
           fadeInDuration: const Duration(milliseconds: 150),
-          placeholder: (_, _) => placeholder,
-          errorWidget: (_, _, _) => placeholder,
+          placeholder: (_, _) => fallback,
+          errorWidget: (_, _, _) => fallback,
         );
       },
+    );
+  }
+
+  /// 没有剧照时用番剧封面代替。
+  Widget _buildCover(Widget placeholder) {
+    final cover = widget.cover;
+    if (cover == null || cover.isEmpty) return placeholder;
+    return CachedNetworkImage(
+      imageUrl: cover,
+      fit: BoxFit.cover,
+      memCacheWidth: 320,
+      fadeInDuration: const Duration(milliseconds: 150),
+      placeholder: (_, _) => placeholder,
+      errorWidget: (_, _, _) => placeholder,
     );
   }
 

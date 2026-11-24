@@ -784,6 +784,7 @@ class _PlayerPageState extends State<PlayerPage>
       currentLineIndex: downloadMode ? null : content.currUrl,
       bgmSubjectId: content.bgmInfo.subjectId,
       bgmEpisodes: content.bgmEpisodes,
+      coverUrl: content.coverImageUrl,
       sourceNames: downloadMode ? null : content.sourceNames,
       onLineChanged: downloadMode ? null : _changeLine,
       onSetEpisodeWatched: downloadMode ? null : _setEpisodeWatched,
