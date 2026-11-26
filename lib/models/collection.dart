@@ -49,6 +49,10 @@ class AnimeCollection {
   final String? bgmImage;
   final String? bgmTitle;
 
+  /// 这一条确实写入过 Bangumi（来自远端读取或镜像成功）。
+  /// 用来区分「本机草稿」和「在 Bangumi 上被删掉的旧收藏」。
+  final bool bgmSynced;
+
   const AnimeCollection({
     required this.status,
     this.postId,
@@ -65,7 +69,28 @@ class AnimeCollection {
     this.bgmRating,
     this.bgmImage,
     this.bgmTitle,
+    this.bgmSynced = false,
   });
+
+  /// 标记为已同步到 Bangumi，其余字段原样保留。
+  AnimeCollection asBgmSynced() => AnimeCollection(
+    postId: postId,
+    bgmId: bgmId,
+    status: status,
+    rating: rating,
+    comment: comment,
+    epTotal: epTotal,
+    epWatched: epWatched,
+    tags: tags,
+    isPrivate: isPrivate,
+    nsfw: nsfw,
+    postTitle: postTitle,
+    postCover: postCover,
+    bgmRating: bgmRating,
+    bgmImage: bgmImage,
+    bgmTitle: bgmTitle,
+    bgmSynced: true,
+  );
 
   String get displayTitle => (postTitle != null && postTitle!.isNotEmpty)
       ? postTitle!
@@ -101,6 +126,7 @@ class AnimeCollection {
     bgmRating: (json['bgm_rating'] as num?)?.toDouble(),
     bgmImage: json['bgm_image'] as String?,
     bgmTitle: json['bgm_title'] as String?,
+    bgmSynced: json['bgm_synced'] == true,
   );
 
   factory AnimeCollection.fromBangumi(Map<String, dynamic> json) {
@@ -119,6 +145,7 @@ class AnimeCollection {
       comment: trimmed(json['comment']),
       epTotal: subject?['eps'] as int?,
       bgmRating: (subject?['score'] as num?)?.toDouble(),
+      bgmSynced: true,
     );
   }
 
@@ -140,6 +167,7 @@ class AnimeCollection {
     if (bgmImage != null && bgmImage!.isNotEmpty) 'bgm_image': bgmImage,
     if (bgmTitle != null && bgmTitle!.isNotEmpty) 'bgm_title': bgmTitle,
     if (includeLocalFields && bgmRating != null) 'bgm_rating': bgmRating,
+    if (includeLocalFields && bgmSynced) 'bgm_synced': true,
   };
 }
 

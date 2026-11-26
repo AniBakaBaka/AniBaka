@@ -1,6 +1,5 @@
 import 'package:baka/api/bangumi_account_api.dart';
 import 'dart:convert';
-import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/models/collection.dart';
 import 'package:baka/services/account/bangumi_session.dart';
 import 'package:baka/services/collection/collection_repository.dart';
@@ -43,6 +42,29 @@ class BangumiSyncService {
   BangumiSyncService(this.session, this.collections);
   final BangumiSession session;
   final CollectionRepository collections;
+
+  /// 本机记录缺的字段用远端补齐；本机有的以本机为准。
+  AnimeCollection _withRemoteFallback(
+    AnimeCollection local,
+    AnimeCollection remote,
+  ) => AnimeCollection(
+    postId: local.postId,
+    bgmId: local.bgmId,
+    status: local.status,
+    rating: local.rating > 0 ? local.rating : remote.rating,
+    comment: local.comment ?? remote.comment,
+    epTotal: local.epTotal ?? remote.epTotal,
+    epWatched: local.epWatched ?? remote.epWatched,
+    tags: local.tags.isNotEmpty ? local.tags : remote.tags,
+    isPrivate: local.isPrivate || remote.isPrivate,
+    nsfw: local.nsfw,
+    postTitle: local.postTitle,
+    postCover: local.postCover,
+    bgmRating: local.bgmRating ?? remote.bgmRating,
+    bgmImage: local.bgmImage ?? remote.bgmImage,
+    bgmTitle: local.bgmTitle ?? remote.bgmTitle,
+    bgmSynced: local.bgmSynced,
+  );
 
   Future<BangumiSyncReport>? _running;
   Future<BangumiSyncReport> sync({void Function(String)? onProgress}) =>
@@ -89,8 +111,16 @@ class BangumiSyncService {
     }
     final ids = items.keys.toList()..sort();
     final imports = <AnimeCollection>[];
+    var importedToServer = false;
     final snapshots = session.loadSnapshots();
-    final pendingPush = session.loadPendingPush();
+    // 旧的第二张待补传清单做一次迁移。
+    final legacyPending = session.loadPendingPush();
+    if (legacyPending.isNotEmpty) {
+      for (final id in legacyPending) {
+        collections.markPendingSync(id);
+      }
+      await session.preferences.remove(session.pendingPushKey);
+    }
     var imported = 0;
     var exported = 0;
     var unchanged = 0;
@@ -118,20 +148,22 @@ class BangumiSyncService {
       if (previous != null &&
           ((remoteItem == null && localFingerprint == previous) ||
               (localItem == null && remoteFingerprint == previous))) {
-        pendingPush.remove(id);
+        collections.clearPendingSync(id);
         skippedDeletions++;
         continue;
       }
 
+      // 两边已经一致，待补传标记可以划掉。
       if (remoteFingerprint == localFingerprint && remoteFingerprint != null) {
         snapshots['$id'] = remoteFingerprint;
-        pendingPush.remove(id);
+        collections.clearPendingSync(id);
         unchanged++;
         continue;
       }
 
+      // 改状态留下的待补传同样算本地更新。
       final preferLocal =
-          pendingPush.contains(id) ||
+          collections.hasPendingSync(id) ||
           (previous != null &&
               localFingerprint != null &&
               localFingerprint != previous &&
@@ -140,7 +172,11 @@ class BangumiSyncService {
       try {
         if (remoteItem == null || (localItem != null && preferLocal)) {
           if (localItem == null) continue;
-          await session.api.putCollection(token, localItem);
+          // 本机没带的字段沿用远端。
+          final exportItem = remoteItem == null
+              ? localItem
+              : _withRemoteFallback(localItem, remoteItem);
+          await session.api.putCollection(token, exportItem);
           if (localItem.epWatched != null) {
             await session.api.putEpisodeProgress(
               token,
@@ -149,7 +185,8 @@ class BangumiSyncService {
             );
           }
           snapshots['$id'] = localFingerprint!;
-          pendingPush.remove(id);
+          await collections.markSynced(id);
+          collections.clearPendingSync(id);
           exported++;
         } else {
           final localChanged = previous != null && localFingerprint != previous;
@@ -160,28 +197,26 @@ class BangumiSyncService {
           if (collections.isLocalMode) {
             imports.add(collection);
           } else {
-            await AniBakaApi.saveCollection(collection);
+            await collections.importRemote([collection], notify: false);
+            importedToServer = true;
           }
           snapshots['$id'] = remoteFingerprint!;
-          pendingPush.remove(id);
+          collections.clearPendingSync(id);
           imported++;
         }
       } catch (error) {
         firstError ??= error;
-        if (preferLocal || remoteItem == null) pendingPush.add(id);
+        if (preferLocal || remoteItem == null) collections.markPendingSync(id);
         failed++;
       }
     }
 
     checkAccount();
-    if (imports.isNotEmpty) await collections.storeAll(imports);
+    if (imports.isNotEmpty) await collections.importRemote(imports);
+    if (importedToServer) collections.notifyChanged();
     await session.preferences.setString(
       session.snapshotKey,
       jsonEncode(snapshots),
-    );
-    await session.preferences.setString(
-      session.pendingPushKey,
-      jsonEncode(pendingPush.toList()..sort()),
     );
     if (failed > 0 &&
         imported == 0 &&

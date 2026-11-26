@@ -37,10 +37,24 @@ class AnimeDetailPlaceholder extends StatefulWidget {
   /// The episode playback starts from, when the card remembers one.
   final int? episodeIndex;
 
+  /// 放在标题信息下方、分页标签上方的一块内容；播放页的详情面板用它放选集。
+  final Widget? headerSliver;
+
+  /// 播放页的详情面板用：播放与相关推荐由播放页处理。
+  final VoidCallback? onSearchTap;
+  final ValueChanged<Map<String, dynamic>>? onRelatedTap;
+
+  /// 播放按钮上的字，默认「开始观看」。
+  final String searchLabel;
+
   const AnimeDetailPlaceholder({
     required this.data,
     this.heroTag,
     this.episodeIndex,
+    this.headerSliver,
+    this.onSearchTap,
+    this.onRelatedTap,
+    this.searchLabel = '开始观看',
     super.key,
   });
 
@@ -211,15 +225,24 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
       } else {
         final result = await collections.addOrUpdate(
           AnimeCollection(
-            postId: _validPostId,
+            postId: _validPostId ?? collection?.postId,
             bgmId: _subjectId,
             status: status.value,
-            nsfw: _detail.nsfw,
+            // 只改状态，打分、标签、私密、评语、进度沿用原来的。
+            rating: collection?.rating ?? 0,
+            comment: collection?.comment,
+            epTotal: collection?.epTotal,
+            epWatched: collection?.epWatched,
+            tags: collection?.tags ?? const [],
+            isPrivate: collection?.isPrivate ?? false,
+            nsfw: _detail.nsfw || (collection?.nsfw ?? false),
             postTitle: widget.data['title'] as String? ?? '',
             postCover: _detail.coverUrl,
             bgmImage: _bgmInfo.imageUrl,
             bgmTitle: _detail.bgmTitle,
           ),
+          // Bangumi 只提交 type。
+          statusOnly: true,
         );
         if (!mounted || generation != _loadGeneration) return;
         _collectionRevision++;
@@ -262,7 +285,8 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
           Navigator.pop(ctx);
           if (generation == _loadGeneration) _updateCollectionStatus(status);
         },
-        onRemove: collection != null
+        // 只有本地收藏 + Bangumi 才删不掉；云端收藏可以取消。
+        onRemove: collection != null && !collections.isBangumiMode
             ? () {
                 Navigator.pop(ctx);
                 if (generation == _loadGeneration) {
@@ -394,6 +418,10 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                               elevation: 0,
                               pinned: false,
                               foregroundColor: Colors.white,
+                              // 面板右上角有它自己的关闭按钮，标题别伸到那底下。
+                              actions: widget.headerSliver == null
+                                  ? null
+                                  : const [SizedBox(width: 44)],
                               title: Text(
                                 _detail.title,
                                 style: const TextStyle(
@@ -411,10 +439,13 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
                                   detail: _detail,
                                   collection: _collection,
                                   onCollectionTap: _handleCollectionTap,
-                                  onSearchTap: _startWatching,
+                                  onSearchTap: widget.onSearchTap ?? _startWatching,
+                                  searchLabel: widget.searchLabel,
                                 ),
                               ),
                             ),
+                            // 面板里有选集区时插在标题信息下方。
+                            ?widget.headerSliver,
                             SliverPersistentHeader(
                               pinned: true,
                               delegate: _TabBarDelegate(
@@ -557,10 +588,11 @@ class _AnimeDetailPlaceholderState extends State<AnimeDetailPlaceholder> {
         (_) => _wrapTabContent(
           AnimeDetailRelatedSection(
             subjectId: subjectId,
-            onAnimeTap: (data) => NavigationService.toPlayback(
-              context,
-              PlaybackRequest.fromMap(data),
-            ),
+            onAnimeTap: widget.onRelatedTap ??
+                (data) => NavigationService.toPlayback(
+                    context,
+                    PlaybackRequest.fromMap(data),
+                  ),
           ),
         ),
       ));

@@ -1,4 +1,5 @@
 import 'package:baka/app/navigation.dart';
+import 'package:baka/models/collection.dart';
 import 'package:baka/services/playback/playback_content.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -15,7 +16,7 @@ import 'package:baka/widgets/danmaku/danmaku_list_sheet.dart';
 /// 播放页视频详情卡片
 class VideoDetailCard extends StatelessWidget {
   final PlaybackContent content;
-  final ValueNotifier<bool> followNotifier;
+  final ValueNotifier<CollectionStatus?> followNotifier;
   final VoidCallback onFollowPressed;
   final VoidCallback onShowDetail;
   final DanmakuController danmakuController;
@@ -74,12 +75,12 @@ class VideoDetailCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              ValueListenableBuilder<bool>(
+              ValueListenableBuilder<CollectionStatus?>(
                 valueListenable: followNotifier,
-                builder: (context, isFollowed, _) => BgmFollowPill(
+                builder: (context, status, _) => BgmFollowPill(
                   title: content.title,
                   bgmInfo: content.bgmInfo,
-                  isFollowed: isFollowed,
+                  status: status,
                   onFollowPressed: onFollowPressed,
                 ),
               ),

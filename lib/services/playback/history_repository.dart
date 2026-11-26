@@ -4,6 +4,7 @@ import 'package:baka/models/playback_request.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/utils/json_values.dart';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
 
 import 'package:baka/api/anibaka_api.dart';
@@ -25,10 +26,15 @@ class HistoryRepository {
   static const _resumeKey = 'resume';
   static const _maxHistoryCount = 50;
   static const _minPositionToSaveMs = 10000;
-  static const _completionThreshold = 0.95;
+
+  /// 正片播完即算看完。
+  static const _completionThreshold = 0.90;
   static const _platform = 'app';
 
   final Map<String, List<Map<String, dynamic>>> _memory = {};
+
+  /// 每次落盘后自增，供首页「继续观看」刷新。
+  final ValueNotifier<int> revision = ValueNotifier(0);
 
   void _logUploadFailure(Object error) =>
       Log.w('History', '上传播放历史失败（本地已保存）', error);
@@ -136,6 +142,7 @@ class HistoryRepository {
 
   Future<void> _write(String key, List<Map<String, dynamic>> list) {
     _memory[key] = list;
+    if (key == _historyKey) revision.value++;
     return AppStorage.playHistoryBox.put(key, list);
   }
 
@@ -262,6 +269,8 @@ class HistoryRepository {
           ? ordered.sublist(0, _maxHistoryCount)
           : ordered;
       await _write(_historyKey, finalHistory);
+      // 历史变了，已看集数的缓存跟着失效。
+      invalidateWatchedCount();
     } catch (e) {
       Log.w('History', '同步远程历史失败: $e');
     }
@@ -275,6 +284,7 @@ class HistoryRepository {
     required int urlIndex,
     String? cover,
     int? bgmId,
+    int? bgmEpisodeSort,
   }) async {
     if (durationMs <= 0 || positionMs < 0) return;
 
@@ -314,7 +324,14 @@ class HistoryRepository {
       next.add(item);
       if (next.length >= _maxHistoryCount) break;
     }
+    final wasFinished = list.any(
+      (item) => _localKey(item) == key && item['isFinished'] == true,
+    );
     await _write(_historyKey, next);
+    final finished = record['isFinished'] == true;
+    if (finished != wasFinished) {
+      _applyEpisodeProgress(toInt(record['bgmId']), episodeIndex, finished);
+    }
 
     final remote = _toRemote(record);
     if (remote != null && session.token.isNotEmpty) {
@@ -327,13 +344,16 @@ class HistoryRepository {
     }
 
     final subjectId = toInt(record['bgmId']);
+    // 认不出集号时不上报。
+    final sort = bgmEpisodeSort;
     if (record['isFinished'] == true &&
         subjectId != null &&
+        sort != null &&
         bangumi.isConnected &&
         bangumi.autoMarkEpisode) {
       unawaited(
         bangumi
-            .markEpisodeWatched(subjectId: subjectId, watched: episodeIndex + 1)
+            .markEpisodeWatched(subjectId: subjectId, episodeNumber: sort)
             .catchError((Object error, StackTrace stackTrace) {
               Log.w('History', '更新 Bangumi 集数失败: $error');
             }),
@@ -341,8 +361,298 @@ class HistoryRepository {
     }
   }
 
-  static bool isEpisodeWatched(String videoId, int episodeIndex) =>
-      readProgress('${videoId}_${episodeIndex}_1').inSeconds > 30;
+  static String _watchedKey(String videoId, int episodeIndex) =>
+      '${videoId}_${episodeIndex}_watched';
+
+  /// 这一集是否算看过。[legacyVideoId] 是换源前的源 id，用来兼容旧标记。
+  /// 传入 [bgmId] 时与追番列表共用同一份索引，别的源看过也算看过。
+  static bool isEpisodeWatched(
+    String videoId,
+    int episodeIndex, {
+    String? legacyVideoId,
+    int? bgmId,
+  }) {
+    final ids = legacyVideoId == null || legacyVideoId == videoId
+        ? <String>[videoId]
+        : <String>[videoId, legacyVideoId];
+    if (!Hive.isBoxOpen(AppStorage.videoProgressBoxName)) return false;
+    for (final id in ids) {
+      final raw = AppStorage.videoProgressBox.get(_watchedKey(id, episodeIndex));
+      final flag = raw is Map ? raw['watched'] : null;
+      if (flag is bool) return flag;
+    }
+    if (bgmId != null && bgmId > 0) return watchedAt(bgmId, episodeIndex);
+    for (final id in ids) {
+      final progress = _furthestProgress(id, episodeIndex);
+      final position = toInt(progress?['positionMs']) ?? 0;
+      if (position <= 0) continue;
+      final duration = toInt(progress?['durationMs']) ?? 0;
+      if (duration <= 0 ? position >= 30000 : position / duration >= _completionThreshold) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// 这部番的第 [episodeIndex] 集是否算看过，与追番列表的统计同一份索引。
+  static bool watchedAt(int bgmId, int episodeIndex) {
+    if (bgmId <= 0) return false;
+    if (!_watchedIndex.containsKey(bgmId)) {
+      if (!Hive.isBoxOpen(AppStorage.videoProgressBoxName)) return false;
+      _buildWatchedIndex({bgmId});
+    }
+    if (_blockedIndex[bgmId]?.contains(episodeIndex) ?? false) return false;
+    return _watchedIndex[bgmId]?.contains(episodeIndex) ?? false;
+  }
+
+  /// 这部番在本地算作看过的集数。
+  static int watchedCountForBgm(int bgmId) {
+    if (bgmId <= 0 || !Hive.isBoxOpen(AppStorage.videoProgressBoxName)) {
+      return 0;
+    }
+    final index = _watchedIndex[bgmId];
+    if (index != null) return index.length;
+    _buildWatchedIndex({bgmId});
+    return _watchedIndex[bgmId]?.length ?? 0;
+  }
+
+  /// 进列表时一次算好这批番的已看集数；之后只按单集变动更新。
+  static void prefetchWatchedCounts(Iterable<int> bgmIds) {
+    if (!Hive.isBoxOpen(AppStorage.videoProgressBoxName)) return;
+    final missing = <int>{
+      for (final id in bgmIds)
+        if (id > 0 && !_watchedIndex.containsKey(id)) id,
+    };
+    if (missing.isEmpty) return;
+    _buildWatchedIndex(missing);
+  }
+
+  /// 标记或进度变化后只失效这一部番；[bgmId] 为空时全部失效。
+  static void invalidateWatchedCount([int? bgmId]) {
+    if (bgmId == null) {
+      _watchedIndex.clear();
+      _blockedIndex.clear();
+    } else {
+      _watchedIndex.remove(bgmId);
+      _blockedIndex.remove(bgmId);
+    }
+  }
+
+  /// bgmId → 本地算作看过的集下标；手动标为未看的集单独记一份。
+  static final Map<int, Set<int>> _watchedIndex = {};
+  static final Map<int, Set<int>> _blockedIndex = {};
+
+  /// 本地明确取消过单集的番剧：这些番的已看数以本地记录为准，
+  /// 不再被远端进度覆盖。
+  static const _overrideKey = 'watched_override_bgm_ids';
+  static Set<int>? _overrideCache;
+
+  static Set<int> _localOverrides() {
+    final cached = _overrideCache;
+    if (cached != null) return cached;
+    final set = <int>{};
+    if (Hive.isBoxOpen(AppStorage.playHistoryBoxName)) {
+      final raw = AppStorage.playHistoryBox.get(_overrideKey);
+      if (raw is List) set.addAll(raw.map(toInt).whereType<int>());
+    }
+    return _overrideCache = set;
+  }
+
+  static bool hasLocalOverride(int bgmId) =>
+      bgmId > 0 && _localOverrides().contains(bgmId);
+
+  static void _markOverride(int bgmId) {
+    if (bgmId <= 0) return;
+    final set = _localOverrides();
+    if (!set.add(bgmId)) return;
+    if (Hive.isBoxOpen(AppStorage.playHistoryBoxName)) {
+      unawaited(AppStorage.playHistoryBox.put(_overrideKey, set.toList()));
+    }
+  }
+
+  static void _buildWatchedIndex(Set<int> targets) {
+    for (final entry in _scanWatched(targets).entries) {
+      _watchedIndex[entry.key] = entry.value.watched;
+      _blockedIndex[entry.key] = entry.value.blocked;
+    }
+  }
+
+  /// 手动标记后直接改索引，不重扫播放记录。
+  static void _applyEpisodeMark(int? bgmId, int episodeIndex, bool watched) {
+    if (bgmId == null || bgmId <= 0) return;
+    final index = _watchedIndex[bgmId];
+    if (index == null) return;
+    final blocked = _blockedIndex.putIfAbsent(bgmId, () => <int>{});
+    if (watched) {
+      blocked.remove(episodeIndex);
+      index.add(episodeIndex);
+    } else {
+      index.remove(episodeIndex);
+      blocked.add(episodeIndex);
+    }
+  }
+
+  /// 播放完成状态翻转后改索引；取消完成时其他线路可能仍算看过，保守重算这一部。
+  static void _applyEpisodeProgress(int? bgmId, int episodeIndex, bool finished) {
+    if (bgmId == null || bgmId <= 0) {
+      invalidateWatchedCount();
+      return;
+    }
+    final index = _watchedIndex[bgmId];
+    if (index == null) return;
+    if (!finished) {
+      invalidateWatchedCount(bgmId);
+      return;
+    }
+    final blocked = _blockedIndex[bgmId];
+    if (blocked == null || !blocked.contains(episodeIndex)) {
+      index.add(episodeIndex);
+    }
+  }
+
+  /// 记录带 bgmId 时直接匹配；旧记录用观看历史里的源 id 对应。
+  /// 同一集的多条线路记录按集下标去重，先出现的记录决定状态。
+  static Map<int, ({Set<int> watched, Set<int> blocked})> _scanWatched(
+    Set<int> targets,
+  ) {
+    final videoIds = <int, Set<String>>{};
+    if (Hive.isBoxOpen(AppStorage.playHistoryBoxName)) {
+      final raw = AppStorage.playHistoryBox.get(_resumeKey);
+      if (raw is List) {
+        for (final item in raw) {
+          if (item is! Map) continue;
+          final bgmId = toInt(item['bgmId']);
+          if (bgmId == null || !targets.contains(bgmId)) continue;
+          final id = item['id'];
+          if (id != null) {
+            videoIds.putIfAbsent(bgmId, () => <String>{}).add('$id');
+          }
+        }
+      }
+    }
+
+    final entries = <_WatchEntry>[];
+    final box = AppStorage.videoProgressBox;
+    for (final key in box.keys) {
+      if (key is! String) continue;
+      final parts = key.split('_');
+      if (parts.length < 3) continue;
+      final index = int.tryParse(parts[parts.length - 2]);
+      if (index == null) continue;
+      final item = box.get(key);
+      if (item is! Map) continue;
+      final videoId = parts.sublist(0, parts.length - 2).join('_');
+      final flag = item['watched'];
+      final ownBgm = toInt(item['bgmId']);
+      if (parts.last == 'watched' && flag is bool) {
+        entries.add((
+          videoId: videoId,
+          index: index,
+          ownBgm: ownBgm,
+          mark: flag,
+          ratio: 0,
+        ));
+        continue;
+      }
+      final position = toInt(item['positionMs']) ?? 0;
+      final duration = toInt(item['durationMs']) ?? 0;
+      entries.add((
+        videoId: videoId,
+        index: index,
+        ownBgm: ownBgm,
+        mark: null,
+        ratio: duration <= 0
+            ? (position >= 30000 ? 1.0 : 0.0)
+            : position / duration,
+      ));
+    }
+
+    // 每条记录归到所属的番剧，不按番剧重复扫描。
+    final ownerByVideo = <String, int>{};
+    videoIds.forEach((bgmId, ids) {
+      for (final id in ids) {
+        ownerByVideo[id] = bgmId;
+      }
+    });
+    final watchedByBgm = <int, Set<int>>{
+      for (final bgmId in targets) bgmId: <int>{},
+    };
+    final blockedByBgm = <int, Set<int>>{};
+    int? ownerOf(_WatchEntry entry) {
+      final own = entry.ownBgm;
+      if (own != null) return watchedByBgm.containsKey(own) ? own : null;
+      return ownerByVideo[entry.videoId];
+    }
+
+    // 先处理手动标记。
+    for (final entry in entries) {
+      final mark = entry.mark;
+      if (mark == null) continue;
+      final bgmId = ownerOf(entry);
+      if (bgmId == null) continue;
+      if (mark) {
+        watchedByBgm[bgmId]!.add(entry.index);
+        blockedByBgm[bgmId]?.remove(entry.index);
+      } else {
+        watchedByBgm[bgmId]!.remove(entry.index);
+        blockedByBgm.putIfAbsent(bgmId, () => <int>{}).add(entry.index);
+      }
+    }
+    // 再处理播放进度：手动标为未看的集跳过。
+    for (final entry in entries) {
+      if (entry.mark != null) continue;
+      final bgmId = ownerOf(entry);
+      if (bgmId == null) continue;
+      if (blockedByBgm[bgmId]?.contains(entry.index) ?? false) continue;
+      if (entry.ratio >= _completionThreshold) {
+        watchedByBgm[bgmId]!.add(entry.index);
+      }
+    }
+    return {
+      for (final entry in watchedByBgm.entries)
+        entry.key: (
+          watched: entry.value,
+          blocked: blockedByBgm[entry.key] ?? <int>{},
+        ),
+    };
+  }
+
+  static Map? _furthestProgress(String videoId, int episodeIndex) {
+    if (!Hive.isBoxOpen(AppStorage.videoProgressBoxName)) return null;
+    final box = AppStorage.videoProgressBox;
+    final prefix = '${videoId}_${episodeIndex}_';
+    Map? best;
+    var bestPosition = -1;
+    for (final key in box.keys) {
+      if (key is! String || !key.startsWith(prefix)) continue;
+      final item = box.get(key);
+      if (item is! Map) continue;
+      final position = toInt(item['positionMs']) ?? 0;
+      if (position > bestPosition) {
+        bestPosition = position;
+        best = item;
+      }
+    }
+    return best;
+  }
+
+  Future<void> setEpisodeWatched(
+    String videoId,
+    int episodeIndex,
+    bool watched, {
+    int? bgmId,
+  }) async {
+    if (!Hive.isBoxOpen(AppStorage.videoProgressBoxName)) return;
+    await AppStorage.videoProgressBox.put(_watchedKey(videoId, episodeIndex), {
+      'watched': watched,
+      if (bgmId != null && bgmId > 0) 'bgmId': bgmId,
+      'updateTime': DateTime.now().millisecondsSinceEpoch,
+    });
+    // 取消某一集后，这一部的已看数改以本地记录为准。
+    if (!watched) _markOverride(bgmId ?? 0);
+    _applyEpisodeMark(bgmId, episodeIndex, watched);
+    revision.value = revision.value + 1;
+  }
 
   static Map? _readProgress(String key) =>
       Hive.isBoxOpen(AppStorage.videoProgressBoxName)
@@ -395,9 +705,23 @@ class HistoryRepository {
   });
 
   Future<void> clearHistory() async {
+    invalidateWatchedCount();
+    _overrideCache = null;
+    if (Hive.isBoxOpen(AppStorage.playHistoryBoxName)) {
+      unawaited(AppStorage.playHistoryBox.delete(_overrideKey));
+    }
     await Future.wait([
       _write(_historyKey, const []),
       _write(_resumeKey, const []),
     ]);
   }
 }
+
+/// 播放记录里的一条：来源、集下标、所属番剧、手动标记、观看进度。
+typedef _WatchEntry = ({
+  String videoId,
+  int index,
+  int? ownBgm,
+  bool? mark,
+  double ratio,
+});

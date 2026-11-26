@@ -1,15 +1,22 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:baka/widgets/common/platform_tooltip.dart';
 
+import 'package:baka/app/navigation.dart';
+import 'package:baka/models/collection.dart';
+import 'package:baka/models/playback_request.dart';
 import 'package:baka/services/playback/playback_content.dart';
 import 'package:baka/pages/setting/player_settings_page.dart';
 import 'package:baka/services/torrent/torrent_engine.dart';
 import 'package:baka/utils/format_utils.dart';
+import 'package:baka/widgets/anime_detail/anime_detail_placeholder.dart';
 import 'package:baka/widgets/baka_player/controller.dart';
 import 'package:baka/widgets/baka_player/view.dart';
 import 'package:baka/widgets/comment/comment_widget.dart';
 import 'package:baka/services/playback/danmaku_controller.dart';
+import 'package:baka/widgets/anime_detail/anime_detail_sheet.dart';
 import 'package:baka/widgets/platform/windows/windows_episode_list.dart';
 import 'package:baka/widgets/platform/windows/windows_title_bar.dart';
 
@@ -18,9 +25,10 @@ class WindowsPlayerLayout extends StatefulWidget {
   final bool inited;
   final PlaybackController controller;
   final DanmakuController danmakuController;
-  final ValueNotifier<bool> followNotifier;
+  final ValueNotifier<CollectionStatus?> followNotifier;
   final VoidCallback onSourceTap;
   final void Function(int) onEpisodeChanged;
+  final Future<bool> Function(int, bool)? onSetEpisodeWatched;
   final VoidCallback onCastPressed;
   final VoidCallback onWatchPartyPressed;
   final VoidCallback onPickEpisode;
@@ -32,6 +40,9 @@ class WindowsPlayerLayout extends StatefulWidget {
   final bool isSearching;
   final bool terminalPlaybackFailure;
   final VoidCallback onAiRepair;
+
+  /// 番剧详情面板关掉以后调用；面板里可能改过追番状态。
+  final VoidCallback? onDetailClosed;
 
   const WindowsPlayerLayout({
     required this.content,
@@ -52,6 +63,8 @@ class WindowsPlayerLayout extends StatefulWidget {
     required this.onAiRepair,
     this.isSearching = false,
     this.terminalPlaybackFailure = false,
+    this.onSetEpisodeWatched,
+    this.onDetailClosed,
     super.key,
   });
 
@@ -63,6 +76,48 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
   bool _showSidebar = true;
   int _tabIndex = 0;
   bool _isFullScreen = false;
+  bool _detailOpen = false;
+
+  /// 标题旁的 ⓘ：从底部升起完整详情页，画面留在后面继续播。
+  void _showDetail() {
+    if (_detailOpen) return;
+    _detailOpen = true;
+    final content = widget.content;
+    unawaited(
+      showAnimeDetailSheet(
+        context,
+        page: (context, close) => AnimeDetailPlaceholder(
+          data: content.detailData,
+          headerSliver: PlayerDetailEpisodes(
+            content: content,
+            onSelected: (index) {
+              // 先收面板再切集，切过去直接看到画面。
+              close();
+              widget.onEpisodeChanged(index);
+            },
+          ),
+          onSearchTap: () {
+            // 已经在播这部番，这个按钮就是给当前这一集找线路。
+            close();
+            widget.onSourceTap();
+          },
+          searchLabel: '切换播放源',
+          onRelatedTap: (data) {
+            // 换一部番：关掉当前播放页再开新的，任何时候只有一个播放器。
+            close();
+            NavigationService.toPlayback(
+              context,
+              PlaybackRequest.fromMap(data),
+              popFirst: true,
+            );
+          },
+        ),
+      ).whenComplete(() {
+        _detailOpen = false;
+        widget.onDetailClosed?.call();
+      }),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -112,8 +167,7 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
 
   Widget _buildPlayerArea(BuildContext context) {
     final content = widget.content;
-    final nextIndex = content.currPlayIndex + 1;
-    final hasNextEpisode = nextIndex < content.videoList.length;
+    final hasNextEpisode = content.nextEpisodeIndex() != null;
     return Container(
       color: Colors.black,
       child: Stack(
@@ -128,8 +182,12 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
               full: false,
               onPickEpisode: widget.onPickEpisode,
               hasNextEpisode: hasNextEpisode,
+              // 目标集在点击时再计算。
               onNextEpisode: hasNextEpisode
-                  ? () => widget.onEpisodeChanged(nextIndex)
+                  ? () {
+                      final target = content.nextEpisodeIndex();
+                      if (target != null) widget.onEpisodeChanged(target);
+                    }
                   : null,
               onFullScreenChanged: (full) {
                 setState(() => _isFullScreen = full);
@@ -283,90 +341,110 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
   Widget _buildPlaybackStatus(BuildContext context) {
     final primaryColor = Theme.of(context).colorScheme.primary;
 
-    return Container(
-      color: Colors.black,
-      child: Stack(
-        children: [
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: _buildTopHeaderBar(context),
-          ),
-          Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (!widget.terminalPlaybackFailure) ...[
-                  SizedBox(
-                    width: 32,
-                    height: 32,
-                    child: CircularProgressIndicator(
-                      color: primaryColor,
-                      strokeWidth: 2.5,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    widget.isSearching ? '正在自动匹配源中...' : '正在加载视频...',
-                    style: const TextStyle(color: Colors.white70, fontSize: 13),
-                  ),
-                ] else ...[
-                  const Icon(
-                    Icons.error_outline_rounded,
-                    color: Colors.redAccent,
-                    size: 42,
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    '播放失败，请换源或重试',
-                    style: TextStyle(color: Colors.white, fontSize: 13.5),
-                  ),
-                  const SizedBox(height: 14),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    alignment: WrapAlignment.center,
-                    children: [
-                      ElevatedButton.icon(
-                        onPressed: widget.onSourceTap,
-                        icon: const Icon(Icons.swap_horiz_rounded, size: 17),
-                        label: const Text('切换播放源'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: primaryColor,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 8,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(6),
-                          ),
+    // 加载与失败状态的退出通道：Esc 返回。
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          Navigator.of(context).maybePop();
+        },
+      },
+      child: Focus(
+        autofocus: true,
+        child: Container(
+          color: Colors.black,
+          child: Stack(
+            children: [
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: _buildTopHeaderBar(context),
+              ),
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!widget.terminalPlaybackFailure) ...[
+                      SizedBox(
+                        width: 32,
+                        height: 32,
+                        child: CircularProgressIndicator(
+                          color: primaryColor,
+                          strokeWidth: 2.5,
                         ),
                       ),
-                      OutlinedButton.icon(
-                        onPressed: widget.onAiRepair,
-                        icon: const Icon(Icons.auto_awesome_rounded, size: 17),
-                        label: const Text('AI 修复当前源'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          side: const BorderSide(color: Colors.white54),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 8,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(6),
-                          ),
+                      const SizedBox(height: 14),
+                      Text(
+                        widget.isSearching ? '正在自动匹配源中...' : '正在加载视频...',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 13,
                         ),
+                      ),
+                    ] else ...[
+                      const Icon(
+                        Icons.error_outline_rounded,
+                        color: Colors.redAccent,
+                        size: 42,
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        '播放失败，请换源或重试',
+                        style: TextStyle(color: Colors.white, fontSize: 13.5),
+                      ),
+                      const SizedBox(height: 14),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        alignment: WrapAlignment.center,
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed: widget.onSourceTap,
+                            icon: const Icon(
+                              Icons.swap_horiz_rounded,
+                              size: 17,
+                            ),
+                            label: const Text('切换播放源'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: primaryColor,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 8,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: widget.onAiRepair,
+                            icon: const Icon(
+                              Icons.auto_awesome_rounded,
+                              size: 17,
+                            ),
+                            label: const Text('AI 修复当前源'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white54),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 8,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
-                  ),
-                ],
-              ],
-            ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -416,6 +494,8 @@ class _WindowsPlayerLayoutState extends State<WindowsPlayerLayout> {
                   child: WindowsEpisodeList(
                     content: widget.content,
                     onEpisodeSelected: widget.onEpisodeChanged,
+                    onDetailTap: _showDetail,
+                    onSetEpisodeWatched: widget.onSetEpisodeWatched,
                     onDownloadPressed: widget.onDownloadPressed,
                     onUrlChanged: widget.onUrlChanged,
                     followNotifier: widget.followNotifier,

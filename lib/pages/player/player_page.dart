@@ -10,12 +10,14 @@ import 'package:baka/app/app_runtime.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/instance.dart';
 import 'package:baka/models/ai_rule_authoring.dart';
+import 'package:baka/models/collection.dart';
 import 'package:baka/models/playback_request.dart';
 import 'package:baka/models/skip_segment.dart';
 import 'package:baka/pages/player/bgm_detail_page.dart';
 import 'package:baka/pages/player/dlna_page.dart';
 import 'package:baka/pages/setting/player_settings_page.dart';
 import 'package:baka/pages/source/ai_rule_authoring_page.dart';
+import 'package:baka/services/account/bangumi_session.dart';
 import 'package:baka/services/collection/collection_repository.dart';
 import 'package:baka/services/matching/match_memory_service.dart';
 import 'package:baka/services/playback/danmaku_controller.dart';
@@ -29,6 +31,7 @@ import 'package:baka/source/runtime/source_operation.dart';
 import 'package:baka/source/source_registry.dart';
 import 'package:baka/utils/toast_utils.dart';
 import 'package:baka/widgets/anime_detail/anime_detail_placeholder.dart';
+import 'package:baka/widgets/anime_detail/collection_sheet.dart';
 import 'package:baka/widgets/anime_detail/controller/video_source_search_controller.dart';
 import 'package:baka/widgets/anime_detail/video_source_search_sheet.dart';
 import 'package:baka/widgets/baka_player/index.dart';
@@ -82,7 +85,7 @@ class _PlayerPageState extends State<PlayerPage>
   final _mediaSession = Get.find<MediaSessionService>();
   final ctr = PlaybackController();
   final _danmaku = DanmakuController();
-  final _followed = ValueNotifier(false);
+  final _followed = ValueNotifier<CollectionStatus?>(null);
   final _showDetail = ValueNotifier(false);
   final _sortAscending = ValueNotifier(true);
   final _failedSources = <String>{};
@@ -111,10 +114,12 @@ class _PlayerPageState extends State<PlayerPage>
   bool _wasPlaying = false;
   bool _fullscreen = false;
   bool _darkTheme = false;
-  bool _updatingFollow = false;
+
+  /// 状态卡还开着时不再弹第二张；写入过程不拦下一次点击。
+  bool _collectionSheetOpen = false;
 
   bool get _hidden => contentFilter.value && _content.isNsfw;
-  bool get _hasNext => _content.currPlayIndex + 1 < _content.videoList.length;
+  bool get _hasNext => _content.hasNextEpisode;
   bool _isStale(int id) => !mounted || id != _generation;
 
   void _refresh() {
@@ -333,12 +338,13 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   void _playNext() {
-    if (_hasNext) unawaited(_switchEpisode(_content.currPlayIndex + 1));
+    final next = _content.nextEpisodeIndex();
+    if (next != null) unawaited(_switchEpisode(next));
   }
 
   void _playPrevious() {
-    final index = _content.currPlayIndex;
-    if (index > 0) unawaited(_switchEpisode(index - 1));
+    final previous = _content.previousEpisodeIndex();
+    if (previous != null) unawaited(_switchEpisode(previous));
   }
 
   Future<void> _reloadHlsFilter(bool enabled) {
@@ -488,6 +494,7 @@ class _PlayerPageState extends State<PlayerPage>
         start: start,
         bgmId: bgmId,
         cover: content.coverImageUrl,
+        bgmEpisodeSortOf: () => content.currentBgmEpisodeSort,
       );
       await ctr.open(
         url,
@@ -768,17 +775,66 @@ class _PlayerPageState extends State<PlayerPage>
       context: context,
       videoList: content.videoList,
       currentIndex: content.currPlayIndex,
-      videoId: '${content.data['id']}',
+      videoId: content.watchedVideoId,
+      legacyVideoId: '${content.data['id']}',
       isFullScreen:
           _fullscreen && (downloadMode || !Instances.isDesktopPlatform),
       postDetail: content.detailData,
       urlResolver: content.resolveEpisodeUrl,
       startInDownloadMode: downloadMode,
       currentLineIndex: downloadMode ? null : content.currUrl,
+      bgmSubjectId: content.bgmInfo.subjectId,
+      bgmEpisodes: content.bgmEpisodes,
+      coverUrl: content.coverImageUrl,
       sourceNames: downloadMode ? null : content.sourceNames,
       onLineChanged: downloadMode ? null : _changeLine,
+      onSetEpisodeWatched: downloadMode || !bangumiSession.quickMarkGrid
+          ? null
+          : _setEpisodeWatched,
     );
     if (index != null) unawaited(_switchEpisode(index));
+  }
+
+  /// 手动点格子：先记本地，连着 Bangumi 时再后台同步。
+  Future<bool> _setEpisodeWatched(int episodeIndex, bool watched) async {
+    final subjectId = _content.bgmInfo.subjectId;
+    await historyRepository.setEpisodeWatched(
+      _content.watchedVideoId,
+      episodeIndex,
+      watched,
+      bgmId: subjectId,
+    );
+    showSnackBar(watched ? '已标记为看过' : '已取消看过标记');
+
+    if (subjectId != null && bangumiSession.isConnected) {
+      unawaited(
+        _syncEpisodeWatchedToBangumi(subjectId, episodeIndex, watched),
+      );
+    }
+    return true;
+  }
+
+  Future<void> _syncEpisodeWatchedToBangumi(
+    int subjectId,
+    int episodeIndex,
+    bool watched,
+  ) async {
+    // 用 Bangumi 分集列表里的 sort，和自动标记保持一致；对不上就不上报。
+    final number = _content.bgmEpisodeSortAt(episodeIndex);
+    if (number == null) {
+      showSnackBar('认不出这一集在 Bangumi 上的集号，只记在本地', isError: true);
+      return;
+    }
+    try {
+      final ok = await bangumiSession.setEpisodeWatched(
+        subjectId: subjectId,
+        episodeNumber: number,
+        watched: watched,
+      );
+      if (!ok) showSnackBar('Bangumi 上没有第 $number 集，只记在本地', isError: true);
+    } catch (error) {
+      showSnackBar('Bangumi 同步失败，已记在本地：$error', isError: true);
+    }
   }
 
   void _showCast() {
@@ -800,22 +856,75 @@ class _PlayerPageState extends State<PlayerPage>
   Future<void> _loadFollowState() async {
     try {
       await _content.refreshCollection();
-      if (mounted) _followed.value = _content.isFollow();
+      if (mounted) _followed.value = _collectionStatus;
     } catch (error) {
       Log.w('Player', '读取追番状态失败: $error');
     }
   }
 
-  Future<void> _toggleFollow() async {
-    if (_updatingFollow) return;
-    _updatingFollow = true;
+  CollectionStatus? get _collectionStatus =>
+      CollectionStatus.fromValue(_content.collection?.status);
+
+  /// 追番按钮：弹出收藏状态，选完立刻写本地，网络请求放后台。
+  Future<void> _showCollectionSheet() async {
+    if (_collectionSheetOpen) return;
+    _collectionSheetOpen = true;
     try {
-      await _content.toggleFollow();
-      if (mounted) _followed.value = _content.isFollow();
-    } catch (e) {
-      if (mounted) showSnackBar(e.toString(), isError: true);
+      final current = _collectionStatus;
+      final wide = MediaQuery.sizeOf(context).width >= 700;
+      HapticFeedback.selectionClick();
+      final picked = await showModalBottomSheet<Object?>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) {
+          final sheet = CollectionStatusSheet(
+            currentStatus: current,
+            onSelect: (status) => Navigator.pop(ctx, status),
+            // 只有本地收藏 + Bangumi 才删不掉；云端收藏可以取消。
+            onRemove: current == null || collections.isBangumiMode
+                ? null
+                : () => Navigator.pop(ctx, _CollectionAction.remove),
+          );
+          // 桌面端别把状态卡铺满整屏。
+          return wide
+              ? Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [SizedBox(width: 460, child: sheet)],
+                )
+              : sheet;
+        },
+      );
+      if (!mounted || picked == null) return;
+      final status = picked is CollectionStatus ? picked : null;
+      if (status == current) {
+        // 点已选中的状态时给出提示。
+        showSnackBar(
+          current == null ? '还没有收藏' : '已经是「${current.label}」了',
+        );
+        return;
+      }
+
+      final before = _followed.value;
+      final task = _content.setCollectionStatus(status);
+      // setCollectionStatus 会先写乐观值，这里立即刷新胶囊。
+      if (mounted) _followed.value = _collectionStatus;
+      try {
+        await task;
+        if (mounted) {
+          // 请求返回后再同步一次胶囊状态。
+          _followed.value = _collectionStatus;
+          showSnackBar(
+            status == null ? '已取消收藏' : '已标记为「${status.label}」',
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          _followed.value = before;
+          showSnackBar(e.toString(), isError: true);
+        }
+      }
     } finally {
-      _updatingFollow = false;
+      _collectionSheetOpen = false;
     }
   }
 
@@ -872,6 +981,9 @@ class _PlayerPageState extends State<PlayerPage>
           isSearching: _autoMatch != null,
           onSourceTap: _openSourceSheet,
           onEpisodeChanged: _switchEpisode,
+          onSetEpisodeWatched: bangumiSession.quickMarkGrid
+              ? _setEpisodeWatched
+              : null,
           onCastPressed: _showCast,
           onWatchPartyPressed: _showWatchParty,
           onPickEpisode: _showEpisodePicker,
@@ -879,9 +991,11 @@ class _PlayerPageState extends State<PlayerPage>
           onUrlChanged: _changeLine,
           onCommentLinkTap: _onCommentLink,
           onDownloadPressed: () => _showEpisodePicker(downloadMode: true),
-          onFollowPressed: _toggleFollow,
+          onFollowPressed: _showCollectionSheet,
           terminalPlaybackFailure: _failure != null,
           onAiRepair: _openAiRepair,
+          // 详情面板里改过追番状态的话，侧栏的追番胶囊要跟上。
+          onDetailClosed: _loadFollowState,
         ),
       );
     }
@@ -1169,7 +1283,8 @@ class _PlayerPageState extends State<PlayerPage>
 
   Widget _buildEpisodeTab(BuildContext context) {
     final content = _content;
-    final videoId = '${content.data['id']}';
+    final videoId = content.watchedVideoId;
+    final legacyVideoId = '${content.data['id']}';
     final wide =
         Instances.isDesktopPlatform || MediaQuery.sizeOf(context).width > 600;
     return ValueListenableBuilder<bool>(
@@ -1179,7 +1294,7 @@ class _PlayerPageState extends State<PlayerPage>
           VideoDetailCard(
             content: content,
             followNotifier: _followed,
-            onFollowPressed: _toggleFollow,
+            onFollowPressed: _showCollectionSheet,
             onShowDetail: () => _showDetail.value = true,
             danmakuController: _danmaku,
             onSourceTap: _openSourceSheet,
@@ -1232,6 +1347,9 @@ class _PlayerPageState extends State<PlayerPage>
                     videoList: content.videoList,
                     ascending: ascending,
                     currPlayIndex: content.currPlayIndex,
+                    videoId: videoId,
+                    legacyVideoId: legacyVideoId,
+                    bgmId: content.bgmInfo.subjectId,
                     onEpisodeChanged: _switchEpisode,
                   )
                 : SliverToBoxAdapter(
@@ -1241,6 +1359,8 @@ class _PlayerPageState extends State<PlayerPage>
                       ascending: ascending,
                       currPlayIndex: content.currPlayIndex,
                       videoId: videoId,
+                      legacyVideoId: legacyVideoId,
+                      bgmId: content.bgmInfo.subjectId,
                       onEpisodeChanged: _switchEpisode,
                     ),
                   ),
@@ -1250,3 +1370,6 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 }
+
+/// 收藏弹窗的返回值：用独立标记表示「取消收藏」。
+enum _CollectionAction { remove }

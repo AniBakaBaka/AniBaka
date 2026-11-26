@@ -3,6 +3,7 @@ import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/skip_segment.dart';
 import 'package:baka/source/runtime/source_operation.dart';
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:baka/utils/title_matcher.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/utils/json_values.dart';
@@ -18,6 +19,7 @@ import 'package:baka/models/playback_request.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/services/collection/collection_repository.dart';
 import 'package:baka/services/playback/danmaku_controller.dart';
+import 'package:baka/services/playback/episode_numbering.dart';
 import 'package:baka/services/playback/history_repository.dart';
 import 'package:baka/services/source/source_repository.dart';
 import 'package:baka/services/torrent/torrent_service.dart';
@@ -36,8 +38,9 @@ class PlaybackContent {
     required this.sources,
     required this.collections,
     required this.history,
-    this.posIndex,
+    int? posIndex,
   }) : _request = request.copyWith() {
+    _posIndex = posIndex;
     if (!isLocalSource) {
       bgmInfo = BgmInfo.fromData(data);
       bgmDetailData = data['bgmDetailData'] as Map<String, dynamic>?;
@@ -48,7 +51,7 @@ class PlaybackContent {
         bgmId: bgmInfo.subjectId,
       );
       _request.episodeIndex =
-          posIndex ?? request.episodeIndex ?? remembered?.episodeIndex;
+          _takePosIndex() ?? request.episodeIndex ?? remembered?.episodeIndex;
       _request.lineIndex = request.lineIndex ?? remembered?.lineIndex;
     }
   }
@@ -62,12 +65,119 @@ class PlaybackContent {
   final CollectionRepository collections;
   final HistoryRepository history;
   Map<String, dynamic> get data => request.metadata;
-  final int? posIndex;
+
+  /// 打开播放页时指定的集下标，只用一次。
+  int? _posIndex;
+
+  int? _takePosIndex() {
+    final value = _posIndex;
+    _posIndex = null;
+    return value;
+  }
 
   List<PlaybackEpisode> get videoList => request.episodes;
   int get currPlayIndex => request.episodeIndex ?? 0;
   int get currUrl => request.lineIndex ?? 1;
   List<String>? get sourceNames => request.sourceNames;
+
+  EpisodeNumbering? _numbering;
+  List<PlaybackEpisode>? _numberingSource;
+
+  /// 源分集标题里的集号。
+  EpisodeNumbering get episodeNumbering {
+    if (!identical(_numberingSource, videoList)) {
+      _numberingSource = videoList;
+      _numbering = EpisodeNumbering(videoList.map((episode) => episode.title));
+    }
+    return _numbering!;
+  }
+
+  /// 播放顺序上的下一集，按集号而不是数组下标。
+  int? nextEpisodeIndex() {
+    if (videoList.isEmpty) return null;
+    final numbering = episodeNumbering;
+    final current = numbering.isUsable
+        ? numbering.numberAt(currPlayIndex)
+        : null;
+    if (current != null) {
+      final byNumber = numbering.nextIndex(currPlayIndex);
+      if (byNumber != null) return byNumber;
+    }
+    final following = currPlayIndex + 1;
+    if (following >= videoList.length) return null;
+    // 下一项没编号（特别篇）或集号更大时才顺序前进。
+    final next = numbering.numberAt(following);
+    if (current == null || next == null || next > current) return following;
+    return null;
+  }
+
+  int? previousEpisodeIndex() {
+    if (videoList.isEmpty) return null;
+    final numbering = episodeNumbering;
+    final current = numbering.isUsable
+        ? numbering.numberAt(currPlayIndex)
+        : null;
+    if (current != null) {
+      final byNumber = numbering.previousIndex(currPlayIndex);
+      if (byNumber != null) return byNumber;
+    }
+    final preceding = currPlayIndex - 1;
+    if (preceding < 0) return null;
+    final previous = numbering.numberAt(preceding);
+    if (current == null || previous == null || previous < current) {
+      return preceding;
+    }
+    return null;
+  }
+
+  bool get hasNextEpisode => nextEpisodeIndex() != null;
+
+  /// 当前集在 Bangumi 上的集序（1 起算），用于收藏进度；解析不出集号时为 null。
+  int? get currentBgmOrdinal {
+    final number = episodeNumbering.numberAt(currPlayIndex);
+    if (number == null) return null;
+    if (bgmEpisodes.isEmpty) return number;
+    return BgmEpisodeOrder.ordinalOf(bgmEpisodes, number);
+  }
+
+  /// 当前集在 Bangumi 分集列表里的 `sort`，用于单集标记；对不上时为 null。
+  int? get currentBgmEpisodeSort => bgmEpisodeSortAt(currPlayIndex);
+
+  /// 指定源下标对应 Bangumi 分集的 `sort`；集号对不上时为 null。
+  int? bgmEpisodeSortAt(int index) {
+    final number = episodeNumbering.numberAt(index);
+    if (number == null) return null;
+    if (bgmEpisodes.isEmpty) return number;
+    final episode = BgmEpisodeOrder.byNumber(bgmEpisodes, number);
+    final sort = episode?['sort'];
+    return sort is num ? sort.toInt() : null;
+  }
+
+  /// 本地已看状态用的稳定标识：优先 Bangumi 条目，换源后仍指向同一部番。
+  String get watchedVideoId {
+    final bgmId = bgmInfo.subjectId;
+    if (bgmId != null && bgmId > 0) return 'bgm_$bgmId';
+    return '${data['id']}';
+  }
+
+  /// Bangumi 条目的本篇总集数；未知时为 null。
+  int? get bgmEpisodeCount {
+    if (bgmEpisodes.isNotEmpty) return bgmEpisodes.length;
+    final total = toInt(
+      bgmDetailData?['eps'] ?? bgmDetailData?['total_episodes'],
+    );
+    return total != null && total > 0 ? total : null;
+  }
+
+  /// 源下标 → Bangumi 分集条目；集号对不上时返回 null。
+  Map<String, dynamic>? _bgmEpisodeForSource(int index) {
+    final number = episodeNumbering.numberAt(index);
+    if (number != null && bgmEpisodes.isNotEmpty) {
+      return BgmEpisodeOrder.byNumber(bgmEpisodes, number);
+    }
+    if (index >= 0 && index < bgmEpisodes.length) return bgmEpisodes[index];
+    return null;
+  }
 
   bool get isLocalSource => request.source == '_local';
   bool get isAdapter {
@@ -75,8 +185,7 @@ class PlaybackContent {
     return !isLocalSource && AdapterRegistry.isAdapterSource(source);
   }
 
-  /// Bangumi 条目没有对应的本站贴文：它的 `id` 是 BGM 条目 id。
-  /// 两个 id 不是同一命名空间，按贴文查询会命中别人的贴文或 null。
+  /// Bangumi 条目的 `id` 是 BGM 条目 id，与贴文 id 不在同一命名空间。
   bool get isBgmSubject => request.source.trim() == 'bgm';
 
   /// A cloud history record identifies the anime, not a source on this device.
@@ -104,6 +213,7 @@ class PlaybackContent {
   Future<BgmInfo>? _bgmInfoFuture;
   Future<void>? _bgmDetailFuture;
   AnimeCollection? collection;
+  /// 收藏读取的版本号；写入时自增，用来丢弃过期的读取结果。
   int _collectionRevision = 0;
 
   SourceAdapter? _playbackKeepAliveAdapter;
@@ -136,8 +246,8 @@ class PlaybackContent {
   }
 
   String? get bgmEpisodeTitle {
-    if (currPlayIndex < 0 || currPlayIndex >= bgmEpisodes.length) return null;
-    final ep = bgmEpisodes[currPlayIndex];
+    final ep = _bgmEpisodeForSource(currPlayIndex);
+    if (ep == null) return null;
     return (ep['name_cn']?.toString().isNotEmpty == true
             ? ep['name_cn']
             : ep['name'])
@@ -211,6 +321,7 @@ class PlaybackContent {
       ]),
       timelineKey: timelineKey,
       episodeNumber:
+          episodeNumbering.numberAt(currPlayIndex)?.toDouble() ??
           skipEpisodeNumber(currentEpisodeTitle) ??
           (currPlayIndex + 1).toDouble(),
       seriesKey: SkipContext.sourceIdentity([
@@ -302,7 +413,16 @@ class PlaybackContent {
         lineIndex: (lineIndex ?? currUrl) > 0 ? (lineIndex ?? currUrl) : 1,
       );
     }
-    final normalizedEpisodeIndex = episodeIndex.clamp(0, videoList.length - 1);
+    var target = episodeIndex;
+    if (target < 0 || target >= videoList.length) {
+      // 越界时按标题里的集号反查源下标，找不到再夹取。
+      final mapped = episodeNumbering.indexOfNumber(target + 1);
+      if (mapped != null) {
+        Log.w('Playback', '剧集下标 $episodeIndex 越界，按集号映射到第 ${target + 1} 集');
+        target = mapped;
+      }
+    }
+    final normalizedEpisodeIndex = target.clamp(0, videoList.length - 1);
     final preferred = lineIndex ?? currUrl;
     final episode = videoList[normalizedEpisodeIndex];
     return (
@@ -360,12 +480,12 @@ class PlaybackContent {
           ],
         );
       }
-      final preferred = posIndex ?? currPlayIndex;
+      final preferred = _takePosIndex() ?? currPlayIndex;
       applySelection(normalizeSelection(preferred, currUrl));
       return;
     }
 
-    final explicitEpisodeIndex = posIndex ?? request.episodeIndex;
+    final explicitEpisodeIndex = _takePosIndex() ?? request.episodeIndex;
     final explicitLineIndex = request.lineIndex;
 
     // Bangumi 条目的 `id` 是 BGM 条目 id，拿去查贴文只会拿到 null 或别人的贴文。
@@ -688,9 +808,12 @@ class PlaybackContent {
     final detach = lifetime.token.onCancel(cancel);
     final detachOuter = SourceOperation.current?.token.onCancel(cancel);
     try {
+      // `p` 是集号，不是源分集的数组下标。
+      final episodeNumber =
+          episodeNumbering.numberAt(episodeIndex) ?? episodeIndex + 1;
       return await DanmakuController.fetchDanmaku(
         subjectId: bgmId,
-        episodeIndex: episodeIndex + 1,
+        episodeIndex: episodeNumber,
         titles: searchTitles,
         abortTrigger: abortTrigger == null
             ? abort.future
@@ -702,7 +825,7 @@ class PlaybackContent {
     }
   }
 
-  /// 贴文 id 只对本站条目成立；BGM 条目 id 一旦写进收藏的 post_id 就是串号。
+  /// 贴文 id 只对本站条目成立，BGM 条目 id 不能写进收藏的 post_id。
   int? get validPostId =>
       AnimeCollection.postIdFrom(data, source: request.source);
 
@@ -723,45 +846,90 @@ class PlaybackContent {
     if (!_disposed && revision == _collectionRevision) collection = current;
   }
 
+  /// 追番开关：已追番则取消，否则标记为「在看」。
   Future<void> toggleFollow() async {
-    await refreshCollection();
-    if (_disposed) return;
+    if (isFollow()) return removeFromCollection();
+    return setCollectionStatus(CollectionStatus.doing);
+  }
 
-    if (isFollow()) {
-      final current = collection!;
-      final postId = current.postId ?? validPostId;
-      final bgmId =
-          current.bgmId ?? (postId == null ? bgmInfo.subjectId : null);
+  /// 取消收藏。[collection] 先清空，请求失败再放回。
+  Future<void> removeFromCollection() async {
+    final previous = collection;
+    if (previous == null) return;
+    // 进页面时的收藏读取如果还没返回，忽略它的结果。
+    ++_collectionRevision;
+    final postId = previous.postId ?? validPostId;
+    final bgmId = previous.bgmId ?? (postId == null ? bgmInfo.subjectId : null);
+    collection = null;
+    try {
       final success = bgmId != null
           ? await collections.deleteByBgmId(bgmId)
           : postId != null
           ? await collections.delete(postId)
           : false;
       if (!success) throw Exception('取消追番失败');
-      collection = null;
-      return;
+    } catch (error) {
+      collection = previous;
+      rethrow;
     }
+  }
+
+  /// 切换收藏状态，[status] 为空表示取消收藏。
+  ///
+  /// 本地模式先写本地、Bangumi 同步放后台；云端模式等本站保存返回后再更新。
+  /// Bangumi 只做镜像，失败不影响收藏结果。
+  Future<void> setCollectionStatus(CollectionStatus? status) async {
+    if (status == null) return removeFromCollection();
+    final previous = collection;
+    if (CollectionStatus.fromValue(previous?.status) == status) return;
+    // 进页面时的收藏读取如果还没返回，忽略它的结果。
+    ++_collectionRevision;
 
     final detail = bgmDetailData;
-    final epCount = videoList.isEmpty ? null : videoList.length;
-    final result = await collections.addOrUpdate(
-      AnimeCollection(
-        postId: validPostId,
-        bgmId: bgmInfo.subjectId,
-        status: CollectionStatus.doing.value,
-        nsfw: isNsfw,
-        epTotal: epCount,
-        epWatched: epCount == null ? null : currPlayIndex + 1,
-        postTitle: title,
-        postCover: coverImageUrl,
-        bgmImage: bgmInfo.imageUrl,
-        bgmTitle:
-            detail?['name_cn']?.toString() ??
-            detail?['name']?.toString() ??
-            title,
-      ),
+    // 总集数与已看集数都以 Bangumi 为准。
+    final epCount =
+        bgmEpisodeCount ?? (videoList.isEmpty ? null : videoList.length);
+    final bgmId = previous?.bgmId ?? bgmInfo.subjectId;
+    final localWatched = bgmId == null
+        ? 0
+        : HistoryRepository.watchedCountForBgm(bgmId);
+    final watched = currentBgmOrdinal ?? 0;
+    // 取已有进度、本地已看与当前集号三者中的最大值。
+    final epWatched = [
+      previous?.epWatched ?? 0,
+      localWatched,
+      watched,
+    ].reduce(math.max);
+    final optimistic = AnimeCollection(
+      postId: previous?.postId ?? validPostId,
+      bgmId: bgmId,
+      status: status.value,
+      rating: previous?.rating ?? 0,
+      comment: previous?.comment,
+      epTotal: previous?.epTotal ?? epCount,
+      epWatched: epWatched,
+      tags: previous?.tags ?? const [],
+      isPrivate: previous?.isPrivate ?? false,
+      nsfw: previous?.nsfw ?? isNsfw,
+      postTitle: previous?.postTitle ?? title,
+      postCover: previous?.postCover ?? coverImageUrl,
+      bgmRating: previous?.bgmRating,
+      bgmImage: previous?.bgmImage ?? bgmInfo.imageUrl,
+      bgmTitle:
+          previous?.bgmTitle ??
+          detail?['name_cn']?.toString() ??
+          detail?['name']?.toString() ??
+          title,
     );
-    collection = result;
+    collection = optimistic;
+    try {
+      // 本地模式只写本地，Bangumi 由收藏仓库后台同步；云端模式等本站保存返回。
+      // 只改状态，Bangumi 那边也只提交 type。
+      collection = await collections.addOrUpdate(optimistic, statusOnly: true);
+    } catch (error) {
+      collection = previous;
+      rethrow;
+    }
   }
 
   Future<void>? _disposing;

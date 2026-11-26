@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:baka/core/app_logger.dart';
 import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/playback_request.dart';
@@ -39,6 +42,8 @@ class _LibraryPageState extends State<LibraryPage> {
   int _collectionPage = 1;
   bool _hasMoreCollection = true;
   final ScrollController _scrollController = ScrollController();
+  Timer? _collectionRefreshTimer;
+  bool _collectionStale = false;
 
   bool get _isLoggedIn =>
       Instances.sp.getString('usertoken')?.isNotEmpty == true;
@@ -48,14 +53,78 @@ class _LibraryPageState extends State<LibraryPage> {
     super.initState();
     _historyList = historyRepository.getHistoryList();
     _scrollController.addListener(_onScroll);
+    collections.revision.addListener(_onCollectionChanged);
     _loadInitialData();
   }
 
   @override
   void dispose() {
+    collections.revision.removeListener(_onCollectionChanged);
+    _collectionRefreshTimer?.cancel();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// 收藏在别处被改动时重新取统计与列表。
+  void _onCollectionChanged() {
+    if (!mounted) return;
+    _collectionStale = true;
+    _scheduleCollectionRefresh();
+  }
+
+  /// 合并 200ms 内的连续改动，只刷新一次。
+  void _scheduleCollectionRefresh() {
+    _collectionRefreshTimer?.cancel();
+    _collectionRefreshTimer = Timer(const Duration(milliseconds: 200), () {
+      if (!mounted || _selectedIndex != 1) return;
+      _collectionStale = false;
+      _fetchStats();
+      _reloadCollectionInPlace();
+    });
+  }
+
+  /// 收藏在别处改了以后重取列表，保留已经翻到的页数和滚动位置。
+  Future<void> _reloadCollectionInPlace() async {
+    final generation = ++_collectionGeneration;
+    final status = _collectionStatusFilter;
+    final merged = <AnimeCollection>[];
+    var total = 0;
+    var failed = false;
+    for (var page = 1; page <= _collectionPage; page++) {
+      try {
+        final response = await collections.getList(
+          page: page,
+          pageSize: 20,
+          status: status,
+        );
+        total = response.total;
+        merged.addAll(response.list);
+        if (response.list.isEmpty || merged.length >= total) break;
+      } catch (e) {
+        Log.w('Library', '刷新收藏列表失败: $e');
+        failed = true;
+        break;
+      }
+    }
+    if (!mounted ||
+        generation != _collectionGeneration ||
+        status != _collectionStatusFilter) {
+      return;
+    }
+    if (failed) {
+      // 保留原来的列表，只收掉可能被这次刷新顶掉的加载状态。
+      setState(() => _isCollectionLoading = false);
+      return;
+    }
+    HistoryRepository.prefetchWatchedCounts(
+      merged.map((item) => item.bgmId).whereType<int>(),
+    );
+    setState(() {
+      _isCollectionLoading = false;
+      _collectionList = merged;
+      _hasMoreCollection = merged.length < total;
+    });
   }
 
   void _onScroll() {
@@ -102,6 +171,10 @@ class _LibraryPageState extends State<LibraryPage> {
         page: page,
         pageSize: 20,
         status: status,
+      );
+      // 列表出来时一次算好已看集数，卡片只读结果。
+      HistoryRepository.prefetchWatchedCounts(
+        response.list.map((item) => item.bgmId).whereType<int>(),
       );
       if (!mounted ||
           generation != _collectionGeneration ||
@@ -194,8 +267,14 @@ class _LibraryPageState extends State<LibraryPage> {
                 IconButton(
                   icon: const Icon(Icons.refresh_rounded),
                   onPressed: () {
-                    _fetchCollectionData();
-                    _fetchStats();
+                    // 手动刷新要跳过冷却，先向 Bangumi 拉一次再读本地。
+                    unawaited(
+                      collections.refreshFromBangumi().then((_) {
+                        if (!mounted) return;
+                        _fetchCollectionData();
+                        _fetchStats();
+                      }),
+                    );
                   },
                   tooltip: '刷新',
                 ),
@@ -214,6 +293,47 @@ class _LibraryPageState extends State<LibraryPage> {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                 child: _buildStatusFilterChips(),
+              ),
+            ),
+          if (_selectedIndex == 1)
+            SliverToBoxAdapter(
+              child: ValueListenableBuilder<bool>(
+                valueListenable: collections.servingCache,
+                builder: (context, offline, _) {
+                  if (!offline) return const SizedBox.shrink();
+                  final theme = Theme.of(context);
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.cloud_off_rounded,
+                            size: 16,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'AniBaka 服务器暂时连不上，显示的是本地缓存',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
           _selectedIndex == 0
@@ -276,7 +396,9 @@ class _LibraryPageState extends State<LibraryPage> {
                 setState(() => _selectedIndex = 1);
                 if (_collectionList.isEmpty) {
                   _fetchCollectionData();
-                  if (_stats == null) _fetchStats();
+                  _fetchStats();
+                } else if (_collectionStale) {
+                  _scheduleCollectionRefresh();
                 }
               },
             ),
@@ -612,12 +734,26 @@ class _CollectionCard extends StatelessWidget {
   };
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      ValueListenableBuilder<int>(
+        valueListenable: historyRepository.revision,
+        builder: (context, _, _) => _buildCard(context),
+      );
+
+  Widget _buildCard(BuildContext context) {
     final statusColor = _statusColors[collection.status] ?? Colors.grey;
     final statusText =
         CollectionStatus.fromValue(collection.status)?.label ?? '';
     final title = collection.displayTitle;
-    final hasEp = collection.epWatched != null && collection.epWatched! > 0;
+    final bgmId = collection.bgmId;
+    final localWatched = bgmId == null
+        ? 0
+        : HistoryRepository.watchedCountForBgm(bgmId);
+    // 本地取消过单集时以本地记录为准，其余取远端进度。
+    final epWatched = bgmId != null && HistoryRepository.hasLocalOverride(bgmId)
+        ? localWatched
+        : math.max(collection.epWatched ?? 0, localWatched);
+    final hasEp = epWatched > 0;
     final hasTotal = collection.epTotal != null && collection.epTotal! > 0;
 
     final mapData = {
@@ -628,13 +764,13 @@ class _CollectionCard extends StatelessWidget {
     };
 
     String? remainingText;
-    if (hasTotal && hasEp && collection.epTotal! >= collection.epWatched!) {
-      final remain = collection.epTotal! - collection.epWatched!;
+    if (hasTotal && hasEp && collection.epTotal! >= epWatched) {
+      final remain = collection.epTotal! - epWatched;
       remainingText = remain > 0 ? '剩 $remain 集' : '已看完';
     } else if (hasTotal) {
       remainingText = '全 ${collection.epTotal} 集';
     } else if (hasEp) {
-      remainingText = '已看 ${collection.epWatched} 集';
+      remainingText = '已看 $epWatched 集';
     }
 
     return Stack(

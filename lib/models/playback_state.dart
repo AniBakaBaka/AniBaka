@@ -197,6 +197,7 @@ class PlaybackPreferences {
     this.hwdecMode = 'auto',
     this.videoRenderer = 'gpu',
     this.filterHlsAds = false,
+    this.wheelVolume = true,
   });
 
   final bool rememberLastPosition;
@@ -220,6 +221,9 @@ class PlaybackPreferences {
   final String videoRenderer;
   final bool filterHlsAds;
 
+  /// 桌面端滚轮调节音量。
+  final bool wheelVolume;
+
   PlaybackPreferences copyWith({
     bool? rememberLastPosition,
     bool? autoFullscreen,
@@ -241,6 +245,7 @@ class PlaybackPreferences {
     String? hwdecMode,
     String? videoRenderer,
     bool? filterHlsAds,
+    bool? wheelVolume,
   }) => PlaybackPreferences(
     rememberLastPosition: rememberLastPosition ?? this.rememberLastPosition,
     autoFullscreen: autoFullscreen ?? this.autoFullscreen,
@@ -263,6 +268,7 @@ class PlaybackPreferences {
     hwdecMode: hwdecMode ?? this.hwdecMode,
     videoRenderer: videoRenderer ?? this.videoRenderer,
     filterHlsAds: filterHlsAds ?? this.filterHlsAds,
+    wheelVolume: wheelVolume ?? this.wheelVolume,
   );
 
   @override
@@ -288,7 +294,8 @@ class PlaybackPreferences {
           videoFitDescription == other.videoFitDescription &&
           hwdecMode == other.hwdecMode &&
           videoRenderer == other.videoRenderer &&
-          filterHlsAds == other.filterHlsAds;
+          filterHlsAds == other.filterHlsAds &&
+          wheelVolume == other.wheelVolume;
 
   @override
   int get hashCode => Object.hash(
@@ -310,6 +317,7 @@ class PlaybackPreferences {
     videoFit,
     videoFitDescription,
     Object.hash(hwdecMode, videoRenderer, filterHlsAds),
+    wheelVolume,
   );
 }
 

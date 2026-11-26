@@ -283,7 +283,7 @@ String _formatTime(Duration value) {
       '${two(value.inSeconds % 60)}';
 }
 
-/// 投屏面板（Bottom Sheet）
+/// 投屏面板（与弹幕/播放器设置共用侧边浮层）
 class DlnaCastPanel extends StatelessWidget {
   const DlnaCastPanel({required this.controller, required this.url, super.key});
 
@@ -296,86 +296,24 @@ class DlnaCastPanel extends StatelessWidget {
     BuildContext context,
     DlnaCastController controller, {
     required String url,
-  }) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.transparent,
-      builder: (_) => DlnaCastPanel(controller: controller, url: url),
-    );
-  }
+  }) => showPlayerSettingsPanel(
+    context,
+    DlnaCastPanel(controller: controller, url: url),
+  );
 
   @override
-  Widget build(BuildContext context) {
-    final portrait = isBottomPlayerPanel(context);
-    final theme = Theme.of(context);
-    final media = MediaQuery.of(context);
-    final height = portrait
-        ? (media.size.height - media.padding.top - media.size.width * 9 / 16)
-              .clamp(0.0, media.size.height * 0.74)
-        : (media.size.height - media.padding.top) * 0.9;
-
-    return Material(
-      color: theme.colorScheme.surfaceContainerLow,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-      clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        height: height,
-        child: SafeArea(
-          top: false,
-          child: Column(
-            children: [
-              SizedBox(
-                height: 24,
-                child: Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.onSurfaceVariant.withValues(
-                        alpha: 0.4,
-                      ),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 12, 12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '投屏',
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    IconButton.filledTonal(
-                      tooltip: '收起投屏面板',
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: ListenableBuilder(
-                  listenable: controller,
-                  builder: (context, _) => controller.connected
-                      ? _buildControls(theme)
-                      : _buildDevices(theme),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => PanelContainer(
+    title: '投屏',
+    child: ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) {
+        final theme = Theme.of(context);
+        return controller.connected
+            ? _buildControls(theme)
+            : _buildDevices(theme);
+      },
+    ),
+  );
 
   Widget _buildDevices(ThemeData theme) {
     final colors = theme.colorScheme;

@@ -3,6 +3,7 @@ import 'package:baka/models/anime_filter.dart';
 import 'package:baka/pages/home/home_controller.dart';
 import 'package:baka/widgets/anime/post_card.dart';
 import 'package:baka/widgets/common/refresh.dart';
+import 'package:baka/widgets/platform/windows/windows_continue_watching.dart';
 import 'package:baka/widgets/platform/windows/windows_home_widgets.dart';
 import 'package:baka/widgets/search/tag_filter_sheet.dart';
 import 'package:flutter/material.dart';
@@ -53,6 +54,7 @@ class WindowsHomePage extends StatelessWidget {
             scrollCacheExtent: const ScrollCacheExtent.pixels(800),
             slivers: [
               _buildBanner(),
+              _buildContinueWatching(),
               _buildSchedule(textHeight),
               _buildRanks(textHeight),
               _buildFeedHeader(),
@@ -81,6 +83,28 @@ class WindowsHomePage extends StatelessWidget {
             0,
           ),
           sliver: SliverToBoxAdapter(child: WindowsHeroBanner(items: swipers)),
+        );
+      },
+    );
+  }
+
+  /// 「今日更新」取自已加载的每日放送数据。
+  Widget _buildContinueWatching() {
+    return ValueListenableBuilder<List<HomeItems>>(
+      valueListenable: svc.schedule,
+      builder: (context, schedule, _) {
+        final today = DateTime.now().weekday - 1;
+        final updated = <int>{};
+        if (today >= 0 && today < schedule.length) {
+          for (final item in schedule[today]) {
+            final id = item['bgmId'];
+            final value = id is int ? id : int.tryParse('$id');
+            if (value != null && value > 0) updated.add(value);
+          }
+        }
+        return WindowsContinueWatching(
+          gutter: _gutter,
+          todaySubjects: updated,
         );
       },
     );

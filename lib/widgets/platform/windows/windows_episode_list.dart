@@ -4,7 +4,9 @@ import 'package:baka/utils/json_values.dart';
 import 'package:flutter/material.dart';
 import 'package:baka/widgets/common/platform_tooltip.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:baka/models/collection.dart';
 import 'package:baka/models/playback_episode.dart';
+import 'package:baka/services/playback/history_repository.dart';
 import 'package:baka/widgets/platform/windows/windows_line_selector.dart';
 import 'package:baka/api/anibaka_api.dart';
 import 'package:baka/services/playback/danmaku_controller.dart';
@@ -17,6 +19,8 @@ class WindowsEpisodeList extends StatefulWidget {
     required this.content,
     required this.onEpisodeSelected,
     required this.onUrlChanged,
+    required this.onDetailTap,
+    this.onSetEpisodeWatched,
     super.key,
     this.followNotifier,
     this.onFollowPressed,
@@ -29,8 +33,12 @@ class WindowsEpisodeList extends StatefulWidget {
   final PlaybackContent content;
   final ValueChanged<int> onEpisodeSelected;
   final ValueChanged<int> onUrlChanged;
+
+  /// 点标题旁的 ⓘ：在播放页上方弹出番剧详情面板。
+  final VoidCallback onDetailTap;
+  final Future<bool> Function(int, bool)? onSetEpisodeWatched;
   final VoidCallback? onDownloadPressed;
-  final ValueNotifier<bool>? followNotifier;
+  final ValueNotifier<CollectionStatus?>? followNotifier;
   final VoidCallback? onFollowPressed;
   final VoidCallback? onSourceTap;
   final bool isSearching;
@@ -73,9 +81,18 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: historyRepository.revision,
+      builder: (context, _, _) => _buildContent(context),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     final content = widget.content;
     final videoList = content.videoList;
     final currentIndex = content.currPlayIndex;
+    final videoId = content.watchedVideoId;
+    final legacyVideoId = '${content.data['id']}';
     final primaryColor = Theme.of(context).colorScheme.primary;
     final source = trimmed(content.sourceName) ?? '切换播放源';
     final line = trimmed(content.lineName);
@@ -87,12 +104,19 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
         final i = _filteredList?[position] ?? position;
         final item = videoList[i];
         final isPlaying = i == currentIndex;
+        final watched = HistoryRepository.isEpisodeWatched(
+          videoId,
+          i,
+          legacyVideoId: legacyVideoId,
+          bgmId: content.bgmInfo.subjectId,
+        );
         if (_isGridView) {
           return Material(
             color: Colors.transparent,
             borderRadius: BorderRadius.circular(6),
             child: InkWell(
               onTap: () => widget.onEpisodeSelected(i),
+              onLongPress: _markHandler(i, watched),
               borderRadius: BorderRadius.circular(6),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 160),
@@ -111,22 +135,50 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                 ),
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                 alignment: Alignment.center,
-                child: Text(
-                  item.title,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontWeight: isPlaying ? FontWeight.bold : FontWeight.w500,
-                    fontSize: 12.5,
-                    color: isPlaying ? primaryColor : Colors.white70,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (watched && !isPlaying) ...[
+                      const Icon(
+                        Icons.done_rounded,
+                        size: 12,
+                        color: Colors.white38,
+                      ),
+                      const SizedBox(width: 3),
+                    ],
+                    Flexible(
+                      child: Text(
+                        item.title,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontWeight: isPlaying
+                              ? FontWeight.bold
+                              : FontWeight.w500,
+                          fontSize: 12.5,
+                          color: isPlaying
+                              ? primaryColor
+                              : watched
+                              ? Colors.white38
+                              : Colors.white70,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
           );
         }
-        return _buildEpisodeRow(context, i, item, isPlaying, primaryColor);
+        return _buildEpisodeRow(
+          context,
+          i,
+          item,
+          isPlaying,
+          watched,
+          primaryColor,
+        );
       },
       childCount: itemCount,
       addAutomaticKeepAlives: false,
@@ -231,27 +283,51 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(
-            child: Text(
-              title.isNotEmpty ? title : '番剧详情',
-              style: const TextStyle(
-                fontSize: 19,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-                letterSpacing: -0.2,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    title.isNotEmpty ? title : '番剧详情',
+                    style: const TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                      letterSpacing: -0.2,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 2),
+                // 番剧详情入口。
+                PlatformTooltip(
+                  message: '番剧详情',
+                  child: InkResponse(
+                    radius: 16,
+                    onTap: widget.onDetailTap,
+                    child: const Padding(
+                      padding: EdgeInsets.all(3),
+                      child: Icon(
+                        Icons.info_outline_rounded,
+                        size: 15,
+                        color: Colors.white54,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           if (widget.followNotifier != null &&
               widget.onFollowPressed != null) ...[
             const SizedBox(width: 6),
-            ValueListenableBuilder<bool>(
+            ValueListenableBuilder<CollectionStatus?>(
               valueListenable: widget.followNotifier!,
-              builder: (context, isFollowed, _) => BgmFollowPill(
+              builder: (context, status, _) => BgmFollowPill(
                 title: title,
                 bgmInfo: content.bgmInfo,
-                isFollowed: isFollowed,
+                status: status,
                 onFollowPressed: widget.onFollowPressed!,
               ),
             ),
@@ -467,33 +543,104 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
     );
   }
 
+  VoidCallback? _markHandler(int index, bool watched) {
+    final setter = widget.onSetEpisodeWatched;
+    if (setter == null) return null;
+    return () => setter(index, !watched);
+  }
+
+  Future<void> _showOverview(
+    BuildContext context,
+    String title,
+    String overview,
+  ) {
+    return showDialog<void>(
+      context: context,
+      barrierColor: Colors.black38,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: const Color(0xFF26262C),
+        surfaceTintColor: Colors.transparent,
+        elevation: 14,
+        shadowColor: Colors.black87,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: Colors.white12, width: 0.8),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 460, maxHeight: 420),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 10),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      overview,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        height: 1.6,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('关闭'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildEpisodeRow(
     BuildContext context,
     int index,
     PlaybackEpisode item,
     bool isPlaying,
+    bool watched,
     Color primaryColor,
   ) {
-    final content = widget.content;
-    final bgmId = content.bgmInfo.subjectId;
-    final stillFuture = bgmId != null && bgmId > 0
-        ? AniBakaApi.getEpisodeStills(
-            bgmId: bgmId,
-            season: 1,
-            episode: index + 1,
-          )
-        : null;
-    if (stillFuture == null) {
-      return _buildEpisodeRowContent(index, item, isPlaying, primaryColor, null);
-    }
-    return FutureBuilder<Map<String, dynamic>?>(
-      future: stillFuture,
-      builder: (context, snapshot) => _buildEpisodeRowContent(
+    final bgmId = widget.content.bgmInfo.subjectId;
+    return _EpisodeRowTile(
+      key: ValueKey((bgmId, index)),
+      stillFuture: bgmId != null && bgmId > 0
+          ? AniBakaApi.getEpisodeStills(
+              bgmId: bgmId,
+              season: 1,
+              episode: index + 1,
+            )
+          : null,
+      isPlaying: isPlaying,
+      primaryColor: primaryColor,
+      onTap: () => widget.onEpisodeSelected(index),
+      onLongPress: _markHandler(index, watched),
+      builder: (still) => _buildEpisodeRowContent(
         index,
         item,
         isPlaying,
+        watched,
         primaryColor,
-        snapshot.data,
+        still,
       ),
     );
   }
@@ -502,6 +649,7 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
     int index,
     PlaybackEpisode item,
     bool isPlaying,
+    bool watched,
     Color primaryColor,
     Map<String, dynamic>? still,
   ) {
@@ -533,173 +681,295 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
     const placeholder = Center(
       child: Icon(Icons.movie_outlined, size: 22, color: Colors.white24),
     );
-
-    return AnimatedContainer(
-      key: ValueKey((content.bgmInfo.subjectId, index)),
-      duration: const Duration(milliseconds: 160),
-      curve: Curves.easeOutCubic,
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        color: isPlaying ? const Color(0xFF222226) : const Color(0xFF18181B),
-        border: Border.all(
-          color: isPlaying
-              ? primaryColor.withValues(alpha: 0.6)
-              : Colors.white10,
-          width: 0.8,
-        ),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () => widget.onEpisodeSelected(index),
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                width: 126,
+                height: 71,
+                color: const Color(0xFF1E1E22),
+                child: Stack(
+                  fit: StackFit.expand,
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: Container(
-                        width: 126,
-                        height: 71,
-                        color: const Color(0xFF1E1E22),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            if (stillUrl.isNotEmpty)
-                              CachedNetworkImage(
-                                memCacheWidth: 260,
-                                imageUrl: stillUrl,
-                                fit: BoxFit.cover,
-                                fadeInDuration: const Duration(
-                                  milliseconds: 150,
-                                ),
-                                fadeOutDuration: const Duration(
-                                  milliseconds: 150,
-                                ),
-                                placeholder: (_, _) => placeholder,
-                                errorWidget: (_, _, _) => placeholder,
-                              )
-                            else
-                              placeholder,
-                            if (isPlaying)
-                              ColoredBox(
-                                color: Colors.black45,
-                                child: Center(
-                                  child: Icon(
-                                    Icons.play_circle_fill_rounded,
-                                    color: primaryColor,
-                                    size: 24,
-                                  ),
-                                ),
-                              ),
-                          ],
+                    if (stillUrl.isNotEmpty)
+                      CachedNetworkImage(
+                        memCacheWidth: 260,
+                        imageUrl: stillUrl,
+                        fit: BoxFit.cover,
+                        fadeInDuration: const Duration(
+                          milliseconds: 150,
+                        ),
+                        fadeOutDuration: const Duration(
+                          milliseconds: 150,
+                        ),
+                        placeholder: (_, _) => placeholder,
+                        errorWidget: (_, _, _) => placeholder,
+                      )
+                    else
+                      placeholder,
+                    if (isPlaying)
+                      ColoredBox(
+                        color: Colors.black45,
+                        child: Center(
+                          child: Icon(
+                            Icons.play_circle_fill_rounded,
+                            color: primaryColor,
+                            size: 24,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  title,
-                                  style: TextStyle(
-                                    fontSize: 13.5,
-                                    fontWeight: isPlaying
-                                        ? FontWeight.bold
-                                        : FontWeight.w600,
-                                    color: isPlaying
-                                        ? primaryColor
-                                        : Colors.white,
-                                    height: 1.25,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              if (lineCount > 1)
-                                Container(
-                                  margin: const EdgeInsets.only(left: 6),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: primaryColor.withValues(alpha: 0.15),
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(
-                                      color: primaryColor.withValues(
-                                        alpha: 0.4,
-                                      ),
-                                      width: 0.8,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    '$lineCount 线路',
-                                    style: const TextStyle(
-                                      fontSize: 10.5,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                            ],
+                    if (watched && !isPlaying)
+                      Positioned(
+                        right: 4,
+                        bottom: 4,
+                        child: Container(
+                          width: 16,
+                          height: 16,
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(
+                              alpha: 0.55,
+                            ),
+                            shape: BoxShape.circle,
                           ),
-                          if (airDate.isNotEmpty) ...[
-                            const SizedBox(height: 3),
-                            Text(
-                              airDate,
-                              style: const TextStyle(
-                                fontSize: 11.0,
-                                color: Colors.white38,
-                              ),
+                          child: const Icon(
+                            Icons.check_rounded,
+                            size: 11,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: isPlaying
+                                ? FontWeight.bold
+                                : FontWeight.w600,
+                            color: isPlaying
+                                ? primaryColor
+                                : watched
+                                ? Colors.white60
+                                : Colors.white,
+                            height: 1.25,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (lineCount > 1)
+                        Container(
+                          margin: const EdgeInsets.only(left: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: primaryColor.withValues(
+                              alpha: 0.15,
                             ),
-                          ],
-                          if (overview.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              overview,
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                color: Colors.white60,
-                                height: 1.35,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(
+                              color: primaryColor.withValues(
+                                alpha: 0.4,
                               ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
+                              width: 0.8,
                             ),
-                          ],
-                        ],
+                          ),
+                          child: Text(
+                            '$lineCount 线路',
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (airDate.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      airDate,
+                      style: const TextStyle(
+                        fontSize: 11.0,
+                        color: Colors.white38,
                       ),
                     ),
                   ],
-                ),
-                if (isPlaying && lineCount > 1) ...[
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Divider(
-                      height: 1,
-                      thickness: 0.6,
-                      color: Colors.white12,
+                  if (overview.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            overview,
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              color: Colors.white60,
+                              height: 1.35,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (overview.length > 30) ...[
+                          const SizedBox(width: 4),
+                          InkWell(
+                            onTap: () => _showOverview(
+                              context,
+                              title,
+                              overview,
+                            ),
+                            borderRadius: BorderRadius.circular(4),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 2,
+                                vertical: 1,
+                              ),
+                              child: Text(
+                                '全文',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: primaryColor,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                  ),
-                  WindowsLineSelector(
-                    availableLineIndexes: item.availableLineIndexes,
-                    currUrl: content.currUrl,
-                    onUrlChanged: widget.onUrlChanged,
-                    sourceNames: content.sourceNames,
-                  ),
+                  ],
                 ],
-              ],
+              ),
+            ),
+          ],
+        ),
+        if (isPlaying && lineCount > 1) ...[
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Divider(
+              height: 1,
+              thickness: 0.6,
+              color: Colors.white12,
+            ),
+          ),
+          WindowsLineSelector(
+            availableLineIndexes: item.availableLineIndexes,
+            currUrl: content.currUrl,
+            onUrlChanged: widget.onUrlChanged,
+            sourceNames: content.sourceNames,
+          ),
+        ],
+      ],
+    );
+  }
+}
+/// 剧集行：悬停状态与剧照都留在行内。
+class _EpisodeRowTile extends StatefulWidget {
+  const _EpisodeRowTile({
+    required this.stillFuture,
+    required this.isPlaying,
+    required this.primaryColor,
+    required this.onTap,
+    required this.onLongPress,
+    required this.builder,
+    super.key,
+  });
+
+  final Future<Map<String, dynamic>?>? stillFuture;
+  final bool isPlaying;
+  final Color primaryColor;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final Widget Function(Map<String, dynamic>? still) builder;
+
+  @override
+  State<_EpisodeRowTile> createState() => _EpisodeRowTileState();
+}
+
+class _EpisodeRowTileState extends State<_EpisodeRowTile> {
+  bool _hovered = false;
+  Map<String, dynamic>? _still;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStill();
+  }
+
+  @override
+  void didUpdateWidget(_EpisodeRowTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(widget.stillFuture, oldWidget.stillFuture)) _loadStill();
+  }
+
+  void _loadStill() {
+    _still = null;
+    final future = widget.stillFuture;
+    if (future == null) return;
+    future.then((data) {
+      if (!mounted || !identical(future, widget.stillFuture)) return;
+      setState(() => _still = data);
+    }, onError: (Object _) {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hovered = _hovered;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOut,
+        margin: const EdgeInsets.only(bottom: 8),
+        transform: Matrix4.translationValues(hovered ? 2 : 0, 0, 0),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          color: widget.isPlaying
+              ? const Color(0xFF222226)
+              : hovered
+              ? const Color(0xFF212127)
+              : const Color(0xFF18181B),
+          border: Border.all(
+            color: widget.isPlaying
+                ? widget.primaryColor.withValues(alpha: 0.6)
+                : hovered
+                ? Colors.white24
+                : Colors.white10,
+            width: 0.8,
+          ),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            onLongPress: widget.onLongPress,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: widget.builder(_still),
             ),
           ),
         ),

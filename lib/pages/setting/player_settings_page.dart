@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:baka/instance.dart';
 import 'package:baka/models/playback_state.dart';
 import 'package:baka/services/playback/playback_settings.dart';
 import 'package:baka/utils/toast_utils.dart';
@@ -59,6 +60,15 @@ class PlayerSettingsPage extends StatelessWidget {
                   value: p.showNextEpisodeButton,
                   onChanged: (v) => _set(p.copyWith(showNextEpisodeButton: v)),
                 ),
+                if (Instances.isDesktopPlatform && !Instances.isTV) ...[
+                  const PanelDivider(),
+                  PanelSwitchTile(
+                    title: '滚轮调节音量',
+                    subtitle: '在画面上滚动滚轮增减音量',
+                    value: p.wheelVolume,
+                    onChanged: (v) => _set(p.copyWith(wheelVolume: v)),
+                  ),
+                ],
               ],
             ),
             gap,

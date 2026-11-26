@@ -686,6 +686,9 @@ class PlaybackController {
     final next = value.clamp(0.0, 1.0);
     if (overlay.value.volume == next) return;
     overlay.value = overlay.value.copyWith(volume: next);
+    // 音量指示器与播放器音量（mpv 0–100）保持同步。
+    final player = _player;
+    if (player != null) unawaited(player.setVolume(next * 100));
   }
 
   void setBrightness(double value) {

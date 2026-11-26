@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'package:baka/app/watch_party_links.dart';
 import 'package:baka/models/watch_party.dart';
 import 'package:baka/pages/mine/mine_profile.dart';
@@ -207,44 +206,40 @@ class _InviteView extends StatelessWidget {
 }
 
 class _PartyHeader extends StatelessWidget {
-  const _PartyHeader({
-    required this.title,
-    this.onBack,
-    this.actions = const [],
-  });
-  final String title;
+  const _PartyHeader({this.title, this.onBack, this.actions = const []});
+  final String? title;
   final VoidCallback? onBack;
   final List<Widget> actions;
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: EdgeInsets.fromLTRB(onBack == null ? 20 : 8, 0, 8, 4),
-    child: Row(
-      children: [
-        if (onBack != null)
-          IconButton(
-            tooltip: '返回聊天',
-            onPressed: onBack,
-            icon: const Icon(Icons.arrow_back_rounded),
+  Widget build(BuildContext context) {
+    final title = this.title;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(onBack == null ? 4 : 0, 0, 0, 4),
+      child: Row(
+        children: [
+          if (onBack != null)
+            IconButton(
+              tooltip: '返回聊天',
+              onPressed: onBack,
+              icon: const Icon(Icons.arrow_back_rounded),
+            ),
+          Expanded(
+            child: title == null
+                ? const SizedBox.shrink()
+                : Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
           ),
-        Expanded(
-          child: Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(
-              context,
-            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
-          ),
-        ),
-        ...actions,
-        IconButton.filledTonal(
-          tooltip: '收起一起看',
-          onPressed: () => Navigator.of(context).pop(),
-          icon: const Icon(Icons.close_rounded),
-        ),
-      ],
-    ),
-  );
+          ...actions,
+        ],
+      ),
+    );
+  }
 }
 
 class _MediaCard extends StatelessWidget {
@@ -518,11 +513,14 @@ class _RoomViewState extends State<_RoomView> {
     final snapshot = widget.state.snapshot!;
     final canControl = snapshot.canControl;
     final chatPage = _page == _RoomPage.chat;
-    final title = switch (_page) {
-      _RoomPage.chat => '一起看',
-      _RoomPage.members => '房间成员',
-      _RoomPage.invite => '邀请好友',
-    };
+    // 聊天页的标题由外层面板给，子页才需要自己的小标题。
+    final title = chatPage
+        ? null
+        : switch (_page) {
+            _RoomPage.chat => null,
+            _RoomPage.members => '房间成员',
+            _RoomPage.invite => '邀请好友',
+          };
     final error = _error.isNotEmpty
         ? _error
         : widget.state.status == WatchPartyConnectionStatus.reconnecting
@@ -532,7 +530,7 @@ class _RoomViewState extends State<_RoomView> {
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): () {
           if (chatPage) {
-            Navigator.of(context).pop();
+            closePlayerSettingsPanel(context);
           } else {
             _openPage(_RoomPage.chat);
           }
@@ -875,83 +873,37 @@ class _MessageBubble extends StatelessWidget {
 class WatchPartySheet extends StatelessWidget {
   const WatchPartySheet({required this.service, super.key});
   final WatchPartyService service;
+
+  /// 和弹幕/播放器设置一样，走右侧半透明浮层。
   static Future<void> show(BuildContext context, WatchPartyService service) =>
-      showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        backgroundColor: Colors.transparent,
-        barrierColor: Colors.transparent,
-        constraints: const BoxConstraints(maxWidth: 560),
-        builder: (_) => WatchPartySheet(service: service),
-      );
+      showPlayerSettingsPanel(context, WatchPartySheet(service: service));
+
   @override
   Widget build(BuildContext context) {
-    final media = MediaQuery.of(context);
-    final portrait = isBottomPlayerPanel(context);
-    final theme = Theme.of(context);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final available = math.max(
-          0.0,
-          constraints.maxHeight - media.viewInsets.bottom,
-        );
-        final preferred = portrait
-            ? (media.size.height - media.size.width * 9 / 16).clamp(
-                0.0,
-                media.size.height * .74,
-              )
-            : media.size.height * .9;
-        final height = math.min(preferred, available);
-        return Padding(
-          padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
-          child: Material(
-            color: theme.colorScheme.surfaceContainerLow,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-            clipBehavior: Clip.antiAlias,
-            child: SizedBox(
-              height: height,
-              child: SafeArea(
-                top: false,
-                child: Column(
-                  children: [
-                    SizedBox(
-                      height: 24,
-                      child: Center(
-                        child: Container(
-                          width: 40,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.onSurfaceVariant
-                                .withValues(alpha: .4),
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: ValueListenableBuilder<WatchPartyViewState>(
-                        valueListenable: service.state,
-                        builder: (context, state, _) {
-                          final snapshot = state.snapshot;
-                          return snapshot == null
-                              ? _EntryView(service: service)
-                              : _RoomView(
-                                  key: ValueKey(snapshot.roomId),
-                                  service: service,
-                                  state: state,
-                                  compact: height < 360,
-                                );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+    final panel = PanelContainer(
+      title: '一起看',
+      child: ValueListenableBuilder<WatchPartyViewState>(
+        valueListenable: service.state,
+        builder: (context, state, _) {
+          final snapshot = state.snapshot;
+          if (snapshot == null) return _EntryView(service: service);
+          return LayoutBuilder(
+            builder: (context, constraints) => _RoomView(
+              key: ValueKey(snapshot.roomId),
+              service: service,
+              state: state,
+              compact: constraints.maxHeight < 360,
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
+    );
+    // 底部面板形态下按软键盘高度上移。
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    if (keyboard <= 0) return panel;
+    return Padding(
+      padding: EdgeInsets.only(bottom: keyboard),
+      child: panel,
     );
   }
 }
@@ -1049,7 +1001,6 @@ class _EntryViewState extends State<_EntryView> {
     final current = widget.service.currentMedia;
     return Column(
       children: [
-        const _PartyHeader(title: '一起看'),
         Expanded(
           child: ListView(
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,

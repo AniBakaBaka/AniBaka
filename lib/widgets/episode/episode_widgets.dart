@@ -18,6 +18,7 @@ class EpisodeItem extends StatelessWidget {
   final bool isQueued;
   final bool isDownloadSelected;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final Color? textColor;
 
   const EpisodeItem({
@@ -30,6 +31,7 @@ class EpisodeItem extends StatelessWidget {
     this.isQueued = false,
     this.isDownloadSelected = false,
     this.onTap,
+    this.onLongPress,
     this.textColor,
   });
 
@@ -57,6 +59,7 @@ class EpisodeItem extends StatelessWidget {
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
         onTap: (isDownloadMode && isQueued) ? null : onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(8),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -84,6 +87,13 @@ class EpisodeItem extends StatelessWidget {
                           : Icons.play_arrow_rounded,
                       size: 13,
                       color: foreground,
+                    ),
+                  ] else if (isWatched) ...[
+                    const SizedBox(width: 3),
+                    Icon(
+                      Icons.done_rounded,
+                      size: 12,
+                      color: base.withValues(alpha: 0.45),
                     ),
                   ],
                 ],
@@ -176,7 +186,10 @@ Widget buildWindowsEpisodeList({
   required List<PlaybackEpisode> videoList,
   required bool ascending,
   required int currPlayIndex,
+  required String videoId,
   required Function(int) onEpisodeChanged,
+  String? legacyVideoId,
+  int? bgmId,
 }) {
   return SliverMainAxisGroup(
     slivers: [
@@ -214,6 +227,12 @@ Widget buildWindowsEpisodeList({
             index: index,
             rawTitle: videoList[index].title,
             isSelected: index == currPlayIndex,
+            isWatched: HistoryRepository.isEpisodeWatched(
+              videoId,
+              index,
+              legacyVideoId: legacyVideoId,
+              bgmId: bgmId,
+            ),
             onTap: () => onEpisodeChanged(index),
           );
         },
@@ -230,6 +249,8 @@ Widget buildHorizontalEpisodeList({
   required int currPlayIndex,
   required String videoId,
   required Function(int) onEpisodeChanged,
+  String? legacyVideoId,
+  int? bgmId,
 }) {
   return SizedBox(
     height: 52,
@@ -245,7 +266,12 @@ Widget buildHorizontalEpisodeList({
             index: index,
             rawTitle: videoList[index].title,
             isSelected: index == currPlayIndex,
-            isWatched: HistoryRepository.isEpisodeWatched(videoId, index),
+            isWatched: HistoryRepository.isEpisodeWatched(
+              videoId,
+              index,
+              legacyVideoId: legacyVideoId,
+              bgmId: bgmId,
+            ),
             onTap: () => onEpisodeChanged(index),
           ),
         );

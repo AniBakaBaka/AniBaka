@@ -247,20 +247,27 @@ class BangumiApi {
     return result;
   }
 
-  Future<void> putCollection(String token, AnimeCollection collection) async {
+  /// 写入收藏。[statusOnly] 为 true 时只提交 `type`。
+  Future<void> putCollection(
+    String token,
+    AnimeCollection collection, {
+    bool statusOnly = false,
+  }) async {
     final subjectId = collection.bgmId;
     if (subjectId == null || subjectId <= 0) return;
     await _request<void>(
       'POST',
       '/v0/users/-/collections/$subjectId',
       token: token,
-      body: {
-        'type': collection.status,
-        'rate': collection.rating,
-        'comment': collection.comment ?? '',
-        'private': collection.isPrivate,
-        'tags': collection.tags,
-      },
+      body: statusOnly
+          ? {'type': collection.status}
+          : {
+              'type': collection.status,
+              'rate': collection.rating,
+              'comment': collection.comment ?? '',
+              'private': collection.isPrivate,
+              'tags': collection.tags,
+            },
     );
   }
 
@@ -274,12 +281,7 @@ class BangumiApi {
       '/v0/users/-/collections/$subjectId/episodes?episode_type=0&limit=1000',
       token: token,
     );
-    final episodes = (page['data'] as List).cast<Map<String, dynamic>>()
-      ..sort(
-        (a, b) => ((a['episode'] as Map)['sort'] as num).compareTo(
-          (b['episode'] as Map)['sort'] as num,
-        ),
-      );
+    final episodes = _sortedEpisodes(page);
 
     final watchedCount = watched.clamp(0, episodes.length);
     final doneIds = <int>[];
@@ -301,6 +303,42 @@ class BangumiApi {
       await _putEpisodes(token, subjectId, resetIds, 0);
     }
   }
+
+  /// 按集号标记单集；集号是 Bangumi 的 `sort`，不是源数组下标。
+  /// 没有这一集时返回 false。
+  Future<bool> setEpisodeWatched(
+    String token,
+    int subjectId,
+    num episodeNumber, {
+    required bool watched,
+  }) async {
+    final page = await _request<Map<String, dynamic>>(
+      'GET',
+      '/v0/users/-/collections/$subjectId/episodes?episode_type=0&limit=1000',
+      token: token,
+    );
+    final target = episodeNumber.toDouble();
+    int? episodeId;
+    for (final item in _sortedEpisodes(page)) {
+      final sort = (item['episode'] as Map)['sort'];
+      if (sort is num && (sort.toDouble() - target).abs() < 0.001) {
+        episodeId = (item['episode'] as Map)['id'] as int;
+        break;
+      }
+    }
+    if (episodeId == null) return false;
+    await _putEpisodes(token, subjectId, [episodeId], watched ? 2 : 0);
+    return true;
+  }
+
+  static List<Map<String, dynamic>> _sortedEpisodes(
+    Map<String, dynamic> page,
+  ) => (page['data'] as List).cast<Map<String, dynamic>>()
+    ..sort(
+      (a, b) => ((a['episode'] as Map)['sort'] as num).compareTo(
+        (b['episode'] as Map)['sort'] as num,
+      ),
+    );
 
   Future<void> _putEpisodes(
     String token,

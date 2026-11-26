@@ -1,11 +1,15 @@
 import 'package:baka/core/app_logger.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:baka/api/anibaka_api.dart';
+import 'package:baka/instance.dart';
 import 'package:baka/models/download_task.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/api/bgm.dart';
 import 'package:baka/services/download/download_manager.dart';
+import 'package:baka/services/playback/episode_numbering.dart';
 import 'package:baka/services/playback/history_repository.dart';
 import 'package:baka/models/playback_episode.dart';
 import 'package:baka/widgets/episode/episode_widgets.dart';
@@ -19,25 +23,35 @@ Future<int?> showEpisodeListDialog({
   required List<PlaybackEpisode> videoList,
   required int currentIndex,
   required String videoId,
+  String? legacyVideoId,
   bool isFullScreen = false,
   Map<String, dynamic>? postDetail,
   Future<String?> Function(int episodeIndex)? urlResolver,
   bool startInDownloadMode = false,
   int? currentLineIndex,
+  int? bgmSubjectId,
+  List<Map<String, dynamic>> bgmEpisodes = const [],
+  String? coverUrl,
   List<String>? sourceNames,
   ValueChanged<int>? onLineChanged,
+  Future<bool> Function(int episodeIndex, bool watched)? onSetEpisodeWatched,
 }) {
   final panel = EpisodeListDialog(
     videoList: videoList,
     currentIndex: currentIndex,
     videoId: videoId,
+    legacyVideoId: legacyVideoId,
     isFullScreen: isFullScreen,
     postDetail: postDetail,
     urlResolver: urlResolver,
     startInDownloadMode: startInDownloadMode,
     currentLineIndex: currentLineIndex,
+    bgmSubjectId: bgmSubjectId,
+    bgmEpisodes: bgmEpisodes,
+    coverUrl: coverUrl,
     sourceNames: sourceNames,
     onLineChanged: onLineChanged,
+    onSetEpisodeWatched: onSetEpisodeWatched,
   );
 
   if (isFullScreen) {
@@ -61,6 +75,11 @@ Future<int?> showEpisodeListDialog({
   return showModalBottomSheet<int>(
     context: context,
     isScrollControlled: true,
+    backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    clipBehavior: Clip.antiAlias,
     builder: (_) => panel,
   );
 }
@@ -69,13 +88,23 @@ class EpisodeListDialog extends StatefulWidget {
   final List<PlaybackEpisode> videoList;
   final int currentIndex;
   final String videoId;
+  final String? legacyVideoId;
   final bool isFullScreen;
   final Map<String, dynamic>? postDetail;
   final Future<String?> Function(int episodeIndex)? urlResolver;
   final bool startInDownloadMode;
   final int? currentLineIndex;
+  final int? bgmSubjectId;
+  final List<Map<String, dynamic>> bgmEpisodes;
+
+  /// 没有剧照时的封面图。
+  final String? coverUrl;
   final List<String>? sourceNames;
   final ValueChanged<int>? onLineChanged;
+
+  /// 手动点格子。为 null 表示当前不可用（未登录 Bangumi 或不是 Bangumi 条目）。
+  final Future<bool> Function(int episodeIndex, bool watched)?
+  onSetEpisodeWatched;
 
   bool get canDownload => postDetail != null && urlResolver != null;
 
@@ -85,12 +114,17 @@ class EpisodeListDialog extends StatefulWidget {
     required this.videoId,
     required this.isFullScreen,
     super.key,
+    this.legacyVideoId,
     this.postDetail,
     this.urlResolver,
     this.startInDownloadMode = false,
     this.currentLineIndex,
+    this.bgmSubjectId,
+    this.bgmEpisodes = const [],
+    this.coverUrl,
     this.sourceNames,
     this.onLineChanged,
+    this.onSetEpisodeWatched,
   });
 
   @override
@@ -105,6 +139,14 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
   final Set<int> _selected = {};
 
   Set<int>? _queuedIndexes;
+  late final EpisodeNumbering _numbering = EpisodeNumbering(
+    widget.videoList.map((episode) => episode.title),
+  );
+
+  /// 本次会话里手动点过的格子，用于列表即时反馈。
+  /// 长按后的即时状态，用于本地写入完成前更新已看样式。
+  final Map<int, bool> _watchedOverride = {};
+  final Set<int> _marking = {};
   late final String _taskIdPrefix;
   List<int>? _visibleIndexes;
   late final List<int> _lineIndexes =
@@ -292,8 +334,10 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
       );
     }
 
-    return SizedBox(
-      height: MediaQuery.of(context).size.height * 0.68,
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.8,
+      ),
       child: SafeArea(
         top: false,
         child: Padding(
@@ -304,6 +348,43 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
     );
   }
 
+  /// 集号：Bangumi 与弹幕都按它记账，而不是源数组的下标。
+  int _episodeNumber(int index) => _numbering.numberAt(index) ?? index + 1;
+
+  bool _isWatched(int index) {
+    final override = _watchedOverride[_episodeNumber(index)];
+    if (override != null) return override;
+    return HistoryRepository.isEpisodeWatched(
+      widget.videoId,
+      index,
+      legacyVideoId: widget.legacyVideoId,
+      bgmId: widget.bgmSubjectId,
+    );
+  }
+
+  /// 长按直接切换：没标过的标为看过，标过的取消。
+  Future<void> _toggleWatched(int index) async {
+    final setter = widget.onSetEpisodeWatched;
+    if (setter == null || _marking.contains(index)) return;
+    final number = _episodeNumber(index);
+    final watched = !_isWatched(index);
+    HapticFeedback.selectionClick();
+    setState(() {
+      _marking.add(index);
+      _watchedOverride[number] = watched;
+    });
+    try {
+      final ok = await setter(index, watched);
+      if (!mounted) return;
+      // 写失败就退回长按前的状态。
+      if (!ok) setState(() => _watchedOverride.remove(number));
+    } catch (_) {
+      if (mounted) setState(() => _watchedOverride.remove(number));
+    } finally {
+      if (mounted) setState(() => _marking.remove(index));
+    }
+  }
+
   Widget _buildBody(Color? textColor) {
     final showSearch =
         widget.videoList.length > _kSearchThreshold && !_downloadMode;
@@ -311,6 +392,7 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
     final count = visible?.length ?? widget.videoList.length;
 
     return Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildHeader(textColor),
@@ -322,19 +404,29 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
           _buildSearchField(textColor),
           const SizedBox(height: 10),
         ],
-        Expanded(
-          child: GridView.builder(
-            padding: const EdgeInsets.only(bottom: 16),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              childAspectRatio: 1.5,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-            ),
-            itemCount: count,
-            itemBuilder: (_, i) {
-              final position = _sortAscending ? i : count - 1 - i;
-              return _buildItem(visible?[position] ?? position, textColor);
+        Flexible(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // 宽屏用带剧照的卡片，手机上仍用原来的紧凑格子。
+              final cards = !_downloadMode && constraints.maxWidth >= 520;
+              return GridView.builder(
+                shrinkWrap: true,
+                padding: const EdgeInsets.only(bottom: 16),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: cards ? 4 : 3,
+                  childAspectRatio: cards ? 1.65 : 1.5,
+                  crossAxisSpacing: cards ? 10 : 8,
+                  mainAxisSpacing: cards ? 10 : 8,
+                ),
+                itemCount: count,
+                itemBuilder: (_, i) {
+                  final position = _sortAscending ? i : count - 1 - i;
+                  final index = visible?[position] ?? position;
+                  return cards
+                      ? _buildCardItem(index, textColor)
+                      : _buildItem(index, textColor);
+                },
+              );
             },
           ),
         ),
@@ -374,7 +466,7 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
         ),
         const SizedBox(width: 8),
         Text(
-          '${widget.currentIndex + 1} / ${widget.videoList.length}',
+          '${_episodeNumber(widget.currentIndex)} / ${widget.videoList.length}',
           style: TextStyle(fontSize: 12, color: muted),
         ),
         const Spacer(),
@@ -504,6 +596,43 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
     );
   }
 
+  /// 宽屏选集卡片：剧照打底，标题叠在图上。
+  Widget _buildCardItem(int index, Color? textColor) {
+    final theme = Theme.of(context);
+    final bgmId = widget.bgmSubjectId;
+    return _EpisodeCard(
+      number: _episodeNumber(index).toString().padLeft(2, '0'),
+      label: _episodeLabel(index, widget.videoList[index].title),
+      selected: index == widget.currentIndex,
+      watched: _isWatched(index),
+      still: bgmId == null || bgmId <= 0
+          ? null
+          : AniBakaApi.getEpisodeStills(
+              bgmId: bgmId,
+              season: 1,
+              episode: _episodeNumber(index),
+            ),
+      cover: widget.coverUrl,
+      base: textColor ?? theme.colorScheme.onSurface,
+      accent: theme.colorScheme.primary,
+      onTap: () => Navigator.pop(context, index),
+      onLongPress: widget.onSetEpisodeWatched == null
+          ? null
+          : () => _toggleWatched(index),
+    );
+  }
+
+  /// 卡片标题优先用 Bangumi 的集名。
+  String _episodeLabel(int index, String rawTitle) {
+    final episodes = widget.bgmEpisodes;
+    if (episodes.isNotEmpty) {
+      final entry = BgmEpisodeOrder.byNumber(episodes, _episodeNumber(index));
+      final name = entry == null ? null : (entry['name_cn'] ?? entry['name']);
+      if (name is String && name.trim().isNotEmpty) return name.trim();
+    }
+    return rawTitle.replaceAll(RegExp(r'[\d第集话回章]'), '').trim();
+  }
+
   Widget _buildItem(int index, Color? textColor) {
     final rawTitle = widget.videoList[index].title;
 
@@ -535,9 +664,263 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
       index: index,
       rawTitle: rawTitle,
       isSelected: index == widget.currentIndex,
-      isWatched: HistoryRepository.isEpisodeWatched(widget.videoId, index),
+      isWatched: _isWatched(index),
       textColor: textColor,
       onTap: () => Navigator.pop(context, index),
+      onLongPress: widget.onSetEpisodeWatched == null
+          ? null
+          : () => _toggleWatched(index),
+    );
+  }
+}
+/// 选集卡片：剧照铺满，标题压在底部渐变上。
+/// 悬停轻微放大；长按标记时从上往下扫过一道光，作为按下的反馈。
+class _EpisodeCard extends StatefulWidget {
+  const _EpisodeCard({
+    required this.number,
+    required this.label,
+    required this.selected,
+    required this.watched,
+    required this.still,
+    required this.cover,
+    required this.base,
+    required this.accent,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  final String number;
+  final String label;
+  final bool selected;
+  final bool watched;
+  final Future<Map<String, dynamic>?>? still;
+  final String? cover;
+  final Color base;
+  final Color accent;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+
+  @override
+  State<_EpisodeCard> createState() => _EpisodeCardState();
+}
+
+class _EpisodeCardState extends State<_EpisodeCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _scan = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 380),
+  );
+  bool _hovered = false;
+
+  @override
+  void dispose() {
+    _scan.dispose();
+    super.dispose();
+  }
+
+  void _longPress() {
+    if (!context.reduceMotion) _scan.forward(from: 0);
+    widget.onLongPress?.call();
+  }
+
+  Widget _buildStill() {
+    final placeholder = Container(
+      color: widget.base.withValues(alpha: 0.08),
+      alignment: Alignment.center,
+      child: Icon(
+        Icons.movie_outlined,
+        size: 20,
+        color: widget.base.withValues(alpha: 0.28),
+      ),
+    );
+    final fallback = _buildCover(placeholder);
+    final future = widget.still;
+    if (future == null) return fallback;
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: future,
+      builder: (context, snapshot) {
+        final data = snapshot.data;
+        final url = (data?['still_thumb'] ?? data?['still_url']) as String?;
+        if (url == null || url.isEmpty) return fallback;
+        return CachedNetworkImage(
+          imageUrl: url,
+          fit: BoxFit.cover,
+          memCacheWidth: 320,
+          fadeInDuration: const Duration(milliseconds: 150),
+          placeholder: (_, _) => fallback,
+          errorWidget: (_, _, _) => fallback,
+        );
+      },
+    );
+  }
+
+  /// 没有剧照时用番剧封面代替。
+  Widget _buildCover(Widget placeholder) {
+    final cover = widget.cover;
+    if (cover == null || cover.isEmpty) return placeholder;
+    return CachedNetworkImage(
+      imageUrl: cover,
+      fit: BoxFit.cover,
+      memCacheWidth: 320,
+      fadeInDuration: const Duration(milliseconds: 150),
+      placeholder: (_, _) => placeholder,
+      errorWidget: (_, _, _) => placeholder,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final motion = !context.reduceMotion;
+    final dimmed = widget.watched && !widget.selected;
+    final radius = BorderRadius.circular(10);
+    final animated = Duration(milliseconds: motion ? 200 : 0);
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: AnimatedScale(
+        scale: _hovered && motion ? 1.05 : 1,
+        duration: animated,
+        curve: Curves.easeOutCubic,
+        child: AnimatedContainer(
+          duration: animated,
+          curve: Curves.easeOutCubic,
+          decoration: BoxDecoration(
+            borderRadius: radius,
+            boxShadow: [
+              if (_hovered)
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  blurRadius: 18,
+                  offset: const Offset(0, 6),
+                ),
+            ],
+          ),
+          child: Material(
+            color: widget.base.withValues(alpha: 0.07),
+            borderRadius: radius,
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: widget.onTap,
+              onLongPress: widget.onLongPress == null ? null : _longPress,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Opacity(opacity: dimmed ? 0.5 : 1, child: _buildStill()),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: const [0.4, 1],
+                        colors: [
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.78),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 7,
+                    right: 7,
+                    bottom: 6,
+                    child: Row(
+                      children: [
+                        Text(
+                          widget.number,
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            height: 1.2,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white.withValues(
+                              alpha: dimmed ? 0.55 : 0.75,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Text(
+                            widget.label.isEmpty
+                                ? '第 ${widget.number} 集'
+                                : widget.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              height: 1.2,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.white.withValues(
+                                alpha: dimmed ? 0.55 : 1,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (widget.watched)
+                    Positioned(
+                      top: 6,
+                      right: 6,
+                      child: Container(
+                        width: 18,
+                        height: 18,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.check_rounded,
+                          size: 12,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  if (widget.selected)
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: radius,
+                        border: Border.all(color: widget.accent, width: 2),
+                      ),
+                    ),
+                  if (motion)
+                    AnimatedBuilder(
+                      animation: _scan,
+                      builder: (context, _) {
+                        if (!_scan.isAnimating) {
+                          return const SizedBox.shrink();
+                        }
+                        return IgnorePointer(
+                          child: Align(
+                            alignment: Alignment(
+                              0,
+                              Curves.easeInOut.transform(_scan.value) * 2 - 1,
+                            ),
+                            child: Container(
+                              height: 30,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    Colors.transparent,
+                                    Colors.white.withValues(alpha: 0.28),
+                                    Colors.transparent,
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
