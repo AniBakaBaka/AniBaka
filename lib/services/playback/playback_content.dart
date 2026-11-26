@@ -3,6 +3,7 @@ import 'package:baka/core/content_filter.dart';
 import 'package:baka/models/skip_segment.dart';
 import 'package:baka/source/runtime/source_operation.dart';
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:baka/utils/title_matcher.dart';
 import 'package:baka/models/bgm.dart';
 import 'package:baka/utils/json_values.dart';
@@ -131,17 +132,32 @@ class PlaybackContent {
 
   bool get hasNextEpisode => nextEpisodeIndex() != null;
 
-  /// 当前集在 Bangumi 上是「第几集」，用于收藏进度。
+  /// 当前集在 Bangumi 上的集序（1 起算），用于收藏进度；解析不出集号时为 null。
   int? get currentBgmOrdinal {
     final number = episodeNumbering.numberAt(currPlayIndex);
-    if (bgmEpisodes.isNotEmpty && number != null) {
-      return BgmEpisodeOrder.ordinalOf(bgmEpisodes, number);
-    }
-    if (number != null) return number;
-    if (bgmEpisodes.isEmpty || bgmEpisodes.length == videoList.length) {
-      return currPlayIndex + 1;
-    }
-    return null;
+    if (number == null) return null;
+    if (bgmEpisodes.isEmpty) return number;
+    return BgmEpisodeOrder.ordinalOf(bgmEpisodes, number);
+  }
+
+  /// 当前集在 Bangumi 分集列表里的 `sort`，用于单集标记；对不上时为 null。
+  int? get currentBgmEpisodeSort => bgmEpisodeSortAt(currPlayIndex);
+
+  /// 指定源下标对应 Bangumi 分集的 `sort`；集号对不上时为 null。
+  int? bgmEpisodeSortAt(int index) {
+    final number = episodeNumbering.numberAt(index);
+    if (number == null) return null;
+    if (bgmEpisodes.isEmpty) return number;
+    final episode = BgmEpisodeOrder.byNumber(bgmEpisodes, number);
+    final sort = episode?['sort'];
+    return sort is num ? sort.toInt() : null;
+  }
+
+  /// 本地已看状态用的稳定标识：优先 Bangumi 条目，换源后仍指向同一部番。
+  String get watchedVideoId {
+    final bgmId = bgmInfo.subjectId;
+    if (bgmId != null && bgmId > 0) return 'bgm_$bgmId';
+    return '${data['id']}';
   }
 
   /// Bangumi 条目的本篇总集数；未知时为 null。
@@ -878,6 +894,12 @@ class PlaybackContent {
         ? 0
         : HistoryRepository.watchedCountForBgm(bgmId);
     final watched = currentBgmOrdinal ?? 0;
+    // 取已有进度、本地已看与当前集号三者中的最大值。
+    final epWatched = [
+      previous?.epWatched ?? 0,
+      localWatched,
+      watched,
+    ].reduce(math.max);
     final optimistic = AnimeCollection(
       postId: previous?.postId ?? validPostId,
       bgmId: bgmId,
@@ -885,7 +907,7 @@ class PlaybackContent {
       rating: previous?.rating ?? 0,
       comment: previous?.comment,
       epTotal: previous?.epTotal ?? epCount,
-      epWatched: localWatched > watched ? localWatched : watched,
+      epWatched: epWatched,
       tags: previous?.tags ?? const [],
       isPrivate: previous?.isPrivate ?? false,
       nsfw: previous?.nsfw ?? isNsfw,
@@ -900,28 +922,10 @@ class PlaybackContent {
           title,
     );
     collection = optimistic;
-    // 本地先落盘，Bangumi 同步放后台。
-    if (collections.isLocalMode) {
-      try {
-        await collections.saveLocal(optimistic);
-      } catch (error) {
-        collection = previous;
-        rethrow;
-      }
-      if (collections.isBangumiMode) {
-        unawaited(
-          collections.syncToBangumi(optimistic).catchError((
-            Object error,
-            StackTrace stackTrace,
-          ) {
-            Log.w('Player', 'Bangumi 收藏状态同步失败', error);
-          }),
-        );
-      }
-      return;
-    }
     try {
-      collection = await collections.addOrUpdate(optimistic);
+      // 本地模式只写本地，Bangumi 由收藏仓库后台同步；云端模式等本站保存返回。
+      // 只改状态，Bangumi 那边也只提交 type。
+      collection = await collections.addOrUpdate(optimistic, statusOnly: true);
     } catch (error) {
       collection = previous;
       rethrow;

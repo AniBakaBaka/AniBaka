@@ -494,7 +494,7 @@ class _PlayerPageState extends State<PlayerPage>
         start: start,
         bgmId: bgmId,
         cover: content.coverImageUrl,
-        bgmEpisodeOrdinalOf: () => content.currentBgmOrdinal,
+        bgmEpisodeSortOf: () => content.currentBgmEpisodeSort,
       );
       await ctr.open(
         url,
@@ -775,7 +775,8 @@ class _PlayerPageState extends State<PlayerPage>
       context: context,
       videoList: content.videoList,
       currentIndex: content.currPlayIndex,
-      videoId: '${content.data['id']}',
+      videoId: content.watchedVideoId,
+      legacyVideoId: '${content.data['id']}',
       isFullScreen:
           _fullscreen && (downloadMode || !Instances.isDesktopPlatform),
       postDetail: content.detailData,
@@ -787,7 +788,9 @@ class _PlayerPageState extends State<PlayerPage>
       coverUrl: content.coverImageUrl,
       sourceNames: downloadMode ? null : content.sourceNames,
       onLineChanged: downloadMode ? null : _changeLine,
-      onSetEpisodeWatched: downloadMode ? null : _setEpisodeWatched,
+      onSetEpisodeWatched: downloadMode || !bangumiSession.quickMarkGrid
+          ? null
+          : _setEpisodeWatched,
     );
     if (index != null) unawaited(_switchEpisode(index));
   }
@@ -796,7 +799,7 @@ class _PlayerPageState extends State<PlayerPage>
   Future<bool> _setEpisodeWatched(int episodeIndex, bool watched) async {
     final subjectId = _content.bgmInfo.subjectId;
     await historyRepository.setEpisodeWatched(
-      '${_content.data['id']}',
+      _content.watchedVideoId,
       episodeIndex,
       watched,
       bgmId: subjectId,
@@ -816,8 +819,12 @@ class _PlayerPageState extends State<PlayerPage>
     int episodeIndex,
     bool watched,
   ) async {
-    final number =
-        _content.episodeNumbering.numberAt(episodeIndex) ?? episodeIndex + 1;
+    // 用 Bangumi 分集列表里的 sort，和自动标记保持一致；对不上就不上报。
+    final number = _content.bgmEpisodeSortAt(episodeIndex);
+    if (number == null) {
+      showSnackBar('认不出这一集在 Bangumi 上的集号，只记在本地', isError: true);
+      return;
+    }
     try {
       final ok = await bangumiSession.setEpisodeWatched(
         subjectId: subjectId,
@@ -873,8 +880,8 @@ class _PlayerPageState extends State<PlayerPage>
           final sheet = CollectionStatusSheet(
             currentStatus: current,
             onSelect: (status) => Navigator.pop(ctx, status),
-            // Bangumi 没有取消收藏的接口。
-            onRemove: current == null || bangumiSession.isConnected
+            // 只有本地收藏 + Bangumi 才删不掉；云端收藏可以取消。
+            onRemove: current == null || collections.isBangumiMode
                 ? null
                 : () => Navigator.pop(ctx, _CollectionAction.remove),
           );
@@ -974,7 +981,9 @@ class _PlayerPageState extends State<PlayerPage>
           isSearching: _autoMatch != null,
           onSourceTap: _openSourceSheet,
           onEpisodeChanged: _switchEpisode,
-          onSetEpisodeWatched: _setEpisodeWatched,
+          onSetEpisodeWatched: bangumiSession.quickMarkGrid
+              ? _setEpisodeWatched
+              : null,
           onCastPressed: _showCast,
           onWatchPartyPressed: _showWatchParty,
           onPickEpisode: _showEpisodePicker,
@@ -985,6 +994,8 @@ class _PlayerPageState extends State<PlayerPage>
           onFollowPressed: _showCollectionSheet,
           terminalPlaybackFailure: _failure != null,
           onAiRepair: _openAiRepair,
+          // 详情面板里改过追番状态的话，侧栏的追番胶囊要跟上。
+          onDetailClosed: _loadFollowState,
         ),
       );
     }
@@ -1272,7 +1283,8 @@ class _PlayerPageState extends State<PlayerPage>
 
   Widget _buildEpisodeTab(BuildContext context) {
     final content = _content;
-    final videoId = '${content.data['id']}';
+    final videoId = content.watchedVideoId;
+    final legacyVideoId = '${content.data['id']}';
     final wide =
         Instances.isDesktopPlatform || MediaQuery.sizeOf(context).width > 600;
     return ValueListenableBuilder<bool>(
@@ -1336,6 +1348,8 @@ class _PlayerPageState extends State<PlayerPage>
                     ascending: ascending,
                     currPlayIndex: content.currPlayIndex,
                     videoId: videoId,
+                    legacyVideoId: legacyVideoId,
+                    bgmId: content.bgmInfo.subjectId,
                     onEpisodeChanged: _switchEpisode,
                   )
                 : SliverToBoxAdapter(
@@ -1345,6 +1359,8 @@ class _PlayerPageState extends State<PlayerPage>
                       ascending: ascending,
                       currPlayIndex: content.currPlayIndex,
                       videoId: videoId,
+                      legacyVideoId: legacyVideoId,
+                      bgmId: content.bgmInfo.subjectId,
                       onEpisodeChanged: _switchEpisode,
                     ),
                   ),

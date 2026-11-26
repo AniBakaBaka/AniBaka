@@ -23,6 +23,7 @@ Future<int?> showEpisodeListDialog({
   required List<PlaybackEpisode> videoList,
   required int currentIndex,
   required String videoId,
+  String? legacyVideoId,
   bool isFullScreen = false,
   Map<String, dynamic>? postDetail,
   Future<String?> Function(int episodeIndex)? urlResolver,
@@ -39,6 +40,7 @@ Future<int?> showEpisodeListDialog({
     videoList: videoList,
     currentIndex: currentIndex,
     videoId: videoId,
+    legacyVideoId: legacyVideoId,
     isFullScreen: isFullScreen,
     postDetail: postDetail,
     urlResolver: urlResolver,
@@ -86,6 +88,7 @@ class EpisodeListDialog extends StatefulWidget {
   final List<PlaybackEpisode> videoList;
   final int currentIndex;
   final String videoId;
+  final String? legacyVideoId;
   final bool isFullScreen;
   final Map<String, dynamic>? postDetail;
   final Future<String?> Function(int episodeIndex)? urlResolver;
@@ -111,6 +114,7 @@ class EpisodeListDialog extends StatefulWidget {
     required this.videoId,
     required this.isFullScreen,
     super.key,
+    this.legacyVideoId,
     this.postDetail,
     this.urlResolver,
     this.startInDownloadMode = false,
@@ -350,7 +354,12 @@ class _EpisodeListDialogState extends State<EpisodeListDialog> {
   bool _isWatched(int index) {
     final override = _watchedOverride[_episodeNumber(index)];
     if (override != null) return override;
-    return HistoryRepository.isEpisodeWatched(widget.videoId, index);
+    return HistoryRepository.isEpisodeWatched(
+      widget.videoId,
+      index,
+      legacyVideoId: widget.legacyVideoId,
+      bgmId: widget.bgmSubjectId,
+    );
   }
 
   /// 长按直接切换：没标过的标为看过，标过的取消。

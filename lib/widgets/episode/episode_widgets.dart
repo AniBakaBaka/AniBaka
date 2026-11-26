@@ -188,6 +188,8 @@ Widget buildWindowsEpisodeList({
   required int currPlayIndex,
   required String videoId,
   required Function(int) onEpisodeChanged,
+  String? legacyVideoId,
+  int? bgmId,
 }) {
   return SliverMainAxisGroup(
     slivers: [
@@ -225,7 +227,12 @@ Widget buildWindowsEpisodeList({
             index: index,
             rawTitle: videoList[index].title,
             isSelected: index == currPlayIndex,
-            isWatched: HistoryRepository.isEpisodeWatched(videoId, index),
+            isWatched: HistoryRepository.isEpisodeWatched(
+              videoId,
+              index,
+              legacyVideoId: legacyVideoId,
+              bgmId: bgmId,
+            ),
             onTap: () => onEpisodeChanged(index),
           );
         },
@@ -242,6 +249,8 @@ Widget buildHorizontalEpisodeList({
   required int currPlayIndex,
   required String videoId,
   required Function(int) onEpisodeChanged,
+  String? legacyVideoId,
+  int? bgmId,
 }) {
   return SizedBox(
     height: 52,
@@ -257,7 +266,12 @@ Widget buildHorizontalEpisodeList({
             index: index,
             rawTitle: videoList[index].title,
             isSelected: index == currPlayIndex,
-            isWatched: HistoryRepository.isEpisodeWatched(videoId, index),
+            isWatched: HistoryRepository.isEpisodeWatched(
+              videoId,
+              index,
+              legacyVideoId: legacyVideoId,
+              bgmId: bgmId,
+            ),
             onTap: () => onEpisodeChanged(index),
           ),
         );

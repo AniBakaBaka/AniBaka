@@ -247,20 +247,27 @@ class BangumiApi {
     return result;
   }
 
-  Future<void> putCollection(String token, AnimeCollection collection) async {
+  /// 写入收藏。[statusOnly] 为 true 时只提交 `type`。
+  Future<void> putCollection(
+    String token,
+    AnimeCollection collection, {
+    bool statusOnly = false,
+  }) async {
     final subjectId = collection.bgmId;
     if (subjectId == null || subjectId <= 0) return;
     await _request<void>(
       'POST',
       '/v0/users/-/collections/$subjectId',
       token: token,
-      body: {
-        'type': collection.status,
-        'rate': collection.rating,
-        'comment': collection.comment ?? '',
-        'private': collection.isPrivate,
-        'tags': collection.tags,
-      },
+      body: statusOnly
+          ? {'type': collection.status}
+          : {
+              'type': collection.status,
+              'rate': collection.rating,
+              'comment': collection.comment ?? '',
+              'private': collection.isPrivate,
+              'tags': collection.tags,
+            },
     );
   }
 

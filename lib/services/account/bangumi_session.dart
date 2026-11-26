@@ -33,9 +33,9 @@ class BangumiSession {
   static const _localSnapshotKey = 'bangumi_local_sync_snapshot';
   static const _localPendingPushKey = 'bangumi_local_sync_pending_push';
   static const _localLastSyncKey = 'bangumi_local_last_sync_at';
-  static const _autoProgressKey = 'bangumi_auto_episode_progress';
   static const _autoMarkEpisodeKey = 'bangumi_auto_mark_episode';
   static const _quickMarkGridKey = 'bangumi_quick_mark_grid';
+  static const _syncedEpisodesKey = 'bangumi_synced_episodes';
 
   final BangumiApi api;
   final BangumiOAuthBroker oauth;
@@ -54,10 +54,18 @@ class BangumiSession {
     await preferences.setBool(_quickMarkGridKey, value);
   }
 
-  String get snapshotKey => isLocalMode ? _localSnapshotKey : _snapshotKey;
+  /// 同步清单按 Bangumi 账号分开存。
+  String _scopedKey(String base) {
+    final owner = account?.username ?? '';
+    return owner.isEmpty ? base : '$base:$owner';
+  }
+
+  String get snapshotKey =>
+      _scopedKey(isLocalMode ? _localSnapshotKey : _snapshotKey);
   String get pendingPushKey =>
-      isLocalMode ? _localPendingPushKey : _pendingPushKey;
-  String get lastSyncKey => isLocalMode ? _localLastSyncKey : _lastSyncKey;
+      _scopedKey(isLocalMode ? _localPendingPushKey : _pendingPushKey);
+  String get lastSyncKey =>
+      _scopedKey(isLocalMode ? _localLastSyncKey : _lastSyncKey);
 
   bool get isConnected => (preferences.getString(_tokenKey) ?? '').isNotEmpty;
 
@@ -122,6 +130,7 @@ class BangumiSession {
       }
       await _saveOAuthToken(token);
       await preferences.setString(accountKey, jsonEncode(user.toJson()));
+      await _resetSyncedEpisodes();
       // Binding is already saved. A lost acknowledgement (or an older server
       // without this endpoint) must not undo it; the server also expires state.
       unawaited(oauth.acknowledge(state).catchError((Object _) {}));
@@ -155,6 +164,7 @@ class BangumiSession {
     await preferences.remove(_refreshTokenKey);
     await preferences.remove(_tokenExpiresAtKey);
     await preferences.setString(accountKey, jsonEncode(user.toJson()));
+    await _resetSyncedEpisodes();
     return user;
   }
 
@@ -163,6 +173,7 @@ class BangumiSession {
     generation++;
     _account = null;
     _refresh = null;
+    await _resetSyncedEpisodes();
     await Future.wait([
       preferences.remove(_tokenKey),
       preferences.remove(_refreshTokenKey),
@@ -174,7 +185,6 @@ class BangumiSession {
       preferences.remove(_localSnapshotKey),
       preferences.remove(_localPendingPushKey),
       preferences.remove(_localLastSyncKey),
-      preferences.remove(_autoProgressKey),
     ]);
   }
 
@@ -205,19 +215,15 @@ class BangumiSession {
   }
 
   /// 直接写入 Bangumi 收藏状态；Access Token 只保存在本机。
-  Future<void> updateCollection(AnimeCollection collection) async {
+  /// [statusOnly] 只提交状态，不动打分、标签、私密与评语。
+  Future<void> updateCollection(
+    AnimeCollection collection, {
+    bool statusOnly = false,
+  }) async {
     final revision = generation;
     final token = await accessToken();
     ensureCurrent(revision);
-    await api.putCollection(token, collection);
-    ensureCurrent(revision);
-  }
-
-  Future<void> updateEpisodeProgress(int subjectId, int watched) async {
-    final revision = generation;
-    final token = await accessToken();
-    ensureCurrent(revision);
-    await api.putEpisodeProgress(token, subjectId, watched);
+    await api.putCollection(token, collection, statusOnly: statusOnly);
     ensureCurrent(revision);
   }
 
@@ -237,65 +243,97 @@ class BangumiSession {
       watched: watched,
     );
     ensureCurrent(revision);
-    if (ok) _syncAutoProgress(subjectId, episodeNumber, watched: watched);
+    if (!watched) _forgetSynced(subjectId, episodeNumber);
     return ok;
   }
 
-  /// 手动标记的集数不被「自动点格子」以更低的集数覆盖。
-  void _syncAutoProgress(
-    int subjectId,
-    num episodeNumber, {
-    required bool watched,
-  }) {
-    final progress = _loadAutoProgress();
-    if (watched) {
-      final current = progress['$subjectId'] ?? 0;
-      final next = episodeNumber.round();
-      if (next > current) progress['$subjectId'] = next;
-    } else {
-      progress.remove('$subjectId');
+  /// 已上报过的单集，落盘保存。
+  Set<String>? _syncedEpisodes;
+
+  Set<String> _loadSyncedEpisodes() {
+    final cached = _syncedEpisodes;
+    if (cached != null) return cached;
+    final raw = preferences.getString(_syncedEpisodesKey);
+    final set = <String>{};
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final list = jsonDecode(raw);
+        if (list is List) set.addAll(list.whereType<String>());
+      } catch (_) {
+        // 旧数据坏了就当作没记录。
+      }
     }
-    unawaited(preferences.setString(_autoProgressKey, jsonEncode(progress)));
+    return _syncedEpisodes = set;
   }
 
-  /// 播放完成后把集数推进到 Bangumi。相同或更早集数不会重复请求。
+  void _saveSyncedEpisodes() {
+    final set = _syncedEpisodes;
+    if (set == null) return;
+    // 只保留最近 600 条。
+    final list = set.length > 600
+        ? set.toList(growable: false).sublist(set.length - 600)
+        : set.toList(growable: false);
+    unawaited(preferences.setString(_syncedEpisodesKey, jsonEncode(list)));
+  }
+
+  Future<void> _resetSyncedEpisodes() async {
+    _syncedEpisodes = null;
+    await preferences.remove(_syncedEpisodesKey);
+  }
+
+  bool _markSynced(int subjectId, num episodeNumber) {
+    final added = _loadSyncedEpisodes().add('$subjectId#$episodeNumber');
+    if (added) _saveSyncedEpisodes();
+    return added;
+  }
+
+  /// 清掉这一集的已上报记录，下次播放完成时重新上报。
+  void _forgetSynced(int subjectId, num episodeNumber) {
+    if (_loadSyncedEpisodes().remove('$subjectId#$episodeNumber')) {
+      _saveSyncedEpisodes();
+    }
+  }
+
+  /// 播放完成后把这一集标记为看过。
   Future<void> markEpisodeWatched({
     required int subjectId,
-    required int watched,
+    required num episodeNumber,
     AnimeCollection? metadata,
   }) async {
-    final revision = generation;
-    if (watched <= 0) return;
-    final progress = _loadAutoProgress();
-    if ((progress['$subjectId'] ?? 0) >= watched) return;
-
-    final token = await accessToken();
-    ensureCurrent(revision);
-    final current = await api.getCollection(token, subjectId);
-    ensureCurrent(revision);
-    if (current != null && (current.epWatched ?? 0) >= watched) {
-      progress['$subjectId'] = (current.epWatched ?? 0);
-      await preferences.setString(_autoProgressKey, jsonEncode(progress));
-      return;
-    }
-    if (current == null || current.status == CollectionStatus.wish.value) {
-      await api.putCollection(
+    if (episodeNumber <= 0) return;
+    if (!_markSynced(subjectId, episodeNumber)) return;
+    try {
+      final revision = generation;
+      final token = await accessToken();
+      ensureCurrent(revision);
+      final current = await api.getCollection(token, subjectId);
+      ensureCurrent(revision);
+      if (current == null || current.status == CollectionStatus.wish.value) {
+        await api.putCollection(
+          token,
+          AnimeCollection(
+            bgmId: subjectId,
+            status: CollectionStatus.doing.value,
+            postTitle: metadata?.postTitle,
+            postCover: metadata?.postCover,
+            bgmImage: metadata?.bgmImage,
+            bgmTitle: metadata?.bgmTitle,
+          ),
+        );
+        ensureCurrent(revision);
+      }
+      final marked = await api.setEpisodeWatched(
         token,
-        AnimeCollection(
-          bgmId: subjectId,
-          status: CollectionStatus.doing.value,
-          epWatched: watched,
-          postTitle: metadata?.postTitle,
-          postCover: metadata?.postCover,
-          bgmImage: metadata?.bgmImage,
-          bgmTitle: metadata?.bgmTitle,
-        ),
+        subjectId,
+        episodeNumber,
+        watched: true,
       );
+      ensureCurrent(revision);
+      if (!marked) _forgetSynced(subjectId, episodeNumber);
+    } catch (error) {
+      _forgetSynced(subjectId, episodeNumber);
+      rethrow;
     }
-    await api.putEpisodeProgress(token, subjectId, watched);
-    ensureCurrent(revision);
-    progress['$subjectId'] = watched;
-    await preferences.setString(_autoProgressKey, jsonEncode(progress));
   }
 
   Future<String> accessToken() {
@@ -366,21 +404,20 @@ class BangumiSession {
   }
 
   Set<int> loadPendingPush() {
-    final value = preferences.getString(pendingPushKey);
+    final scoped = _decodeIntList(preferences.getString(pendingPushKey));
+    if (scoped.isNotEmpty) return scoped;
+    // 旧版本的键做一次迁移。
+    final base = isLocalMode ? _localPendingPushKey : _pendingPushKey;
+    if (base == pendingPushKey) return scoped;
+    final legacy = _decodeIntList(preferences.getString(base));
+    if (legacy.isNotEmpty) unawaited(preferences.remove(base));
+    return legacy;
+  }
+
+  static Set<int> _decodeIntList(String? value) {
     if (value == null || value.isEmpty) return {};
     try {
       return (jsonDecode(value) as List).map(toInt).whereType<int>().toSet();
-    } catch (_) {
-      return {};
-    }
-  }
-
-  Map<String, int> _loadAutoProgress() {
-    final value = preferences.getString(_autoProgressKey);
-    if (value == null || value.isEmpty) return {};
-    try {
-      final json = jsonDecode(value) as Map<String, dynamic>;
-      return json.map((key, value) => MapEntry(key, toInt(value) ?? 0));
     } catch (_) {
       return {};
     }

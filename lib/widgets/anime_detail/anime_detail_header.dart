@@ -16,11 +16,15 @@ class AnimeDetailHeader extends StatelessWidget {
   final VoidCallback onCollectionTap;
   final VoidCallback onSearchTap;
 
+  /// 播放按钮上的字；播放页的详情面板里它做的事是换线路，由那一层改名。
+  final String searchLabel;
+
   const AnimeDetailHeader({
     required this.detail,
     required this.collection,
     required this.onCollectionTap,
     required this.onSearchTap,
+    this.searchLabel = '开始观看',
     super.key,
   });
 
@@ -68,7 +72,7 @@ class AnimeDetailHeader extends StatelessWidget {
         );
         final searchButton = _buildActionButton(
           icon: Icons.play_arrow_rounded,
-          label: '开始观看',
+          label: searchLabel,
           bgColor: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
           textColor: isDark ? Colors.white : Colors.black,
           onTap: onSearchTap,

@@ -1,7 +1,6 @@
 import 'package:baka/services/playback/playback_content.dart';
 import 'package:baka/theme.dart';
 import 'package:baka/utils/json_values.dart';
-import 'package:baka/app/navigation.dart';
 import 'package:flutter/material.dart';
 import 'package:baka/widgets/common/platform_tooltip.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -20,6 +19,7 @@ class WindowsEpisodeList extends StatefulWidget {
     required this.content,
     required this.onEpisodeSelected,
     required this.onUrlChanged,
+    required this.onDetailTap,
     this.onSetEpisodeWatched,
     super.key,
     this.followNotifier,
@@ -33,6 +33,9 @@ class WindowsEpisodeList extends StatefulWidget {
   final PlaybackContent content;
   final ValueChanged<int> onEpisodeSelected;
   final ValueChanged<int> onUrlChanged;
+
+  /// 点标题旁的 ⓘ：在播放页上方弹出番剧详情面板。
+  final VoidCallback onDetailTap;
   final Future<bool> Function(int, bool)? onSetEpisodeWatched;
   final VoidCallback? onDownloadPressed;
   final ValueNotifier<CollectionStatus?>? followNotifier;
@@ -88,7 +91,8 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
     final content = widget.content;
     final videoList = content.videoList;
     final currentIndex = content.currPlayIndex;
-    final videoId = '${content.data['id']}';
+    final videoId = content.watchedVideoId;
+    final legacyVideoId = '${content.data['id']}';
     final primaryColor = Theme.of(context).colorScheme.primary;
     final source = trimmed(content.sourceName) ?? '切换播放源';
     final line = trimmed(content.lineName);
@@ -100,7 +104,12 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
         final i = _filteredList?[position] ?? position;
         final item = videoList[i];
         final isPlaying = i == currentIndex;
-        final watched = HistoryRepository.isEpisodeWatched(videoId, i);
+        final watched = HistoryRepository.isEpisodeWatched(
+          videoId,
+          i,
+          legacyVideoId: legacyVideoId,
+          bgmId: content.bgmInfo.subjectId,
+        );
         if (_isGridView) {
           return Material(
             color: Colors.transparent,
@@ -296,8 +305,7 @@ class _WindowsEpisodeListState extends State<WindowsEpisodeList> {
                   message: '番剧详情',
                   child: InkResponse(
                     radius: 16,
-                    onTap: () =>
-                        NavigationService.toDetail(context, content.detailData),
+                    onTap: widget.onDetailTap,
                     child: const Padding(
                       padding: EdgeInsets.all(3),
                       child: Icon(

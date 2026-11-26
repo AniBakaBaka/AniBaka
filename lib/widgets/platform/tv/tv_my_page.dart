@@ -41,6 +41,7 @@ class _TvMyPageState extends State<TvMyPage> {
 
   CollectionStats? _stats;
   int _historyCount = 0;
+  Timer? _statsTimer;
 
   @override
   void initState() {
@@ -51,7 +52,16 @@ class _TvMyPageState extends State<TvMyPage> {
         _loadUserData();
       }
     });
+    // 追番状态在别处改了，数字要跟着变。
+    collections.revision.addListener(_onCollectionChanged);
     _loadUserData();
+  }
+
+  void _onCollectionChanged() {
+    _statsTimer?.cancel();
+    _statsTimer = Timer(const Duration(milliseconds: 200), () {
+      if (mounted) _loadStats();
+    });
   }
 
   void _loadUserData() {
@@ -183,6 +193,8 @@ class _TvMyPageState extends State<TvMyPage> {
 
   @override
   void dispose() {
+    collections.revision.removeListener(_onCollectionChanged);
+    _statsTimer?.cancel();
     _loginWorker.dispose();
     _qrServer?.stop();
     _qrServer = null;

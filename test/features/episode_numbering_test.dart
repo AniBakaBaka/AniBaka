@@ -33,6 +33,16 @@ void main() {
       expect(parseEpisodeNumber('纯标题没有数字'), isNull);
     });
 
+    test('半集不算整数集号', () {
+      expect(parseEpisodeNumber('09.5'), isNull);
+      expect(parseEpisodeNumber('EP9.5'), isNull);
+      expect(parseEpisodeNumber('第9.5集'), isNull);
+      expect(parseEpisodeNumber('[09].5'), isNull);
+      // 标题里另带半集编号时，正经的集号写法仍然生效
+      expect(parseEpisodeNumber('第9集 9.5'), 9);
+      expect(parseEpisodeNumber('09.标题'), 9);
+    });
+
     test('优先采用「第N集」而不是其他数字', () {
       expect(parseEpisodeNumber('第9集 [1080p]'), 9);
       expect(parseEpisodeNumber('第9集 2024年'), 9);

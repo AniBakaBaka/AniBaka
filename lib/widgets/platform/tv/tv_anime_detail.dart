@@ -158,20 +158,32 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
   Future<void> _updateCollectionStatus(CollectionStatus status) async {
     try {
       if (_collection != null && _collection!.status == status.value) {
+        if (collections.isBangumiMode) {
+          showSnackBar('Bangumi 官方 API 暂不支持取消收藏，请到 Bangumi 页面操作');
+          return;
+        }
         await _deleteCollection();
         return;
       }
+      final previous = _collection;
       final col = AnimeCollection(
-        postId: _validPostId,
+        postId: _validPostId ?? previous?.postId,
         bgmId: _subjectId,
         status: status.value,
-        nsfw: _detail.nsfw,
+        // 只改状态，打分、标签、私密、评语、进度沿用原来的。
+        rating: previous?.rating ?? 0,
+        comment: previous?.comment,
+        epTotal: previous?.epTotal,
+        epWatched: previous?.epWatched,
+        tags: previous?.tags ?? const [],
+        isPrivate: previous?.isPrivate ?? false,
+        nsfw: _detail.nsfw || (previous?.nsfw ?? false),
         postTitle: _detail.title,
         postCover: _detail.coverUrl,
         bgmImage: _bgmInfo.imageUrl,
         bgmTitle: _detail.title,
       );
-      final result = await collections.addOrUpdate(col);
+      final result = await collections.addOrUpdate(col, statusOnly: true);
       if (mounted) {
         setState(() => _collection = result);
         showSnackBar('已标记为「${status.label}」');
@@ -540,6 +552,10 @@ class _TvAnimeDetailPlaceholderState extends State<TvAnimeDetailPlaceholder> {
           color: _collection != null ? Colors.amber : null,
           onPressed: () {
             if (_collection != null) {
+              if (collections.isBangumiMode) {
+                showSnackBar('Bangumi 官方 API 暂不支持取消收藏，请到 Bangumi 页面操作');
+                return;
+              }
               _deleteCollection();
             } else {
               _updateCollectionStatus(CollectionStatus.doing);

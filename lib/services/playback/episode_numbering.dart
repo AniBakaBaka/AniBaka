@@ -12,6 +12,18 @@ int? parseEpisodeNumber(String title) {
     if (value == null || !_isPlausibleEpisode(value, explicit: explicit)) {
       continue;
     }
+    // 半集（`9.5`）不按整数集号处理。
+    final digits = match.group(1)!;
+    final whole = match.group(0)!;
+    var end = match.start + whole.lastIndexOf(digits) + digits.length;
+    while (end < text.length && ')]】'.contains(text[end])) {
+      end++;
+    }
+    if (end + 1 < text.length &&
+        text[end] == '.' &&
+        _isAsciiDigit(text[end + 1])) {
+      continue;
+    }
     return value;
   }
   return null;
@@ -114,6 +126,11 @@ class BgmEpisodeOrder {
 }
 
 const _implausibleNumbers = <int>{360, 480, 540, 576, 720, 1080, 1440, 2160};
+
+bool _isAsciiDigit(String char) {
+  final code = char.codeUnitAt(0);
+  return code >= 0x30 && code <= 0x39;
+}
 
 bool _isPlausibleEpisode(int value, {required bool explicit}) {
   if (value < 1 || value > 999) return false;
